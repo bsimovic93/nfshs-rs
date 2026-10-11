@@ -56,6 +56,7 @@ impl ApplicationHandler for App {
                     KeyCode::Space => self.input.handbrake = down,
                     KeyCode::KeyR => self.input.reset = down,
                     KeyCode::KeyC => self.input.camera = down,
+                    KeyCode::KeyP if down => self.input.autopilot = !self.input.autopilot,
                     KeyCode::Escape => el.exit(),
                     _ => {}
                 }
@@ -97,9 +98,14 @@ pub fn screenshot(data: &GameData, track: u32, variant: &str, car: &str, out: &s
     let mut r = pollster::block_on(Renderer::new(None, (960, 720), &atlas))?;
     r.set_world(&game.track.verts, &game.track.indices);
     let mut t = 0.0;
+    let mut next_log = 10.0;
     while t < seconds {
         game.update(1.0 / 60.0, input);
         t += 1.0 / 60.0;
+        if t >= next_log {
+            next_log += 10.0;
+            println!("  t={t:5.1} lap={} progress={}/{} speed={:.0} km/h", game.lap, game.progress, game.path.len(), game.car.speed() * 3.6);
+        }
     }
     println!(
         "after {seconds}s: pos={:?} speed={:.1} km/h gear={} progress={}/{} on_ground={}",

@@ -18,7 +18,10 @@
 //!                 0x29  quads into 0x27 pool
 //!         0x03  object placements, 0x0b light/sound emitter, others: visibility/AI
 //! 0x21  global: 0x02 texture table, 0x08 prop models, 0x07 animated objects,
-//!               0x0f virtual road (fine path), 0x24/0x26 misc
+//!               0x0f virtual road: 32-byte samples {i32 pos[3] (16.16), i8 normal[3],
+//!                     i8 forward[3], i8 right[3], u8 pad, u16 flags, u16 left_wall, u16 right_wall
+//!                     (1/256 m), u8 block, u8 ?, u8 ?, u8 ?}
+//!               0x24/0x26 misc
 //! 0x23  colour table
 //! ```
 
@@ -92,6 +95,11 @@ pub struct VRoad {
     pub normal: Vec3,
     pub forward: Vec3,
     pub right: Vec3,
+    pub flags: u16,
+    /// Drivable distance from the centre line to the left / right wall (m).
+    pub left_wall: f32,
+    pub right_wall: f32,
+    pub block: u8,
     pub raw: [u8; 20],
 }
 
@@ -205,6 +213,10 @@ impl Track {
                                         normal: v(o + 12),
                                         forward: v(o + 15),
                                         right: v(o + 18),
+                                        flags: u16le(b, o + 22),
+                                        left_wall: u16le(b, o + 24) as f32 / 256.0,
+                                        right_wall: u16le(b, o + 26) as f32 / 256.0,
+                                        block: b[o + 28],
                                         raw: b[o + 12..o + 32].try_into().unwrap(),
                                     });
                                 }

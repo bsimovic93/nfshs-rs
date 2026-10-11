@@ -1,5 +1,6 @@
 //! Gameplay: a single-player time-trial session on a track with one car.
 
+pub mod ai;
 pub mod car;
 pub mod collision;
 pub mod hud;
@@ -20,6 +21,7 @@ pub struct Input {
     pub handbrake: bool,
     pub reset: bool,
     pub camera: bool,
+    pub autopilot: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -36,6 +38,8 @@ pub struct Game {
     pub car: Car,
     /// Virtual-road centre line (world space) used for progress, resets and start grid.
     pub path: Vec<Vec3>,
+    /// (left, right) wall distance per path sample.
+    pub walls: Vec<(f32, f32)>,
     pub progress: usize,
     pub lap: u32,
     pub lap_time: f32,
@@ -44,6 +48,7 @@ pub struct Game {
     pub cam_target: Vec3,
     pub cam_mode: CameraMode,
     prev_camera_key: bool,
+    autopilot: ai::Driver,
     accum: f32,
     font: hud::Font,
     pub fog: (Vec3, f32, f32),
@@ -58,10 +63,17 @@ impl Game {
         let font = hud::Font::new(atlas);
         let world = CollisionWorld::new(track.tris.clone());
         let mut path: Vec<Vec3> = track.track.vroad.iter().map(|v| assets::ps1_to_world(v.pos)).collect();
+        let mut walls: Vec<(f32, f32)> = track.track.vroad.iter().map(|v| (v.left_wall, v.right_wall)).collect();
         if path.len() < 2 {
             path = track.nodes.clone();
+            walls = vec![(15.0, 15.0); path.len()];
         }
-        let spec = CarSpec { wheel_radius: car_model.wheel_radius, half_width: car_model.half_extents.x * 0.9, ..Default::default() };
+        let mut spec = CarSpec { wheel_radius: car_model.wheel_radius, half_width: car_model.half_extents.x * 0.9, ..Default::default() };
+        match data.read(&format!("Z{car_code}.QDA")).and_then(|d| crate::formats::compress::maybe_decompress(d)) {
+            Ok(qda) => spec.apply_qda(&qda),
+            Err(e) => log::warn!("no engine data for {car_code}: {e}"),
+        }
+        log::info!("{car_code}: redline {} rpm, {} gears {:?}", spec.redline, spec.gear_speeds.len(), spec.gear_speeds);
         let (pos, yaw) = Self::spawn_point(&path, 0);
         let mut car = Car::new(spec, pos, yaw);
         if let Some(h) = world.ground(pos + Vec3::Y * 5.0, 10.0) {
@@ -82,12 +94,14 @@ impl Game {
             world,
             car,
             path,
+            walls,
             progress: 0,
             lap: 1,
             lap_time: 0.0,
             best_lap: None,
             cam_mode: CameraMode::Chase,
             prev_camera_key: false,
+            autopilot: ai::Driver::new(0.0, 1.0),
             accum: 0.0,
             font,
             fog,
@@ -129,18 +143,23 @@ impl Game {
             let ground = self.world.ground(p + Vec3::Y * 3.0, 6.0).map(|h| h.height).unwrap_or(p.y);
             self.car.reset(Vec3::new(p.x, ground, p.z), yaw);
         }
-        let controls = Controls {
-            throttle: input.up as u8 as f32,
-            brake: input.down as u8 as f32,
-            reverse: input.down,
-            steer: input.right as u8 as f32 - input.left as u8 as f32,
-            handbrake: input.handbrake,
+        let controls = if input.autopilot {
+            self.autopilot.controls(&self.car, &self.path, self.progress, frame_dt)
+        } else {
+            Controls {
+                throttle: input.up as u8 as f32,
+                brake: input.down as u8 as f32,
+                reverse: input.down,
+                steer: input.right as u8 as f32 - input.left as u8 as f32,
+                handbrake: input.handbrake,
+            }
         };
         self.accum = (self.accum + frame_dt).min(0.25);
         while self.accum >= DT {
             self.car.step(controls, DT, &self.world);
             self.accum -= DT;
         }
+        self.enforce_walls();
         // fell out of the world: put back on the road
         if self.car.pos.y < self.path[self.progress].y - 40.0 {
             let (p, yaw) = Self::spawn_point(&self.path, self.progress);
@@ -159,6 +178,47 @@ impl Game {
         self.progress = new;
         self.lap_time += frame_dt;
         self.update_camera(frame_dt);
+    }
+
+    /// Keep the car between the virtual-road walls (the original game's track boundary).
+    fn enforce_walls(&mut self) {
+        let n = self.path.len();
+        let i = self.nearest_path(self.progress, 8);
+        // project onto the segment (i -> i+1) or (i-1 -> i), whichever contains the car
+        let (a, b, ia) = {
+            let nxt = (i + 1) % n;
+            let prv = (i + n - 1) % n;
+            let d = self.path[nxt] - self.path[i];
+            if (self.car.pos - self.path[i]).dot(d) >= 0.0 { (self.path[i], self.path[nxt], i) } else { (self.path[prv], self.path[i], prv) }
+        };
+        let seg = (b - a).with_y(0.0);
+        let len2 = seg.length_squared().max(1e-6);
+        let t = ((self.car.pos - a).with_y(0.0).dot(seg) / len2).clamp(0.0, 1.0);
+        let centre = a + (b - a) * t;
+        let fwd = seg.normalize_or_zero();
+        let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+        let (l0, r0) = self.walls[ia];
+        let (l1, r1) = self.walls[(ia + 1) % n];
+        let (lw, rw) = (l0 + (l1 - l0) * t, r0 + (r1 - r0) * t);
+        let lateral = (self.car.pos - centre).dot(right);
+        let margin = self.car.spec.half_width;
+        let push = if lateral > rw - margin {
+            Some((rw - margin - lateral, right))
+        } else if lateral < -(lw - margin) {
+            Some((-(lw - margin) - lateral, right))
+        } else {
+            None
+        };
+        if let Some((amount, axis)) = push {
+            self.car.pos += axis * amount;
+            let n_wall = axis * amount.signum();
+            let into = self.car.vel.dot(n_wall);
+            if into < 0.0 {
+                self.car.vel -= n_wall * into * 1.2;
+                self.car.vel *= 0.985;
+                self.car.yaw_rate *= 0.8;
+            }
+        }
     }
 
     fn update_camera(&mut self, dt: f32) {

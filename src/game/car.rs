@@ -12,11 +12,12 @@ pub struct CarSpec {
     pub cg_rear: f32,
     pub half_width: f32,
     pub wheel_radius: f32,
-    pub max_torque: f32,
     pub redline: f32,
     pub idle: f32,
-    pub gears: Vec<f32>,
-    pub final_drive: f32,
+    /// Road speed (m/s) at redline in each forward gear (from the car's .QDA file).
+    pub gear_speeds: Vec<f32>,
+    /// Net full-throttle acceleration (m/s^2) sampled every 1 m/s of road speed (from .QDA).
+    pub accel_curve: Vec<f32>,
     pub drag: f32,
     pub grip: f32,
     pub cornering_stiffness: f32,
@@ -32,17 +33,46 @@ impl Default for CarSpec {
             cg_rear: 1.5,
             half_width: 0.9,
             wheel_radius: 0.33,
-            max_torque: 500.0,
             redline: 7000.0,
             idle: 900.0,
-            gears: vec![3.5, 2.3, 1.6, 1.2, 0.95, 0.78],
-            final_drive: 3.4,
+            gear_speeds: vec![17.7, 29.5, 44.9, 66.7, 74.5, 89.7],
+            accel_curve: (0..70).map(|i| 5.5 * (1.0 - i as f32 / 70.0)).collect(),
             drag: 0.42,
             grip: 1.25,
             cornering_stiffness: 9.0,
             max_steer: 0.55,
             brake: 1.3,
         }
+    }
+}
+
+impl CarSpec {
+    /// Full-throttle net acceleration at road speed `v` (m/s), linearly interpolated.
+    pub fn accel_at(&self, v: f32) -> f32 {
+        let i = (v.max(0.0).floor() as usize).min(self.accel_curve.len().saturating_sub(1));
+        let t = (v - i as f32).clamp(0.0, 1.0);
+        let a = self.accel_curve.get(i).copied().unwrap_or(0.0);
+        let b = self.accel_curve.get(i + 1).copied().unwrap_or(0.0);
+        a + (b - a) * t
+    }
+
+    pub fn top_speed(&self) -> f32 {
+        self.accel_curve.iter().position(|&a| a <= 0.0).unwrap_or(self.accel_curve.len()) as f32
+    }
+
+    /// Engine data from a decompressed `.QDA` file (276 bytes):
+    /// `+0x00` redline (16.16 rpm), `+0x04..0x1C` m/s at redline per gear (16.16, 0 = unused),
+    /// `+0x20` i16[112] net full-throttle acceleration in 1/256 m/s^2, one entry per m/s of speed.
+    pub fn apply_qda(&mut self, d: &[u8]) {
+        if d.len() < 0x100 {
+            return;
+        }
+        let fx = |o: usize| i32::from_le_bytes(d[o..o + 4].try_into().unwrap()) as f32 / 65536.0;
+        self.redline = fx(0);
+        self.gear_speeds = (1..8).map(|i| fx(i * 4)).take_while(|&v| v > 0.0).collect();
+        let raw: Vec<i16> = (0..112).map(|i| i16::from_le_bytes([d[0x20 + i * 2], d[0x21 + i * 2]])).collect();
+        let n = raw.iter().rposition(|&v| v > 0).map_or(0, |p| p + 2).min(raw.len());
+        self.accel_curve = raw[..n].iter().map(|&v| v.max(0) as f32 / 256.0).collect();
     }
 }
 
@@ -146,26 +176,27 @@ impl Car {
         let mut torque = 0.0;
 
         if self.on_ground {
-            let wheel_rpm = vf.abs() / s.wheel_radius * 60.0 / std::f32::consts::TAU;
-            let ratio = if self.reversing { 3.2 } else { s.gears[self.gear] } * s.final_drive;
-            self.rpm = (wheel_rpm * ratio).max(s.idle);
-            // automatic gearbox
-            if !self.reversing {
-                if self.rpm > s.redline * 0.95 && self.gear + 1 < s.gears.len() {
-                    self.gear += 1;
-                } else if self.gear > 0 {
-                    let lower = wheel_rpm * s.gears[self.gear - 1] * s.final_drive;
-                    if lower < s.redline * 0.6 {
-                        self.gear -= 1;
-                    }
+            // gear + rpm are derived from road speed (display / sound only)
+            let speed = vf.abs();
+            if self.reversing {
+                self.gear = 0;
+            } else {
+                let mut g = 0;
+                while g + 1 < s.gear_speeds.len() && speed > s.gear_speeds[g] * 0.92 {
+                    g += 1;
                 }
+                // hysteresis on downshifts
+                if g < self.gear && speed > s.gear_speeds[g] * 0.8 {
+                    g = self.gear;
+                }
+                self.gear = g;
             }
-            self.rpm = self.rpm.min(s.redline);
-            // flat-ish torque curve peaking at 60% of redline
-            let x = self.rpm / s.redline;
-            let torque_curve = (0.55 + 1.2 * x - 1.0 * x * x).clamp(0.3, 1.0);
+            let gear_speed = s.gear_speeds[self.gear];
+            self.rpm = (speed / gear_speed * s.redline).clamp(s.idle, s.redline);
             let throttle = if self.reversing { c.reverse as u8 as f32 } else { c.throttle };
-            let mut drive = throttle * s.max_torque * torque_curve * ratio * 0.85 / s.wheel_radius;
+            // the table is net of aerodynamic drag, so add drag back to get tractive force
+            let tractive = s.accel_at(speed) * s.mass + s.drag * speed * speed;
+            let mut drive = throttle * if self.reversing { tractive.min(s.mass * 3.0) } else { tractive };
             if self.reversing {
                 drive = -drive;
             }
@@ -199,7 +230,7 @@ impl Car {
                 force -= f * vf.signum() * 0.5 * load_r;
             }
             // rolling resistance
-            force -= self.vel * 12.0;
+            force -= self.vel * if c.throttle > 0.0 { 0.0 } else { 15.0 };
         }
         // aerodynamic drag
         force -= self.vel * self.vel.length() * s.drag;

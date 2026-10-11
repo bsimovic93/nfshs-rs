@@ -32,6 +32,7 @@ fn main() -> Result<()> {
                 left: keys.contains('l'),
                 right: keys.contains('r'),
                 handbrake: keys.contains('h'),
+                autopilot: keys.contains('a'),
                 ..Default::default()
             };
             let out = opt(&args, "--out").unwrap_or("shot.png");
@@ -75,6 +76,18 @@ fn main() -> Result<()> {
                 }
             }
             println!("{ok} ok, {bad} bad");
+        }
+        Some("probe") => {
+            let from: usize = opt(&args, "--from").unwrap_or("0").parse()?;
+            let to: usize = opt(&args, "--to").unwrap_or("10").parse()?;
+            let mut atlas = assets::Atlas::new(2048);
+            let g = game::Game::load(&data, &mut atlas, track, &variant, &car)?;
+            for i in from..to {
+                let p = g.path[i];
+                let gh = g.world.ground(p + glam::Vec3::Y * 3.0, 6.0).map(|h| h.height);
+                let walls = g.world.walls(p + glam::Vec3::Y * 0.5, 2.0, p.y + 0.2, p.y + 1.2);
+                println!("{i}: path y={:.2} ground={:?} walls={:?} lim={:?}", p.y, gh, walls.map(|w| w.1), g.walls[i]);
+            }
         }
         Some("dump-car") => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,
         _ => eprintln!(
