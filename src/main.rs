@@ -1,5 +1,6 @@
 mod app;
 mod assets;
+mod audio;
 mod formats;
 mod game;
 mod iso;
@@ -95,6 +96,42 @@ fn main() -> Result<()> {
                 let gh = g.world.ground(p + glam::Vec3::Y * 3.0, 6.0).map(|h| h.height);
                 let walls = g.world.walls(p + glam::Vec3::Y * 0.5, 2.0, p.y + 0.2, p.y + 1.2);
                 println!("{i}: path y={:.2} ground={:?} walls={:?} lim={:?}", p.y, gh, walls.map(|w| w.1), g.walls[i]);
+            }
+        }
+        Some("dump-audio") => {
+            // dump-audio <file.bnk|.viv|stream> <outdir>: decode banks/streams to WAV with stats
+            let d = std::fs::read(&args[2])?;
+            let out = Path::new(&args[3]);
+            std::fs::create_dir_all(out)?;
+            let mut items: Vec<(String, Vec<u8>)> = Vec::new();
+            if d.starts_with(b"BIGF") {
+                items = formats::viv::Viv::parse(&d)?.entries;
+            } else {
+                items.push((Path::new(&args[2]).file_name().unwrap().to_string_lossy().into(), d));
+            }
+            let stats = |pcm: &[i16]| {
+                let n = pcm.len().max(1) as f64;
+                let rms = (pcm.iter().map(|&v| (v as f64).powi(2)).sum::<f64>() / n).sqrt();
+                let diff = pcm.windows(2).map(|w| (w[1] as f64 - w[0] as f64).abs()).sum::<f64>() / n;
+                (rms, diff)
+            };
+            for (name, data) in items {
+                let safe: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
+                if data.starts_with(b"BNKl") {
+                    let bank = formats::audio::Bank::parse(&data)?;
+                    for (i, s) in bank.sounds.iter().enumerate() {
+                        if let Some(s) = s {
+                            let (rms, diff) = stats(&s.pcm);
+                            println!("{name}#{i}: {} ch {} Hz {} samples loop={:?}-{:?} rms={rms:.0} meandiff={diff:.0}", s.channels, s.rate, s.pcm.len(), s.loop_start, s.loop_end);
+                            formats::audio::write_wav(&out.join(format!("{safe}_{i:02}.wav")), s)?;
+                        }
+                    }
+                } else if data.starts_with(b"SCHl") {
+                    let s = formats::audio::decode_stream(&data)?;
+                    let (rms, diff) = stats(&s.pcm);
+                    println!("{name}: {} ch {} Hz {:.1}s rms={rms:.0} meandiff={diff:.0}", s.channels, s.rate, s.pcm.len() as f32 / s.channels as f32 / s.rate as f32);
+                    formats::audio::write_wav(&out.join(format!("{safe}.wav")), &s)?;
+                }
             }
         }
         Some("dump-car") => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,

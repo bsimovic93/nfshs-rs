@@ -1,5 +1,6 @@
 //! Decoders for the file formats used by the PS1 release of Need for Speed: High Stakes.
 
+pub mod audio;
 pub mod compress;
 pub mod geo;
 pub mod grp;

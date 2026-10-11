@@ -13,11 +13,69 @@ use winit::window::{Window, WindowId};
 
 pub struct App {
     game: Game,
+    data: GameData,
+    audio: Option<crate::audio::Audio>,
+    engine: Option<crate::audio::EngineSound>,
+    music_rx: Option<std::sync::mpsc::Receiver<crate::formats::audio::Sample>>,
     atlas: Option<Atlas>,
     renderer: Option<Renderer>,
     window: Option<Arc<Window>>,
     input: Input,
     last: Instant,
+}
+
+impl App {
+    fn start_audio(&mut self) {
+        let audio = match crate::audio::Audio::new() {
+            Ok(a) => a,
+            Err(e) => {
+                log::warn!("audio disabled: {e}");
+                return;
+            }
+        };
+        // engine bank of the player's car: Z<code>ENG.VIV -> first .bnk
+        let code = self.game.player().name.clone();
+        let bank = self
+            .data
+            .read(&format!("Z{code}ENG.VIV"))
+            .ok()
+            .and_then(|d| crate::formats::viv::Viv::parse(&d).ok())
+            .and_then(|v| v.find_suffix(".bnk").and_then(|(_, b)| crate::formats::audio::Bank::parse(b).ok()));
+        if let Some(bank) = bank {
+            self.engine = crate::audio::EngineSound::new(&audio, &bank);
+        }
+        // race music: decode one of the in-game tracks in the background
+        let root = self.data.root.clone();
+        let pick = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) % 18) as usize;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let data = GameData::new(&root);
+            let Ok(viv) = data.read("ZZZZYMUS.VIV").and_then(|d| crate::formats::viv::Viv::parse(&d)) else { return };
+            let tracks: Vec<_> = viv.entries.iter().filter(|(n, _)| n.starts_with("game")).collect();
+            if let Some((name, d)) = tracks.get(pick % tracks.len().max(1)) {
+                if let Ok(s) = crate::formats::audio::decode_stream(d) {
+                    log::info!("music: {name}");
+                    let _ = tx.send(s);
+                }
+            }
+        });
+        self.music_rx = Some(rx);
+        self.audio = Some(audio);
+    }
+
+    fn update_audio(&mut self, dt: f32) {
+        let Some(audio) = &self.audio else { return };
+        if let Some(rx) = &self.music_rx {
+            if let Ok(s) = rx.try_recv() {
+                audio.play(std::sync::Arc::new(s), 0.45, 1.0, true);
+                self.music_rx = None;
+            }
+        }
+        if let Some(engine) = &mut self.engine {
+            let p = self.game.player();
+            engine.update(audio, p.car.rpm / p.car.spec.redline, p.throttle, 0.55, dt);
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -35,6 +93,7 @@ impl ApplicationHandler for App {
         r.set_world(&self.game.track.verts, &self.game.track.indices);
         self.renderer = Some(r);
         self.window = Some(window);
+        self.start_audio();
         self.last = Instant::now();
     }
 
@@ -66,6 +125,7 @@ impl ApplicationHandler for App {
                 let dt = (now - self.last).as_secs_f32();
                 self.last = now;
                 self.game.update(dt, self.input);
+                self.update_audio(dt);
                 if let Some(r) = &mut self.renderer {
                     let (w, h) = r.size;
                     let params = self.game.frame_params(w as f32 / h.max(1) as f32);
@@ -86,7 +146,18 @@ pub fn run(data: &GameData, cfg: &RaceConfig) -> anyhow::Result<()> {
     let mut atlas = Atlas::new(2048);
     let game = Game::load(data, &mut atlas, cfg)?;
     let el = EventLoop::new()?;
-    let mut app = App { game, atlas: Some(atlas), renderer: None, window: None, input: Input::default(), last: Instant::now() };
+    let mut app = App {
+        game,
+        data: GameData::new(&data.root),
+        audio: None,
+        engine: None,
+        music_rx: None,
+        atlas: Some(atlas),
+        renderer: None,
+        window: None,
+        input: Input::default(),
+        last: Instant::now(),
+    };
     el.run_app(&mut app)?;
     Ok(())
 }

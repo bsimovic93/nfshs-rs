@@ -50,6 +50,8 @@ pub struct Racer {
     pub lap_time: f32,
     pub best_lap: Option<f32>,
     pub finish_time: Option<f32>,
+    /// Throttle applied last frame (for engine sound).
+    pub throttle: f32,
 }
 
 impl Racer {
@@ -143,6 +145,7 @@ impl Game {
                 lap_time: 0.0,
                 best_lap: None,
                 finish_time: None,
+                throttle: 0.0,
             });
             models.push(model);
         }
@@ -248,6 +251,7 @@ impl Game {
                     handbrake: input.handbrake,
                 }
             };
+            r.throttle = if r.car.reversing { c.reverse as u8 as f32 } else { c.throttle };
             controls.push(c);
         }
 
