@@ -1,7 +1,7 @@
 //! Window + event loop (winit 0.30 ApplicationHandler).
 
 use crate::assets::{Atlas, GameData};
-use crate::game::{Game, Input};
+use crate::game::{Game, Input, RaceConfig};
 use crate::render::Renderer;
 use std::sync::Arc;
 use std::time::Instant;
@@ -82,9 +82,9 @@ impl ApplicationHandler for App {
     }
 }
 
-pub fn run(data: &GameData, track: u32, variant: &str, car: &str) -> anyhow::Result<()> {
+pub fn run(data: &GameData, cfg: &RaceConfig) -> anyhow::Result<()> {
     let mut atlas = Atlas::new(2048);
-    let game = Game::load(data, &mut atlas, track, variant, car)?;
+    let game = Game::load(data, &mut atlas, cfg)?;
     let el = EventLoop::new()?;
     let mut app = App { game, atlas: Some(atlas), renderer: None, window: None, input: Input::default(), last: Instant::now() };
     el.run_app(&mut app)?;
@@ -92,9 +92,9 @@ pub fn run(data: &GameData, track: u32, variant: &str, car: &str) -> anyhow::Res
 }
 
 /// Headless: simulate `seconds` with a scripted input and save a screenshot.
-pub fn screenshot(data: &GameData, track: u32, variant: &str, car: &str, out: &std::path::Path, seconds: f32, input: Input) -> anyhow::Result<()> {
+pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seconds: f32, input: Input) -> anyhow::Result<()> {
     let mut atlas = Atlas::new(2048);
-    let mut game = Game::load(data, &mut atlas, track, variant, car)?;
+    let mut game = Game::load(data, &mut atlas, cfg)?;
     let mut r = pollster::block_on(Renderer::new(None, (960, 720), &atlas))?;
     r.set_world(&game.track.verts, &game.track.indices);
     let mut t = 0.0;
@@ -104,17 +104,20 @@ pub fn screenshot(data: &GameData, track: u32, variant: &str, car: &str, out: &s
         t += 1.0 / 60.0;
         if t >= next_log {
             next_log += 10.0;
-            println!("  t={t:5.1} lap={} progress={}/{} speed={:.0} km/h", game.lap, game.progress, game.path.len(), game.car.speed() * 3.6);
+            let p = game.player();
+            let order: Vec<String> = game.standings().iter().map(|&i| format!("{}:{}/{}", game.racers[i].name, game.racers[i].laps_done, game.racers[i].progress)).collect();
+            println!("  t={t:5.1} {:?} speed={:.0} km/h  order={}", game.phase, p.car.speed() * 3.6, order.join(" "));
         }
     }
+    let p = game.player();
     println!(
         "after {seconds}s: pos={:?} speed={:.1} km/h gear={} progress={}/{} on_ground={}",
-        game.car.pos,
-        game.car.speed() * 3.6,
-        game.car.gear + 1,
-        game.progress,
+        p.car.pos,
+        p.car.speed() * 3.6,
+        p.car.gear + 1,
+        p.progress,
         game.path.len(),
-        game.car.on_ground
+        p.car.on_ground
     );
     let params = game.frame_params(960.0 / 720.0);
     let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &game.hud(960.0, 720.0));

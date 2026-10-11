@@ -21,8 +21,16 @@ fn main() -> Result<()> {
     let track: u32 = opt(&args, "--track").unwrap_or("0").parse()?;
     let variant = opt(&args, "--variant").unwrap_or("").to_ascii_uppercase();
     let car = opt(&args, "--car").unwrap_or("BMWM").to_ascii_uppercase();
+    let opponents: Vec<String> = opt(&args, "--opponents")
+        .unwrap_or("MCF1,F550,DIAB,P993,CORV")
+        .split(',')
+        .filter(|s| !s.is_empty() && *s != "none")
+        .map(|s| s.to_ascii_uppercase())
+        .collect();
+    let laps: i32 = opt(&args, "--laps").unwrap_or("2").parse()?;
+    let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps };
     match args.get(1).map(String::as_str) {
-        None | Some("play") => app::run(&data, track, &variant, &car)?,
+        None | Some("play") => app::run(&data, &cfg)?,
         Some("shot") => {
             let secs: f32 = opt(&args, "--time").unwrap_or("0").parse()?;
             let keys = opt(&args, "--keys").unwrap_or("");
@@ -36,7 +44,7 @@ fn main() -> Result<()> {
                 ..Default::default()
             };
             let out = opt(&args, "--out").unwrap_or("shot.png");
-            app::screenshot(&data, track, &variant, &car, Path::new(out), secs, input)?;
+            app::screenshot(&data, &cfg, Path::new(out), secs, input)?;
         }
         Some("extract") => {
             let bin = PathBuf::from(&args[2]);
@@ -81,7 +89,7 @@ fn main() -> Result<()> {
             let from: usize = opt(&args, "--from").unwrap_or("0").parse()?;
             let to: usize = opt(&args, "--to").unwrap_or("10").parse()?;
             let mut atlas = assets::Atlas::new(2048);
-            let g = game::Game::load(&data, &mut atlas, track, &variant, &car)?;
+            let g = game::Game::load(&data, &mut atlas, &cfg)?;
             for i in from..to {
                 let p = g.path[i];
                 let gh = g.world.ground(p + glam::Vec3::Y * 3.0, 6.0).map(|h| h.height);
@@ -93,7 +101,7 @@ fn main() -> Result<()> {
         _ => eprintln!(
             "usage:
   nfshs extract <image.bin> [outdir]
-  nfshs play [--track N] [--variant N|S|W] [--car CODE] [--data DIR]
+  nfshs play [--track N] [--variant N|S|W] [--car CODE] [--opponents A,B|none] [--laps N] [--data DIR]
   nfshs shot --out x.png [--time S] [--keys udlrh] ...
   nfshs dump-psh|dump-car|dump-track ..."
         ),
