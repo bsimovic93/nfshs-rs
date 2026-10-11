@@ -68,6 +68,8 @@ impl App {
             Ok(g) => g,
             Err(e) => {
                 log::error!("could not load race: {e:#}");
+                self.enter_menu();
+                self.menu.error = Some(format!("{e:#}"));
                 return;
             }
         };

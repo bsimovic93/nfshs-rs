@@ -11,6 +11,31 @@ mod soft;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+/// Locate the extracted disc: `--data`, `NFSHS_DATA`, or a `gamedata` folder in the current
+/// directory, next to the executable, or in any parent of the executable (so
+/// `target/release/nfshs` finds the project's `gamedata`).
+fn find_data_dir(explicit: Option<&str>) -> PathBuf {
+    if let Some(d) = explicit {
+        return PathBuf::from(d);
+    }
+    if let Ok(d) = std::env::var("NFSHS_DATA") {
+        return PathBuf::from(d);
+    }
+    let is_data = |p: &Path| p.join("NFS4.EXE").is_file() || p.join("ZTR00.GRP").is_file();
+    let mut candidates = vec![PathBuf::from("gamedata")];
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        candidates.extend(dir.ancestors().map(|a| a.join("gamedata")));
+    }
+    for c in &candidates {
+        if is_data(c) {
+            log::info!("game data: {}", c.display());
+            return c.clone();
+        }
+    }
+    log::warn!("no extracted game data found (looked for gamedata/ near the working dir and executable); use --data <dir>");
+    PathBuf::from("gamedata")
+}
+
 /// Value of `--name value` style option.
 fn opt<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str)
@@ -19,7 +44,7 @@ fn opt<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<String> = std::env::args().collect();
-    let data = assets::GameData::new(Path::new(opt(&args, "--data").unwrap_or("gamedata")));
+    let data = assets::GameData::new(&find_data_dir(opt(&args, "--data")));
     let track: u32 = opt(&args, "--track").unwrap_or("0").parse()?;
     let variant = opt(&args, "--variant").unwrap_or("").to_ascii_uppercase();
     let car = opt(&args, "--car").unwrap_or("BMWM").to_ascii_uppercase();

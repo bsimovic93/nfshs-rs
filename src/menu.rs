@@ -125,6 +125,8 @@ pub struct Menu {
     pub car: usize,
     pub opponents: usize,
     pub laps: usize,
+    /// Last load error, shown until the next selection.
+    pub error: Option<String>,
     prev: MenuInput,
 }
 
@@ -132,7 +134,7 @@ const ROWS: usize = 7;
 
 impl Default for Menu {
     fn default() -> Self {
-        Self { row: 5, track: 0, condition: 0, car: 6, opponents: 5, laps: 2, prev: MenuInput::default() }
+        Self { row: 5, track: 0, condition: 0, car: 6, opponents: 5, laps: 2, error: None, prev: MenuInput::default() }
     }
 }
 
@@ -166,6 +168,7 @@ impl Menu {
             return MenuAction::Quit;
         }
         if edge(i.accept, p.accept) {
+            self.error = None;
             return match self.row {
                 6 => MenuAction::Quit,
                 _ => MenuAction::Start,
@@ -225,6 +228,12 @@ impl Menu {
             if !value.is_empty() {
                 font.text(&mut out, value, x + 92.0 * s, y, s * 1.2, if k == self.row { yellow } else { grey });
             }
+        }
+        if let Some(e) = &self.error {
+            // keep it short: the font has no lowercase, and paths can be long
+            let msg: String = e.to_ascii_uppercase().chars().filter(|c| c.is_ascii()).take(70).collect();
+            centred(&mut out, "COULD NOT LOAD RACE - CHECK --DATA FOLDER", h - 44.0 * s, s, [1.0, 0.3, 0.3, 1.0]);
+            centred(&mut out, &msg, h - 34.0 * s, s * 0.8, [1.0, 0.5, 0.5, 1.0]);
         }
         centred(&mut out, "ARROWS/DPAD: SELECT  ENTER/A: GO  ESC: QUIT", h - 20.0 * s, s, grey);
         out

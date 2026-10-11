@@ -33,7 +33,7 @@ Requires Rust (stable) and your own copy of the game disc image.
 cargo build --release
 # extract the disc (once)
 ./target/release/nfshs extract "Need for Speed - High Stakes (USA).bin" gamedata
-# play (opens the menu)
+# play (opens the menu; gamedata/ is found next to the project, or pass --data DIR / set NFSHS_DATA)
 ./target/release/nfshs --data gamedata
 # or jump straight into a race
 ./target/release/nfshs play --track 5 --variant N --car F375 --opponents MCF1,DIAB --laps 3
