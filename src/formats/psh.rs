@@ -91,7 +91,8 @@ impl Psh {
         let mut indices = Vec::new();
         match kind {
             0x40 => {
-                let stride = wu.div_ceil(2);
+                // VRAM rows are whole 16-bit words: 4 pixels per word at 4bpp
+                let stride = wu.div_ceil(4) * 2;
                 indices = vec![0u8; wu * hu];
                 for y in 0..hu {
                     for x in 0..wu {
@@ -101,9 +102,12 @@ impl Psh {
                 }
             }
             0x41 => {
+                let stride = wu.div_ceil(2) * 2;
                 indices = vec![0u8; wu * hu];
-                for i in 0..wu * hu {
-                    indices[i] = d.get(px + i).copied().unwrap_or(0);
+                for y in 0..hu {
+                    for x in 0..wu {
+                        indices[y * wu + x] = d.get(px + y * stride + x).copied().unwrap_or(0);
+                    }
                 }
             }
             0x42 => {

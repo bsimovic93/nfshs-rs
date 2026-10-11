@@ -84,7 +84,7 @@ impl Game {
             "N" => (Vec3::new(0.02, 0.02, 0.06), 60.0, 260.0),
             "S" => (Vec3::new(0.75, 0.78, 0.82), 40.0, 220.0),
             "W" => (Vec3::new(0.45, 0.48, 0.52), 50.0, 260.0),
-            _ => (Vec3::new(0.62, 0.72, 0.85), 120.0, 420.0),
+            _ => (track.sky_colors.1, 120.0, 420.0),
         };
         Ok(Self {
             cam_pos: car.pos - f * 7.0 + Vec3::Y * 2.5,
@@ -247,7 +247,10 @@ impl Game {
     pub fn frame_params(&self, aspect: f32) -> FrameParams {
         let proj = Mat4::perspective_rh(1.05, aspect, 0.1, 2000.0);
         let view = Mat4::look_at_rh(self.cam_pos, self.cam_target, Vec3::Y);
+        let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, Vec3::Y);
         FrameParams {
+            sky_view_proj: Mat4::perspective_rh(1.05, aspect, 1.0, 1000.0) * sky_view,
+            sky_top: self.track.sky_colors.0,
             view_proj: proj * view,
             cam_pos: self.cam_pos,
             fog_color: self.fog.0,
@@ -256,9 +259,20 @@ impl Game {
         }
     }
 
-    /// Car geometry transformed to world space.
+    /// Car geometry and camera-facing sprites transformed to world space.
     pub fn dynamic_geometry(&self) -> Vec<Vertex> {
         let mut out = Vec::new();
+        for s in &self.track.sprites {
+            let to_cam = (self.cam_pos - s.pos).with_y(0.0);
+            let d2 = to_cam.length_squared();
+            if d2 > self.fog.2 * self.fog.2 {
+                continue;
+            }
+            let rot = Quat::from_rotation_y(to_cam.x.atan2(to_cam.z));
+            for v in &s.verts {
+                out.push(Vertex { pos: (s.pos + rot * Vec3::from(v.pos)).into(), ..*v });
+            }
+        }
         let rot = self.car.orientation();
         let model = Mat4::from_rotation_translation(rot, self.car.pos);
         let skip_body = self.cam_mode == CameraMode::Bumper;

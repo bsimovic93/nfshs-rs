@@ -79,9 +79,24 @@ pub struct Mesh {
     pub quads: Vec<Quad>,
 }
 
+/// Object placement from a block's 0x03 chunk (length-prefixed records).
+#[derive(Clone, Copy, Debug)]
+pub struct Placement {
+    /// Record type: 1 = plain model (20 bytes), 5 = rotated/scaled model (36 bytes),
+    /// 9 = scaled object / sprite (28 bytes).
+    pub kind: u8,
+    pub model: u16,
+    pub pos: Vec3,
+    /// Yaw as (cos, sin); type 5 stores them as 2.30 fixed point.
+    pub rot: (f32, f32),
+    /// Scale (x, y, z), 0x100 = 1.0.
+    pub scale: Vec3,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Block {
     pub origin: Vec3,
+    pub placements: Vec<Placement>,
     /// Road + terrain surface (vertex pool 0x18).
     pub ground: Mesh,
     /// Roadside detail (vertex pool 0x27).
@@ -108,6 +123,8 @@ pub struct Track {
     pub blocks: Vec<Block>,
     pub textures: Vec<TexEntry>,
     pub vroad: Vec<VRoad>,
+    /// Prop models (0x21/0x08), vertices in 1/64 m around the placement point.
+    pub models: Vec<Mesh>,
 }
 
 pub fn fx(v: i32) -> f32 {
@@ -153,6 +170,7 @@ impl Track {
         let mut blocks = Vec::new();
         let mut textures = Vec::new();
         let mut vroad = Vec::new();
+        let mut models = Vec::new();
         for c in chunks(root.body) {
             match c.kind {
                 0x20 => {
@@ -165,6 +183,38 @@ impl Track {
                 0x1d => {
                     let origin = nodes.get(blocks.len()).copied().unwrap_or(Vec3::ZERO);
                     let mut b = Block { origin, ..Default::default() };
+                    if let Some(pl) = find(c.body, 0x03) {
+                        let d = pl.body;
+                        let mut o = 0;
+                        for _ in 0..pl.count {
+                            let len = d.get(o).copied().unwrap_or(0) as usize;
+                            if len < 20 || o + len > d.len() {
+                                break;
+                            }
+                            let r = &d[o..o + len];
+                            let mut rot = (1.0, 0.0);
+                            let mut scale = Vec3::ONE;
+                            match (r[2], len) {
+                                (5, 36) => {
+                                    rot = (i32le(r, 20) as f32 / (1u32 << 30) as f32, i32le(r, 24) as f32 / (1u32 << 30) as f32);
+                                    scale = Vec3::new(u16le(r, 28) as f32, u16le(r, 30) as f32, u16le(r, 32) as f32) / 256.0;
+                                }
+                                (9, 28) => {
+                                    let (sx, sy) = (u16le(r, 22) as f32 / 256.0, u16le(r, 24) as f32 / 256.0);
+                                    scale = Vec3::new(sx, sy, sx);
+                                }
+                                _ => {}
+                            }
+                            b.placements.push(Placement {
+                                kind: r[2],
+                                model: u16le(r, 6),
+                                pos: Vec3::new(fx(i32le(r, 8)), fx(i32le(r, 12)), fx(i32le(r, 16))),
+                                rot,
+                                scale,
+                            });
+                            o += len;
+                        }
+                    }
                     if let Some(g) = find(c.body, 0x17) {
                         let hdr = find(g.body, 0x1b).map(|h| h.body).unwrap_or(&[]);
                         let cnt = |i: usize| if hdr.len() >= i * 2 + 2 { u16le(hdr, i * 2) as usize } else { 0 };
@@ -198,6 +248,23 @@ impl Track {
                                     })
                                     .collect();
                             }
+                            0x08 => {
+                                let b = s.body;
+                                let mut o = 0;
+                                for _ in 0..s.count {
+                                    if o + 4 > b.len() {
+                                        break;
+                                    }
+                                    let nv = b[o + 2] as usize;
+                                    let np = b[o + 3] as usize;
+                                    let vo = o + 4;
+                                    let po = vo + nv * 8;
+                                    let mut m = Mesh { verts: verts(&b[vo..po.min(b.len())]), quads: Vec::new() };
+                                    quads(&b[po.min(b.len())..], np, &mut m.quads);
+                                    models.push(m);
+                                    o = (po + np * 6 + 3) & !3;
+                                }
+                            }
                             0x0f => {
                                 let b = s.body;
                                 let v = |o: usize| {
@@ -228,6 +295,6 @@ impl Track {
                 _ => {}
             }
         }
-        Ok(Self { nodes, blocks, textures, vroad })
+        Ok(Self { nodes, blocks, textures, vroad, models })
     }
 }

@@ -13,9 +13,13 @@ struct Globals {
     cam_pos: [f32; 4],
     fog_color: [f32; 4],
     fog: [f32; 4],
+    sky_top: [f32; 4],
 }
 
 pub struct FrameParams {
+    /// Projection * rotation-only view, for the camera-centred sky.
+    pub sky_view_proj: Mat4,
+    pub sky_top: Vec3,
     pub view_proj: Mat4,
     pub cam_pos: Vec3,
     pub fog_color: Vec3,
@@ -68,6 +72,9 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     world_globals: wgpu::Buffer,
     hud_globals: wgpu::Buffer,
+    sky_globals: wgpu::Buffer,
+    sky_bg: wgpu::BindGroup,
+    sky_vb: DynBuf,
     world_bg: wgpu::BindGroup,
     hud_bg: wgpu::BindGroup,
     depth: Option<(wgpu::TextureView, u32, u32)>,
@@ -177,6 +184,7 @@ impl Renderer {
         };
         let world_globals = mk_globals();
         let hud_globals = mk_globals();
+        let sky_globals = mk_globals();
         let mk_bg = |buf: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -190,6 +198,7 @@ impl Renderer {
         };
         let world_bg = mk_bg(&world_globals);
         let hud_bg = mk_bg(&hud_globals);
+        let sky_bg = mk_bg(&sky_globals);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
@@ -244,6 +253,7 @@ impl Renderer {
         let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, false);
         let dyn_vb = DynBuf::new(&device, "dynamic");
         let hud_vb = DynBuf::new(&device, "hud");
+        let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
             device,
             queue,
@@ -254,6 +264,9 @@ impl Renderer {
             sky_pipeline,
             world_globals,
             hud_globals,
+            sky_globals,
+            sky_bg,
+            sky_vb,
             world_bg,
             hud_bg,
             depth: None,
@@ -312,12 +325,13 @@ impl Renderer {
         v
     }
 
-    fn encode(&mut self, view: &wgpu::TextureView, p: &FrameParams, dynamic: &[Vertex], hud: &[Vertex]) -> wgpu::CommandBuffer {
+    fn encode(&mut self, view: &wgpu::TextureView, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) -> wgpu::CommandBuffer {
         let g = Globals {
             view_proj: p.view_proj.to_cols_array_2d(),
             cam_pos: p.cam_pos.extend(1.0).into(),
             fog_color: p.fog_color.extend(1.0).into(),
             fog: Vec4::new(p.fog_start, p.fog_end, 0.0, 0.0).into(),
+            sky_top: p.sky_top.extend(1.0).into(),
         };
         self.queue.write_buffer(&self.world_globals, 0, bytemuck::bytes_of(&g));
         let (w, h) = (self.size.0 as f32, self.size.1 as f32);
@@ -326,8 +340,18 @@ impl Renderer {
             cam_pos: [0.0; 4],
             fog_color: [0.0; 4],
             fog: [1e9, 2e9, 0.0, 0.0],
+            sky_top: [0.0; 4],
         };
         self.queue.write_buffer(&self.hud_globals, 0, bytemuck::bytes_of(&hud_g));
+        let sky_g = Globals {
+            view_proj: p.sky_view_proj.to_cols_array_2d(),
+            cam_pos: [0.0; 4],
+            fog_color: p.sky_top.extend(1.0).into(),
+            fog: [1e9, 2e9, 0.0, 0.0],
+            sky_top: [0.0; 4],
+        };
+        self.queue.write_buffer(&self.sky_globals, 0, bytemuck::bytes_of(&sky_g));
+        self.sky_vb.upload(&self.device, &self.queue, sky);
         self.dyn_vb.upload(&self.device, &self.queue, dynamic);
         self.hud_vb.upload(&self.device, &self.queue, hud);
         let depth = self.depth_view();
@@ -353,6 +377,13 @@ impl Renderer {
             rp.set_bind_group(0, &self.world_bg, &[]);
             rp.set_pipeline(&self.sky_pipeline);
             rp.draw(0..3, 0..1);
+            if !sky.is_empty() {
+                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_bind_group(0, &self.sky_bg, &[]);
+                rp.set_vertex_buffer(0, self.sky_vb.buf.slice(..));
+                rp.draw(0..sky.len() as u32, 0..1);
+                rp.set_bind_group(0, &self.world_bg, &[]);
+            }
             rp.set_pipeline(&self.world_pipeline);
             if let Some((vb, ib, n)) = &self.static_vb {
                 rp.set_vertex_buffer(0, vb.slice(..));
@@ -373,7 +404,7 @@ impl Renderer {
         enc.finish()
     }
 
-    pub fn render(&mut self, p: &FrameParams, dynamic: &[Vertex], hud: &[Vertex]) {
+    pub fn render(&mut self, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) {
         let Some((surface, config)) = &self.surface else { return };
         let frame = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
@@ -384,13 +415,13 @@ impl Renderer {
             _ => return,
         };
         let view = frame.texture.create_view(&Default::default());
-        let cmd = self.encode(&view, p, dynamic, hud);
+        let cmd = self.encode(&view, p, sky, dynamic, hud);
         self.queue.submit([cmd]);
         self.queue.present(frame);
     }
 
     /// Render one frame offscreen and return RGBA8 pixels.
-    pub fn screenshot(&mut self, p: &FrameParams, dynamic: &[Vertex], hud: &[Vertex]) -> image::RgbaImage {
+    pub fn screenshot(&mut self, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) -> image::RgbaImage {
         let (w, h) = self.size;
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("shot"),
@@ -403,7 +434,7 @@ impl Renderer {
             view_formats: &[],
         });
         let view = tex.create_view(&Default::default());
-        let cmd = self.encode(&view, p, dynamic, hud);
+        let cmd = self.encode(&view, p, sky, dynamic, hud);
         let row = (w * 4).div_ceil(256) * 256;
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,

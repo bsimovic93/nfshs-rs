@@ -86,7 +86,18 @@ pub struct CollTri {
     pub n: Vec3,
 }
 
+/// A camera-facing object (trees): local-space triangles rotated about Y each frame.
+pub struct Sprite {
+    pub pos: Vec3,
+    pub verts: Vec<Vertex>,
+}
+
 pub struct TrackAssets {
+    /// Camera-relative sky cylinder (horizon panorama).
+    pub sky: Vec<Vertex>,
+    /// Sky colour sampled from the cloud texture (zenith) and panorama top row (horizon).
+    pub sky_colors: (Vec3, Vec3),
+    pub sprites: Vec<Sprite>,
     pub verts: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub tris: Vec<CollTri>,
@@ -124,42 +135,47 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
     let mut verts = Vec::new();
     let mut indices = Vec::new();
     let mut tris = Vec::new();
-    for b in &track.blocks {
-        for mesh in [&b.ground, &b.detail] {
-            for q in &mesh.quads {
-                let te = track.textures.get(q.tex as usize);
-                let rect = te.and_then(|t| rects.get(t.shape as usize)).copied().unwrap_or(atlas.white);
-                let p: Vec<Vec3> = q
-                    .v
-                    .iter()
-                    .map(|&i| {
-                        let v = mesh.verts.get(i as usize).copied().unwrap_or([0; 4]);
-                        ps1_to_world(b.origin + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0)
-                    })
-                    .collect();
-                let (w, h) = (rect.w as f32, rect.h as f32);
-                let mut corners = [Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)];
-                // texture-table orientation bits: 0x02 rotate 90, 0x04 flip V, 0x08 flip U
-                let fl = te.map(|t| t.flags).unwrap_or(0);
-                if fl & 0x08 != 0 {
-                    corners.iter_mut().for_each(|c| c.x = w - c.x);
-                }
-                if fl & 0x04 != 0 {
-                    corners.iter_mut().for_each(|c| c.y = h - c.y);
-                }
-                if fl & 0x02 != 0 {
-                    corners.rotate_left(1);
-                }
-                let shade = |i: u16| {
-                    let s = mesh.verts.get(i as usize).map(|v| v[3]).unwrap_or(0);
-                    let k = 1.0 - (s as f32 / 32.0).clamp(0.0, 0.6);
-                    [k * 0.5, k * 0.5, k * 0.5, 1.0]
-                };
-                let base = verts.len() as u32;
-                for k in 0..4 {
-                    verts.push(Vertex { pos: p[k].into(), uv: atlas.uv(rect, corners[k]), color: shade(q.v[k]) });
-                }
-                indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    let quad_uvs = |tex: u16| -> (Rect, [Vec2; 4]) {
+        let te = track.textures.get(tex as usize);
+        let rect = te.and_then(|t| rects.get(t.shape as usize)).copied().unwrap_or(atlas.white);
+        let (w, h) = (rect.w as f32, rect.h as f32);
+        let mut corners = [Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)];
+        // texture-table orientation bits: 0x02 rotate 90, 0x04 flip V, 0x08 flip U
+        let fl = te.map(|t| t.flags).unwrap_or(0);
+        if fl & 0x08 != 0 {
+            corners.iter_mut().for_each(|c| c.x = w - c.x);
+        }
+        if fl & 0x04 != 0 {
+            corners.iter_mut().for_each(|c| c.y = h - c.y);
+        }
+        if fl & 0x02 != 0 {
+            corners.rotate_left(1);
+        }
+        (rect, corners)
+    };
+    let shade = |s: i16| {
+        let k = 1.0 - (s as f32 / 32.0).clamp(0.0, 0.6);
+        [k * 0.5, k * 0.5, k * 0.5, 1.0]
+    };
+    // Emit one mesh, positioned by `place` (local vertex -> world), into verts/indices (+collision).
+    let emit = |mesh: &grp::Mesh, place: &dyn Fn(Vec3) -> Vec3, collide: bool, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, tris: &mut Vec<CollTri>| {
+        for q in &mesh.quads {
+            let (rect, corners) = quad_uvs(q.tex);
+            let p: Vec<Vec3> = q
+                .v
+                .iter()
+                .map(|&i| {
+                    let v = mesh.verts.get(i as usize).copied().unwrap_or([0; 4]);
+                    place(Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0)
+                })
+                .collect();
+            let base = verts.len() as u32;
+            for k in 0..4 {
+                let s = mesh.verts.get(q.v[k] as usize).map(|v| v[3]).unwrap_or(0);
+                verts.push(Vertex { pos: p[k].into(), uv: atlas.uv(rect, corners[k]), color: shade(s) });
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            if collide {
                 for (a, b2, c) in [(0, 1, 2), (0, 2, 3)] {
                     let n = (p[b2] - p[a]).cross(p[c] - p[a]);
                     if n.length_squared() > 1e-8 {
@@ -168,10 +184,92 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                 }
             }
         }
+    };
+    let mut sprites = Vec::new();
+    for b in &track.blocks {
+        let origin = b.origin;
+        for mesh in [&b.ground, &b.detail] {
+            emit(mesh, &|v| ps1_to_world(origin + v), true, &mut verts, &mut indices, &mut tris);
+        }
+        for pl in &b.placements {
+            let Some(model) = track.models.get(pl.model as usize) else { continue };
+            let flat_quad = model.quads.len() == 1 && model.verts.iter().all(|v| v[2] == 0);
+            let scale = if pl.scale.max_element() > 0.0 { pl.scale } else { Vec3::ONE };
+            if flat_quad {
+                // cut-out tree / sign: rotated to face the camera every frame
+                let mut local = Vec::new();
+                let mut idx = Vec::new();
+                emit(model, &|v| Vec3::new(-v.x, v.y, v.z) * scale, false, &mut local, &mut idx, &mut Vec::new());
+                let tri_verts: Vec<Vertex> = idx.iter().map(|&i| local[i as usize]).collect();
+                sprites.push(Sprite { pos: ps1_to_world(pl.pos), verts: tri_verts });
+            } else {
+                let (pos, (c, sn)) = (pl.pos, pl.rot);
+                let place = move |v: Vec3| {
+                    let v = v * scale;
+                    ps1_to_world(pos + Vec3::new(c * v.x + sn * v.z, v.y, -sn * v.x + c * v.z))
+                };
+                emit(model, &place, false, &mut verts, &mut indices, &mut tris);
+            }
+        }
     }
     let nodes = track.nodes.iter().map(|&n| ps1_to_world(n)).collect();
-    log::info!("track {grp_name}: {} quads, {} textures", indices.len() / 6, psh.shapes.len());
-    Ok(TrackAssets { verts, indices, tris, track, nodes })
+    log::info!("{} sprites", sprites.len());
+    let (sky, sky_colors) = build_sky(&psh, &rects, atlas);
+    Ok(TrackAssets { verts, indices, tris, track, nodes, sprites, sky, sky_colors })
+}
+
+fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
+    let mut acc = Vec3::ZERO;
+    let mut n = 0.0;
+    for y in rows {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            if i + 3 < rgba.len() && rgba[i + 3] > 0 {
+                acc += Vec3::new(rgba[i] as f32, rgba[i + 1] as f32, rgba[i + 2] as f32) / 255.0;
+                n += 1.0;
+            }
+        }
+    }
+    if n > 0.0 { acc / n } else { Vec3::new(0.5, 0.6, 0.8) }
+}
+
+/// Horizon cylinder from the HZ01..HZ04 panorama strips (8 segments, ~22 degrees tall).
+fn build_sky(psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, Vec3)) {
+    let panels: Vec<usize> = ["HZ01", "HZ02", "HZ03", "HZ04"]
+        .iter()
+        .filter_map(|n| psh.shapes.iter().position(|s| s.name == *n))
+        .collect();
+    let mut verts = Vec::new();
+    let mut colors = (Vec3::new(0.3, 0.45, 0.8), Vec3::new(0.7, 0.75, 0.85));
+    if let Some(&p0) = panels.first() {
+        let s = &psh.shapes[p0];
+        colors.1 = avg_color(&s.rgba, 0..2, s.width as usize);
+    }
+    // zenith: a deeper, bluer version of the panorama's sky colour
+    colors.0 = (colors.1 * Vec3::new(0.55, 0.7, 0.95)).min(Vec3::ONE);
+    if panels.is_empty() {
+        return (verts, colors);
+    }
+    let segs = 8;
+    let r = 100.0;
+    let (y0, y1) = (-r * 0.04, r * 0.24);
+    for k in 0..segs {
+        let rect = rects[panels[k % panels.len()]];
+        let a0 = k as f32 / segs as f32 * std::f32::consts::TAU;
+        let a1 = (k + 1) as f32 / segs as f32 * std::f32::consts::TAU;
+        let p = |a: f32, y: f32| [a.sin() * r, y, a.cos() * r];
+        let (w, h) = (rect.w as f32, rect.h as f32);
+        let quad = [
+            (p(a0, y1), Vec2::new(0.0, 0.0)),
+            (p(a1, y1), Vec2::new(w, 0.0)),
+            (p(a1, y0), Vec2::new(w, h)),
+            (p(a0, y0), Vec2::new(0.0, h)),
+        ];
+        for i in [0, 1, 2, 0, 2, 3] {
+            verts.push(Vertex { pos: quad[i].0, uv: atlas.uv(rect, quad[i].1), color: [0.5, 0.5, 0.5, 1.0] });
+        }
+    }
+    (verts, colors)
 }
 
 /// A car model in local space (metres, origin at ground contact centre, +Z forward).

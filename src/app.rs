@@ -71,7 +71,7 @@ impl ApplicationHandler for App {
                     let params = self.game.frame_params(w as f32 / h.max(1) as f32);
                     let dynamic = self.game.dynamic_geometry();
                     let hud = self.game.hud(w as f32, h as f32);
-                    r.render(&params, &dynamic, &hud);
+                    r.render(&params, &self.game.track.sky, &dynamic, &hud);
                 }
                 if let Some(w) = &self.window {
                     w.request_redraw();
@@ -117,7 +117,7 @@ pub fn screenshot(data: &GameData, track: u32, variant: &str, car: &str, out: &s
         game.car.on_ground
     );
     let params = game.frame_params(960.0 / 720.0);
-    let img = r.screenshot(&params, &game.dynamic_geometry(), &game.hud(960.0, 720.0));
+    let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &game.hud(960.0, 720.0));
     img.save(out)?;
     Ok(())
 }

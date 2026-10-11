@@ -6,6 +6,7 @@ struct Globals {
     fog_color: vec4<f32>,
     // x = fog start, y = fog end
     fog: vec4<f32>,
+    sky_top: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -64,7 +65,7 @@ fn vs_sky(@builtin(vertex_index) idx: u32) -> SkyOut {
 
 @fragment
 fn fs_sky(i: SkyOut) -> @location(0) vec4<f32> {
-    let top = vec3<f32>(0.25, 0.42, 0.75);
+    let top = g.sky_top.rgb;
     let k = clamp(i.y * 0.5 + 0.5, 0.0, 1.0);
     return vec4<f32>(mix(g.fog_color.rgb, top, k * k), 1.0);
 }
