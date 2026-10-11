@@ -1,3 +1,4 @@
 target
 /gamedata
 /re
+__pycache__/
