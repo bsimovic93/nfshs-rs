@@ -5,6 +5,7 @@ mod formats;
 mod game;
 mod iso;
 mod menu;
+mod ps1;
 mod render;
 mod soft;
 
@@ -178,6 +179,28 @@ fn main() -> Result<()> {
                     formats::audio::write_wav(&out.join(format!("{safe}.wav")), &s)?;
                 }
             }
+        }
+        Some("verify-recomp") => {
+            // verify-recomp <snapdir>: replay a DuckStation snapshot through the recompiled code
+            let dir = Path::new(&args[2]);
+            let rd = |n: &str| std::fs::read(dir.join(n));
+            let mut mem = ps1::Mem::default();
+            mem.ram.copy_from_slice(&rd("before_ram.bin")?);
+            mem.scratch.copy_from_slice(&rd("before_scratch.bin")?);
+            let regs: Vec<u32> = rd("before_regs.bin")?.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+            let mut cpu = ps1::Cpu::new(mem);
+            cpu.r.copy_from_slice(&regs[..32]);
+            cpu.lo = regs[33];
+            cpu.hi = regs[34];
+            let func = u32::from_str_radix(std::fs::read_to_string(dir.join("func.txt"))?.trim().trim_start_matches("0x"), 16)?;
+            let t = std::time::Instant::now();
+            cpu.call(func);
+            let el = t.elapsed();
+            let after_ram = rd("after_ram.bin")?;
+            let after_scratch = rd("after_scratch.bin")?;
+            let diff: Vec<usize> = (0..after_ram.len()).step_by(4).filter(|&i| cpu.m.ram[i..i + 4] != after_ram[i..i + 4]).collect();
+            let sdiff = (0..after_scratch.len()).step_by(4).filter(|&i| cpu.m.scratch[i..i + 4] != after_scratch[i..i + 4]).count();
+            println!("{func:#x}: {:?}, RAM words differing: {} {:x?}, scratch words differing: {sdiff}", el, diff.len(), &diff.iter().take(10).map(|i| 0x8000_0000u32 + *i as u32).collect::<Vec<_>>());
         }
         Some("dump-car") => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,
         _ => eprintln!(
