@@ -3,7 +3,12 @@ name = "nfshs"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["crates/ps1rt", "crates/nfs4rc"]
+
 [dependencies]
+ps1rt = { path = "crates/ps1rt" }
+nfs4rc = { path = "crates/nfs4rc" }
 anyhow = "1.0.104"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 cpal = "0.18.2"
@@ -15,3 +20,10 @@ log = "0.4"
 pollster = "0.4"
 wgpu = "30"
 winit = "0.30"
+
+[profile.release.package.nfs4rc]
+opt-level = 2
+codegen-units = 256
+
+[profile.dev.package.nfs4rc]
+opt-level = 1

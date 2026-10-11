@@ -17,6 +17,9 @@ class Mem:
         self.stores = collections.Counter()
         self.track = True
 
+    io_log = None  # set to a list to trap hardware I/O instead of raising
+    cur_func = 0
+
     def _map(self, addr):
         a = addr & 0x1FFFFFFF
         if SCRATCH_BASE <= a < SCRATCH_BASE + SCRATCH_SIZE:
@@ -25,7 +28,16 @@ class Mem:
             return self.ram, a & (RAM - 1)
         raise IndexError(f'unmapped access {addr:#x}')
 
+    def _io(self, addr, kind, v=0):
+        a = addr & 0x1FFFFFFF
+        if self.io_log is not None and (0x1F801000 <= a < 0x1F803000 or a >= 0x1FC00000):
+            self.io_log.append((kind, a, v, self.cur_func))
+            return True
+        return False
+
     def load(self, addr, n, signed=False):
+        if self._io(addr, 'r'):
+            return 0
         buf, o = self._map(addr)
         if self.track:
             self.loads[addr & ~3] += 1
@@ -33,6 +45,8 @@ class Mem:
         return v & 0xFFFFFFFF
 
     def store(self, addr, n, v):
+        if self._io(addr, 'w', v):
+            return
         buf, o = self._map(addr)
         if self.track:
             self.stores[addr & ~3] += 1
@@ -43,12 +57,33 @@ def s32(v):
     return v - (1 << 32) if v & 0x80000000 else v
 
 
+COP0 = [0] * 32
+HLE = {}  # addr -> fn(r, mem) ; executed instead of the function, then returns to r[31]
+BIOS = None  # fn(r, mem, fn_number) for A0 calls
+
+
 def run(mem, regs, entry, ret, max_steps=5_000_000):
     r = list(regs[:32])
     hi, lo = regs[34], regs[33]
     pc, npc = entry, entry + 4
     steps = 0
+    stack = [entry]
+    calls = collections.Counter()
     while pc != ret:
+        if pc in HLE:
+            HLE[pc](r, mem)
+            if len(stack) > 1 and stack[-1] == pc:
+                stack.pop(); mem.cur_func = stack[-1]
+            pc, npc = r[31], (r[31] + 4) & 0xFFFFFFFF
+            continue
+        if (pc & 0x1FFFFFFF) in (0xA0, 0xB0, 0xC0):
+            handled = (pc & 0xFF) == 0xA0 and BIOS is not None and BIOS(r, mem, r[9])
+            if not handled:
+                if mem.io_log is not None:
+                    mem.io_log.append(('bios', pc & 0xFF, r[9], stack[-1]))
+                r[2] = 0
+            pc, npc = r[31], r[31] + 4
+            continue
         steps += 1
         if steps > max_steps:
             raise RuntimeError('step limit')
@@ -67,8 +102,13 @@ def run(mem, regs, entry, ret, max_steps=5_000_000):
             elif fn == 4: v = (r[rt] << (r[rs] & 31)) & 0xFFFFFFFF
             elif fn == 6: v = r[rt] >> (r[rs] & 31)
             elif fn == 7: v = (s32(r[rt]) >> (r[rs] & 31)) & 0xFFFFFFFF
-            elif fn == 8: nnpc = r[rs]
-            elif fn == 9: v = (npc + 4) & 0xFFFFFFFF; nnpc = r[rs]
+            elif fn == 8:
+                nnpc = r[rs]
+                if rs == 31 and len(stack) > 1:
+                    stack.pop(); mem.cur_func = stack[-1]
+            elif fn == 9:
+                v = (npc + 4) & 0xFFFFFFFF; nnpc = r[rs]
+                calls[nnpc] += 1; stack.append(nnpc); mem.cur_func = nnpc
             elif fn == 16: v = hi
             elif fn == 18: v = lo
             elif fn == 17: hi = r[rs]
@@ -109,6 +149,8 @@ def run(mem, regs, entry, ret, max_steps=5_000_000):
         elif op == 3:
             r[31] = (npc + 4) & 0xFFFFFFFF
             nnpc = (npc & 0xF0000000) | ((w & 0x3FFFFFF) << 2)
+            calls[nnpc] += 1
+            stack.append(nnpc); mem.cur_func = nnpc
         elif op == 4:
             if r[rs] == r[rt]: nnpc = (npc + simm * 4) & 0xFFFFFFFF
         elif op == 5:
@@ -131,6 +173,15 @@ def run(mem, regs, entry, ret, max_steps=5_000_000):
             if rt: r[rt] = r[rs] ^ imm
         elif op == 15:
             if rt: r[rt] = imm << 16
+        elif op == 16:
+            if rs == 0:
+                if rt: r[rt] = COP0[(w >> 11) & 31]
+            elif rs == 4:
+                COP0[(w >> 11) & 31] = r[rt]
+            elif rs == 16 and (w & 63) == 16:
+                pass  # rfe
+            else:
+                raise RuntimeError(f'cop0 {w:#010x} at {pc:#x}')
         elif op >= 32:
             addr = (r[rs] + simm) & 0xFFFFFFFF
             if op == 32: v = mem.load(addr, 1, True)
@@ -170,6 +221,7 @@ def run(mem, regs, entry, ret, max_steps=5_000_000):
         else:
             raise RuntimeError(f'op {op} at {pc:#x} ({w:#010x})')
         pc, npc = npc, nnpc
+    run.calls = calls
     return r, steps
 
 

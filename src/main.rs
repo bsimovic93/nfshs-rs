@@ -188,7 +188,7 @@ fn main() -> Result<()> {
             mem.ram.copy_from_slice(&rd("before_ram.bin")?);
             mem.scratch.copy_from_slice(&rd("before_scratch.bin")?);
             let regs: Vec<u32> = rd("before_regs.bin")?.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
-            let mut cpu = ps1::Cpu::new(mem);
+            let mut cpu = ps1::new_cpu(mem);
             cpu.r.copy_from_slice(&regs[..32]);
             cpu.lo = regs[33];
             cpu.hi = regs[34];
@@ -201,6 +201,37 @@ fn main() -> Result<()> {
             let diff: Vec<usize> = (0..after_ram.len()).step_by(4).filter(|&i| cpu.m.ram[i..i + 4] != after_ram[i..i + 4]).collect();
             let sdiff = (0..after_scratch.len()).step_by(4).filter(|&i| cpu.m.scratch[i..i + 4] != after_scratch[i..i + 4]).count();
             println!("{func:#x}: {:?}, RAM words differing: {} {:x?}, scratch words differing: {sdiff}", el, diff.len(), &diff.iter().take(10).map(|i| 0x8000_0000u32 + *i as u32).collect::<Vec<_>>());
+        }
+        Some("run-snap") => {
+            // run-snap <snapdir> [--trace]: run the snapshotted function natively with host HLE
+            let dir = Path::new(&args[2]);
+            let rd = |n: &str| std::fs::read(dir.join(n));
+            let mut mem = ps1::Mem::default();
+            mem.ram.copy_from_slice(&rd("before_ram.bin")?);
+            mem.scratch.copy_from_slice(&rd("before_scratch.bin")?);
+            let regs: Vec<u32> = rd("before_regs.bin")?.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+            let mut cpu = ps1::new_cpu(mem);
+            cpu.r.copy_from_slice(&regs[..32]);
+            cpu.lo = regs[33];
+            cpu.hi = regs[34];
+            cpu.trace = args.iter().any(|a| a == "--trace");
+            cpu.host = Some(Box::new(ps1::host::GameHost::new(data.root.clone())));
+            let func = u32::from_str_radix(std::fs::read_to_string(dir.join("func.txt"))?.trim().trim_start_matches("0x"), 16)?;
+            let t = std::time::Instant::now();
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cpu.call(func);
+                cpu
+            }));
+            match res {
+                Ok(mut cpu) => {
+                    println!("{func:#x} returned v0={:#x} in {:?}, {} calls, {} io accesses", cpu.r[2], t.elapsed(), cpu.calls, cpu.m.io_accesses);
+                    if let Some(h) = cpu.host.take() {
+                        let _ = h;
+                    }
+                    std::fs::write(dir.join("native_after_ram.bin"), &cpu.m.ram)?;
+                }
+                Err(_) => println!("{func:#x} panicked after {:?}", t.elapsed()),
+            }
         }
         Some("dump-car") => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,
         _ => eprintln!(

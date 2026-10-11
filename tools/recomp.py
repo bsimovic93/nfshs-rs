@@ -26,29 +26,90 @@ def is_prologue(w):
     return (w >> 16) == 0x27BD and (w & 0x8000)
 
 
+_END_CACHE = {}
+
+
 def func_end(start):
-    """End = next known function start or next prologue after the first instruction."""
+    """Function extent by control-flow tracing from the entry: follow branches and jumps,
+    stop paths at `jr ra`. A `jr reg` (jump table) extends linearly to the next known start."""
+    if start in _END_CACHE:
+        return _END_CACHE[start]
     import bisect
     k = bisect.bisect_right(SORTED_STARTS, start)
-    nxt = SORTED_STARTS[k] if k < len(SORTED_STARTS) else e.end
-    p = start + 4
-    while p < nxt and e.valid(p):
-        if is_prologue(e.word(p)):
-            # a prologue in the middle could also be an alloca; accept only if preceded by jr ra delay
-            if e.word(p - 8) == 0x03E00008:
-                return p
-        p += 4
-    return nxt
+    limit = min(SORTED_STARTS[k] if k < len(SORTED_STARTS) else e.end, e.end, start + 0x8000)
+    seen = set()
+    work = [start]
+    hi = start
+    jump_table = False
+    while work:
+        pc = work.pop()
+        while start <= pc < limit and pc not in seen:
+            seen.add(pc)
+            hi = max(hi, pc)
+            w = e.word(pc)
+            op = w >> 26
+            fn = w & 63
+            if op == 0 and fn == 8:  # jr
+                seen.add(pc + 4); hi = max(hi, pc + 4)
+                if ((w >> 21) & 31) != 31:
+                    jump_table = True
+                break
+            if op == 2:  # j
+                t = (pc & 0xF0000000) | ((w & 0x3FFFFFF) << 2)
+                seen.add(pc + 4); hi = max(hi, pc + 4)
+                if start <= t < limit:
+                    work.append(t)
+                break
+            if op in (4, 5, 6, 7) or op == 1:
+                s16 = w & 0xFFFF
+                s16 = s16 - 0x10000 if s16 & 0x8000 else s16
+                t = (pc + 4 + s16 * 4) & 0xFFFFFFFF
+                if start <= t < limit:
+                    work.append(t)
+                # unconditional "b" (beq zero, zero) ends the path
+                if op == 4 and ((w >> 21) & 31) == 0 and ((w >> 16) & 31) == 0:
+                    seen.add(pc + 4); hi = max(hi, pc + 4)
+                    break
+            pc += 4
+    end = hi + 4
+    if jump_table:
+        end = limit
+    _END_CACHE[start] = end
+    return end
+
+
+def looks_like_function(a):
+    """Address-taken code constant that plausibly starts a function."""
+    if not (e.valid(a) and a & 3 == 0):
+        return False
+    if a in ALL_CALLS:
+        return True
+    w = e.word(a)
+    prev2 = e.word(a - 8) if e.valid(a - 8) else 0
+    return is_prologue(w) or prev2 == 0x03E00008
 
 
 def calls_of(start):
     end = func_end(start)
     out = set()
+    hi = {}
     for q in range(start, end, 4):
         w = e.word(q)
-        if w >> 26 == 3:
+        op = w >> 26
+        if op == 3:
             out.add((q & 0xF0000000) | ((w & 0x3FFFFFF) << 2))
+        rt, rs = (w >> 16) & 31, (w >> 21) & 31
+        if op == 15:
+            hi[rt] = (w & 0xFFFF) << 16
+        elif op in (9, 13) and rs in hi:
+            imm = w & 0xFFFF
+            v = (hi[rs] + (imm - 0x10000 if (op == 9 and imm & 0x8000) else imm)) & 0xFFFFFFFF
+            if 0x80010000 <= v < e.end and looks_like_function(v):
+                out.add(v)
     return out
+
+
+HLE_SET = set()
 
 
 def collect(roots):
@@ -56,7 +117,7 @@ def collect(roots):
     stack = list(roots)
     while stack:
         f = stack.pop()
-        if f in seen:
+        if f in seen or f in HLE_SET or not e.valid(f):
             continue
         seen.add(f)
         stack.extend(calls_of(f))
@@ -116,6 +177,13 @@ def gen_simple(w, pc):
         if fn in (8, 9, 12, 13):
             return None
         raise ValueError(f'special {fn} at {pc:#x}')
+    if op == 16:
+        if rs == 0: return set_reg(rt, f'c.cop0[{rd}]')
+        if rs == 4: return f'c.cop0[{rd}] = {reg(rt)};'
+        if rs == 16 and fn == 16: return '/* rfe */'
+        raise ValueError(f'cop0 {w:#010x} at {pc:#x}')
+    if op in (18, 50, 58):
+        return f'c.gte({w:#010x});'
     if op in (8, 9): return set_reg(rt, f'{reg(rs)}.wrapping_add({s & 0xFFFFFFFF:#x})')
     if op == 10: return set_reg(rt, f'(({reg(rs)} as i32) < {s}) as u32')
     if op == 11: return set_reg(rt, f'({reg(rs)} < {s & 0xFFFFFFFF:#x}) as u32')
@@ -237,7 +305,8 @@ def gen_function(f, known):
                 if rs == 31:
                     body.append('                let _ = target; return;')
                 else:
-                    body.append('                pc = target; continue;')
+                    body.append(f'                if ({f:#x}..{end:#x}).contains(&target) {{ pc = target; continue; }}')
+                    body.append('                c.call(target); return;')
             elif kind == 'jalr':
                 rs, rd = bi[1], bi[2]
                 body.append(f'                let target = {reg(rs)};{comment}')
@@ -266,25 +335,65 @@ def call_expr(t, known):
     return f'f_{t:08x}(c);' if t in known else f'c.call({t:#x});'
 
 
+def all_starts():
+    starts = set(ALL_CALLS)
+    for a in range(e.base, e.end, 4):
+        if is_prologue(e.word(a)):
+            starts.add(a)
+    for a in range(e.base, e.end, 4):
+        v = e.word(a)
+        if 0x80010000 <= v < e.end and looks_like_function(v):
+            starts.add(v)
+    return sorted(x for x in starts if e.valid(x))
+
+
+def safe_gen(f, known):
+    try:
+        return gen_function(f, known)
+    except ValueError as ex:
+        return f'pub fn f_{f:08x}(c: &mut Cpu) {{ let _ = c; panic!("f_{f:08x}: not code"); }}' + chr(10)
+
+
 if __name__ == '__main__':
-    out_path = sys.argv[1]
-    roots = [int(x, 16) for x in sys.argv[2:]]
+    # usage: recomp.py OUT_DIR [--all | ROOTS...] [--hle ADDRS...] [--parts N]
+    out_dir = sys.argv[1]
+    args = sys.argv[2:]
+    if '--hle' in args:
+        i = args.index('--hle')
+        HLE_SET.update(int(x, 16) for x in args[i + 1:])
+        args = args[:i]
+    parts_n = 48
+    if '--parts' in args:
+        i = args.index('--parts'); parts_n = int(args[i + 1]); args = args[:i] + args[i + 2:]
+    roots = all_starts() if '--all' in args else [int(x, 16) for x in args]
     funcs = collect(roots)
     known = set(funcs)
-    parts = ['//! Generated by tools/recomp.py from NFS4.EXE (NTSC-U). Do not edit by hand.',
-             '//! Roots: ' + ', '.join(f'{r:#x}' for r in roots),
-             '#![allow(unused_variables, unused_assignments, clippy::all, unreachable_code, non_snake_case)]',
-             'use super::Cpu;', '']
+    import os
+    os.makedirs(out_dir, exist_ok=True)
+    header = ['//! Generated by tools/recomp.py from NFS4.EXE (NTSC-U SLUS-00826). Do not edit by hand.',
+              '#![allow(unused_variables, unused_assignments, unused_mut, clippy::all, unreachable_code, non_snake_case, unused_imports)]',
+              'use ps1rt::Cpu;', 'use crate::*;', '']
+    chunk = (len(funcs) + parts_n - 1) // parts_n
+    for k in range(parts_n):
+        sub = funcs[k * chunk:(k + 1) * chunk]
+        body = header + [safe_gen(f, known) for f in sub]
+        open(os.path.join(out_dir, f'part_{k:02}.rs'), 'w', encoding='utf-8').write(chr(10).join(body))
+    lib = ['//! NFS4.EXE recompiled to Rust (generated by tools/recomp.py). Do not edit by hand.',
+           '#![allow(clippy::all)]',
+           'use ps1rt::Cpu;']
+    for k in range(parts_n):
+        lib.append(f'mod part_{k:02};')
+        lib.append(f'pub use part_{k:02}::*;')
+    lib.append('/// Functions replaced on the host side (excluded from recompilation).')
+    lib.append('pub const HLE: &[u32] = &[' + ', '.join(f'{x:#x}' for x in sorted(HLE_SET)) + '];')
+    lib.append('/// Dispatch a call by address into recompiled code.')
+    lib.append('pub fn dispatch(c: &mut Cpu, addr: u32) -> bool {')
+    lib.append('    match addr {')
     for f in funcs:
-        parts.append(gen_function(f, known))
-    parts.append('/// Dispatch for indirect calls into recompiled code.')
-    parts.append('pub fn dispatch(c: &mut Cpu, addr: u32) -> bool {')
-    parts.append('    match addr {')
-    for f in funcs:
-        parts.append(f'        {f:#x} => f_{f:08x}(c),')
-    parts.append('        _ => return false,')
-    parts.append('    }')
-    parts.append('    true')
-    parts.append('}')
-    open(out_path, 'w', encoding='utf-8').write('\n'.join(parts))
-    print(f'{len(funcs)} functions -> {out_path}')
+        lib.append(f'        {f:#x} => f_{f:08x}(c),')
+    lib.append('        _ => return false,')
+    lib.append('    }')
+    lib.append('    true')
+    lib.append('}')
+    open(os.path.join(out_dir, 'lib.rs'), 'w', encoding='utf-8').write(chr(10).join(lib))
+    print(f'{len(funcs)} functions -> {out_dir} ({parts_n} parts)')

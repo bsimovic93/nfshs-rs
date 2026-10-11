@@ -1230,6 +1230,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nfs4rc"
+version = "0.1.0"
+dependencies = [
+ "ps1rt",
+]
+
+[[package]]
 name = "nfshs"
 version = "0.1.0"
 dependencies = [
@@ -1241,7 +1248,9 @@ dependencies = [
  "glam",
  "image",
  "log",
+ "nfs4rc",
  "pollster",
+ "ps1rt",
  "wgpu",
  "winit",
 ]
@@ -1832,6 +1841,10 @@ name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
+
+[[package]]
+name = "ps1rt"
+version = "0.1.0"
 
 [[package]]
 name = "pxfm"

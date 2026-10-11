@@ -1,0 +1,7 @@
+[package]
+name = "ps1rt"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal PS1 CPU/memory runtime for statically recompiled code"
+
+[dependencies]
