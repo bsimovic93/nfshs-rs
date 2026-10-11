@@ -4,6 +4,7 @@ mod audio;
 mod formats;
 mod game;
 mod iso;
+mod menu;
 mod render;
 mod soft;
 
@@ -31,7 +32,18 @@ fn main() -> Result<()> {
     let laps: i32 = opt(&args, "--laps").unwrap_or("2").parse()?;
     let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps };
     match args.get(1).map(String::as_str) {
-        None | Some("play") => app::run(&data, &cfg)?,
+        None | Some("menu") => app::run(&data, None)?,
+        Some("play") => app::run(
+            &data,
+            Some(app::RaceConfigOwned {
+                track,
+                variant: variant.clone(),
+                player_car: car.clone(),
+                opponents: cfg.opponents.clone(),
+                laps,
+            }),
+        )?,
+        Some("shot-menu") => app::menu_screenshot(&data, Path::new(opt(&args, "--out").unwrap_or("menu.png")))?,
         Some("shot") => {
             let secs: f32 = opt(&args, "--time").unwrap_or("0").parse()?;
             let keys = opt(&args, "--keys").unwrap_or("");

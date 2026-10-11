@@ -81,6 +81,8 @@ pub struct Renderer {
     sky_globals: wgpu::Buffer,
     sky_bg: wgpu::BindGroup,
     sky_vb: DynBuf,
+    bgl: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     world_bg: wgpu::BindGroup,
     hud_bg: wgpu::BindGroup,
     depth: Option<(wgpu::TextureView, u32, u32)>,
@@ -128,22 +130,6 @@ impl Renderer {
             None => (None, wgpu::TextureFormat::Rgba8UnormSrgb),
         };
 
-        let tex = device.create_texture_with_data(
-            &queue,
-            &wgpu::TextureDescriptor {
-                label: Some("atlas"),
-                size: wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            },
-            wgpu::util::TextureDataOrder::LayerMajor,
-            &atlas.rgba,
-        );
-        let tex_view = tex.create_view(&Default::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
@@ -191,20 +177,7 @@ impl Renderer {
         let world_globals = mk_globals();
         let hud_globals = mk_globals();
         let sky_globals = mk_globals();
-        let mk_bg = |buf: &wgpu::Buffer| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &bgl,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&tex_view) },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
-                ],
-            })
-        };
-        let world_bg = mk_bg(&world_globals);
-        let hud_bg = mk_bg(&hud_globals);
-        let sky_bg = mk_bg(&sky_globals);
+        let [world_bg, hud_bg, sky_bg] = make_bind_groups(&device, &queue, &bgl, &sampler, atlas, [&world_globals, &hud_globals, &sky_globals]);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
@@ -273,6 +246,8 @@ impl Renderer {
             sky_globals,
             sky_bg,
             sky_vb,
+            bgl,
+            sampler,
             world_bg,
             hud_bg,
             depth: None,
@@ -281,6 +256,18 @@ impl Renderer {
             hud_vb,
             size,
         })
+    }
+
+    /// Replace the texture atlas (e.g. when switching from the menu to a race).
+    pub fn set_atlas(&mut self, atlas: &crate::assets::Atlas) {
+        let [w, h, s] = make_bind_groups(&self.device, &self.queue, &self.bgl, &self.sampler, atlas, [&self.world_globals, &self.hud_globals, &self.sky_globals]);
+        self.world_bg = w;
+        self.hud_bg = h;
+        self.sky_bg = s;
+    }
+
+    pub fn clear_world(&mut self) {
+        self.static_vb = None;
     }
 
     pub fn set_world(&mut self, verts: &[Vertex], indices: &[u32]) {
@@ -482,4 +469,41 @@ impl Renderer {
         }
         img
     }
+}
+
+fn make_bind_groups(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bgl: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    atlas: &crate::assets::Atlas,
+    globals: [&wgpu::Buffer; 3],
+) -> [wgpu::BindGroup; 3] {
+    let tex = device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("atlas"),
+            size: wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        &atlas.rgba,
+    );
+    let view = tex.create_view(&Default::default());
+    globals.map(|buf| {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
+            ],
+        })
+    })
 }

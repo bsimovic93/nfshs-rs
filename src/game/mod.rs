@@ -22,6 +22,10 @@ pub struct Input {
     pub reset: bool,
     pub camera: bool,
     pub autopilot: bool,
+    /// Analog controls (gamepad); override the digital ones when non-zero.
+    pub steer_axis: f32,
+    pub throttle_axis: f32,
+    pub brake_axis: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -187,6 +191,10 @@ impl Game {
         })
     }
 
+    pub fn font(&self) -> &hud::Font {
+        &self.font
+    }
+
     pub fn player(&self) -> &Racer {
         &self.racers[0]
     }
@@ -253,11 +261,14 @@ impl Game {
             } else if input.autopilot || (i == 0 && r.finish_time.is_some()) {
                 self.autopilot.controls(&r.car, &self.path, r.progress, frame_dt)
             } else {
+                let digital_steer = input.right as u8 as f32 - input.left as u8 as f32;
+                let throttle = (input.up as u8 as f32).max(input.throttle_axis);
+                let brake = (input.down as u8 as f32).max(input.brake_axis);
                 Controls {
-                    throttle: input.up as u8 as f32,
-                    brake: input.down as u8 as f32,
-                    reverse: input.down,
-                    steer: input.right as u8 as f32 - input.left as u8 as f32,
+                    throttle,
+                    brake,
+                    reverse: brake > 0.5,
+                    steer: if input.steer_axis != 0.0 { input.steer_axis } else { digital_steer },
                     handbrake: input.handbrake,
                 }
             };
