@@ -14,9 +14,15 @@ struct Globals {
     fog_color: [f32; 4],
     fog: [f32; 4],
     sky_top: [f32; 4],
+    light: [f32; 4],
+    head_pos: [f32; 4],
+    head_dir: [f32; 4],
 }
 
 pub struct FrameParams {
+    pub ambient: f32,
+    /// Headlight strength (0 = off), position and direction.
+    pub headlight: (f32, Vec3, Vec3),
     /// Projection * rotation-only view, for the camera-centred sky.
     pub sky_view_proj: Mat4,
     pub sky_top: Vec3,
@@ -332,6 +338,9 @@ impl Renderer {
             fog_color: p.fog_color.extend(1.0).into(),
             fog: Vec4::new(p.fog_start, p.fog_end, 0.0, 0.0).into(),
             sky_top: p.sky_top.extend(1.0).into(),
+            light: [p.ambient, p.headlight.0, 0.0, 0.0],
+            head_pos: p.headlight.1.extend(1.0).into(),
+            head_dir: p.headlight.2.extend(0.0).into(),
         };
         self.queue.write_buffer(&self.world_globals, 0, bytemuck::bytes_of(&g));
         let (w, h) = (self.size.0 as f32, self.size.1 as f32);
@@ -341,6 +350,9 @@ impl Renderer {
             fog_color: [0.0; 4],
             fog: [1e9, 2e9, 0.0, 0.0],
             sky_top: [0.0; 4],
+            light: [1.0, 0.0, 0.0, 0.0],
+            head_pos: [0.0; 4],
+            head_dir: [0.0; 4],
         };
         self.queue.write_buffer(&self.hud_globals, 0, bytemuck::bytes_of(&hud_g));
         let sky_g = Globals {
@@ -349,6 +361,9 @@ impl Renderer {
             fog_color: p.sky_top.extend(1.0).into(),
             fog: [1e9, 2e9, 0.0, 0.0],
             sky_top: [0.0; 4],
+            light: [if p.ambient < 0.5 { p.ambient * 0.5 } else { p.ambient }, 0.0, 0.0, 0.0],
+            head_pos: [0.0; 4],
+            head_dir: [0.0; 4],
         };
         self.queue.write_buffer(&self.sky_globals, 0, bytemuck::bytes_of(&sky_g));
         self.sky_vb.upload(&self.device, &self.queue, sky);

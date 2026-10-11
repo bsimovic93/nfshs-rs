@@ -7,6 +7,10 @@ struct Globals {
     // x = fog start, y = fog end
     fog: vec4<f32>,
     sky_top: vec4<f32>,
+    // x = ambient light multiplier, y = headlight strength
+    light: vec4<f32>,
+    head_pos: vec4<f32>,
+    head_dir: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -24,6 +28,7 @@ struct VOut {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) dist: f32,
+    @location(3) world: vec3<f32>,
 };
 
 @vertex
@@ -33,6 +38,7 @@ fn vs_main(v: VIn) -> VOut {
     o.uv = v.uv;
     o.color = v.color;
     o.dist = distance(v.pos, g.cam_pos.xyz);
+    o.world = v.pos;
     return o;
 }
 
@@ -43,6 +49,16 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
         discard;
     }
     var c = min(t.rgb * i.color.rgb * 2.0, vec3<f32>(1.0));
+    // ambient (night darkening) + player headlight cone
+    var lit = g.light.x;
+    if (g.light.y > 0.0) {
+        let to = i.world - g.head_pos.xyz;
+        let d = length(to);
+        let cone = smoothstep(0.86, 0.97, dot(to / max(d, 0.001), g.head_dir.xyz));
+        let fall = clamp(1.0 - d / 70.0, 0.0, 1.0);
+        lit = lit + g.light.y * cone * fall * fall;
+    }
+    c = c * min(lit, 1.25);
     let f = clamp((i.dist - g.fog.x) / max(g.fog.y - g.fog.x, 1.0), 0.0, 1.0);
     c = mix(c, g.fog_color.rgb, f);
     return vec4<f32>(c, i.color.a);

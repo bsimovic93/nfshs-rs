@@ -88,6 +88,9 @@ pub struct Game {
     accum: f32,
     font: hud::Font,
     pub fog: (Vec3, f32, f32),
+    /// Ambient light multiplier (night < 1).
+    pub ambient: f32,
+    pub night: bool,
 }
 
 const DT: f32 = 1.0 / 120.0;
@@ -150,7 +153,7 @@ impl Game {
             models.push(model);
         }
         let fog = match cfg.variant {
-            "N" => (Vec3::new(0.02, 0.02, 0.06), 60.0, 260.0),
+            "N" => (Vec3::new(0.03, 0.04, 0.09), 50.0, 240.0),
             "S" => (Vec3::new(0.75, 0.78, 0.82), 40.0, 220.0),
             "W" => (Vec3::new(0.45, 0.48, 0.52), 50.0, 260.0),
             _ => (track.sky_colors.1, 120.0, 420.0),
@@ -174,6 +177,13 @@ impl Game {
             accum: 0.0,
             font,
             fog,
+            ambient: match cfg.variant {
+                // linear-light multipliers (output is sRGB)
+                "N" => 0.1,
+                "W" => 0.65,
+                _ => 1.0,
+            },
+            night: cfg.variant == "N",
         })
     }
 
@@ -412,9 +422,12 @@ impl Game {
         let proj = Mat4::perspective_rh(1.05, aspect, 0.1, 2000.0);
         let view = Mat4::look_at_rh(self.cam_pos, self.cam_target, Vec3::Y);
         let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, Vec3::Y);
+        let p = &self.racers[0].car;
         FrameParams {
+            ambient: self.ambient,
+            headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
             sky_view_proj: Mat4::perspective_rh(1.05, aspect, 1.0, 1000.0) * sky_view,
-            sky_top: self.track.sky_colors.0,
+            sky_top: self.track.sky_colors.0 * if self.night { 0.12 } else { 1.0 },
             view_proj: proj * view,
             cam_pos: self.cam_pos,
             fog_color: self.fog.0,
