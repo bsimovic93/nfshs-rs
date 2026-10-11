@@ -138,7 +138,18 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                     })
                     .collect();
                 let (w, h) = (rect.w as f32, rect.h as f32);
-                let corners = [Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)];
+                let mut corners = [Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)];
+                // texture-table orientation bits: 0x02 rotate 90, 0x04 flip V, 0x08 flip U
+                let fl = te.map(|t| t.flags).unwrap_or(0);
+                if fl & 0x08 != 0 {
+                    corners.iter_mut().for_each(|c| c.x = w - c.x);
+                }
+                if fl & 0x04 != 0 {
+                    corners.iter_mut().for_each(|c| c.y = h - c.y);
+                }
+                if fl & 0x02 != 0 {
+                    corners.rotate_left(1);
+                }
                 let shade = |i: u16| {
                     let s = mesh.verts.get(i as usize).map(|v| v[3]).unwrap_or(0);
                     let k = 1.0 - (s as f32 / 32.0).clamp(0.0, 0.6);

@@ -54,6 +54,28 @@ fn main() -> Result<()> {
         }
         Some("dump-psh") => dump_psh(Path::new(&args[2]), Path::new(&args[3]))?,
         Some("dump-track") => dump_track(&args[2], &args[3], Path::new(&args[4]), args.get(5).map(String::as_str))?,
+        Some("verify-decompress") => {
+            // compare against reference outputs produced by tools/mipsemu.py (re/dec/<name>.bin)
+            let (mut ok, mut bad) = (0, 0);
+            for f in &args[2..] {
+                let src = std::fs::read(f)?;
+                let name = Path::new(f).file_name().unwrap().to_string_lossy().to_string();
+                let reference = std::fs::read(format!("re/dec/{name}.bin"))?;
+                match formats::compress::decompress(&src) {
+                    Ok(out) if out == reference => ok += 1,
+                    Ok(out) => {
+                        bad += 1;
+                        let first = out.iter().zip(&reference).position(|(a, b)| a != b);
+                        println!("MISMATCH {name}: len {} vs {} first diff {:?}", out.len(), reference.len(), first);
+                    }
+                    Err(e) => {
+                        bad += 1;
+                        println!("ERROR {name}: {e}");
+                    }
+                }
+            }
+            println!("{ok} ok, {bad} bad");
+        }
         Some("dump-car") => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,
         _ => eprintln!(
             "usage:
