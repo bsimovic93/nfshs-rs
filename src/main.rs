@@ -1,13 +1,42 @@
+mod app;
+mod assets;
 mod formats;
+mod game;
 mod iso;
+mod render;
 mod soft;
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+/// Value of `--name value` style option.
+fn opt<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str)
+}
+
 fn main() -> Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<String> = std::env::args().collect();
+    let data = assets::GameData::new(Path::new(opt(&args, "--data").unwrap_or("gamedata")));
+    let track: u32 = opt(&args, "--track").unwrap_or("0").parse()?;
+    let variant = opt(&args, "--variant").unwrap_or("").to_ascii_uppercase();
+    let car = opt(&args, "--car").unwrap_or("BMWM").to_ascii_uppercase();
     match args.get(1).map(String::as_str) {
+        None | Some("play") => app::run(&data, track, &variant, &car)?,
+        Some("shot") => {
+            let secs: f32 = opt(&args, "--time").unwrap_or("0").parse()?;
+            let keys = opt(&args, "--keys").unwrap_or("");
+            let input = game::Input {
+                up: keys.contains('u'),
+                down: keys.contains('d'),
+                left: keys.contains('l'),
+                right: keys.contains('r'),
+                handbrake: keys.contains('h'),
+                ..Default::default()
+            };
+            let out = opt(&args, "--out").unwrap_or("shot.png");
+            app::screenshot(&data, track, &variant, &car, Path::new(out), secs, input)?;
+        }
         Some("extract") => {
             let bin = PathBuf::from(&args[2]);
             let out = PathBuf::from(args.get(3).map(String::as_str).unwrap_or("gamedata"));
@@ -26,7 +55,13 @@ fn main() -> Result<()> {
         Some("dump-psh") => dump_psh(Path::new(&args[2]), Path::new(&args[3]))?,
         Some("dump-track") => dump_track(&args[2], &args[3], Path::new(&args[4]), args.get(5).map(String::as_str))?,
         Some("dump-car") => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,
-        _ => eprintln!("usage: nfshs extract <image.bin> [outdir] | dump-psh <file.psh|viv> <out.png>"),
+        _ => eprintln!(
+            "usage:
+  nfshs extract <image.bin> [outdir]
+  nfshs play [--track N] [--variant N|S|W] [--car CODE] [--data DIR]
+  nfshs shot --out x.png [--time S] [--keys udlrh] ...
+  nfshs dump-psh|dump-car|dump-track ..."
+        ),
     }
     Ok(())
 }
@@ -124,7 +159,7 @@ fn dump_car(src: &Path, out: &Path, parts: Option<&str>) -> Result<()> {
     }
     let tex = vec![soft::Texture { w: 256, h: 256, rgba: atlas.rgba }];
     let proj = Mat4::perspective_rh_gl(0.7, 4.0 / 3.0, 10.0, 10000.0);
-    let views = [Vec3::new(900.0, 500.0, 1100.0), Vec3::new(-900.0, 400.0, -1100.0), Vec3::new(0.0, 1800.0, 1.0)];
+    let views = [Vec3::new(2000.0, 0.0, 0.0), Vec3::new(-900.0, 400.0, -1100.0), Vec3::new(0.0, 1800.0, 1.0)];
     let mut sheet = image::RgbaImage::new(640 * 3, 480);
     for (k, eye) in views.iter().enumerate() {
         let view = Mat4::look_at_rh(*eye, Vec3::ZERO, Vec3::Y);
