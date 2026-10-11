@@ -8,6 +8,8 @@ pub struct Driver {
     pub lane: f32,
     /// Fraction of the tyre limit the driver is willing to use in corners.
     pub skill: f32,
+    /// Temporary lateral offset used to pass other cars.
+    pub nudge: f32,
     stuck_time: f32,
     recover_time: f32,
 }
@@ -17,7 +19,7 @@ const BRAKE_DECEL: f32 = 9.0;
 
 impl Driver {
     pub fn new(lane: f32, skill: f32) -> Self {
-        Self { lane, skill, stuck_time: 0.0, recover_time: 0.0 }
+        Self { lane, skill, nudge: 0.0, stuck_time: 0.0, recover_time: 0.0 }
     }
 
     fn heading(path: &[Vec3], i: usize) -> f32 {
@@ -63,7 +65,7 @@ impl Driver {
         let q = path[(progress + ahead + 1) % n];
         let tangent = (q - p).normalize_or_zero();
         let right = Vec3::new(-tangent.z, 0.0, tangent.x);
-        let target = p + right * self.lane;
+        let target = p + right * (self.lane + self.nudge);
         let to = (target - car.pos).with_y(0.0).normalize_or_zero();
         let angle = to.dot(car.right()).atan2(to.dot(car.forward()));
 

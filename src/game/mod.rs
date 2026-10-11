@@ -249,6 +249,24 @@ impl Game {
             _ => true,
         };
 
+        // nearest car ahead for each racer: (distance, lateral offset, closing speed)
+        let traffic: Vec<Option<(f32, f32, f32)>> = (0..self.racers.len())
+            .map(|i| {
+                let me = &self.racers[i].car;
+                let (f, r) = (me.forward(), me.right());
+                self.racers
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i)
+                    .filter_map(|(_, o)| {
+                        let d = o.car.pos - me.pos;
+                        let ahead = d.dot(f);
+                        let lat = d.dot(r);
+                        (ahead > 0.0 && ahead < 25.0 && lat.abs() < 3.0).then(|| (ahead, lat, (me.vel - o.car.vel).dot(f)))
+                    })
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+            })
+            .collect();
         // controls for every racer (frozen during the countdown)
         let mut controls = Vec::with_capacity(self.racers.len());
         for (i, r) in self.racers.iter_mut().enumerate() {
@@ -257,7 +275,18 @@ impl Game {
             } else if r.finish_time.is_some() && i > 0 {
                 Controls { brake: 0.5, ..Default::default() }
             } else if let Some(d) = r.driver.as_mut() {
-                d.controls(&r.car, &self.path, r.progress, frame_dt)
+                let mut c = d.controls(&r.car, &self.path, r.progress, frame_dt);
+                if let Some((dist, lat, closing)) = traffic[i] {
+                    // move out of the slipstream to pass, and lift if we are about to hit
+                    d.nudge = if lat >= 0.0 { -2.5 } else { 2.5 };
+                    if dist < 8.0 && closing > 2.0 {
+                        c.throttle = 0.0;
+                        c.brake = c.brake.max((closing / 10.0).min(0.6));
+                    }
+                } else {
+                    d.nudge *= 0.98;
+                }
+                c
             } else if input.autopilot || (i == 0 && r.finish_time.is_some()) {
                 self.autopilot.controls(&r.car, &self.path, r.progress, frame_dt)
             } else {
@@ -337,26 +366,28 @@ impl Game {
                     [c.pos + f * c.spec.cg_front * 0.8, c.pos - f * c.spec.cg_rear * 0.8]
                 };
                 let rad = (ra.car.spec.half_width + rb.car.spec.half_width) * 0.95;
+                // deepest contact only, so one impact isn't applied once per circle pair
+                let mut best: Option<(f32, Vec3)> = None;
                 for pa in circles(&ra.car) {
                     for pb in circles(&rb.car) {
                         let mut d = pb - pa;
                         d.y = 0.0;
                         let dist = d.length();
-                        if dist >= rad || dist < 1e-4 {
-                            continue;
+                        if dist < rad && dist > 1e-4 && best.is_none_or(|b| rad - dist > b.0) {
+                            best = Some((rad - dist, d / dist));
                         }
-                        let nrm = d / dist;
-                        let overlap = rad - dist;
-                        ra.car.pos -= nrm * overlap * 0.5;
-                        rb.car.pos += nrm * overlap * 0.5;
-                        let rel = (rb.car.vel - ra.car.vel).dot(nrm);
-                        if rel < 0.0 {
-                            let impulse = -(1.3) * rel * 0.5;
-                            ra.car.vel -= nrm * impulse;
-                            rb.car.vel += nrm * impulse;
-                            ra.car.yaw_rate *= 0.9;
-                            rb.car.yaw_rate *= 0.9;
-                        }
+                    }
+                }
+                if let Some((overlap, nrm)) = best {
+                    ra.car.pos -= nrm * overlap * 0.5;
+                    rb.car.pos += nrm * overlap * 0.5;
+                    let rel = (rb.car.vel - ra.car.vel).dot(nrm);
+                    if rel < 0.0 {
+                        let impulse = -(1.0 + 0.2) * rel * 0.5;
+                        ra.car.vel -= nrm * impulse;
+                        rb.car.vel += nrm * impulse;
+                        ra.car.yaw_rate *= 0.95;
+                        rb.car.yaw_rate *= 0.95;
                     }
                 }
             }

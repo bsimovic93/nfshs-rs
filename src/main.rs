@@ -107,7 +107,15 @@ fn main() -> Result<()> {
                 let p = g.path[i];
                 let gh = g.world.ground(p + glam::Vec3::Y * 3.0, 6.0).map(|h| h.height);
                 let walls = g.world.walls(p + glam::Vec3::Y * 0.5, 2.0, p.y + 0.2, p.y + 1.2);
-                println!("{i}: path y={:.2} ground={:?} walls={:?} lim={:?}", p.y, gh, walls.map(|w| w.1), g.walls[i]);
+                println!("{i}: path {:?} ground={:?} walls={:?} lim={:?}", p, gh, walls.map(|w| w.1), g.walls[i]);
+            }
+            if let Some(at) = opt(&args, "--at") {
+                let v: Vec<f32> = at.split(',').map(|x| x.parse().unwrap()).collect();
+                let p = glam::Vec3::new(v[0], v[1], v[2]);
+                for r in [0.5f32, 1.0, 2.0] {
+                    println!("at {p:?} r={r}: walls={:?}", g.world.walls(p + glam::Vec3::Y * 0.5, r, p.y + 0.2, p.y + 1.2));
+                }
+                println!("ground {:?}", g.world.ground(p + glam::Vec3::Y, 2.0).map(|h| (h.height, h.normal)));
             }
         }
         Some("dump-audio") => {
