@@ -31,6 +31,40 @@ const DIALS_NIGHT: [&str; 29] = [
     "nslk", "nbz3", "nhsv", "nfor", "nz28", "ntra", "ndb7", "nxkr", "nnm5", "nvet", "n550", "n911", "nf50", "tdsv", "tclk", "nmcf", "n911", "nhsv",
     "nvet", "nbon", "nbon", "nbon", "ncap", "nhsv", "nnm5", "nvet", "n911", "tdsv", "nbon",
 ];
+/// Flare_gOct: the halo's octagon (x, y per 256 of its size).
+const FLARE_OCT: [(i32, i32); 8] = [(0, -256), (180, -180), (256, 0), (180, 180), (0, 256), (-180, 180), (-256, 0), (-180, -180)];
+/// Flare_gType: (centre colour, spike colour) per flare type, 0xBBGGRR.
+const FLARE_TYPES: [(u32, u32); 12] = [
+    (0x808080, 0x808080),
+    (0x303030, 0x808080),
+    (0x080868, 0x060628),
+    (0x808080, 0x303030),
+    (0x406FC0, 0x0808C0),
+    (0x406FC0, 0x0808C0),
+    (0x707070, 0x101018),
+    (0x080880, 0x080828),
+    (0x080880, 0x080828),
+    (0x088080, 0x082828),
+    (0x800808, 0x280808),
+    (0x303030, 0x808080),
+];
+/// Hud_Character: the countdown digits on a 5x5 grid of lights (bit 5 * row + column).
+const COUNTDOWN_DIGITS: [u32; 5] = [0x4255C4, 0x423108, 0xF0BA1C, 0x743A1C, 0];
+
+/// What the HUD shows this frame (from the simulation's state).
+pub struct HudFrame<'a> {
+    /// DashHUD_gInfo
+    pub dash: &'a [u8],
+    /// The layout Hud_Init chose (`*(gp + 6352)`).
+    pub layout: &'a [u8],
+    pub map: &'a MapView,
+    /// Phase of the blinking elements.
+    pub blink: bool,
+    /// The start countdown's stage and the ticks since it began.
+    pub countdown: u8,
+    pub countdown_ticks: i32,
+}
+
 /// HudPmx_gShapes index of player 1's dial.
 const DIAL: usize = 129;
 const BIG0: usize = 44;
@@ -75,6 +109,8 @@ struct Quad {
     colors: [[u8; 3]; 4],
     textured: bool,
     semi: bool,
+    /// Semi-transparency mode 1 (background + foreground) instead of mode 0 (halves).
+    additive: bool,
     /// Drawing area (x0, y0, x1, y1) the primitive is clipped to, for the small views.
     clip: Option<[f32; 4]>,
 }
@@ -253,6 +289,7 @@ impl Ps1Hud {
             colors,
             textured: true,
             semi,
+            additive: false,
             clip,
         });
     }
@@ -269,7 +306,7 @@ impl Ps1Hud {
         let pt = |j: usize| Vec2::new(i16le(p, 8 + 8 * j) as f32, i16le(p, 10 + 8 * j) as f32);
         let col = |j: usize| [p[4 + 8 * j], p[5 + 8 * j], p[6 + 8 * j]];
         let pts = [pt(0), pt(1), pt(3), pt(2)];
-        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [col(0), col(1), col(3), col(2)], textured: false, semi: p[7] & 2 != 0, clip: None });
+        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [col(0), col(1), col(3), col(2)], textured: false, semi: p[7] & 2 != 0, additive: false, clip: None });
     }
 
     fn cap(&self, out: &mut Vec<Quad>, k: usize) {
@@ -277,13 +314,13 @@ impl Ps1Hud {
         let p = &self.setup.caps[k * 24..k * 24 + 24];
         let pt = |j: usize| Vec2::new(i16le(p, 8 + 4 * j) as f32, i16le(p, 10 + 4 * j) as f32);
         let c = [p[4], p[5], p[6]];
-        out.push(Quad { pts: [pt(0), pt(1), pt(3), pt(2)], uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi: p[7] & 2 != 0, clip: None });
+        out.push(Quad { pts: [pt(0), pt(1), pt(3), pt(2)], uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi: p[7] & 2 != 0, additive: false, clip: None });
     }
 
     /// A flat polygon (POLY_F3 as a quad with its last point repeated, or a LINE_F2 as a thin quad).
     fn flat(&self, out: &mut Vec<Quad>, pts: [Vec2; 4], rgb: u32, semi: bool, clip: Option<[f32; 4]>) {
         let c = [rgb as u8, (rgb >> 8) as u8, (rgb >> 16) as u8];
-        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi, clip });
+        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi, additive: false, clip });
     }
 
     /// LINE_F2: the pixels from `a` to `b` inclusive, as a one pixel wide quad.
@@ -348,6 +385,7 @@ impl Ps1Hud {
                         colors: [[r, g, b]; 4],
                         textured: true,
                         semi: code & 2 != 0,
+                        additive: false,
                         clip,
                     });
                 }
@@ -358,6 +396,86 @@ impl Ps1Hud {
             let Some(&(u, v, clut, w, h)) = self.shapes.get(m.shape as usize) else { continue };
             let c = [m.color as u8, (m.color >> 8) as u8, (m.color >> 16) as u8];
             self.textured_clipped(out, vx + m.x as f32, vy + m.y as f32, w, h, u, v, clut, [c; 4], false, clip);
+        }
+    }
+
+    /// Flare_2DHalo: a glow of the given flare type around (x, y), additive: a gouraud
+    /// octagon from the centre colour to black and a spike to each corner.
+    fn halo(&self, out: &mut Vec<Quad>, x: i32, y: i32, sx: i32, sy: i32, ty: usize) {
+        let (c0, c1) = FLARE_TYPES[ty % FLARE_TYPES.len()];
+        let rgb = |c: u32| [c as u8, (c >> 8) as u8, (c >> 16) as u8];
+        let centre = Vec2::new(x as f32, y as f32);
+        // (the product rounded towards zero, as the original)
+        let corner = |k: usize| Vec2::new((x + FLARE_OCT[k].0 * sx / 65536) as f32, (y + FLARE_OCT[k].1 * sy / 65536) as f32);
+        for k in 0..8 {
+            let (a, b) = (corner(k), corner((k + 1) % 8));
+            out.push(Quad {
+                pts: [b, centre, a, a],
+                uv: [Vec2::ZERO; 4],
+                rect: self.white_semi,
+                colors: [[0; 3], rgb(c0), [0; 3], [0; 3]],
+                textured: false,
+                semi: true,
+                additive: true,
+                clip: None,
+            });
+            let d = (a - centre).normalize_or(Vec2::X) * 0.5;
+            let n = Vec2::new(-d.y, d.x);
+            out.push(Quad {
+                pts: [centre - n, a + d - n, a + d + n, centre + n],
+                uv: [Vec2::ZERO; 4],
+                rect: self.white_semi,
+                colors: [rgb(c1), [0; 3], [0; 3], rgb(c1)],
+                textured: false,
+                semi: true,
+                additive: true,
+                clip: None,
+            });
+        }
+    }
+
+    /// Hud_BlackThinBox: a black frame 2 pixels wide with rounded corners (crn1..4).
+    fn black_thin_box(&self, out: &mut Vec<Quad>, x: f32, y: f32, w: f32, h: f32) {
+        let (cw, ch) = self.shapes.get(17).map(|s| (s.3 as f32, s.4 as f32)).unwrap_or((7.0, 7.0));
+        let rect = |out: &mut Vec<Quad>, x: f32, y: f32, w: f32, h: f32| {
+            self.flat(out, [Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)], 0, false, None);
+        };
+        rect(out, x + cw - 2.0, y - 2.0, w - 2.0 * cw + 2.0, 2.0);
+        rect(out, x - 2.0, y + ch - 2.0, 2.0, h - 2.0 * ch + 4.0);
+        rect(out, x + w - 2.0, y + ch - 2.0, 2.0, h - 2.0 * ch + 4.0);
+        rect(out, x + cw - 2.0, y + h, w - 2.0 * cw + 2.0, 2.0);
+        let black = [[0; 3]; 4];
+        self.shape(out, 14, x - 2.0, y - 2.0, black);
+        self.shape(out, 15, x + w - cw, y - 2.0, black);
+        self.shape(out, 16, x - 2.0, y + h - ch + 2.0, black);
+        self.shape(out, 17, x + w - cw, y + h - ch + 2.0, black);
+    }
+
+    /// Hud_Render321Go / Hud_Draw321Num: the start lights, three panels of 5x5 lamps
+    /// showing the count, the lit lamps glowing brightly when the number changes.
+    fn countdown(&self, out: &mut Vec<Quad>, stage: u8, ticks: i32, y: f32) {
+        if !(1..=3).contains(&stage) {
+            return;
+        }
+        let glow = if (0..100).contains(&ticks) { 6000 - 60 * ticks } else { 0 };
+        let bits = COUNTDOWN_DIGITS[(4 - stage) as usize];
+        for x in [72.0, 135.0, 198.0] {
+            let corners = [Vec2::new(x - 3.0, y - 2.0), Vec2::new(x + 53.0, y - 2.0), Vec2::new(x + 53.0, y + 47.0), Vec2::new(x - 3.0, y + 47.0)];
+            self.flat(out, corners, 0, false, None);
+            for k in 0..25 {
+                let (c, r) = ((k % 5) as f32, (k / 5) as f32);
+                let lit = bits >> k & 1 != 0;
+                self.shape(out, if lit { 61 } else { 60 }, x + 10.0 * c + 1.0, y + 9.0 * r + 1.0, [[0x80; 3]; 4]);
+            }
+            self.black_thin_box(out, x - 3.0, y - 2.0, 56.0, 49.0);
+            if glow != 0 {
+                for k in 0..25 {
+                    if bits >> k & 1 != 0 {
+                        let (c, r) = (k % 5, k / 5);
+                        self.halo(out, x as i32 + 10 * c + 4, y as i32 + 9 * r + 4, glow, glow, 6);
+                    }
+                }
+            }
         }
     }
 
@@ -380,9 +498,10 @@ impl Ps1Hud {
     }
 
     /// The HUD for player 1 from this frame's DashHUD_gInfo.
-    fn build(&self, dash: &[u8], layout: &[u8], map: &MapView, blink: bool) -> Vec<Quad> {
+    fn build(&self, f: &HudFrame) -> Vec<Quad> {
+        let (dash, layout, map, blink) = (f.dash, f.layout, f.map, f.blink);
         let mut out = Vec::new();
-        if dash.len() < 0x60 || layout.len() < 0x40 {
+        if dash.len() < 0x60 || layout.len() < 0x48 {
             return out;
         }
         let d = |o: usize| i32le(dash, o);
@@ -488,13 +607,14 @@ impl Ps1Hud {
                 self.sprite(&mut out, k, None);
             }
         }
+        self.countdown(&mut out, f.countdown, f.countdown_ticks, l(70));
         out
     }
 
     /// Vertices for the HUD, mapping the PS1 screen (320x240) into a `w` x `h` window.
-    pub fn vertices(&self, dash: &[u8], layout: &[u8], map: &MapView, blink: bool, w: f32, h: f32) -> Vec<Vertex> {
+    pub fn vertices(&self, frame: &HudFrame, w: f32, h: f32) -> Vec<Vertex> {
         let atlas_uv = |r: Rect, t: Vec2| [(r.x as f32 + t.x) / self.atlas_size, (r.y as f32 + t.y) / self.atlas_size];
-        let quads = self.build(dash, layout, map, blink);
+        let quads = self.build(frame);
         // 4:3 area centred in the window
         let scale = (h / 240.0).min(w / 320.0);
         let ox = (w - 320.0 * scale) / 2.0;
@@ -503,7 +623,11 @@ impl Ps1Hud {
         for q in quads {
             // textured: colour / 128 modulates the texel (x2 in the shader); flat: the colour itself
             let div = if q.textured { 256.0 } else { 510.0 };
-            let alpha = if q.semi { 0.5 } else { 1.0 };
+            let alpha = match (q.semi, q.additive) {
+                (false, _) => 1.0,
+                (true, false) => 0.5,
+                (true, true) => 0.0,
+            };
             // the PS1 fills the pixels whose top-left corner is inside a polygon, the GPU those
             // whose centre is: shift untextured polygons by half a pixel (for textured
             // rectangles both give the same pixels)

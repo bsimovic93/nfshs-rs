@@ -398,6 +398,8 @@ pub struct Snapshot {
     /// See [`addr::COUNTDOWN_STAGE`].
     pub countdown: u8,
     pub ticks: u32,
+    /// `ticks` when the countdown last changed stage (Hud_Render321Go's timer).
+    pub countdown_start: u32,
     /// Simulation time of the car states, see [`addr::SIM_COUNTER`].
     pub sim_ticks: u32,
     /// The player view's camera as the game computed it for the last rendered frame
@@ -408,7 +410,7 @@ pub struct Snapshot {
     pub camera_mode: i16,
     /// Sky and horizon set-up.
     pub sky: Option<SkyData>,
-    /// HUD inputs: `DashHUD_gInfo` (0x80 bytes) and the HUD layout record (0x40 bytes).
+    /// HUD inputs: `DashHUD_gInfo` (0x80 bytes) and the HUD layout record (0x60 bytes).
     pub dash: Vec<u8>,
     pub hud_layout: Vec<u8>,
     /// The track map (when the HUD shows it).
@@ -451,6 +453,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         cars,
         countdown: c.m.r8(addr::COUNTDOWN_STAGE),
         ticks: c.m.r32(addr::TICKS),
+        countdown_start: c.m.r32(addr::GP + 6348),
         sim_ticks: c.m.r32(addr::SIM_COUNTER),
         camera_pos: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 8 + 4 * i as u32) as i32),
         projection: c.m.r32(addr::CAMERA_ZOOM),
@@ -461,7 +464,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         dash: (0..0x80).map(|i| c.m.r8(addr::DASHHUD + i)).collect(),
         hud_layout: {
             let l = c.m.r32(addr::GP + 6352);
-            if l == 0 { Vec::new() } else { (0..0x40).map(|i| c.m.r8(l + i)).collect() }
+            if l == 0 { Vec::new() } else { (0..0x60).map(|i| c.m.r8(l + i)).collect() }
         },
         light_table: {
             let t = c.m.r32(addr::LIGHT_TABLE);

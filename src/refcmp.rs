@@ -148,10 +148,18 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         Some(h) => {
             let dash: Vec<u8> = (0..0x80u32).map(|i| ram.0[((0x8011_39E8u32 + i) & 0x1F_FFFF) as usize]).collect();
             let lp = ram.i32(0x8013_D83C + 6352) as u32;
-            let layout: Vec<u8> = (0..0x40u32).map(|i| ram.0[((lp + i) & 0x1F_FFFF) as usize]).collect();
+            let layout: Vec<u8> = (0..0x60u32).map(|i| ram.0[((lp + i) & 0x1F_FFFF) as usize]).collect();
             let counter = ram.i32(0x8011_F368);
             let map = crate::ps1::race::MapView::read(&mut |a| ram.i32(a) as u32);
-            h.vertices(&dash, &layout, &map, (counter >> 4) & 1 != 0, W as f32, H as f32)
+            let frame = crate::game::ps1hud::HudFrame {
+                dash: &dash,
+                layout: &layout,
+                map: &map,
+                blink: (counter >> 4) & 1 != 0,
+                countdown: ram.0[0x13_D930],
+                countdown_ticks: ram.i32(0x8013_EF8C).wrapping_sub(ram.i32(0x8013_D83C + 6348)),
+            };
+            h.vertices(&frame, W as f32, H as f32)
         }
         None => game.hud(W as f32, H as f32),
     };

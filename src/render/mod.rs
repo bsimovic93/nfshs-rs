@@ -220,7 +220,7 @@ impl Renderer {
                            fs: &str,
                            buffers: &[Option<wgpu::VertexBufferLayout>],
                            depth: Option<(bool, wgpu::CompareFunction)>,
-                           blend: bool,
+                           blend: Option<wgpu::BlendState>,
                            cull: Option<wgpu::Face>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
@@ -246,7 +246,7 @@ impl Renderer {
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
-                        blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                        blend,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
@@ -257,10 +257,10 @@ impl Renderer {
         // reversed Z (1 = near, 0 = infinitely far): even precision over the whole track
         let depth = Some((true, wgpu::CompareFunction::Greater));
         // the track is single-sided like on the PS1 (double-sided materials are emitted twice)
-        let track_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, false, Some(wgpu::Face::Back));
-        let world_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, false, None);
-        let hud_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl)], None, true, None);
-        let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, false, None);
+        let track_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, None, Some(wgpu::Face::Back));
+        let world_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, None, None);
+        let hud_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl)], None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
+        let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");
         let hud_vb = DynBuf::new(&device, "hud");
         let sky_vb = DynBuf::new(&device, "sky");

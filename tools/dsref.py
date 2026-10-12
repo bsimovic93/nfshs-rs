@@ -1,4 +1,4 @@
-"""dsref.py OUTDIR [--state FILE] [--wait SECONDS] [--keys K,K,...]
+"""dsref.py OUTDIR [--state FILE] [--wait SECONDS] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS)
 
 Capture a reference frame from DuckStation: start the emulator on a save state, let it run,
 pause it over GDB, capture the window (PrintWindow) and dump main RAM. The Rust side
@@ -41,7 +41,9 @@ def main():
         if keys:
             ds.focus_pid(proc.pid)
             for k in keys:
-                if k.startswith('hold:'):
+                if k.startswith('sleep:'):
+                    time.sleep(float(k.split(':')[1]))
+                elif k.startswith('hold:'):
                     _, key, secs = k.split(':')
                     ds.down(key)
                     time.sleep(float(secs))

@@ -46,6 +46,25 @@ fn vs_main(v: VIn) -> VOut {
 
 @fragment
 fn fs_main(i: VOut) -> @location(0) vec4<f32> {
+    return shade(i);
+}
+
+// The 2D overlay, blended with premultiplied alpha so one pipeline does the PS1's modes:
+// opaque (vertex alpha 1), half background + half foreground (0.5) and background +
+// foreground (0); the semi-transparent modes apply to STP texels only.
+@fragment
+fn fs_hud(i: VOut) -> @location(0) vec4<f32> {
+    let o = shade(i);
+    if (o.a < 0.75) {
+        if (i.color.a < 0.25) {
+            return vec4<f32>(o.rgb, 0.0);
+        }
+        return vec4<f32>(o.rgb * 0.5, 0.5);
+    }
+    return vec4<f32>(o.rgb, 1.0);
+}
+
+fn shade(i: VOut) -> vec4<f32> {
     let t = textureSample(atlas, samp, i.uv);
     if (t.a < 0.25) {
         discard;
