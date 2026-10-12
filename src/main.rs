@@ -315,12 +315,6 @@ fn real_main() -> Result<()> {
                 show(&sim.last, st);
                 show_cam(&sim.last);
             }
-            {
-                let (w, h, px) = &*sim.last.image;
-                std::fs::create_dir_all("re/boot")?;
-                image::RgbaImage::from_raw(*w, *h, px.clone()).unwrap().save("re/boot/frame.png")?;
-                println!("PS1 frame written to re/boot/frame.png ({w}x{h})");
-            }
             if std::env::var_os("BOOT_RAM").is_some() {
                 let s = sim.step(FrameInput { buttons: 0, want_ram: true })?;
                 std::fs::create_dir_all("re/boot")?;

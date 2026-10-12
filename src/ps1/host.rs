@@ -22,7 +22,7 @@ pub struct GameHost {
     pub rcnt: u32,
     pub log: Vec<String>,
     /// 1024x512 16-bit VRAM, filled by the game's LoadImage/ClearImage/MoveImage.
-    pub gpu: super::gpu::Gpu,
+    pub vram: Vec<u16>,
     /// Controller receive buffers registered with PadInitDirect (port 1, port 2).
     pub pad_buffers: [u32; 2],
     /// Callbacks the game registered (vsync, draw sync, ...), keyed by kind.
@@ -38,10 +38,8 @@ pub struct GameHost {
 pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<u16>>;
 
 /// Host-side state handed to the frame callback.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct FrameInfo {
-    /// The displayed picture of the previous frame (width, height, RGBA8).
-    pub image: std::sync::Arc<(u32, u32, Vec<u8>)>,
     /// 60 Hz field number of the virtual clock.
     pub field: u64,
     /// Display area (x, y, w, h) from the last PutDispEnv.
@@ -85,7 +83,7 @@ impl GameHost {
             display: [0; 4],
             rcnt: 0,
             log: Vec::new(),
-            gpu: Default::default(),
+            vram: vec![0; VRAM_W * VRAM_H],
             pad_buffers: [0; 2],
             callbacks: HashMap::new(),
             next_event: 0xF000_0001,
@@ -186,12 +184,7 @@ impl Host for GameHost {
             }
 
             // ---- libgpu
-            0x800E_DFCC => {
-                // ResetGraph: libgpu remembers the VRAM size (used to clamp draw areas)
-                c.m.w16(0x8012_4990, 1024);
-                c.m.w16(0x8012_4992, 512);
-                0
-            }
+            0x800E_DFCC => 0,                  // ResetGraph
             0x800E_E140 => 0,                  // SetDispMask
             0x800E_E1D8 | 0x800F_0318 => 0,    // DrawSync
             0x800E_E35C => {
@@ -200,7 +193,7 @@ impl Host for GameHost {
                 let col = ((a1 as u16 >> 3) & 31) | (((a2 as u16 >> 3) & 31) << 5) | (((a3 as u16 >> 3) & 31) << 10);
                 for yy in y..(y + h).min(VRAM_H) {
                     for xx in x..(x + w).min(VRAM_W) {
-                        self.gpu.vram[yy * VRAM_W + xx] = col;
+                        self.vram[yy * VRAM_W + xx] = col;
                     }
                 }
                 0
@@ -214,7 +207,7 @@ impl Host for GameHost {
                         let v = c.m.r16(p);
                         p += 2;
                         if yy < VRAM_H && xx < VRAM_W {
-                            self.gpu.vram[yy * VRAM_W + xx] = v;
+                            self.vram[yy * VRAM_W + xx] = v;
                         }
                     }
                 }
@@ -226,7 +219,7 @@ impl Host for GameHost {
                 let mut p = a1;
                 for yy in y..y + h {
                     for xx in x..x + w {
-                        let v = if yy < VRAM_H && xx < VRAM_W { self.gpu.vram[yy * VRAM_W + xx] } else { 0 };
+                        let v = if yy < VRAM_H && xx < VRAM_W { self.vram[yy * VRAM_W + xx] } else { 0 };
                         c.m.w16(p, v);
                         p += 2;
                     }
@@ -239,13 +232,13 @@ impl Host for GameHost {
                 let (dx, dy) = (a1 as usize, a2 as usize);
                 let src: Vec<u16> = (0..h)
                     .flat_map(|j| (0..w).map(move |i| (x + i, y + j)))
-                    .map(|(sx, sy)| if sy < VRAM_H && sx < VRAM_W { self.gpu.vram[sy * VRAM_W + sx] } else { 0 })
+                    .map(|(sx, sy)| if sy < VRAM_H && sx < VRAM_W { self.vram[sy * VRAM_W + sx] } else { 0 })
                     .collect();
                 for j in 0..h {
                     for i in 0..w {
                         let (tx, ty) = (dx + i, dy + j);
                         if ty < VRAM_H && tx < VRAM_W {
-                            self.gpu.vram[ty * VRAM_W + tx] = src[j * w + i];
+                            self.vram[ty * VRAM_W + tx] = src[j * w + i];
                         }
                     }
                 }
@@ -259,30 +252,14 @@ impl Host for GameHost {
                 }
                 a0
             }
-            0x800E_E610 => {
-                // DrawOTag(ot)
-                let before = self.gpu.prims;
-                self.gpu.draw_ot(&mut c.m, a0);
-                if std::env::var_os("PS1_GPU").is_some() {
-                    eprintln!("DrawOTag({a0:#x}): {} primitives, area {:?} offset {:?} display {:?}", self.gpu.prims - before, self.gpu.area(), self.gpu.offset(), self.gpu.display);
-                }
-                0
-            }
-            0x800E_E680 => {
-                self.gpu.put_draw_env(&mut c.m, a0);
-                a0
-            }
+            0x800E_E610 => 0,                  // DrawOTag: rendering is done by the host engine
+            0x800E_E680 => a0, // PutDrawEnv
             0x800E_E740 => {
-                // PutDispEnv: the displayed VRAM area (x, y, w, h)
+                // PutDispEnv: remember the display area (x, y, w, h)
                 self.display = [0, 2, 4, 6].map(|o| c.m.r16(a0 + o));
-                self.gpu.put_disp_env(&mut c.m, a0);
                 a0
             }
-            0x8010_53B8 => {
-                // GPU_cw(word): a single GP0 command
-                self.gpu.gp0_list(&[a0]);
-                0
-            }
+            0x8010_53B8 => 0,                  // GPU_cw
             0x800F_24B8 => 0,                  // GetVideoMode: NTSC
 
             // ---- libetc / timers / callbacks
@@ -350,7 +327,7 @@ impl Host for GameHost {
                     }
                     self.frame.last_top = self.clock;
                     let field = self.clock / FIELD;
-                    match self.frame.on_frame.as_mut().and_then(|f| f(c, FrameInfo { image: std::sync::Arc::new(self.gpu.display_rgba()), field, display: self.display })) {
+                    match self.frame.on_frame.as_mut().and_then(|f| f(c, FrameInfo { field, display: self.display })) {
                         None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
                         Some(buttons) => {
                             self.frame.frames_run += 1;
@@ -398,6 +375,14 @@ impl Host for GameHost {
 
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
+            0x800B_4024 => {
+                // Render_RenderPlayerView(view, player): the 3D world is drawn by the host
+                // renderer; only set up the view's camera (Camera_SetCamera without the GTE part)
+                c.m.w32(RENDER_VIEW, a0);
+                c.m.w32(RENDER_VIEW + 4, a1);
+                c.call_nested(CAMERA_GET_VIEW_INFO, &[a1, RENDER_VIEW + 8, a0]);
+                0
+            }
 
             // ---- EA CD layer (only used for streaming once FILE_* is replaced)
             0x800F_AB04 | 0x800F_AB58 => 1,              // readsectorB / loaddirinfo

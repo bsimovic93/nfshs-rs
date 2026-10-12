@@ -267,11 +267,6 @@ impl App {
                 };
                 r.render(&params, &[], &[], &hud);
             }
-            Screen::Race(game) if game.ps1_frame().is_some() => {
-                // the original game renders the race (world, cars and HUD) itself
-                let img = game.ps1_frame().unwrap();
-                r.render_picture(img.0, img.1, &img.2);
-            }
             Screen::Race(game) => {
                 let params = game.frame_params(w as f32 / h.max(1) as f32);
                 let dynamic = game.dynamic_geometry();
@@ -412,12 +407,6 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
             game.cam_target = glam::Vec3::new(v[3], v[4], v[5]);
             game.cam_up = glam::Vec3::Y;
         }
-    }
-    if let Some(f) = game.ps1_frame() {
-        // the original game's own picture, scaled 3x
-        let img = image::RgbaImage::from_raw(f.0, f.1, f.2.clone()).unwrap();
-        image::imageops::resize(&img, f.0 * 3, f.1 * 3, image::imageops::FilterType::Nearest).save(out)?;
-        return Ok(());
     }
     let params = game.frame_params(960.0 / 720.0);
     let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &game.hud(960.0, 720.0));

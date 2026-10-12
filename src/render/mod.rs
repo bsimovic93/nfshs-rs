@@ -94,8 +94,6 @@ pub struct Renderer {
     dyn_vb: DynBuf,
     hud_vb: DynBuf,
     pub size: (u32, u32),
-    /// Texture for whole pictures produced elsewhere (the PS1 frame): (texture, bind group, w, h).
-    screen: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32)>,
 }
 
 impl Renderer {
@@ -271,7 +269,6 @@ impl Renderer {
             dyn_vb,
             hud_vb,
             size,
-            screen: None,
         })
     }
 
@@ -438,102 +435,6 @@ impl Renderer {
         let cmd = self.encode(&view, p, sky, dynamic, hud);
         self.queue.submit([cmd]);
         self.queue.present(frame);
-    }
-
-    /// Show a finished picture (e.g. the PS1's 320x240 frame), scaled to fit at 4:3 with
-    /// nearest-neighbour filtering.
-    pub fn render_picture(&mut self, w: u32, h: u32, rgba: &[u8]) {
-        let Some((surface, config)) = &self.surface else { return };
-        let frame = match surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                surface.configure(&self.device, config);
-                return;
-            }
-            _ => return,
-        };
-        let view = frame.texture.create_view(&Default::default());
-        let cmd = self.encode_picture(&view, w, h, rgba);
-        self.queue.submit([cmd]);
-        self.queue.present(frame);
-    }
-
-    fn encode_picture(&mut self, view: &wgpu::TextureView, pw: u32, ph: u32, rgba: &[u8]) -> wgpu::CommandBuffer {
-        if self.screen.as_ref().is_none_or(|s| s.2 != pw || s.3 != ph) {
-            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("picture"),
-                size: wgpu::Extent3d { width: pw, height: ph, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            let tv = tex.create_view(&Default::default());
-            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.bgl,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: self.hud_globals.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&tv) },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-                ],
-            });
-            self.screen = Some((tex, bg, pw, ph));
-        }
-        let (tex, _, _, _) = self.screen.as_ref().unwrap();
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(pw * 4), rows_per_image: Some(ph) },
-            wgpu::Extent3d { width: pw, height: ph, depth_or_array_layers: 1 },
-        );
-        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
-        let hud_g = Globals {
-            view_proj: Mat4::orthographic_rh(0.0, w, h, 0.0, -1.0, 1.0).to_cols_array_2d(),
-            cam_pos: [0.0; 4],
-            fog_color: [0.0; 4],
-            fog: [1e9, 2e9, 0.0, 0.0],
-            sky_top: [0.0; 4],
-            light: [1.0, 0.0, 0.0, 0.0],
-            head_pos: [0.0; 4],
-            head_dir: [0.0; 4],
-        };
-        self.queue.write_buffer(&self.hud_globals, 0, bytemuck::bytes_of(&hud_g));
-        // largest 4:3 rectangle, centred
-        let (dw, dh) = if w / h > 4.0 / 3.0 { (h * 4.0 / 3.0, h) } else { (w, w * 3.0 / 4.0) };
-        let (x0, y0) = ((w - dw) / 2.0, (h - dh) / 2.0);
-        let c = [0.5, 0.5, 0.5, 1.0];
-        let q = [([x0, y0], [0.0, 0.0]), ([x0 + dw, y0], [1.0, 0.0]), ([x0 + dw, y0 + dh], [1.0, 1.0]), ([x0, y0 + dh], [0.0, 1.0])];
-        let quad: Vec<Vertex> = [0, 1, 2, 0, 2, 3].iter().map(|&k| Vertex { pos: [q[k].0[0], q[k].0[1], 0.0], uv: q[k].1, color: c }).collect();
-        self.hud_vb.upload(&self.device, &self.queue, &quad);
-        let depth = self.depth_view();
-        let mut enc = self.device.create_command_encoder(&Default::default());
-        {
-            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            rp.set_pipeline(&self.hud_pipeline);
-            rp.set_bind_group(0, &self.screen.as_ref().unwrap().1, &[]);
-            rp.set_vertex_buffer(0, self.hud_vb.buf.slice(..));
-            rp.draw(0..6, 0..1);
-        }
-        enc.finish()
     }
 
     /// Render one frame offscreen and return RGBA8 pixels.

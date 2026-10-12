@@ -242,8 +242,6 @@ pub struct Snapshot {
     pub display: [u16; 4],
     /// Full RAM copy, when requested.
     pub ram: Option<Vec<u8>>,
-    /// The picture the PS1 displays (width, height, RGBA8).
-    pub image: std::sync::Arc<(u32, u32, Vec<u8>)>,
 }
 
 /// Input for one frame.
@@ -274,7 +272,6 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         projection: c.m.r32(addr::CAMERA_ZOOM),
         camera_mode: c.m.r16(addr::CAMERA_INFO + 0x70) as i16,
         display: info.display,
-        image: info.image.clone(),
         camera_rot: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 0x14 + 4 * i as u32) as i32),
         ram: want_ram.then(|| c.m.ram.to_vec()),
     }

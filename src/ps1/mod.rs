@@ -1,7 +1,6 @@
 //! Bridge to the recompiled original game code: runtime (`ps1rt`), generated NFS4.EXE
 //! (`nfs4rc`) and the host-side hardware replacements.
 
-pub mod gpu;
 pub mod host;
 pub mod race;
 
