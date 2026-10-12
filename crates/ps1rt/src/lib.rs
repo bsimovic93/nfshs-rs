@@ -114,6 +114,8 @@ impl Mem {
 pub trait Host {
     /// Handle a call to `addr`; return false if not handled.
     fn call(&mut self, c: &mut Cpu, addr: u32) -> bool;
+    /// The code has been spinning without calling the host (see [`Cpu::spin_limit`]).
+    fn idle(&mut self, _c: &mut Cpu) {}
 }
 
 pub struct Cpu {
@@ -137,6 +139,15 @@ pub struct Cpu {
     /// Backward-branch counter (loop watchdog).
     pub ticks: u64,
     pub tick_limit: u64,
+    /// Backward branches since the host last saw a call (the longest stretch is kept for
+    /// diagnostics). After `spin_limit` of them the code is taken to be spinning on memory an
+    /// interrupt would change, and the host lets time pass ([`Host::idle`]); 0 never.
+    pub since_host: u64,
+    pub max_since_host: u64,
+    pub spin_limit: u64,
+    /// The last calls the host saw (address, return address), for diagnosing hangs.
+    pub recent: [(u32, u32); 16],
+    recent_at: usize,
     pub m: Mem,
     pub host: Option<Box<dyn Host>>,
     pub calls: u64,
@@ -150,6 +161,9 @@ pub struct Cpu {
     /// Replacements consulted while the host itself is running (its nested calls cannot
     /// re-enter it): return true when handled. Results can be left in `capture`.
     pub inner_hook: Option<fn(&mut Cpu, u32) -> bool>,
+    /// Calls a host hook asks for (function, arguments): run as soon as the hook returns, with
+    /// the host available again (a hook cannot reach the host from a nested call).
+    pub deferred: Vec<(u32, Vec<u32>)>,
     pub capture: Vec<u32>,
     /// State of the BIOS rand().
     pub rand_seed: u32,
@@ -157,7 +171,7 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(m: Mem) -> Self {
-        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false, inner_hook: None, capture: Vec::new(), rand_seed: 0 }
+        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, since_host: 0, max_since_host: 0, spin_limit: 0, recent: [(0, 0); 16], recent_at: 0, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false, inner_hook: None, deferred: Vec::new(), capture: Vec::new(), rand_seed: 0 }
     }
     #[inline]
     pub fn mult(&mut self, a: u32, b: u32) {
@@ -247,8 +261,16 @@ impl Cpu {
             return;
         }
         if let Some(mut h) = self.host.take() {
+            self.max_since_host = self.max_since_host.max(self.since_host);
+            self.since_host = 0;
+            self.recent[self.recent_at % 16] = (addr, self.r[31]);
+            self.recent_at += 1;
             let handled = h.call(self, addr);
             self.host = Some(h);
+            while !self.deferred.is_empty() {
+                let (f, args) = self.deferred.remove(0);
+                self.call_nested(f, &args);
+            }
             self.service_interrupts();
             if handled {
                 return;
@@ -295,8 +317,18 @@ impl Cpu {
     #[inline]
     pub fn tick(&mut self) {
         self.ticks += 1;
+        self.since_host += 1;
+        if self.spin_limit != 0 && self.since_host >= self.spin_limit && !self.in_irq {
+            self.since_host = 0;
+            if let Some(mut h) = self.host.take() {
+                h.idle(self);
+                self.host = Some(h);
+                self.service_interrupts();
+            }
+        }
         if self.ticks > self.tick_limit {
-            panic!("watchdog: {} backward branches", self.ticks);
+            let recent: Vec<String> = (0..16).map(|i| self.recent[(self.recent_at + i) % 16]).map(|(a, ra)| format!("{a:#x}<-{ra:#x}")).collect();
+            panic!("watchdog: {} backward branches; recent host calls {}", self.ticks, recent.join(" "));
         }
     }
     /// Trampoline for cross-function continuations: keeps resuming until no function leaves

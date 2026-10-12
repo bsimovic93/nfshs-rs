@@ -2,6 +2,7 @@
 //! (`nfs4rc`) and the host-side hardware replacements.
 
 pub mod host;
+pub mod memcard;
 pub mod race;
 
 pub use ps1rt::*;

@@ -112,3 +112,29 @@
 800d3558 Hud_FBuildF4 (recorded, drawn by the host)
 800d4e9c Hud_BuildString (recorded for the host HUD)
 800d8690 Hud_BlackThinBox (recorded for the host HUD)
+800eccc8 FILE_open (asynchronous file operations complete at once)
+800ece48 FILE_read
+800ecf2c FILE_size
+800ecd88 FILE_close
+800ec720 FILE_opstatus
+800ecb18 FILE_waitop
+800ec778 FILE_operror
+800ec828 FILE_priorityop
+800ecc0c FILE_completeop
+800ec964 FILE_cancelop
+800ec7a8 FILE_callbackop
+800fb458 MemCardInit (libmcrd: the host's memory card, src/ps1/memcard.rs)
+800fb484 MemCardEnd
+800fb4a4 MemCardStart
+800fb4f4 MemCardStop
+800fb534 MemCardExist
+800fb770 MemCardAccept
+800fbdf4 MemCardReadFile
+800fc014 MemCardWriteFile
+800fc234 MemCardGetDirentry
+800fc494 MemCardCallback
+800fc4a8 MemCardSync
+800fc5c4 MemCardCreateFile
+800fc7cc MemCardDeleteFile
+800fc988 MemCardFormat
+800f08bc PadInfoMode

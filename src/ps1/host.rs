@@ -15,6 +15,11 @@ pub struct GameHost {
     /// Mounted BIGF archives (FILE_addbigsync): handle -> entries.
     mounts: Vec<(u32, Vec<(String, Vec<u8>)>)>,
     next_handle: u32,
+    memcard: super::memcard::MemCard,
+    /// The EA file layer's asynchronous operations (FILE_open, FILE_read, ...): they complete
+    /// at once; id -> (result, user data).
+    file_ops: HashMap<u32, (u32, u32)>,
+    next_op: u32,
     /// Display area from the last PutDispEnv (x, y, w, h).
     pub display: [u16; 4],
     /// GTE environment the game set up for the player view: far colour R, G, B, DQA, DQB,
@@ -246,6 +251,9 @@ impl GameHost {
             files: HashMap::new(),
             mounts: Vec::new(),
             next_handle: 0x100,
+            memcard: super::memcard::MemCard::new(),
+            file_ops: HashMap::new(),
+            next_op: 1,
             clock: 0,
             voice_end: [0; 24],
             display: [0; 4],
@@ -260,6 +268,13 @@ impl GameHost {
             next_event: 0xF000_0001,
             frame: FrameDriver::default(),
         }
+    }
+
+    fn new_op(&mut self, result: u32, user: u32) -> u32 {
+        let op = self.next_op;
+        self.next_op += 1;
+        self.file_ops.insert(op, (result, user));
+        op
     }
 
     fn resolve(&self, name: &str) -> Option<PathBuf> {
@@ -294,8 +309,17 @@ impl GameHost {
 }
 
 impl Host for GameHost {
+    fn idle(&mut self, c: &mut Cpu) {
+        // a busy-wait on the timer: let one tick pass
+        self.advance_to(c, (self.clock / TICK + 1) * TICK);
+    }
+
     fn call(&mut self, c: &mut Cpu, addr: u32) -> bool {
         let (a0, a1, a2, a3) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+        if let Some(ret) = self.memcard.call(c, addr) {
+            c.r[2] = ret;
+            return true;
+        }
         let ret: u32 = match addr {
             // ---- EA file layer (FILE_*sync)
             0x800E_B204 => {
@@ -318,6 +342,59 @@ impl Host for GameHost {
                         0
                     }
                 }
+            }
+            // the asynchronous operations (asyncload*, streams): done as soon as asked for
+            0x800E_CCC8 => {
+                // FILE_open(name, mode, prio, user) -> op; its result is the handle (0: failed)
+                let name = c.m.cstr(a0);
+                let h = match self.lookup(&name) {
+                    Some(data) => {
+                        let h = self.next_handle;
+                        self.next_handle += 1;
+                        self.log.push(format!("open {name} ({} bytes, async)", data.len()));
+                        self.files.insert(h, data);
+                        h
+                    }
+                    None => {
+                        self.log.push(format!("open {name}: not found"));
+                        0
+                    }
+                };
+                self.new_op(h, a3)
+            }
+            0x800E_CE48 => {
+                // FILE_read(handle, offset, address, size, prio, user)
+                let data = self.files.get(&a0).cloned().unwrap_or_default();
+                let off = (a1 as usize).min(data.len());
+                let n = (a3 as usize).min(data.len() - off);
+                c.m.write_bytes(a2, &data[off..off + n]);
+                let user = c.m.r32(c.r[29] + 20);
+                self.new_op(n as u32, user)
+            }
+            0x800E_CF2C => {
+                // FILE_size(handle, prio, user)
+                let n = self.files.get(&a0).map_or(0, |d| d.len() as u32);
+                self.new_op(n, a2)
+            }
+            0x800E_CD88 => {
+                // FILE_close(handle, prio, user)
+                self.files.remove(&a0);
+                self.new_op(0, a2)
+            }
+            0x800E_C720 | 0x800E_CB18 => u32::from(self.file_ops.contains_key(&a0)), // FILE_opstatus / waitop: done
+            0x800E_C778 => 0,                                                         // FILE_operror
+            0x800E_C828 => 0,                                                         // FILE_priorityop
+            0x800E_CC0C => self.file_ops.remove(&a0).map_or(0, |(r, _)| r),         // FILE_completeop
+            0x800E_C964 => {
+                self.file_ops.remove(&a0);
+                0
+            }
+            0x800E_C7A8 => {
+                // FILE_callbackop(op, callback): done, so the callback runs now (op, status, user)
+                if let Some(&(_, user)) = self.file_ops.get(&a0) {
+                    c.deferred.push((a1, vec![a0, 1, user]));
+                }
+                0
             }
             0x800E_B27C => {
                 let data = self.files.get(&a0).cloned().unwrap_or_default();
@@ -480,6 +557,7 @@ impl Host for GameHost {
             }
             0x800F_07BC => 1, // PadStartCom
             0x800F_07FC => 6, // PadGetState: PadStateStable
+            0x800F_08BC => u32::from(a1 == 1) * 4, // PadInfoMode: a digital pad (ID 4), no extended modes
             0x800F_0A88 | 0x800F_0B08 => 1, // PadSetActAlign / PadSetAct
 
             // ---- events (BIOS)
@@ -522,6 +600,10 @@ impl Host for GameHost {
                     };
                     // polling is detected within a frame
                     c.m.io_accesses = 0;
+                    if std::env::var_os("PS1_SPINSTAT").is_some() {
+                        eprintln!("frame: longest stretch without host calls {} backward branches", c.max_since_host);
+                        c.max_since_host = 0;
+                    }
                     match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
                         None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
                         Some(buttons) => {

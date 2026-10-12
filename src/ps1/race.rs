@@ -188,6 +188,8 @@ pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
     cpu.host = Some(Box::new(GameHost::new(data_root.to_path_buf())));
     cpu.trace = std::env::var("PS1_TRACE").is_ok();
     cpu.tick_limit = 300_000_000;
+    // busy-waits on the timer (a race frame stays far below this between host calls)
+    cpu.spin_limit = 1_000_000;
     call(&mut cpu, addr::INIT_A, &[])?;
     call(&mut cpu, addr::INIT_B, &[])?;
     call(&mut cpu, addr::NFS2_SYSTEM_N_LIB_STARTUP, &[])?;

@@ -366,6 +366,23 @@ fn real_main() -> Result<()> {
                 println!("RAM written to re/boot/ram.bin");
             }
         }
+        Some("boot-main") => {
+            // boot-main: run the original main (front end, then races) headless, for exploring
+            let exe = std::fs::read(data.root.join("NFS4.EXE"))?;
+            let mut mem = ps1::Mem::default();
+            mem.load_exe(&exe);
+            for a in (ps1::race::addr::BSS_START..ps1::race::addr::BSS_END).step_by(4) {
+                mem.w32(a, 0);
+            }
+            let mut cpu = ps1::new_cpu(mem);
+            cpu.host = Some(Box::new(ps1::host::GameHost::new(data.root.clone())));
+            cpu.trace = std::env::var("PS1_TRACE").is_ok();
+            cpu.tick_limit = std::env::var("TICKS").ok().and_then(|t| t.parse().ok()).unwrap_or(2_000_000_000);
+            // busy-waits on the timer (a race frame stays far below this between host calls)
+            cpu.spin_limit = 1_000_000;
+            let r = ps1::race::call(&mut cpu, 0x800A_52A4, &[]);
+            println!("main returned: {r:?}");
+        }
         Some("heap-free") => {
             // heap-free <ram.bin>: the game's largest free heap block in a RAM image
             let mut mem = ps1::Mem::default();
