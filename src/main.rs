@@ -124,6 +124,14 @@ fn real_main() -> Result<()> {
             let k: u32 = args.get(5).and_then(|v| v.parse().ok()).unwrap_or(4);
             image::imageops::resize(&img, img.width() * k, img.height() * k, image::imageops::FilterType::Nearest).save(&args[4])?;
         }
+        Some("crop") => {
+            // crop IN.png X Y W H OUT.png [scale]: a zoomed piece of a picture (for comparing details)
+            let n = |i: usize| -> Result<u32> { Ok(args[i].parse()?) };
+            let img = image::open(&args[2])?.to_rgba8();
+            let piece = image::imageops::crop_imm(&img, n(3)?, n(4)?, n(5)?, n(6)?).to_image();
+            let k: u32 = args.get(8).and_then(|v| v.parse().ok()).unwrap_or(8);
+            image::imageops::resize(&piece, piece.width() * k, piece.height() * k, image::imageops::FilterType::Nearest).save(&args[7])?;
+        }
         Some("dump-psh") => dump_psh(Path::new(&args[2]), Path::new(&args[3]))?,
         Some("dump-track") => dump_track(&args[2], &args[3], Path::new(&args[4]), args.get(5).map(String::as_str))?,
         Some("verify-decompress") => {

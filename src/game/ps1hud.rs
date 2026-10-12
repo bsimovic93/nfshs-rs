@@ -20,8 +20,19 @@ const SHAPE_NAMES: &[&str] = &[
     "sml.", "sml/", "ahyp", "acol", "a192", "a193", "a194", "wrng", "a196", "a197", "a199", "a200", "a201", "a203", "a204", "a205", "a206",
     "a207", "a209", "a210", "a211", "a212", "a214", "a217", "a218", "a219", "a220", "A229", "time", "timb", "laps", "ejct", "play", "paus",
     "resg", "rad0", "rad1", "s1/4", "s1/2", "spd2", "spd1", "plus", "minu", "plr1", "oppn", "barl", "barr", "barb", "baXl", "baXr", "tacc",
-    "tpno",
+    "<dial>", "tpno",
 ];
+/// The tachometer dial per car (HudPmx_InitTextures' day and night tables; 29 and up: "bon").
+const DIALS_DAY: [&str; 29] = [
+    "tslk", "tbz3", "thsv", "tfor", "tz28", "ttra", "tdb7", "txkr", "ttm5", "tvet", "t550", "t911", "tf50", "tdsv", "tclk", "tmcf", "t911", "thsv",
+    "tvet", "tbon", "tbon", "tbon", "tcap", "thsv", "ttm5", "tvet", "t911", "tdsv", "tbon",
+];
+const DIALS_NIGHT: [&str; 29] = [
+    "nslk", "nbz3", "nhsv", "nfor", "nz28", "ntra", "ndb7", "nxkr", "nnm5", "nvet", "n550", "n911", "nf50", "tdsv", "tclk", "nmcf", "n911", "nhsv",
+    "nvet", "nbon", "nbon", "nbon", "ncap", "nhsv", "nnm5", "nvet", "n911", "tdsv", "nbon",
+];
+/// HudPmx_gShapes index of player 1's dial.
+const DIAL: usize = 129;
 const BIG0: usize = 44;
 const SML0: usize = 53; // sml1 = 54
 
@@ -64,6 +75,46 @@ struct Quad {
     colors: [[u8; 3]; 4],
     textured: bool,
     semi: bool,
+    /// Drawing area (x0, y0, x1, y1) the primitive is clipped to, for the small views.
+    clip: Option<[f32; 4]>,
+}
+
+/// rmult: 16.16 fixed-point multiply, rounded.
+fn rmult(a: i32, b: i32) -> i32 {
+    ((a as i64 * b as i64 + 0x8000) >> 16) as i32
+}
+
+/// fixedsincos: sine and cosine (16.16) of an angle in 16.16 turns.
+fn fixed_sin_cos(a: i32) -> (i32, i32) {
+    let t = a as f64 / 65536.0 * std::f64::consts::TAU;
+    ((t.sin() * 65536.0).round() as i32, (t.cos() * 65536.0).round() as i32)
+}
+
+/// Clip a convex polygon (with per-vertex colours) to a rectangle (Sutherland-Hodgman).
+fn clip_polygon(pts: Vec<(Vec2, [f32; 3])>, r: [f32; 4]) -> Vec<(Vec2, [f32; 3])> {
+    let mut poly = pts;
+    let edges: [(usize, f32, bool); 4] = [(0, r[0], true), (0, r[2], false), (1, r[1], true), (1, r[3], false)];
+    for (axis, at, keep_above) in edges {
+        let inside = |p: Vec2| if keep_above { p[axis] >= at } else { p[axis] <= at };
+        let mut out = Vec::new();
+        for i in 0..poly.len() {
+            let (a, ca) = poly[i];
+            let (b, cb) = poly[(i + 1) % poly.len()];
+            if inside(a) {
+                out.push((a, ca));
+            }
+            if inside(a) != inside(b) {
+                let t = (at - a[axis]) / (b[axis] - a[axis]);
+                let c = [ca[0] + (cb[0] - ca[0]) * t, ca[1] + (cb[1] - ca[1]) * t, ca[2] + (cb[2] - ca[2]) * t];
+                out.push((a + (b - a) * t, c));
+            }
+        }
+        poly = out;
+        if poly.is_empty() {
+            break;
+        }
+    }
+    poly
 }
 
 impl Ps1Hud {
@@ -76,6 +127,14 @@ impl Ps1Hud {
             .collect();
         // HudPmx_gShapes follows the load order in SHAPE_NAMES, except that shapes missing from
         // the file are replaced by "wrng" (36x36) and the track map comes late: align by size
+        let car = i32le(&setup.car_info, 0);
+        let dial = match (setup.night, usize::try_from(car).ok().filter(|&c| c < 29)) {
+            (false, Some(c)) => DIALS_DAY[c],
+            (true, Some(c)) => DIALS_NIGHT[c],
+            (false, None) => "tbon",
+            (true, None) => "nbon",
+        };
+        let shape_names: Vec<&str> = SHAPE_NAMES.iter().map(|&n| if n == "<dial>" { dial } else { n }).collect();
         let size = |n: &str| psh.shapes.iter().find(|s| s.name == n).map(|s| (s.width, s.height));
         let mut names: Vec<Option<String>> = Vec::new();
         let mut j = 0;
@@ -84,9 +143,9 @@ impl Ps1Hud {
                 names.push(None);
                 continue;
             }
-            match (j..(j + 16).min(SHAPE_NAMES.len())).find(|&k| size(SHAPE_NAMES[k]) == Some((w, h))) {
+            match (j..(j + 16).min(shape_names.len())).find(|&k| size(shape_names[k]) == Some((w, h))) {
                 Some(k) => {
-                    names.push(Some(SHAPE_NAMES[k].to_string()));
+                    names.push(Some(shape_names[k].to_string()));
                     j = k + 1;
                 }
                 None if (w, h) == (36, 36) => names.push(Some("wrng".into())),
@@ -173,6 +232,7 @@ impl Ps1Hud {
             colors,
             textured: true,
             semi,
+            clip: None,
         });
     }
 
@@ -188,7 +248,7 @@ impl Ps1Hud {
         let pt = |j: usize| Vec2::new(i16le(p, 8 + 8 * j) as f32, i16le(p, 10 + 8 * j) as f32);
         let col = |j: usize| [p[4 + 8 * j], p[5 + 8 * j], p[6 + 8 * j]];
         let pts = [pt(0), pt(1), pt(3), pt(2)];
-        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [col(0), col(1), col(3), col(2)], textured: false, semi: p[7] & 2 != 0 });
+        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [col(0), col(1), col(3), col(2)], textured: false, semi: p[7] & 2 != 0, clip: None });
     }
 
     fn cap(&self, out: &mut Vec<Quad>, k: usize) {
@@ -196,7 +256,50 @@ impl Ps1Hud {
         let p = &self.setup.caps[k * 24..k * 24 + 24];
         let pt = |j: usize| Vec2::new(i16le(p, 8 + 4 * j) as f32, i16le(p, 10 + 4 * j) as f32);
         let c = [p[4], p[5], p[6]];
-        out.push(Quad { pts: [pt(0), pt(1), pt(3), pt(2)], uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi: p[7] & 2 != 0 });
+        out.push(Quad { pts: [pt(0), pt(1), pt(3), pt(2)], uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi: p[7] & 2 != 0, clip: None });
+    }
+
+    /// A flat polygon (POLY_F3 as a quad with its last point repeated, or a LINE_F2 as a thin quad).
+    fn flat(&self, out: &mut Vec<Quad>, pts: [Vec2; 4], rgb: u32, semi: bool, clip: Option<[f32; 4]>) {
+        let c = [rgb as u8, (rgb >> 8) as u8, (rgb >> 16) as u8];
+        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi, clip });
+    }
+
+    /// LINE_F2: the pixels from `a` to `b` inclusive, as a one pixel wide quad.
+    fn line(&self, out: &mut Vec<Quad>, a: Vec2, b: Vec2, rgb: u32, semi: bool, clip: Option<[f32; 4]>) {
+        let d = (b - a).normalize_or(Vec2::X) * 0.5;
+        let n = Vec2::new(-d.y, d.x);
+        self.flat(out, [a - d - n, b + d - n, b + d + n, a - d + n], rgb, semi, clip);
+    }
+
+    /// Hud_RenderTacView / Hud_BuildTach: the tachometer is a 28x28 view of its own (at
+    /// (184, 21), Hud_CreateHudViews) showing the piece of the car's 86x85 dial around the
+    /// needle's tip, so the dial turns behind a fixed needle.
+    fn tach(&self, out: &mut Vec<Quad>, rpm: i32) {
+        let (vx, vy) = (184.0, 21.0);
+        let clip = Some([vx, vy, vx + 28.0, vy + 28.0]);
+        let a = (rpm.wrapping_shl(16) / 10800 + 22937).clamp(22937, 0x13334);
+        let (sn, cs) = fixed_sin_cos(a);
+        let s = self.slot(2);
+        let u = (29 + rmult(cs, 29)) as u16;
+        let v = (157 + rmult(sn, 29)) as u16;
+        let (x, y) = (vx + i16le(s, 8) as f32, vy + i16le(s, 10) as f32);
+        self.textured(out, x, y, u16le(s, 16), u16le(s, 18), u, v, u16le(s, 14), [[s[4], s[5], s[6]]; 4], s[7] & 2 != 0);
+        // the needle: a thin triangle from the dial's centre through the window, its shadow
+        // two lines down, and a semi-transparent line along it
+        let p = |x: i32, y: i32| Vec2::new(vx + x as f32, vy + y as f32);
+        let base = p(14 + rmult(cs, 10), 14 + rmult(sn, 10));
+        let tip = |da: i32| {
+            let (s, c) = fixed_sin_cos(a + da);
+            p(14 - rmult(c, 32), 14 - rmult(s, 32))
+        };
+        let (t0, t1) = (tip(-512), tip(512));
+        let down = Vec2::new(0.0, 2.0);
+        self.flat(out, [base + down, t0 + down, t1 + down, t1 + down], 0, false, clip);
+        let car = i32le(&self.setup.car_info, 0).clamp(0, 29) as usize;
+        let color = self.setup.needle_colors[car];
+        self.line(out, p(14 - rmult(cs, 29), 14 - rmult(sn, 29)), base, color.wrapping_add(0x48_4848) & 0xFF_FFFF, true, clip);
+        self.flat(out, [base, t0, t1, t1], color, false, clip);
     }
 
     /// Hud_BuildETimeString ("MM:SS.hh", 8 slots) / Hud_BuildTimeString ("M:SS.hh", 7 slots):
@@ -277,6 +380,8 @@ impl Ps1Hud {
         }
         // speedometer: units, gear and the big digits
         if ci(0x78) != 0 {
+            // the frame of speedometer and tachometer ("tacc")
+            self.sprite(&mut out, 1, None);
             self.sprite(&mut out, if ci(0x70) == 0 { 50 } else { 49 }, None);
             let gear = d(72);
             let slot = match gear {
@@ -286,7 +391,7 @@ impl Ps1Hud {
             };
             self.sprite(&mut out, slot, None);
             // speed in display units (rmult of the unit factor and the 16.16 speed)
-            let speed = ((ci(0x74) as i64 * d(76) as i64) >> 16) as i32;
+            let speed = rmult(ci(0x74), d(76));
             let n = (speed.max(0) >> 16).min(999);
             let (h, t, o) = (n / 100, n / 10 % 10, n % 10);
             let w = |i: usize| self.shapes.get(i).map(|s| s.3 as f32).unwrap_or(0.0);
@@ -310,6 +415,10 @@ impl Ps1Hud {
             if h != 0 {
                 self.shape(&mut out, BIG0 + h as usize, x, y, grad);
             }
+            // Hud_RenderTacView: when the player's tachometer is on (DashHUD_gInfo +28)
+            if d(28) != 0 {
+                self.tach(&mut out, d(64));
+            }
         }
         out
     }
@@ -324,16 +433,37 @@ impl Ps1Hud {
         let oy = (h - 240.0 * scale) / 2.0;
         let mut v = Vec::with_capacity(quads.len() * 6);
         for q in quads {
-            for k in [0, 1, 2, 0, 2, 3] {
-                let p = q.pts[k];
-                let c = q.colors[k];
-                // textured: colour / 128 modulates the texel (x2 in the shader); flat: the colour itself
-                let div = if q.textured { 256.0 } else { 510.0 };
+            // textured: colour / 128 modulates the texel (x2 in the shader); flat: the colour itself
+            let div = if q.textured { 256.0 } else { 510.0 };
+            let alpha = if q.semi { 0.5 } else { 1.0 };
+            // the PS1 fills the pixels whose top-left corner is inside a polygon, the GPU those
+            // whose centre is: shift untextured polygons by half a pixel (for textured
+            // rectangles both give the same pixels)
+            let shift = if q.textured { 0.0 } else { 0.5 };
+            let mut vert = |p: Vec2, c: [f32; 3], t: Vec2| {
+                let p = p + Vec2::splat(shift);
                 v.push(Vertex {
                     pos: [ox + p.x * scale, oy + p.y * scale, 0.0],
-                    uv: atlas_uv(q.rect, if q.textured { q.uv[k] } else { Vec2::new(0.5, 0.5) }),
-                    color: [c[0] as f32 / div, c[1] as f32 / div, c[2] as f32 / div, if q.semi { 0.5 } else { 1.0 }],
+                    uv: atlas_uv(q.rect, if q.textured { t } else { Vec2::new(0.5, 0.5) }),
+                    color: [c[0] / div, c[1] / div, c[2] / div, alpha],
                 });
+            };
+            let color = |k: usize| q.colors[k].map(|c| c as f32);
+            match q.clip {
+                // (only flat primitives are clipped)
+                Some(r) => {
+                    let poly = clip_polygon((0..4).map(|k| (q.pts[k], color(k))).collect(), r);
+                    for k in 1..poly.len().saturating_sub(1) {
+                        for (p, c) in [poly[0], poly[k], poly[k + 1]] {
+                            vert(p, c, Vec2::ZERO);
+                        }
+                    }
+                }
+                None => {
+                    for k in [0, 1, 2, 0, 2, 3] {
+                        vert(q.pts[k], color(k), q.uv[k]);
+                    }
+                }
             }
         }
         v

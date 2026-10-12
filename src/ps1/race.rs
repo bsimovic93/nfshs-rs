@@ -282,6 +282,10 @@ pub struct HudSetup {
     pub font_clut: [u16; 16],
     /// GameSetup carInfo[0].
     pub car_info: Vec<u8>,
+    /// Night race (GameSetup +0x54): the tachometer uses the night dial and needle colours.
+    pub night: bool,
+    /// Tachometer needle colour per car (Hud_BuildTach's day or night table).
+    pub needle_colors: [u32; 30],
 }
 
 impl HudSetup {
@@ -291,6 +295,7 @@ impl HudSetup {
             return None;
         }
         let bytes = |m: &mut Mem, a: u32, n: u32| (0..n).map(|i| m.r8(a + i)).collect::<Vec<u8>>();
+        let night = m.r32(addr::GAMESETUP + 0x54) != 0;
         Some(Self {
             slots: bytes(m, slots, 64 * 20),
             panels: bytes(m, 0x8013_FA38, 4 * 36),
@@ -299,6 +304,8 @@ impl HudSetup {
             number_uv: std::array::from_fn(|i| m.r32(0x8011_1F34 + 4 * i as u32)),
             car_info: bytes(m, addr::GAMESETUP + 0x3D4, 0xB4),
             font_clut,
+            night,
+            needle_colors: std::array::from_fn(|i| m.r32(if night { 0x8012_1D24 } else { 0x8012_1CAC } + 4 * i as u32)),
         })
     }
 }
