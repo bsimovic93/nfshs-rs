@@ -7,6 +7,7 @@ use crate::assets::GameData;
 use crate::ps1::race::{CarState, FrameInput, RaceSetup, RaceThread, Snapshot, pad};
 use anyhow::Result;
 use glam::{Mat3, Quat, Vec3};
+use std::collections::VecDeque;
 
 const FRAME: f32 = 1.0 / 60.0;
 
@@ -15,9 +16,15 @@ pub struct OriginalSim {
     accum: f32,
     /// The original main loop has ended (race over or an error): the last state stays frozen.
     pub stopped: bool,
+    /// Recent car poses stamped with simulation time (s). Physics runs at 64 Hz but frames at
+    /// 60 Hz, so every 15th frame advances two steps; rendering interpolates on this timeline.
+    history: VecDeque<(f64, Vec<Pose>)>,
+    /// Time the rendered poses show, a little behind the newest simulation state.
+    render_t: f64,
 }
 
 /// Pose of a simulated car in engine world space.
+#[derive(Clone, Copy)]
 pub struct Pose {
     pub pos: Vec3,
     pub rot: Quat,
@@ -32,7 +39,46 @@ impl OriginalSim {
         cars.extend(cfg.opponents.iter().cloned());
         let setup = RaceSetup { track: cfg.track, variant: cfg.variant.to_string(), cars, laps: cfg.laps.max(1) as u32 };
         let thread = RaceThread::start(data.root.clone(), setup.game_setup()?)?;
-        Ok(Self { thread, accum: 0.0, stopped: false })
+        let mut sim = Self { thread, accum: 0.0, stopped: false, history: VecDeque::new(), render_t: 0.0 };
+        sim.record();
+        sim.render_t = sim.history.back().map_or(0.0, |h| h.0);
+        Ok(sim)
+    }
+
+    fn record(&mut self) {
+        let s = &self.thread.last;
+        let t = s.sim_ticks as f64 / 64.0;
+        let poses: Vec<Pose> = s.cars.iter().map(pose).collect();
+        match self.history.back_mut() {
+            // no physics step this frame (start sequence): keep the newest state
+            Some(h) if h.0 >= t => h.1 = poses,
+            _ => self.history.push_back((t, poses)),
+        }
+        while self.history.len() > 8 {
+            self.history.pop_front();
+        }
+    }
+
+    /// Car poses at the render time, interpolated between simulation steps.
+    pub fn poses(&self) -> Vec<Pose> {
+        let Some(newest) = self.history.back() else { return Vec::new() };
+        let t = self.render_t;
+        let Some(i) = self.history.iter().position(|h| h.0 > t) else { return newest.1.clone() };
+        if i == 0 {
+            return self.history[0].1.clone();
+        }
+        let (a, b) = (&self.history[i - 1], &self.history[i]);
+        let f = ((t - a.0) / (b.0 - a.0)).clamp(0.0, 1.0) as f32;
+        a.1.iter()
+            .zip(&b.1)
+            .map(|(p, q)| Pose {
+                pos: p.pos.lerp(q.pos, f),
+                rot: p.rot.slerp(q.rot, f),
+                forward: p.forward.lerp(q.forward, f).normalize_or(q.forward),
+                up: p.up.lerp(q.up, f).normalize_or(q.up),
+                vel: p.vel.lerp(q.vel, f),
+            })
+            .collect()
     }
 
     pub fn snapshot(&self) -> &Snapshot {
@@ -74,8 +120,22 @@ impl OriginalSim {
                 self.stopped = true;
                 return;
             }
+            self.record();
             self.accum -= FRAME;
         }
+        // simulation time runs at real speed (16 steps of 1/64 s per 15 frames), so the render
+        // clock just advances by dt, kept about two physics steps behind the newest state;
+        // it is only corrected when it drifts beyond that step jitter
+        let newest = self.history.back().map_or(0.0, |h| h.0);
+        let target = newest - 2.0 / 64.0;
+        self.render_t += dt as f64;
+        let err = target - self.render_t;
+        if err.abs() > 0.25 {
+            self.render_t = target;
+        } else if err.abs() > 1.5 / 64.0 {
+            self.render_t += err * 0.05;
+        }
+        self.render_t = self.render_t.min(newest);
     }
 }
 

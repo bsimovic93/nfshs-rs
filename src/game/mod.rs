@@ -226,8 +226,8 @@ impl Game {
     fn sync_original(&mut self, frame_dt: f32) {
         let Some(sim) = &self.sim else { return };
         let snap = sim.snapshot();
-        for (r, c) in self.racers.iter_mut().zip(&snap.cars) {
-            let pose = original::pose(c);
+        let poses = sim.poses();
+        for ((r, c), pose) in self.racers.iter_mut().zip(&snap.cars).zip(poses) {
             let car = &mut r.car;
             car.pos = pose.pos;
             car.vel = pose.vel;

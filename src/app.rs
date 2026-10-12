@@ -374,9 +374,14 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
     r.set_world(&game.track.verts, &game.track.indices);
     let mut t = 0.0;
     let mut next_log = 10.0;
+    let trace = std::env::var_os("SHOT_TRACE").is_some();
     while t < seconds {
+        let before = game.player().car.pos;
         game.update(1.0 / 60.0, input);
         t += 1.0 / 60.0;
+        if trace && seconds - t < 0.5 {
+            println!("  t={t:6.3} moved {:.3} m", game.player().car.pos.distance(before));
+        }
         if t >= next_log {
             next_log += 10.0;
             let p = game.player();

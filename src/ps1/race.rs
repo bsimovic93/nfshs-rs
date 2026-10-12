@@ -32,6 +32,8 @@ pub mod addr {
     pub const COUNTDOWN_STAGE: u32 = 0x8013_D930;
     /// 128 Hz timer tick counter.
     pub const TICKS: u32 = 0x8013_EF8C;
+    /// `simGlobal.counter`: simulation time in 128 Hz ticks (physics runs on even counts).
+    pub const SIM_COUNTER: u32 = 0x8011_F368;
 }
 
 /// `GameSetup_tData` field offsets.
@@ -222,6 +224,8 @@ pub struct Snapshot {
     /// See [`addr::COUNTDOWN_STAGE`].
     pub countdown: u8,
     pub ticks: u32,
+    /// Simulation time of the car states, see [`addr::SIM_COUNTER`].
+    pub sim_ticks: u32,
     /// Full RAM copy, when requested.
     pub ram: Option<Vec<u8>>,
 }
@@ -249,6 +253,7 @@ fn snapshot(c: &mut Cpu, frame: u32, field: u64, want_ram: bool) -> Snapshot {
         cars,
         countdown: c.m.r8(addr::COUNTDOWN_STAGE),
         ticks: c.m.r32(addr::TICKS),
+        sim_ticks: c.m.r32(addr::SIM_COUNTER),
         ram: want_ram.then(|| c.m.ram.to_vec()),
     }
 }

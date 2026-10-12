@@ -275,8 +275,24 @@ fn real_main() -> Result<()> {
                 }
                 let t = std::time::Instant::now();
                 let tick0 = sim.last.ticks;
+                let trace = std::env::var_os("BOOT_TRACE").is_some();
                 for _ in 0..(secs * 60.0).round() as u32 {
+                    let prev: Vec<[i32; 3]> = sim.last.cars.iter().map(|c| c.position).collect();
                     let s = sim.step(FrameInput { buttons, want_ram: false })?;
+                    if trace {
+                        let d: Vec<String> = s
+                            .cars
+                            .iter()
+                            .zip(&prev)
+                            .take(3)
+                            .map(|(c, p)| {
+                                let dx = (c.position[0] - p[0]) as f32 / 65536.0;
+                                let dz = (c.position[2] - p[2]) as f32 / 65536.0;
+                                format!("{:6.3}", (dx * dx + dz * dz).sqrt())
+                            })
+                            .collect();
+                        println!("  frame {} ticks {} sim {} moved {}", s.frame, s.ticks, s.sim_ticks, d.join(" "));
+                    }
                     if s.countdown != stage {
                         println!("  frame {}: countdown stage {}", s.frame, s.countdown);
                         stage = s.countdown;
