@@ -6,6 +6,7 @@
 
 pub mod bios;
 mod interp;
+mod gte;
 
 pub const RAM_SIZE: usize = 0x20_0000;
 const SCRATCH_BASE: u32 = 0x1F80_0000;
@@ -306,26 +307,32 @@ impl Cpu {
         // SYSCALL 1/2 = Enter/ExitCriticalSection: interrupts are not emulated.
         self.r[2] = 1;
     }
+    /// COP2 instruction: GTE command, register move or load/store (see gte.rs).
     pub fn gte(&mut self, w: u32) {
         let op = w >> 26;
         let rs = (w >> 21) & 31;
         let rt = ((w >> 16) & 31) as usize;
         let rd = ((w >> 11) & 31) as usize;
         match op {
-            18 if w & (1 << 25) != 0 => self.gte_commands += 1,
+            18 if w & (1 << 25) != 0 => {
+                self.gte_commands += 1;
+                self.gte_command(w & 0x1FF_FFFF);
+            }
             18 => match rs {
                 0 => {
+                    let v = self.gte_read(rd);
                     if rt != 0 {
-                        self.r[rt] = self.gte_regs[rd];
+                        self.r[rt] = v;
                     }
                 }
                 2 => {
+                    let v = self.gte_read(32 + rd);
                     if rt != 0 {
-                        self.r[rt] = self.gte_regs[32 + rd];
+                        self.r[rt] = v;
                     }
                 }
-                4 => self.gte_regs[rd] = self.r[rt],
-                6 => self.gte_regs[32 + rd] = self.r[rt],
+                4 => self.gte_write(rd, self.r[rt]),
+                6 => self.gte_write(32 + rd, self.r[rt]),
                 _ => {}
             },
             50 | 58 => {
@@ -333,9 +340,10 @@ impl Cpu {
                 let off = (w & 0xFFFF) as i16 as i32 as u32;
                 let addr = self.r[base].wrapping_add(off);
                 if op == 50 {
-                    self.gte_regs[rt] = self.m.r32(addr);
+                    let v = self.m.r32(addr);
+                    self.gte_write(rt, v);
                 } else {
-                    let v = self.gte_regs[rt];
+                    let v = self.gte_read(rt);
                     self.m.w32(addr, v);
                 }
             }
