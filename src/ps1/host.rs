@@ -99,6 +99,8 @@ pub enum OverlayCmd {
     /// bottom-right with their colours (0xBBGGRR, 0x80 = 1 on textured quads), optionally
     /// textured from VRAM.
     Quad { pts: [[i16; 2]; 4], colours: [u32; 4], tex: Option<QuadTex>, semi: bool },
+    /// SetDrawArea in the front end: drawing is clipped to this screen rectangle.
+    Clip { x: i16, y: i16, w: i16, h: i16 },
 }
 
 /// A quad's texture in VRAM terms: texture page and CLUT ids, texel coordinates per corner.
@@ -697,6 +699,17 @@ impl Host for GameHost {
             }
             0x800E_E610 => 0,                  // DrawOTag: rendering is done by the host engine
             0x800E_E680 => a0, // PutDrawEnv
+            0x800E_EC70 => {
+                // SetDrawArea(DR_AREA, rect): the front end clips some drawing (scrolling text)
+                if self.mode == Mode::FrontEnd {
+                    // in VRAM terms, inside one of the two 256-line drawing buffers
+                    let mut r = |o: u32| c.m.r16(a1 + o) as i16;
+                    let (x, y) = (r(0), r(2));
+                    let oy = if y >= 256 { 256 } else { 0 };
+                    self.overlay.push(OverlayCmd::Clip { x, y: y - oy, w: r(4), h: r(6) });
+                }
+                return false;
+            }
             0x800E_E740 => {
                 // PutDispEnv: remember the display area (x, y, w, h)
                 self.display = [0, 2, 4, 6].map(|o| c.m.r16(a0 + o));

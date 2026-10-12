@@ -42,8 +42,13 @@ impl FeFrame {
         let (ox, oy) = ((w - 320.0 * scale) / 2.0, (h - 240.0 * scale) / 2.0);
         let size = atlas.size as f32;
         let mut vertices = Vec::new();
+        let mut clip = [0.0, 0.0, 320.0, 240.0];
         // the game adds each primitive at the head of its ordering table: last asked, first drawn
         for cmd in cmds.iter().rev() {
+            if let &OverlayCmd::Clip { x, y, w, h } = cmd {
+                clip = [x as f32, y as f32, (x + w) as f32, (y + h) as f32];
+                continue;
+            }
             let OverlayCmd::Quad { pts, colours, tex, semi } = cmd else { continue };
             let pts: [Vec2; 4] = pts.map(|[x, y]| Vec2::new(x as f32, y as f32));
             let (rect, uv0, div, alpha) = match tex {
@@ -75,7 +80,7 @@ impl FeFrame {
             // is: shift untextured quads by half a pixel
             let shift = if uv0.is_some() { 0.0 } else { 0.5 };
             let corner = |k: usize| {
-                let p = pts[k] + Vec2::splat(shift);
+                let p = pts[k];
                 let t = match uv0 {
                     Some((uv, umin, vmin)) => {
                         let tx = rect.x as f32 + (uv[k][0] - umin) as f32;
@@ -85,16 +90,46 @@ impl FeFrame {
                     None => [(rect.x as f32 + 0.5) / size, (rect.y as f32 + 0.5) / size],
                 };
                 let c = colours[k];
-                Vertex {
-                    pos: [ox + p.x * scale, oy + p.y * scale, 0.0],
-                    uv: t,
-                    color: [(c & 0xFF) as f32 / div, ((c >> 8) & 0xFF) as f32 / div, ((c >> 16) & 0xFF) as f32 / div, alpha],
-                }
+                Vertex { pos: [p.x, p.y, 0.0], uv: t, color: [(c & 0xFF) as f32 / div, ((c >> 8) & 0xFF) as f32 / div, ((c >> 16) & 0xFF) as f32 / div, alpha] }
             };
-            for k in [0, 1, 3, 0, 3, 2] {
-                vertices.push(corner(k));
+            // clipped to the drawing area, in PS1 screen pixels, then placed in the window
+            let poly = clip_polygon(vec![corner(0), corner(1), corner(3), corner(2)], clip);
+            let place = |v: Vertex| Vertex { pos: [ox + (v.pos[0] + shift) * scale, oy + (v.pos[1] + shift) * scale, 0.0], ..v };
+            for k in 1..poly.len().saturating_sub(1) {
+                vertices.extend([place(poly[0]), place(poly[k]), place(poly[k + 1])]);
             }
         }
         Self { atlas, vertices }
     }
 }
+
+/// Sutherland-Hodgman clipping of a convex polygon against the rectangle [x0, y0, x1, y1],
+/// interpolating texture coordinates and colours.
+fn clip_polygon(mut poly: Vec<Vertex>, r: [f32; 4]) -> Vec<Vertex> {
+    let lerp = |a: &Vertex, b: &Vertex, t: f32| Vertex {
+        pos: std::array::from_fn(|i| a.pos[i] + (b.pos[i] - a.pos[i]) * t),
+        uv: std::array::from_fn(|i| a.uv[i] + (b.uv[i] - a.uv[i]) * t),
+        color: std::array::from_fn(|i| a.color[i] + (b.color[i] - a.color[i]) * t),
+    };
+    // (axis, bound, keep the side >= bound)
+    for (axis, bound, ge) in [(0, r[0], true), (0, r[2], false), (1, r[1], true), (1, r[3], false)] {
+        if poly.is_empty() {
+            break;
+        }
+        let inside = |v: &Vertex| if ge { v.pos[axis] >= bound } else { v.pos[axis] <= bound };
+        let mut out = Vec::with_capacity(poly.len() + 2);
+        for i in 0..poly.len() {
+            let (a, b) = (&poly[i], &poly[(i + 1) % poly.len()]);
+            if inside(a) {
+                out.push(*a);
+            }
+            if inside(a) != inside(b) {
+                let t = (bound - a.pos[axis]) / (b.pos[axis] - a.pos[axis]);
+                out.push(lerp(a, b, t));
+            }
+        }
+        poly = out;
+    }
+    poly
+}
+

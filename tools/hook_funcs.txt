@@ -10,3 +10,4 @@
 8004f49c FontUpsideDownBlit (observed)
 800f146c movfxya (observed)
 800bf1d4 Draw_DrawDirectScreen (observed)
+800eec70 SetDrawArea (the front end's clipping is recorded)
