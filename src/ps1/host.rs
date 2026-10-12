@@ -20,6 +20,9 @@ pub struct GameHost {
     /// GTE environment the game set up for the player view: far colour R, G, B, DQA, DQB,
     /// H, back colour R, G, B.
     pub view_env: [i32; 9],
+    /// The cars the game put into the player view this frame (R3DCar_InsertCarFacetII):
+    /// car object and the parts drawn (`R3DCar_ObjectVisible`).
+    pub car_facets: Vec<(u32, Vec<u8>)>,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     pub rcnt: u32,
@@ -41,7 +44,7 @@ pub struct GameHost {
 pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<u16>>;
 
 /// Host-side state handed to the frame callback.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct FrameInfo {
     /// 60 Hz field number of the virtual clock.
     pub field: u64,
@@ -51,6 +54,8 @@ pub struct FrameInfo {
     pub view_env: [i32; 9],
     /// The HUD font's palette as the game uploaded it (CLUT of the digits' glyphs).
     pub font_clut: [u16; 16],
+    /// See [`GameHost::car_facets`].
+    pub car_facets: Vec<(u32, Vec<u8>)>,
 }
 
 /// Paces the original main loop against the virtual clock: game time only passes while the
@@ -70,6 +75,13 @@ pub const RENDER_VIEW: u32 = 0x8011_8234;
 const RENDER_START_WORLD_VIEW: u32 = 0x800B_3EE4;
 const DASHHUD_CHECK_WRONG_WAY: u32 = 0x8009_BAC4;
 const DASHHUD_HUD_CALC: u32 = 0x8009_BB34;
+/// R3DCar_InsertAllListFacet(view): puts every car into the view (sorting, level of detail,
+/// lights and damage state, R3DCar_InsertCarFacet per car).
+const R3DCAR_INSERT_ALL_LIST_FACET: u32 = 0x800B_38C0;
+/// R3DCar_InsertCarFacetII(car): builds the car's primitives from the parts chosen in
+/// `R3DCar_ObjectVisible`.
+const R3DCAR_INSERT_CAR_FACET_II: u32 = 0x800B_2E30;
+const R3DCAR_OBJECT_VISIBLE: u32 = 0x8011_7B64;
 /// Virtual clock units per 128 Hz timer tick and per 60 Hz field.
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
@@ -97,6 +109,7 @@ impl GameHost {
             clock: 0,
             display: [0; 4],
             view_env: [0; 9],
+            car_facets: Vec::new(),
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -114,6 +127,9 @@ impl GameHost {
     }
 
     fn lookup(&self, name: &str) -> Option<Vec<u8>> {
+        if std::env::var_os("PS1_FILES").is_some() {
+            eprintln!("file: {name}");
+        }
         if let Some(p) = self.resolve(name) {
             return std::fs::read(p).ok();
         }
@@ -343,7 +359,13 @@ impl Host for GameHost {
                     }
                     self.frame.last_top = self.clock;
                     let field = self.clock / FIELD;
-                    let info = FrameInfo { field, display: self.display, view_env: self.view_env, font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16) };
+                    let info = FrameInfo {
+                        field,
+                        display: self.display,
+                        view_env: self.view_env,
+                        font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
+                        car_facets: self.car_facets.clone(),
+                    };
                     match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
                         None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
                         Some(buttons) => {
@@ -392,6 +414,11 @@ impl Host for GameHost {
 
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
+            R3DCAR_INSERT_CAR_FACET_II => {
+                let parts = (0..57).map(|i| c.m.r8(R3DCAR_OBJECT_VISIBLE + i)).collect();
+                self.car_facets.push((a0, parts));
+                0
+            }
             0x800B_4024 => {
                 // Render_RenderPlayerView(view, player): the world itself is drawn by the host
                 // renderer. Run the original view set-up (Render_StartRenderingWorldView:
@@ -404,6 +431,9 @@ impl Host for GameHost {
                 // the original runs while rendering the HUD
                 c.call_nested(DASHHUD_CHECK_WRONG_WAY, &[a1]);
                 c.call_nested(DASHHUD_HUD_CALC, &[a1]);
+                // the cars: the original decides what is drawn of each (the host draws them)
+                self.car_facets.clear();
+                c.call_nested(R3DCAR_INSERT_ALL_LIST_FACET, &[a0]);
                 let g = |r: usize| c.gte_read(32 + r) as i32;
                 self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
                 0

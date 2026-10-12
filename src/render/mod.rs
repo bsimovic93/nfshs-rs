@@ -257,8 +257,10 @@ impl Renderer {
         // reversed Z (1 = near, 0 = infinitely far): even precision over the whole track
         let depth = Some((true, wgpu::CompareFunction::Greater));
         // the track is single-sided like on the PS1 (double-sided materials are emitted twice)
-        let track_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, None, Some(wgpu::Face::Back));
-        let world_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, None, None);
+        // semi-transparent texels blend (fs_hud's premultiplied output: PS1 modes 0 and 1)
+        let blend = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
+        let track_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], depth, blend, Some(wgpu::Face::Back));
+        let world_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], depth, blend, None);
         let hud_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl)], None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
         let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");

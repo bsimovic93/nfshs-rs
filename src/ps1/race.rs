@@ -429,6 +429,9 @@ pub struct Snapshot {
     pub hud_layout: Vec<u8>,
     /// The track map (when the HUD shows it).
     pub map: MapView,
+    /// Per car (as in `cars`): the parts of its model the game draws this frame
+    /// (`R3DCar_ObjectVisible`); empty when the car is not in the view.
+    pub car_parts: Vec<Vec<u8>>,
     /// The HUD as Hud_Init built it (read once, see [`HudSetup`]).
     pub hud: Option<std::sync::Arc<HudSetup>>,
     /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
@@ -461,6 +464,12 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         }
         cars.push(CarState::read(&mut c.m, car));
     }
+    let mut car_parts = vec![Vec::new(); cars.len()];
+    for (car, parts) in &info.car_facets {
+        if let Some(k) = cars.iter().position(|c| c.addr == *car) {
+            car_parts[k] = parts.clone();
+        }
+    }
     Snapshot {
         frame,
         field: info.field,
@@ -475,6 +484,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         sky: SkyData::read(&mut c.m),
         hud: HudSetup::read(&mut c.m, info.font_clut).map(std::sync::Arc::new),
         map: MapView::read(&mut |a| c.m.r32(a)),
+        car_parts,
         dash: (0..0x80).map(|i| c.m.r8(addr::DASHHUD + i)).collect(),
         hud_layout: {
             let l = c.m.r32(addr::GP + 6352);

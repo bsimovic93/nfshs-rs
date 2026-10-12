@@ -40,6 +40,9 @@ pub struct Camera {
     pub up: Vec3,
     /// tan of half the horizontal field of view on the PS1's 320-pixel-wide screen.
     pub tan_half_h: f32,
+    /// The view matrix's vertical scale: the game squashes the picture vertically by
+    /// scaling the camera's up row (about 0.85).
+    pub y_scale: f32,
 }
 
 #[derive(Clone)]
@@ -81,12 +84,15 @@ impl OriginalSim {
     fn record(&mut self) {
         let s = &self.thread.last;
         let t = s.sim_ticks as f64 / 64.0;
-        let row = |i: usize| v3([s.camera_rot[i * 3], s.camera_rot[i * 3 + 1], s.camera_rot[i * 3 + 2]]).normalize_or_zero();
+        let raw = |i: usize| v3([s.camera_rot[i * 3], s.camera_rot[i * 3 + 1], s.camera_rot[i * 3 + 2]]);
+        let row = |i: usize| raw(i).normalize_or_zero();
+        let y_scale = (raw(1).length() / raw(2).length().max(1e-6)).clamp(0.5, 1.5);
         let camera = Camera {
             pos: v3(s.camera_pos),
             forward: row(2),
             up: row(1),
             tan_half_h: (s.display[2].max(1) as f32 / 2.0) / s.projection.max(1) as f32,
+            y_scale: if y_scale.is_finite() { y_scale } else { 1.0 },
         };
         let state = State { cars: s.cars.iter().map(pose).collect(), camera };
         match self.history.back_mut() {
@@ -134,6 +140,7 @@ impl OriginalSim {
                 forward: p.forward.lerp(q.forward, f).normalize_or(q.forward),
                 up: p.up.lerp(q.up, f).normalize_or(q.up),
                 tan_half_h: q.tan_half_h,
+                y_scale: q.y_scale,
             }
         };
         (cars, Some(camera))

@@ -432,17 +432,37 @@ fn build_sky(psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, V
     (verts, colors)
 }
 
+/// One part of a car model (the GEO's 57 parts), in the car's local space.
+#[derive(Default)]
+pub struct CarPart {
+    pub verts: Vec<Vertex>,
+    /// Wheel parts turn around their hub: which wheel (FL, FR, RL, RR) and where.
+    pub wheel: Option<usize>,
+    pub hub: Vec3,
+}
+
 /// A car model in local space (metres, origin at ground contact centre, +Z forward).
 pub struct CarModel {
-    pub body: Vec<Vertex>,
-    /// Wheels: local vertex lists around the hub, and hub position. Order FL, FR, RL, RR.
-    pub wheels: Vec<(Vec<Vertex>, Vec3)>,
+    /// Indexed like the GEO (and `R3DCar_ObjectVisible`).
+    pub parts: Vec<CarPart>,
     pub wheel_radius: f32,
     pub half_extents: Vec3,
 }
 
-/// Body parts drawn for the high-detail model (from inspection of the 57-part layout).
-const BODY_PARTS: &[usize] = &[0, 43, 44];
+/// `R3DCar_ObjectVisible` as the game leaves it during a race (used until the simulation
+/// provides its own): the parts drawn, by GEO part number.
+pub const CAR_PARTS_VISIBLE: [u8; 57] = [
+    0, 0, 1, 1, 0, 10, 0, 0, 11, 11, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 15, 0, 0, 15, 0, 0, 1, 0, 0, 1, 13, 0, 0, 0, 3, 3, 4, 4, 4, 1, 1, 5, 6,
+    0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0,
+];
+
+/// The car's texture names by a GEO polygon's texture number (CarIO's table): each is a
+/// shape of the car's PSH files, placed at its own VRAM position.
+const CAR_TEXTURES: [&str; 51] = [
+    "frnt", "rear", "side", "top1", "top2", "dHiF", "dHiR", "dHiS", "dTp1", "dTop", "dLoF", "dLoR", "dLoS", "wndw", "ftdm", "splr", "ext2", "ext3",
+    "ext4", "whl ", "ext1", "botm", "whlI", "tred", "bROf", "bSOf", "rvOf", "sFOf", "sROf", "ltOf", "bROn", "bSOn", "shdw", "sFOn", "sROn",
+    "ltOn", "dcl1", "dcl2", "dcl3", "dcl4", "dcl5", "dcl6", "ins0", "ins1", "ins2", "ins3", "ins4", "ins5", "ins6", "ins7", "ins8",
+];
 
 enum Placement {
     /// Faces the camera (yaw only); scale (width, height, width).
@@ -487,51 +507,73 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
     }
 }
 
-pub fn load_car(data: &GameData, atlas: &mut Atlas, viv_name: &str) -> Result<CarModel> {
-    let viv = Viv::parse(&data.read(viv_name)?)?;
+/// Load a car as the race does (R3DCar_ReadInCarData / CarIO_ReadInCarTextureData): the
+/// player's car from `ZZZ<code>H.VIV`, the others from `ZZZ<code>S.VIV`. The PSH files hold
+/// the texture pages: the interior and underside ("i") on a page of their own, the body in
+/// a day ("l") and a night ("d", wheels "g") version.
+pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool) -> Result<CarModel> {
+    let name = format!("ZZZ{code}{}.VIV", if player { "H" } else { "S" });
+    let viv = Viv::parse(&data.read(&name).or_else(|_| data.read(&format!("ZZZ{code}.VIV")))?)?;
     let (_, geo) = viv.find_suffix(".geo").context("car viv has no .geo")?;
     let geo = Geo::parse(geo)?;
-    let mut page = crate::formats::psh::Atlas::new(256);
-    for (name, d) in &viv.entries {
-        let n = name.to_ascii_lowercase();
-        if n.ends_with(".psh") && !n.ends_with("d.psh") && !n.ends_with("g.psh") && !n.ends_with("i.psh") {
-            page.place(&Psh::parse(d)?.shapes, 64);
+    // two 256x256 pages; which page and shape each texture name is on
+    let mut pages = [crate::formats::psh::Atlas::new(256), crate::formats::psh::Atlas::new(256)];
+    let mut page_of: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let skip = if night { ['l'] } else { ['d'] };
+    let mut files: Vec<(char, Psh)> = Vec::new();
+    for (n, d) in &viv.entries {
+        let n = n.to_ascii_lowercase();
+        let Some(stem) = n.strip_suffix(".psh") else { continue };
+        let kind = stem.chars().last().unwrap_or(' ');
+        if skip.contains(&kind) || (kind == 'g' && !night) {
+            continue;
+        }
+        files.push((kind, Psh::parse(d)?));
+    }
+    // night replacements ("d", "g") last, so they cover the day shapes
+    files.sort_by_key(|(k, _)| matches!(k, 'd' | 'g'));
+    for (kind, psh) in &files {
+        let page = usize::from(*kind == 'i');
+        pages[page].place(&psh.shapes, 64);
+        for s in &psh.shapes {
+            page_of.insert(s.name.clone(), page);
         }
     }
-    let rect = atlas.add(256, 256, &page.rgba);
-    let part_tris = |pi: usize, center: Vec3| -> Vec<Vertex> {
-        let part = &geo.parts[pi];
+    let rects = [atlas.add(256, 256, &pages[0].rgba), atlas.add(256, 256, &pages[1].rgba)];
+    let mut parts = Vec::with_capacity(geo.parts.len());
+    for (pi, part) in geo.parts.iter().enumerate() {
         let off = Vec3::new(part.position[0] as f32, part.position[1] as f32, part.position[2] as f32) / 65536.0;
-        let mut out = Vec::new();
+        // wheels: discs 47/48, front tyres 49..52, rear wheels 53..56 (left, right)
+        let wheel = match pi {
+            47 | 49 | 51 => Some(0),
+            48 | 50 | 52 => Some(1),
+            53 | 55 => Some(2),
+            54 | 56 => Some(3),
+            _ => None,
+        };
+        let hub = if wheel.is_some() { ps1_to_world(off) } else { Vec3::ZERO };
+        let mut verts = Vec::new();
         for poly in &part.polys {
+            let tex = CAR_TEXTURES.get(poly.texture as usize).copied().unwrap_or("");
+            let rect = rects[page_of.get(tex).copied().unwrap_or(0)];
             for k in 0..3 {
                 let v = part.verts.get(poly.v[k] as usize).copied().unwrap_or([0; 3]);
-                let p = ps1_to_world(off + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 256.0) - center;
+                let p = ps1_to_world(off + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 256.0) - hub;
                 let t = Vec2::new(poly.uv[k][0] as f32 + 0.5, poly.uv[k][1] as f32 + 0.5);
-                out.push(Vertex { pos: p.into(), uv: atlas.uv(rect, t), color: [0.5, 0.5, 0.5, 1.0] });
+                // DrawC_Prim: flags bit 0 makes the polygon semi-transparent (its STP texels
+                // blend: the windows)
+                let a = if poly.flags & 1 != 0 { 0.5 } else { 1.0 };
+                verts.push(Vertex { pos: p.into(), uv: atlas.uv(rect, t), color: [0.5, 0.5, 0.5, a] });
             }
         }
-        out
-    };
-    let mut body = Vec::new();
-    for &pi in BODY_PARTS {
-        body.extend(part_tris(pi, Vec3::ZERO));
+        parts.push(CarPart { verts, wheel, hub });
     }
-    let mut wheels = Vec::new();
-    // front wheels are split into hub (47/48) + tyre (51/52); rear wheels are whole (55/56)
-    for group in [[47usize, 51], [48, 52], [55, 55], [56, 56]] {
-        let p = &geo.parts[group[0]];
-        let hub = ps1_to_world(Vec3::new(p.position[0] as f32, p.position[1] as f32, p.position[2] as f32) / 65536.0);
-        let mut v = part_tris(group[0], hub);
-        if group[1] != group[0] {
-            v.extend(part_tris(group[1], hub));
-        }
-        wheels.push((v, hub));
-    }
-    let wheel_radius = wheels.first().map(|w| w.1.y).unwrap_or(0.33).max(0.2);
+    let wheel_radius = parts.get(53).map(|p| p.hub.y).filter(|&r| r > 0.0).unwrap_or(0.33).max(0.2);
     let mut max = Vec3::ZERO;
-    for v in &body {
-        max = max.max(Vec3::from(v.pos).abs());
+    for p in parts.iter().filter(|p| p.wheel.is_none()) {
+        for v in &p.verts {
+            max = max.max(Vec3::from(v.pos).abs());
+        }
     }
-    Ok(CarModel { body, wheels, wheel_radius, half_extents: max })
+    Ok(CarModel { parts, wheel_radius, half_extents: max })
 }

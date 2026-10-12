@@ -97,6 +97,8 @@ pub struct Game {
     pub cam_up: Vec3,
     /// tan of half the vertical field of view.
     pub tan_half_v: f32,
+    /// Vertical squash of the picture (the original's view matrix scales Y), 1 = none.
+    pub y_scale: f32,
     prev_camera_key: bool,
     autopilot: ai::Driver,
     accum: f32,
@@ -109,6 +111,8 @@ pub struct Game {
     pub sim: Option<original::OriginalSim>,
     /// The original HUD (when the simulation provides its layout).
     pub ps1hud: Option<ps1hud::Ps1Hud>,
+    /// Parts drawn per car, instead of the simulation's (for comparisons with captures).
+    pub car_parts_override: Option<Vec<Vec<u8>>>,
 }
 
 const DT: f32 = 1.0 / 120.0;
@@ -158,7 +162,8 @@ impl Game {
         let mut racers = Vec::new();
         let slots = codes.len();
         for (k, code) in codes.iter().enumerate() {
-            let model = assets::load_car(data, atlas, &format!("ZZZ{code}.VIV"))?;
+            let night = matches!(cfg.variant, "N" | "S");
+            let model = assets::load_car(data, atlas, code, k == 0, night)?;
             let spec = load_spec(data, code, &model);
             // two-wide grid behind the start line, ~12 m between rows; the player starts last
             let slot = if k == 0 { slots - 1 } else { k - 1 };
@@ -206,8 +211,10 @@ impl Game {
             phase: Phase::Countdown(3.0),
             race_time: 0.0,
             cam_mode: CameraMode::Chase,
+            car_parts_override: None,
             cam_up: Vec3::Y,
             tan_half_v: (1.05f32 / 2.0).tan(),
+            y_scale: 1.0,
             prev_camera_key: false,
             autopilot: ai::Driver::new(0.0, 1.0),
             accum: 0.0,
@@ -254,6 +261,7 @@ impl Game {
             self.cam_up = cam.up;
             // keep the original horizontal field of view on a 4:3 screen
             self.tan_half_v = cam.tan_half_h * 0.75;
+            self.y_scale = cam.y_scale;
             // the bumper view does not show the player's car
             self.cam_mode = match self.racers.first() {
                 Some(r) if r.car.pos.distance(cam.pos) < 2.0 => CameraMode::Bumper,
@@ -587,14 +595,15 @@ impl Game {
     pub fn frame_params(&self, aspect: f32) -> FrameParams {
         let fov = 2.0 * self.tan_half_v.atan();
         // reversed-Z projection (the renderer's depth test is Greater, cleared to 0)
-        let proj = Mat4::perspective_infinite_reverse_rh(fov, aspect, 0.1);
+        let squash = Mat4::from_scale(Vec3::new(1.0, self.y_scale, 1.0));
+        let proj = squash * Mat4::perspective_infinite_reverse_rh(fov, aspect, 0.1);
         let view = Mat4::look_at_rh(self.cam_pos, self.cam_target, self.cam_up);
         let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, self.cam_up);
         let p = &self.racers[0].car;
         FrameParams {
             ambient: self.ambient,
             headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
-            sky_view_proj: Mat4::perspective_rh(fov, aspect, 1.0, 1000.0) * sky_view,
+            sky_view_proj: squash * Mat4::perspective_rh(fov, aspect, 1.0, 1000.0) * sky_view,
             sky_top: self.track.sky_colors.0 * if self.night { 0.12 } else { 1.0 },
             view_proj: proj * view,
             cam_pos: self.cam_pos,
@@ -637,15 +646,26 @@ impl Game {
             }
             let m = &self.models[r.model];
             let model = Mat4::from_rotation_translation(r.car.orientation(), r.car.pos);
-            for v in &m.body {
-                out.push(Vertex { pos: model.transform_point3(Vec3::from(v.pos)).into(), ..*v });
-            }
-            for (w, (verts, hub)) in m.wheels.iter().enumerate() {
-                let steer = if w < 2 { -r.car.steer } else { 0.0 };
-                let spin = Quat::from_rotation_x(r.car.wheel_spin);
-                let wm = model * Mat4::from_rotation_translation(Quat::from_rotation_y(steer) * spin, *hub);
-                for v in verts {
-                    out.push(Vertex { pos: wm.transform_point3(Vec3::from(v.pos)).into(), ..*v });
+            // the parts the game draws (R3DCar_ObjectVisible), once it has put cars into a view
+            let tables = self.car_parts_override.as_ref().or_else(|| self.sim.as_ref().map(|s| &s.snapshot().car_parts));
+            let visible: &[u8] = match tables {
+                Some(t) if t.iter().any(|p| !p.is_empty()) => t.get(i).map(Vec::as_slice).unwrap_or(&[]),
+                _ => &assets::CAR_PARTS_VISIBLE,
+            };
+            for (part, &on) in m.parts.iter().zip(visible) {
+                if on == 0 {
+                    continue;
+                }
+                let tm = match part.wheel {
+                    Some(w) => {
+                        let steer = if w < 2 { -r.car.steer } else { 0.0 };
+                        let spin = Quat::from_rotation_x(r.car.wheel_spin);
+                        model * Mat4::from_rotation_translation(Quat::from_rotation_y(steer) * spin, part.hub)
+                    }
+                    None => model,
+                };
+                for v in &part.verts {
+                    out.push(Vertex { pos: tm.transform_point3(Vec3::from(v.pos)).into(), ..*v });
                 }
             }
         }

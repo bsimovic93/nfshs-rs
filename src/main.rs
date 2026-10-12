@@ -402,8 +402,9 @@ fn dump_psh(src: &Path, out: &Path) -> Result<()> {
     if &d[..4] == b"BIGF" {
         for (n, e) in formats::viv::Viv::parse(&d)?.entries {
             if e.starts_with(b"SHPP") {
-                println!("-- {n}");
-                pshs.push(formats::psh::Psh::parse(&e)?);
+                let psh = formats::psh::Psh::parse(&e)?;
+                println!("-- {n}: {}", psh.shapes.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" "));
+                pshs.push(psh);
             }
         }
     } else {

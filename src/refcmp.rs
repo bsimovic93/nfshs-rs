@@ -96,11 +96,14 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     // the camera exactly as the game computed it for that frame
     let v = at::VIEW + 8;
     let rot = |i: u32| ram.v3(v + 12 + 12 * i).normalize_or_zero();
+    game.y_scale = ram.v3(v + 24).length() / ram.v3(v + 36).length().max(1e-6);
     game.cam_pos = ram.v3(v);
     game.cam_target = game.cam_pos + rot(2);
     game.cam_up = rot(1);
     let h = ram.i32(at::CAMERA_ZOOM).max(1) as f32;
     game.tan_half_v = 160.0 / h * 0.75;
+    // the parts drawn: the table as the game left it (after its last car, usually the player's)
+    game.car_parts_override = Some(vec![(0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect()]);
     game.cam_mode = if game.racers[0].car.pos.distance(game.cam_pos) < 2.0 { crate::game::CameraMode::Bumper } else { crate::game::CameraMode::Chase };
 
     // NFSHS_PICK="x0,y0,x1,y1": list the track quads whose centre projects into that screen
