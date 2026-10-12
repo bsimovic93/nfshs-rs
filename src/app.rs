@@ -257,6 +257,7 @@ impl App {
                 let params = FrameParams {
                     world_ranges: None,
                     shadows: Vec::new(),
+                    subtract_late: Vec::new(),
                     ambient: 1.0,
                     headlight: (0.0, Vec3::ZERO, Vec3::Z),
                     sky_view_proj: Mat4::IDENTITY,
@@ -428,6 +429,7 @@ pub fn menu_screenshot(data: &GameData, out: &std::path::Path) -> anyhow::Result
     let params = FrameParams {
         world_ranges: None,
         shadows: Vec::new(),
+        subtract_late: Vec::new(),
         ambient: 1.0,
         headlight: (0.0, Vec3::ZERO, Vec3::Z),
         sky_view_proj: Mat4::IDENTITY,

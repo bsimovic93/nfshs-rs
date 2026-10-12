@@ -40,6 +40,43 @@ impl Ram {
     }
 }
 
+/// The player car's reflection maps as DrawC_PrimStart picks them (its results live on the
+/// scratchpad, which the capture does not have): map A and B from the car's road position
+/// (car + 202 / 204 into the track's tables, overridden by the lateral position car + 124),
+/// indices of 11 and up add instead of subtracting; colour from the light level and
+/// R3DCar_eMapColour; the camera yaw R3DCar_yawCam.
+fn ref_env(ram: &Ram, car: u32) -> crate::ps1::host::CarEnv {
+    let gp = 0x8013_D83Cu32;
+    let h16 = |a: u32| i16::from_le_bytes([ram.0[(a & 0x1F_FFFF) as usize], ram.0[((a + 1) & 0x1F_FFFF) as usize]]);
+    let lat = ram.0[((car + 124) & 0x1F_FFFF) as usize] as i8 as i32;
+    let pick = |table: u32, slot: i16| -> i32 {
+        let e = ram.i32(table) as u32 + 6 * slot as u32;
+        let (mut idx, alt) = (h16(e + 2) as i32, h16(e + 4) as u16);
+        if lat < (alt & 0xFF) as i32 {
+            idx = (alt as i16 >> 8) as i32;
+        }
+        idx
+    };
+    let (ia, ib) = (pick(gp + 4764, h16(car + 202)), pick(gp + 4768, h16(car + 204)));
+    let map = |idx: i32, abr_low: u32| -> Option<[u32; 4]> {
+        let (idx, abr) = if idx >= 11 { (idx - 10, 1) } else { (idx, abr_low) };
+        if idx - 1 < 0 {
+            return None;
+        }
+        let e = 0x8011_F460 + 16 * (idx as u32 - 1);
+        let mut m: [u32; 4] = std::array::from_fn(|i| ram.i32(e + 4 * i as u32) as u32);
+        m[1] = (m[1] & !(3 << 21)) | abr << 21;
+        Some(m)
+    };
+    let light = ram.i32(car + 2176) as u32;
+    let level = (((light & 0xFF) + ((light >> 8) & 0xFF) + ((light >> 16) & 0xFF)) / 3).max(24);
+    let mut c = (level >> 2) * ram.0[0x13_E684] as u32 >> 7;
+    if ia >= 11 {
+        c = c * 2 / 3;
+    }
+    crate::ps1::host::CarEnv { a: map(ia, 1), b: map(ib, 2), scroll: 0, colour: c * 0x01_0101, yaw: h16(0x8013_E688) }
+}
+
 /// The emulator's picture: the game area of the captured window, resampled to 320x240.
 fn reference_picture(window: &RgbaImage) -> RgbaImage {
     let (w, h) = window.dimensions();
@@ -113,6 +150,7 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         car: pc,
         parts: (0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect(),
         light: ram.i32(pc + 2176) as u32 & 0xFF_FFFF,
+        env: Some(ref_env(&ram, pc)),
         shadow: (ram.i32(gp + 3648) != 0).then(|| {
             let pos = [ram.i32(pc + 0xA0), 0, ram.i32(pc + 0xA8)];
             let corners = std::array::from_fn(|k| std::array::from_fn(|i| ram.i32(pc + 488 + 12 * k as u32 + 4 * i as u32).wrapping_sub(pos[i])));

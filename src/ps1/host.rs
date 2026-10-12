@@ -72,6 +72,15 @@ fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     rec.extend((0..12).map(|i| c.m.r32(car + 488 + 4 * i).wrapping_sub(pos[i as usize % 3])));
     rec.push(c.m.r32(SHADOW_COLOUR) & 0xFF_FFFF);
     rec.extend((0..57).map(|i| c.m.r8(R3DCAR_OBJECT_VISIBLE + i) as u32));
+    // DrawC_PrimStart sets up the car's drawing (light level, reflection maps chosen from the
+    // track position, their colour and scroll) in the car cache on the scratchpad
+    let (r, g, b) = (light & 0xFF, (light >> 8) & 0xFF, (light >> 16) & 0xFF);
+    let level = ((r + g + b) / 3).max(24);
+    c.m.w32(CAR_CACHE + 140, level * 0x01_0101);
+    let ok = c.call_nested(DRAWC_PRIM_START, &[R3DCAR_CENTER, car, level, CAR_CACHE]) as i32 >= 0;
+    rec.push(ok as u32);
+    rec.extend((0..8).map(|i| c.m.r32(CAR_CACHE + 100 + 4 * i)));
+    rec.extend([c.m.r32(CAR_CACHE + 132), c.m.r32(CAR_CACHE + 144), c.m.r16(R3DCAR_CENTER + 0x14) as u32]);
     c.capture.extend(rec);
     c.r[2] = 0;
     true
@@ -89,10 +98,24 @@ pub struct CarFacet {
     /// The ground shadow's corners (16.16: x and z relative to the car's position, y the
     /// world height) and colour, when drawn.
     pub shadow: Option<([[i32; 3]; 4], [u8; 3])>,
+    /// The reflection maps (DrawC_PrimStart), when the car is drawn.
+    pub env: Option<CarEnv>,
+}
+
+/// A car's reflection mapping for this frame: two of the track's reflection maps
+/// (Track_gReflectionMaps pixmaps: u, v, clut, u, v, tpage, ...), the second one's scroll,
+/// their colour (0xBBGGRR) and the camera's yaw around the car (4096 per turn).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CarEnv {
+    pub a: Option<[u32; 4]>,
+    pub b: Option<[u32; 4]>,
+    pub scroll: u32,
+    pub colour: u32,
+    pub yaw: i16,
 }
 
 impl CarFacet {
-    const WORDS: usize = 3 + 12 + 1 + 57;
+    const WORDS: usize = 3 + 12 + 1 + 57 + 1 + 8 + 3;
 
     /// Records left by `record_car_facet`.
     fn parse(w: &[u32]) -> Vec<Self> {
@@ -103,7 +126,11 @@ impl CarFacet {
                 shadow: (r[2] != 0).then(|| {
                     (std::array::from_fn(|k| std::array::from_fn(|i| r[3 + 3 * k + i] as i32)), std::array::from_fn(|i| (r[15] >> (8 * i)) as u8))
                 }),
-                parts: r[16..].iter().map(|&p| p as u8).collect(),
+                parts: r[16..73].iter().map(|&p| p as u8).collect(),
+                env: (r[73] != 0).then(|| {
+                    let map = |o: usize| (r[o] != 0).then(|| [r[o], r[o + 1], r[o + 2], r[o + 3]]);
+                    CarEnv { a: map(74), b: map(78), scroll: r[82], colour: r[83] & 0xFF_FFFF, yaw: r[84] as u16 as i16 }
+                }),
             })
             .collect()
     }
@@ -133,6 +160,10 @@ const R3DCAR_INSERT_ALL_LIST_FACET: u32 = 0x800B_38C0;
 /// `R3DCar_ObjectVisible`.
 const R3DCAR_INSERT_CAR_FACET_II: u32 = 0x800B_2E30;
 const R3DCAR_OBJECT_VISIBLE: u32 = 0x8011_7B64;
+/// DrawC_PrimStart(vertex, car, light level, cache) and its arguments' homes.
+const DRAWC_PRIM_START: u32 = 0x800B_FAC8;
+const R3DCAR_CENTER: u32 = 0x8013_E674;
+const CAR_CACHE: u32 = 0x1F80_0000;
 /// BWorld_OnyxBuildFacets' set-up: SetupBuildMatrices(view, dcache), then
 /// DrawW_WorldSetUpMatrix(gWorldMat, dcache + 0x14), then SetupChunkBuildList(view) fills
 /// BWorld_gChunkBuildList (count kept at gp + 608): the chunks drawn this frame.

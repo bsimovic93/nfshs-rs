@@ -456,6 +456,9 @@ fn build_sky(psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, V
 #[derive(Default)]
 pub struct CarPart {
     pub verts: Vec<Vertex>,
+    /// Reflection-mapped parts (R3DCar_ObjectInfo flags 9: DrawC_Prim's environment path):
+    /// per vertex the model-space normal / 64 (PS1 axes), per triangle the polygon flags.
+    pub env: Option<(Vec<[i16; 3]>, Vec<u16>)>,
     /// Wheel parts turn around their hub: which wheel (FL, FR, RL, RR) and where.
     pub wheel: Option<usize>,
     pub hub: Vec3,
@@ -581,7 +584,15 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         };
         let hub = if wheel.is_some() { ps1_to_world(off) } else { Vec3::ZERO };
         let mut verts = Vec::new();
+        let mut env = matches!(pi, 0 | 8 | 10 | 41 | 42 | 45 | 46).then(|| (Vec::new(), Vec::new()));
         for poly in &part.polys {
+            if let Some((normals, flags)) = &mut env {
+                flags.push((poly.flags as u16 | (poly.flags2 as u16) << 8) & 0xFFF);
+                for k in 0..3 {
+                    let n = part.normals.get(poly.v[k] as usize).copied().unwrap_or([0; 3]);
+                    normals.push(n.map(|c| c >> 6));
+                }
+            }
             let tex = CAR_TEXTURES.get(poly.texture as usize).copied().unwrap_or("");
             let rect = rects[page_of.get(tex).copied().unwrap_or(0)];
             for k in 0..3 {
@@ -594,7 +605,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
                 verts.push(Vertex { pos: p.into(), uv: atlas.uv(rect, t), color: [0.5, 0.5, 0.5, a] });
             }
         }
-        parts.push(CarPart { verts, wheel, hub });
+        parts.push(CarPart { verts, env, wheel, hub });
     }
     let wheel_radius = parts.get(53).map(|p| p.hub.y).filter(|&r| r > 0.0).unwrap_or(0.33).max(0.2);
     let mut max = Vec3::ZERO;
@@ -605,3 +616,16 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
     }
     Ok(CarModel { parts, wheel_radius, half_extents: max })
 }
+
+/// The track's reflection maps (ZTR<nn>R.PSH: "test", "tree", "tunn", "buil"), laid out as
+/// the game loads them: a 256x256 page with each 128x64 map at u 128, v 64 * n
+/// (Track_gReflectionMaps). Returns the page's atlas rectangle.
+pub fn load_reflection_maps(data: &GameData, atlas: &mut Atlas, track_no: u32) -> Option<Rect> {
+    let psh = Psh::parse(&data.read(&format!("ZTR{track_no:02}R.PSH")).ok()?).ok()?;
+    let mut page = crate::formats::psh::Atlas::new(256);
+    for s in psh.shapes.iter().filter(|s| s.width > 1) {
+        page.blit(s, 128, s.vram.1 as u32 % 256);
+    }
+    Some(atlas.add(256, 256, &page.rgba))
+}
+

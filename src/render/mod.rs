@@ -38,6 +38,8 @@ pub struct FrameParams {
     /// Subtractive primitives (PS1 semi-transparency mode 2: background - foreground), drawn
     /// over the track: the cars' ground shadows.
     pub shadows: Vec<Vertex>,
+    /// Subtractive primitives drawn after the cars (their reflection maps).
+    pub subtract_late: Vec<Vertex>,
     pub ambient: f32,
     /// Headlight strength (0 = off), position and direction.
     pub headlight: (f32, Vec3, Vec3),
@@ -114,6 +116,7 @@ pub struct Renderer {
     static_vb: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     dyn_vb: DynBuf,
     shadow_vb: DynBuf,
+    late_vb: DynBuf,
     sub_pipeline: wgpu::RenderPipeline,
     hud_vb: DynBuf,
     pub size: (u32, u32),
@@ -282,6 +285,7 @@ impl Renderer {
         let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");
         let shadow_vb = DynBuf::new(&device, "shadows");
+        let late_vb = DynBuf::new(&device, "subtract late");
         let hud_vb = DynBuf::new(&device, "hud");
         let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
@@ -306,6 +310,7 @@ impl Renderer {
             static_vb: None,
             dyn_vb,
             shadow_vb,
+            late_vb,
             sub_pipeline,
             hud_vb,
             size,
@@ -419,6 +424,7 @@ impl Renderer {
         self.sky_vb.upload(&self.device, &self.queue, sky);
         self.dyn_vb.upload(&self.device, &self.queue, dynamic);
         self.shadow_vb.upload(&self.device, &self.queue, &p.shadows);
+        self.late_vb.upload(&self.device, &self.queue, &p.subtract_late);
         self.hud_vb.upload(&self.device, &self.queue, hud);
         let depth = self.depth_view();
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -472,6 +478,11 @@ impl Renderer {
             if !dynamic.is_empty() {
                 rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
                 rp.draw(0..dynamic.len() as u32, 0..1);
+            }
+            if !p.subtract_late.is_empty() {
+                rp.set_pipeline(&self.sub_pipeline);
+                rp.set_vertex_buffer(0, self.late_vb.buf.slice(..));
+                rp.draw(0..p.subtract_late.len() as u32, 0..1);
             }
             if !hud.is_empty() {
                 rp.set_pipeline(&self.hud_pipeline);

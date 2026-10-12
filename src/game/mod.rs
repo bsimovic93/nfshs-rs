@@ -114,6 +114,9 @@ pub struct Game {
     pub ps1hud: Option<ps1hud::Ps1Hud>,
     /// The track's glowing lights (from the original's track data).
     glares: Vec<crate::ps1::race::Glare>,
+    /// The track's reflection map page (atlas rectangle) and the atlas' size.
+    reflections: Option<assets::Rect>,
+    atlas_size: f32,
     /// A white texel with the semi-transparency bit, for untextured blended primitives.
     white_semi: [f32; 2],
     /// The cars' ground shadow texture (ZSFX.PSH "SHAD", gShadowPixmap), corners in
@@ -216,6 +219,7 @@ impl Game {
             let r = atlas.add(1, 1, &[255, 255, 255, 128]);
             atlas.uv(r, glam::Vec2::new(0.5, 0.5))
         };
+        let reflections = assets::load_reflection_maps(data, atlas, cfg.track);
         // the ground shadow texture (gShadowPixmap: ZSFX.PSH "SHAD", 32x64)
         let shadow_tex = data.read("ZSFX.PSH").ok().and_then(|d| crate::formats::psh::Psh::parse(&d).ok()).and_then(|p| {
             let s = p.shapes.into_iter().find(|s| s.name == "SHAD")?;
@@ -242,6 +246,8 @@ impl Game {
             shadow_tex,
             glares,
             white_semi,
+            reflections,
+            atlas_size: atlas.size as f32,
             cam_up: Vec3::Y,
             tan_half_v: (1.05f32 / 2.0).tan(),
             y_scale: 1.0,
@@ -652,6 +658,7 @@ impl Game {
                 r
             }),
             shadows: self.shadows(),
+            subtract_late: self.car_reflections().1,
             ambient: self.ambient,
             headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
             sky_view_proj: squash * Mat4::perspective_rh(fov, aspect, 1.0, 1000.0) * sky_view,
@@ -728,6 +735,7 @@ impl Game {
                 }
             }
         }
+        out.extend(self.car_reflections().0);
         // the lights' glows last (additive)
         if let Some(sim) = &self.sim {
             let snap = sim.snapshot();
@@ -768,6 +776,65 @@ impl Game {
     fn car_facets(&self) -> Option<&[Option<crate::ps1::host::CarFacet>]> {
         let f = self.car_facets_override.as_deref().or_else(|| self.sim.as_ref().map(|s| s.snapshot().car_facets.as_slice()))?;
         f.iter().any(Option::is_some).then_some(f)
+    }
+
+    /// The cars' reflections (DrawC_Prim's environment path, flags 9): each polygon of a
+    /// reflection-mapped part again with reflection map A and, for polygons flagged 0x3F3,
+    /// map B (scrolled), blended as the maps' texture pages say. The map coordinates come
+    /// from the vertex normals turned by the camera's yaw around the car (RotMatrix of
+    /// R3DCar_yawCam): u = u0 + 64 + x, v = v0 + |z|. Returns (blended, subtractive).
+    fn car_reflections(&self) -> (Vec<Vertex>, Vec<Vertex>) {
+        let (mut add, mut sub) = (Vec::new(), Vec::new());
+        let (Some(facets), Some(page)) = (self.car_facets(), self.reflections) else { return (add, sub) };
+        let atlas_size = self.atlas_size;
+        for (i, (r, f)) in self.racers.iter().zip(facets).enumerate() {
+            let Some(env) = f.as_ref().and_then(|f| f.env) else { continue };
+            if i == 0 && self.cam_mode == CameraMode::Bumper {
+                continue;
+            }
+            let m = &self.models[r.model];
+            let visible = f.as_ref().map(|f| f.parts.as_slice()).unwrap_or(&[]);
+            let model = Mat4::from_rotation_translation(r.car.orientation(), r.car.pos);
+            let a = env.yaw as f32 / 4096.0 * std::f32::consts::TAU;
+            let (sn, cs) = a.sin_cos();
+            let rgb = [(env.colour & 0xFF) as f32 / 256.0, ((env.colour >> 8) & 0xFF) as f32 / 256.0, ((env.colour >> 16) & 0xFF) as f32 / 256.0];
+            let uv = |u: u8, v: u8| [(page.x as f32 + u as f32 + 0.5) / atlas_size, (page.y as f32 + v as f32 + 0.5) / atlas_size];
+            for (part, &on) in m.parts.iter().zip(visible) {
+                let (Some((normals, flags)), true) = (&part.env, on != 0) else { continue };
+                for (t, &fl) in flags.iter().enumerate() {
+                    let tri = &part.verts[t * 3..t * 3 + 3];
+                    let coords: Vec<(u8, u8, Vec3)> = (0..3)
+                        .map(|k| {
+                            let n = normals[t * 3 + k];
+                            let (nx, nz) = (n[0] as f32, n[2] as f32);
+                            let x = (cs * nx + sn * nz) as i32;
+                            let z = (-sn * nx + cs * nz) as i32;
+                            let p = model.transform_point3(Vec3::from(tri[k].pos));
+                            // a hair towards the camera, over the body it covers
+                            let p = p + (self.cam_pos - p).normalize_or_zero() * 0.01;
+                            (x as u8, z.unsigned_abs() as u8, p)
+                        })
+                        .collect();
+                    for (map, scroll, needs) in [(env.a, 0u8, 0u16), (env.b, env.scroll as u8, 0x3F3)] {
+                        let Some(map) = map else { continue };
+                        if needs != 0 && fl & needs == 0 {
+                            continue;
+                        }
+                        let (u0, v0) = (map[0] as u8, (map[0] >> 8) as u8);
+                        let abr = (map[1] >> 16 >> 5) & 3;
+                        for &(x, z, p) in &coords {
+                            let vert = Vertex {
+                                pos: p.into(),
+                                uv: uv(u0.wrapping_add(64).wrapping_add(x), v0.wrapping_add(scroll).wrapping_add(z)),
+                                color: [rgb[0], rgb[1], rgb[2], if abr == 1 { 0.0 } else { 0.5 }],
+                            };
+                            if abr == 2 { sub.push(vert) } else { add.push(vert) }
+                        }
+                    }
+                }
+            }
+        }
+        (add, sub)
     }
 
     /// The cars' ground shadows (DrawC_ShadowPrim): the "shdw" texture on the quad
