@@ -43,7 +43,13 @@ fn opt<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 }
 
 fn main() -> Result<()> {
-    // the recompiled game code recurses like the original; give it a generous stack
+    // windows (menu, play) must be created on the main thread; races run the original
+    // simulation on its own thread. The research commands run recompiled code directly and
+    // recurse like the original, so they get a generous stack.
+    let windowed = matches!(std::env::args().nth(1).as_deref(), None | Some("menu" | "play"));
+    if windowed {
+        return real_main();
+    }
     std::thread::Builder::new().stack_size(256 << 20).spawn(real_main)?.join().map_err(|_| anyhow::anyhow!("main thread panicked"))?
 }
 
