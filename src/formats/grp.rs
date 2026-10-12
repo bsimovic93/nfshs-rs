@@ -150,7 +150,8 @@ fn strips(body: &[u8], n_rows: u32, out: &mut Vec<Quad>) {
         for i in 0..n {
             let tex = u16le(body, o + 4 + i * 2);
             let i = i as u16;
-            out.push(Quad { tex, v: [row + i, row + i + 1, next + i + 1, next + i], strip: true });
+            // corner order as DrawW_StripDraw_High builds its Trk_Quad
+            out.push(Quad { tex, v: [next + i + 1, next + i, row + i, row + i + 1], strip: true });
         }
         o += len.max(4 + 2 * n);
     }
@@ -229,7 +230,10 @@ impl Track {
                         for s in chunks(g.body) {
                             match s.kind {
                                 0x18 => b.ground.verts = verts(s.body),
-                                0x19 => quads(s.body, cnt(6), &mut b.ground.quads),
+                                // 0x19 holds the chunk's four render quad lists back to back
+                                // (Chunk::renderQuads, sized by 0x1B counts 6, 7, 10 and 11),
+                                // followed by copies of the detail lists (counts 8, 9)
+                                0x19 => quads(s.body, cnt(6) + cnt(7) + cnt(10) + cnt(11), &mut b.ground.quads),
                                 0x1a | 0x25 => strips(s.body, s.count, &mut b.ground.quads),
                                 0x27 => b.detail.verts = verts(s.body),
                                 0x28 => quads(s.body, cnt(8), &mut b.detail.quads),

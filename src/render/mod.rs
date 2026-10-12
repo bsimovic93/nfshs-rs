@@ -85,7 +85,7 @@ impl DynBuf {
 }
 
 /// Winding of the front side of track polygons (with the PS1 X axis mirrored).
-const TRACK_FRONT_FACE: wgpu::FrontFace = wgpu::FrontFace::Cw;
+const TRACK_FRONT_FACE: wgpu::FrontFace = wgpu::FrontFace::Ccw;
 
 pub struct Renderer {
     pub device: wgpu::Device,

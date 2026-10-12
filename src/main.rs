@@ -10,6 +10,7 @@ mod refcmp;
 mod render;
 mod soft;
 
+use anyhow::Context as _;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -112,6 +113,14 @@ fn real_main() -> Result<()> {
                 println!("{:8} {:10} {}", e.lba, e.size, e.path);
                 std::fs::write(&dst, cd.read_file(&e)?)?;
             }
+        }
+        Some("dump-shape") => {
+            // dump-shape FILE.PSH NAME out.png [scale]: one texture shape as PNG
+            let psh = formats::psh::Psh::parse(&std::fs::read(&args[2])?)?;
+            let sh = psh.shapes.iter().find(|s| s.name.eq_ignore_ascii_case(&args[3])).context("no such shape")?;
+            let img = image::RgbaImage::from_raw(sh.width as u32, sh.height as u32, sh.rgba.clone()).context("shape size")?;
+            let k: u32 = args.get(5).and_then(|v| v.parse().ok()).unwrap_or(4);
+            image::imageops::resize(&img, img.width() * k, img.height() * k, image::imageops::FilterType::Nearest).save(&args[4])?;
         }
         Some("dump-psh") => dump_psh(Path::new(&args[2]), Path::new(&args[3]))?,
         Some("dump-track") => dump_track(&args[2], &args[3], Path::new(&args[4]), args.get(5).map(String::as_str))?,

@@ -29,8 +29,17 @@ def main():
     proc = subprocess.Popen([EXE, '-nofullscreen', '-statefile', state, CUE])
     try:
         time.sleep(wait)
+        # DuckStation may show its update notice, which takes the keyboard: close it (= remind later)
+        for h, title in ds.windows_of(proc.pid):
+            if 'updater' in title.lower():
+                ds.user32.PostMessageW(h, 0x0010, 0, 0)
+                time.sleep(0.5)
+        # attach once (this halts the CPU), let it run while driving, then interrupt
+        g = ds.Gdb(timeout=30)
+        g.cmd('?')
+        g.cont()
         if keys:
-            ds.focus('Need for Speed')
+            ds.focus_pid(proc.pid)
             for k in keys:
                 if k.startswith('hold:'):
                     _, key, secs = k.split(':')
@@ -39,10 +48,10 @@ def main():
                     ds.up(key)
                 else:
                     ds.tap(k)
-        g = ds.Gdb(timeout=30)
-        g.cmd('?')  # attaching halts the emulated CPU
+        g.interrupt()
         time.sleep(0.3)
-        dsshot.shot(os.path.join(out, 'window.png'))
+        game = [w for w in ds.windows_of(proc.pid) if 'need for speed' in w[1].lower()]
+        dsshot.capture_to(game[0][0], os.path.join(out, 'window.png'))
         ram = g.read(0x80000000, 0x200000)
         open(os.path.join(out, 'ram.bin'), 'wb').write(ram)
         print(f'captured {out}: window.png, ram.bin ({len(ram)} bytes)')

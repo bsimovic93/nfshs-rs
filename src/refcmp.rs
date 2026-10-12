@@ -87,7 +87,8 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         let row = |i: u32| ram.v3(c + 0xF0 + 12 * i).normalize_or_zero();
         let (right, up, forward) = (row(0), row(1), row(2));
         let m = Mat3::from_cols(-right, up, forward);
-        r.car.pos = ram.v3(c + 0xA0);
+        // model origin at ground level: the body-box centre minus dimension.y along up
+        r.car.pos = ram.v3(c + 0xA0) - up * (ram.i32(c + 0x138) as f32 / 65536.0);
         r.car.rot = Some(Quat::from_mat3(&m).normalize());
         r.car.up = up;
         r.car.yaw = forward.x.atan2(forward.z);
@@ -102,6 +103,43 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     game.tan_half_v = 160.0 / h * 0.75;
     game.cam_mode = if game.racers[0].car.pos.distance(game.cam_pos) < 2.0 { crate::game::CameraMode::Bumper } else { crate::game::CameraMode::Chase };
 
+    // NFSHS_PICK="x0,y0,x1,y1": list the track quads whose centre projects into that screen
+    // rectangle (texture name, material flags, mesh) — for chasing rendering differences
+    if let Ok(pick) = std::env::var("NFSHS_PICK") {
+        let r: Vec<f32> = pick.split(',').filter_map(|v| v.parse().ok()).collect();
+        let vp = game.frame_params(W as f32 / H as f32).view_proj;
+        let psh = crate::formats::psh::Psh::parse(&data.read(&format!("ZTR{track:02}{variant}0.PSH"))?)?;
+        let t = &game.track.track;
+        for (bi, b) in t.blocks.iter().enumerate() {
+            for (mesh, kind) in [(&b.ground, "ground"), (&b.detail, "detail")] {
+                for q in &mesh.quads {
+                    let c = q.v.iter().map(|&i| mesh.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).sum::<Vec3>() / 4.0;
+                    let w = crate::assets::ps1_to_world(b.origin + c);
+                    let p = vp * w.extend(1.0);
+                    if p.w <= 0.1 {
+                        continue;
+                    }
+                    let (sx, sy) = ((p.x / p.w * 0.5 + 0.5) * W as f32, (0.5 - p.y / p.w * 0.5) * H as f32);
+                    if sx >= r[0] && sx < r[2] && sy >= r[1] && sy < r[3] {
+                        let te = t.textures.get(q.tex as usize);
+                        let name = te.and_then(|te| psh.shapes.get(te.shape as usize)).map(|s| s.name.as_str()).unwrap_or("?");
+                        let pts: Vec<Vec3> = q.v.iter().map(|&i| mesh.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).collect();
+                        let edges: Vec<String> = (0..4).map(|k| format!("{:.1}", pts[k].distance(pts[(k + 1) % 4]))).collect();
+                        let shape = te.and_then(|te| psh.shapes.get(te.shape as usize)).map(|s| (s.width, s.height)).unwrap_or((0, 0));
+                        println!("  quad edges {edges:?} (v0->v1, v1->v2, ...), texture {shape:?}, heights {:?}", pts.iter().map(|p| format!("{:.1}", p.y)).collect::<Vec<_>>());
+                        println!(
+                            "block {bi} {kind} strip={} tex {} {name} flag {:02x} uv {:02x} at ({sx:.0},{sy:.0}) dist {:.0}",
+                            q.strip,
+                            q.tex,
+                            te.map(|t| t.mode).unwrap_or(0),
+                            te.map(|t| t.flags).unwrap_or(0),
+                            p.w
+                        );
+                    }
+                }
+            }
+        }
+    }
     let mut r = pollster::block_on(Renderer::new(None, (W, H), &atlas))?;
     r.set_world(&game.track.verts, &game.track.indices);
     let params = game.frame_params(W as f32 / H as f32);

@@ -190,6 +190,8 @@ pub struct CarState {
     pub velocity: [i32; 3],
     /// Rows: right, up, forward (1.0 = 0x10000).
     pub orient: [i32; 9],
+    /// `N.dimension`: half extents of the body box (x, y, z); `position` is its centre.
+    pub dimension: [i32; 3],
     /// Ground speed (m/s, 16.16).
     pub speed: i32,
     pub rpm: i32,
@@ -202,13 +204,14 @@ pub struct CarState {
 impl CarState {
     fn read(m: &mut Mem, car: u32) -> Self {
         let mut v3 = |o: u32| [0, 1, 2].map(|i| m.r32(car + o + 4 * i) as i32);
-        let (position, velocity) = (v3(0xA0), v3(0xAC));
+        let (position, velocity, dimension) = (v3(0xA0), v3(0xAC), v3(0x134));
         let code: String = (0..4).map(|i| m.r8(car + 0x240 + i)).take_while(|&b| b != 0).map(char::from).collect();
         Self {
             addr: car,
             code,
             position,
             velocity,
+            dimension,
             orient: std::array::from_fn(|i| m.r32(car + 0xF0 + 4 * i as u32) as i32),
             speed: m.r32(car + 0xC0) as i32,
             rpm: m.r32(car + 0x468) as i32,

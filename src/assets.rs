@@ -159,8 +159,10 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         } else if fl & 0x08 != 0 {
             pmx = remap(pmx, [1, 3, 0, 2]);
         }
-        // quad vertices go round the quad: 0 = top-left, 1 = top-right, 2 = bottom-right, 3 = bottom-left
-        (rect, [pmx[0], pmx[1], pmx[3], pmx[2]])
+        // DrawW_DrawQuad sends Trk_Quad points 1, 0, 2, 3 as the POLY_GT4's vertices 0..3,
+        // which take the pixmap's UV slots in order: point 0 = top-right, 1 = top-left,
+        // 2 = bottom-left, 3 = bottom-right
+        (rect, [pmx[1], pmx[0], pmx[2], pmx[3]])
     };
     let shade = |s: i16| {
         // vertex colour from the light table: 0x80 per channel is neutral (texture x 1)
@@ -173,7 +175,17 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
     // Emit one mesh, positioned by `place` (local vertex -> world), into verts/indices (+collision).
     let emit = |mesh: &grp::Mesh, place: &dyn Fn(Vec3) -> Vec3, collide: bool, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, tris: &mut Vec<CollTri>| {
         for q in &mesh.quads {
-            let (rect, corners) = quad_uvs(q.tex);
+            let (rect, mut corners) = quad_uvs(q.tex);
+            if q.strip {
+                // NFSHS_STRIP_ORIENT=o (debug): rotate the strip quad's corners by o%4, mirror if o>=4
+                if let Some(o) = std::env::var("NFSHS_STRIP_ORIENT").ok().and_then(|v| v.parse::<usize>().ok()) {
+                    corners.rotate_left(o % 4);
+                    if o >= 4 {
+                        corners.swap(0, 1);
+                        corners.swap(2, 3);
+                    }
+                }
+            }
             let p: Vec<Vec3> = q
                 .v
                 .iter()
@@ -189,10 +201,10 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             }
             let front = [base, base + 1, base + 2, base, base + 2, base + 3];
             let back = [base, base + 2, base + 1, base, base + 3, base + 2];
-            indices.extend_from_slice(if q.strip { &back } else { &front });
+            indices.extend_from_slice(&front);
             // Trk_Material flag 0x10: drawn without the back-face test (DrawW_DrawQuad)
             if track.textures.get(q.tex as usize).is_some_and(|t| t.mode & 0x10 != 0) {
-                indices.extend_from_slice(if q.strip { &front } else { &back });
+                indices.extend_from_slice(&back);
             }
             if collide {
                 for (a, b2, c) in [(0, 1, 2), (0, 2, 3)] {
@@ -257,21 +269,20 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                     pl.raw
                 );
             }
-            let scale = if pl.scale.max_element() > 0.0 { pl.scale } else { Vec3::ONE };
-            if flat_quad {
-                // cut-out tree / sign: rotated to face the camera every frame
-                let mut local = Vec::new();
-                let mut idx = Vec::new();
-                emit(model, &|v| Vec3::new(-v.x, v.y, v.z) * scale, false, &mut local, &mut idx, &mut Vec::new());
-                let tri_verts: Vec<Vertex> = idx.iter().map(|&i| local[i as usize]).collect();
-                sprites.push(Sprite { pos: ps1_to_world(pl.pos), verts: tri_verts });
-            } else {
-                let (pos, (c, sn)) = (pl.pos, pl.rot);
-                let place = move |v: Vec3| {
-                    let v = v * scale;
-                    ps1_to_world(pos + Vec3::new(c * v.x + sn * v.z, v.y, -sn * v.x + c * v.z))
-                };
-                emit(model, &place, false, &mut verts, &mut indices, &mut tris);
+            match placement_transform(pl) {
+                Placement::Billboard(scale) => {
+                    // cut-out tree: rotated to face the camera every frame
+                    let mut local = Vec::new();
+                    let mut idx = Vec::new();
+                    emit(model, &|v| Vec3::new(-v.x, v.y, v.z) * scale, false, &mut local, &mut idx, &mut Vec::new());
+                    let tri_verts: Vec<Vertex> = idx.iter().map(|&i| local[i as usize]).collect();
+                    sprites.push(Sprite { pos: ps1_to_world(pl.pos), verts: tri_verts });
+                }
+                Placement::Fixed(m) => {
+                    let pos = pl.pos;
+                    let place = move |v: Vec3| ps1_to_world(pos + m * v);
+                    emit(model, &place, false, &mut verts, &mut indices, &mut tris);
+                }
             }
         }
     }
@@ -394,6 +405,49 @@ pub struct CarModel {
 
 /// Body parts drawn for the high-detail model (from inspection of the 57-part layout).
 const BODY_PARTS: &[usize] = &[0, 43, 44];
+
+enum Placement {
+    /// Faces the camera (yaw only); scale (width, height, width).
+    Billboard(Vec3),
+    /// Fixed orientation and scale, in PS1 space (applied as M * v).
+    Fixed(glam::Mat3),
+}
+
+/// How DrawW_BuildChunkObjectFacets orients a placed object:
+/// type 1 as is; type 5 by the quaternion at +20 (Quatern_QuatToMat) with column scales at
+/// +28/+30/+32; type 9 facing the camera if byte +5 bit 0 is set, otherwise by the Y angle
+/// at +20 (1024 = 360 degrees), scaled by +24 (x, z) and +22 (y). Scales are 8.8.
+fn placement_transform(pl: &grp::Placement) -> Placement {
+    let r = &pl.raw;
+    let s16 = |o: usize| i16::from_le_bytes([r[o], r[o + 1]]) as f32;
+    let scale = |v: f32| if v == 0.0 { 1.0 } else { v / 256.0 };
+    match pl.kind {
+        5 => {
+            let (x, y, z, w) = (s16(20) / 16384.0, s16(22) / 16384.0, s16(24) / 16384.0, s16(26) / 16384.0);
+            // the game's matrix is the transpose of the textbook quaternion rotation
+            let m = glam::Mat3::from_cols(
+                Vec3::new(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)),
+                Vec3::new(2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)),
+                Vec3::new(2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)),
+            );
+            let sc = Vec3::new(scale(s16(28)), scale(s16(30)), scale(s16(32)));
+            Placement::Fixed(glam::Mat3::from_cols(m.x_axis * sc.x, m.y_axis * sc.y, m.z_axis * sc.z))
+        }
+        9 => {
+            let (w, h) = (scale(s16(24)), scale(s16(22)));
+            if r[5] & 1 != 0 {
+                Placement::Billboard(Vec3::new(w, h, w))
+            } else {
+                let a = s16(20) / 1024.0 * std::f32::consts::TAU;
+                let (sn, c) = a.sin_cos();
+                // xformy: rows (c, 0, -s), (0, 1, 0), (s, 0, c)
+                let m = glam::Mat3::from_cols(Vec3::new(c * w, 0.0, sn * w), Vec3::new(0.0, h, 0.0), Vec3::new(-sn * w, 0.0, c * w));
+                Placement::Fixed(m)
+            }
+        }
+        _ => Placement::Fixed(glam::Mat3::IDENTITY),
+    }
+}
 
 pub fn load_car(data: &GameData, atlas: &mut Atlas, viv_name: &str) -> Result<CarModel> {
     let viv = Viv::parse(&data.read(viv_name)?)?;

@@ -231,7 +231,11 @@ pub fn pose(c: &CarState) -> Pose {
     // model space: +Y up, +Z forward and (mirrored) +X to the car's left
     let m = Mat3::from_cols(-right, up, forward);
     let rot = Quat::from_mat3(&orthonormal(m));
-    Pose { pos: v3(c.position), rot, forward: forward.normalize_or(Vec3::Z), up: up.normalize_or(Vec3::Y), vel: v3(c.velocity) }
+    // the car models' origin is at ground level, the simulation's position is the centre of
+    // the body box (dimension.y above the wheels' contact points)
+    let lift = c.dimension[1] as f32 / 65536.0;
+    let up_n = up.normalize_or(Vec3::Y);
+    Pose { pos: v3(c.position) - up_n * lift, rot, forward: forward.normalize_or(Vec3::Z), up: up.normalize_or(Vec3::Y), vel: v3(c.velocity) }
 }
 
 /// Gram-Schmidt on the fixed-point matrix so it is a proper rotation.

@@ -35,6 +35,11 @@ def capture(hwnd):
     rgb[0::3] = b[2::4]; rgb[1::3] = b[1::4]; rgb[2::3] = b[0::4]
     return w, h, bytes(rgb)
 
+def capture_to(hwnd, out):
+    w, h, rgb = capture(hwnd)
+    png(out, w, h, rgb)
+    return out, w, h
+
 def shot(out, title='Need for Speed - High Stakes'):
     wins = [x for x in ds.find_window(title) if x[1] == title] or ds.find_window(title)
     w, h, rgb = capture(wins[0][0])

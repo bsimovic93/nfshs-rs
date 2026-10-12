@@ -117,6 +117,38 @@ def focus(title_part='Need for Speed'):
     time.sleep(0.15)
     return h
 
+def windows_of(pid):
+    """Visible top-level windows of a process: [(hwnd, title)]."""
+    found = []
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def cb(h, _):
+        p = wt.DWORD()
+        user32.GetWindowThreadProcessId(h, ctypes.byref(p))
+        n = user32.GetWindowTextLengthW(h)
+        if p.value == pid and n and user32.IsWindowVisible(h):
+            b = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(h, b, n + 1)
+            found.append((h, b.value))
+        return True
+    user32.EnumWindows(cb, 0)
+    return found
+
+def focus_pid(pid):
+    """Bring the process's main window to the foreground (Alt tap lets SetForegroundWindow work)."""
+    w = [x for x in windows_of(pid) if 'need for speed' in x[1].lower()] or windows_of(pid)
+    if not w:
+        raise RuntimeError(f'no window for pid {pid}')
+    h = w[0][0]
+    user32.ShowWindow(h, 9)
+    if user32.GetForegroundWindow() != h:
+        # an Alt tap lets another process take the foreground; never send it to DuckStation
+        # itself, where it would open the menu bar
+        _key(0x12, False)
+        _key(0x12, True)
+        user32.SetForegroundWindow(h)
+    time.sleep(0.3)
+    return h
+
 def down(*keys):
     for k in keys:
         _key(VK[k], False)
