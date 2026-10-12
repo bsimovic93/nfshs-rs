@@ -39,7 +39,9 @@ pub fn ps1_color(c: u16) -> [u8; 4] {
     let r = (c & 31) as u32;
     let g = ((c >> 5) & 31) as u32;
     let b = ((c >> 10) & 31) as u32;
-    let a = if c == 0 { 0 } else { 255 };
+    // 0x0000 is transparent; texels with the STP bit (0x8000) blend in semi-transparent
+    // primitives, kept as alpha 128
+    let a = if c == 0 { 0 } else if c & 0x8000 != 0 { 128 } else { 255 };
     [(r * 255 / 31) as u8, (g * 255 / 31) as u8, (b * 255 / 31) as u8, a]
 }
 
@@ -59,7 +61,7 @@ impl Psh {
         Ok(Self { shapes })
     }
 
-    fn parse_shape(d: &[u8], off: usize, name: String) -> Result<Shape> {
+    pub fn parse_shape(d: &[u8], off: usize, name: String) -> Result<Shape> {
         let kind = d[off];
         let next = (u32le(d, off) >> 8) as usize;
         let w = u16le(d, off + 4);

@@ -49,6 +49,8 @@ pub struct FrameInfo {
     pub display: [u16; 4],
     /// See [`GameHost::view_env`].
     pub view_env: [i32; 9],
+    /// The HUD font's palette as the game uploaded it (CLUT of the digits' glyphs).
+    pub font_clut: [u16; 16],
 }
 
 /// Paces the original main loop against the virtual clock: game time only passes while the
@@ -66,12 +68,20 @@ pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
 /// `DRender_tView` the game renders the player view with (id, player, DRender_tCalcView).
 pub const RENDER_VIEW: u32 = 0x8011_8234;
 const RENDER_START_WORLD_VIEW: u32 = 0x800B_3EE4;
+const DASHHUD_CHECK_WRONG_WAY: u32 = 0x8009_BAC4;
+const DASHHUD_HUD_CALC: u32 = 0x8009_BB34;
 /// Virtual clock units per 128 Hz timer tick and per 60 Hz field.
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
 
 impl GameHost {
+    /// 16 palette entries of CLUT id `clut` from VRAM.
+    fn clut(&self, clut: u32) -> [u16; 16] {
+        let (x, y) = ((clut & 0x3F) as usize * 16, ((clut >> 6) & 0x1FF) as usize);
+        std::array::from_fn(|i| self.vram.get(y * VRAM_W + x + i).copied().unwrap_or(0))
+    }
+
     /// Move the virtual clock forward, queueing the timer interrupts that fall in between.
     fn advance_to(&mut self, c: &mut Cpu, t: u64) {
         c.pending_ticks += (t / TICK - self.clock / TICK) as u32;
@@ -333,7 +343,8 @@ impl Host for GameHost {
                     }
                     self.frame.last_top = self.clock;
                     let field = self.clock / FIELD;
-                    match self.frame.on_frame.as_mut().and_then(|f| f(c, FrameInfo { field, display: self.display, view_env: self.view_env })) {
+                    let info = FrameInfo { field, display: self.display, view_env: self.view_env, font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16) };
+                    match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
                         None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
                         Some(buttons) => {
                             self.frame.frames_run += 1;
@@ -389,6 +400,10 @@ impl Host for GameHost {
                 c.m.w32(RENDER_VIEW, a0);
                 c.m.w32(RENDER_VIEW + 4, a1);
                 c.call_nested(RENDER_START_WORLD_VIEW, &[a0]);
+                // the HUD's values (speed in display units, gear, times, position): game logic
+                // the original runs while rendering the HUD
+                c.call_nested(DASHHUD_CHECK_WRONG_WAY, &[a1]);
+                c.call_nested(DASHHUD_HUD_CALC, &[a1]);
                 let g = |r: usize| c.gte_read(32 + r) as i32;
                 self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
                 0

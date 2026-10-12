@@ -5,6 +5,7 @@ pub mod car;
 pub mod collision;
 pub mod hud;
 pub mod original;
+pub mod ps1hud;
 
 use crate::assets::{self, Atlas, CarModel, GameData, TrackAssets, Vertex};
 use crate::render::FrameParams;
@@ -106,6 +107,8 @@ pub struct Game {
     pub night: bool,
     /// The recompiled original simulation, when it drives this race.
     pub sim: Option<original::OriginalSim>,
+    /// The original HUD (when the simulation provides its layout).
+    pub ps1hud: Option<ps1hud::Ps1Hud>,
 }
 
 const DT: f32 = 1.0 / 120.0;
@@ -217,8 +220,15 @@ impl Game {
                 _ => 1.0,
             },
             night: cfg.variant == "N",
+            ps1hud: None,
             sim,
         };
+        if let Some(setup) = game.sim.as_ref().and_then(|s| s.snapshot().hud.clone()) {
+            match ps1hud::Ps1Hud::new(data, atlas, setup, cfg.track) {
+                Ok(h) => game.ps1hud = Some(h),
+                Err(e) => log::warn!("original HUD unavailable: {e:#}"),
+            }
+        }
         if game.sim.is_some() {
             game.phase = Phase::Intro;
             game.sync_original(0.0);
@@ -659,6 +669,10 @@ impl Game {
     }
 
     pub fn hud(&self, w: f32, h: f32) -> Vec<Vertex> {
+        if let (Some(hud), Some(sim)) = (&self.ps1hud, &self.sim) {
+            let s = sim.snapshot();
+            return hud.vertices(&s.dash, &s.hud_layout, (s.sim_ticks >> 4) & 1 != 0, w, h);
+        }
         let mut out = Vec::new();
         let s = (h / 240.0).max(1.0).floor();
         let p = &self.racers[0];

@@ -47,7 +47,7 @@ fn vs_main(v: VIn) -> VOut {
 @fragment
 fn fs_main(i: VOut) -> @location(0) vec4<f32> {
     let t = textureSample(atlas, samp, i.uv);
-    if (t.a < 0.5) {
+    if (t.a < 0.25) {
         discard;
     }
     var vc = i.color.rgb;
@@ -73,7 +73,13 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
         let f = clamp((i.dist - g.fog.x) / max(g.fog.y - g.fog.x, 1.0), 0.0, 1.0);
         c = mix(c, g.fog_color.rgb, f);
     }
-    return vec4<f32>(c, i.color.a);
+    // PS1 semi-transparency (mode 0, half background + half foreground): primitives flagged
+    // semi-transparent (vertex alpha < 0.75) blend only their STP texels (alpha 128)
+    var a = 1.0;
+    if (i.color.a < 0.75 && t.a < 0.75) {
+        a = 0.5;
+    }
+    return vec4<f32>(c, a);
 }
 
 // Fullscreen sky gradient.

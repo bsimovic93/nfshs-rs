@@ -1,0 +1,341 @@
+//! The in-race HUD as the original draws it (Hud_RenderHudView, Hud_BuildNumbers0,
+//! Hud_BuildNumbers), rebuilt: the layout Hud_Init prepared (sprite slots, panel quads,
+//! shape table) comes from the simulation, the per-frame values from DashHUD_gInfo, and the
+//! drawing uses the original ZHUD.PSH shapes and ZFONT.PFN glyphs. Coordinates are the PS1's
+//! 320x240 screen.
+
+use crate::assets::{Atlas, GameData, Rect, Vertex};
+use crate::formats::psh::Psh;
+use crate::ps1::race::HudSetup;
+use anyhow::{Context, Result};
+use glam::Vec2;
+use std::sync::Arc;
+
+/// HudPmx_InitTextures' load order; `HudPmx_gShapes[i]` is `SHAPE_NAMES[i]`.
+const SHAPE_NAMES: &[&str] = &[
+    "cmra", "cam0", "cam1", "cam2", "cam3", "cam4", "cam5", "cam6", "cam7", "cam8", "cam9", "ca10", "ca11", "ca12", "crn1", "crn2", "crn3", "crn4",
+    "arrl", "arrr", "mwt1", "mwt2", "mwb1", "mwb2", "msid", "msi2", "kmhh", "mphh", "gea1", "gea2", "gea3", "gea4", "gea5", "gea6", "smln", "smlr",
+    "pau0", "pau1", "pau2", "pau3", "rwid", "rwi2", "rsid", "rsi2", "big0", "big1", "big2", "big3", "big4", "big5", "big6", "big7", "big8",
+    "big9", "sml1", "sml2", "sml3", "sml4", "sml5", "sml6", "321d", "321l", "mpbt", "smlx", "sml+", "sml-", "sml:", "sml\"", "sml'", "sml,",
+    "sml.", "sml/", "ahyp", "acol", "a192", "a193", "a194", "wrng", "a196", "a197", "a199", "a200", "a201", "a203", "a204", "a205", "a206",
+    "a207", "a209", "a210", "a211", "a212", "a214", "a217", "a218", "a219", "a220", "A229", "time", "timb", "laps", "ejct", "play", "paus",
+    "resg", "rad0", "rad1", "s1/4", "s1/2", "spd2", "spd1", "plus", "minu", "plr1", "oppn", "barl", "barr", "barb", "baXl", "baXr", "tacc",
+    "tpno",
+];
+const BIG0: usize = 44;
+const SML0: usize = 53; // sml1 = 54
+
+/// A texture area in VRAM terms (u, v, clut) and where its picture is in the atlas.
+#[derive(Clone, Copy)]
+struct Tex {
+    u: u16,
+    v: u16,
+    clut: u16,
+    w: u16,
+    h: u16,
+    rect: Rect,
+}
+
+pub struct Ps1Hud {
+    setup: Arc<HudSetup>,
+    textures: Vec<Tex>,
+    /// `HudPmx_gShapes`: (u0, v0, clut, w, h).
+    shapes: Vec<(u16, u16, u16, u16, u16)>,
+    /// 1x1 white with the semi-transparency bit (alpha 128).
+    white_semi: Rect,
+    atlas_size: f32,
+}
+
+fn u16le(d: &[u8], o: usize) -> u16 {
+    u16::from_le_bytes([d[o], d[o + 1]])
+}
+fn i16le(d: &[u8], o: usize) -> i16 {
+    i16::from_le_bytes([d[o], d[o + 1]])
+}
+fn i32le(d: &[u8], o: usize) -> i32 {
+    i32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
+}
+
+/// One 2D primitive in PS1 screen space.
+struct Quad {
+    pts: [Vec2; 4],
+    uv: [Vec2; 4],
+    rect: Rect,
+    colors: [[u8; 3]; 4],
+    textured: bool,
+    semi: bool,
+}
+
+impl Ps1Hud {
+    pub fn new(data: &GameData, atlas: &mut Atlas, setup: Arc<HudSetup>, track: u32) -> Result<Self> {
+        let psh = Psh::parse(&data.read("ZHUD.PSH")?)?;
+        let shapes: Vec<(u16, u16, u16, u16, u16)> = setup
+            .shapes
+            .chunks_exact(20)
+            .map(|e| (e[0] as u16, e[1] as u16, u16le(e, 2), u16le(e, 16), u16le(e, 18)))
+            .collect();
+        // HudPmx_gShapes follows the load order in SHAPE_NAMES, except that shapes missing from
+        // the file are replaced by "wrng" (36x36) and the track map comes late: align by size
+        let size = |n: &str| psh.shapes.iter().find(|s| s.name == n).map(|s| (s.width, s.height));
+        let mut names: Vec<Option<String>> = Vec::new();
+        let mut j = 0;
+        for &(_, _, _, w, h) in &shapes {
+            if w == 0 {
+                names.push(None);
+                continue;
+            }
+            match (j..(j + 16).min(SHAPE_NAMES.len())).find(|&k| size(SHAPE_NAMES[k]) == Some((w, h))) {
+                Some(k) => {
+                    names.push(Some(SHAPE_NAMES[k].to_string()));
+                    j = k + 1;
+                }
+                None if (w, h) == (36, 36) => names.push(Some("wrng".into())),
+                None if (w, h) == (48, 48) => names.push(Some(format!("mp{track:02}"))),
+                None => names.push(None),
+            }
+        }
+        let mut textures = Vec::new();
+        for (&(u, v, clut, w, h), name) in shapes.iter().zip(&names) {
+            let Some(name) = name else { continue };
+            let Some(sh) = psh.shapes.iter().find(|s| s.name.eq_ignore_ascii_case(name)) else { continue };
+            if sh.width != w || sh.height != h {
+                continue;
+            }
+            let rect = atlas.add(w as u32, h as u32, &sh.rgba);
+            textures.push(Tex { u, v, clut, w, h, rect });
+        }
+        // the font (ZFONT.PFN): glyph table at 32, one 4-bit picture at 0x690; it sits 128
+        // lines down in its texture page, with the digits' palette
+        let pfn = data.read("ZFONT.PFN")?;
+        let count = u16le(&pfn, 10) as usize;
+        let img_at = i32le(&pfn, 28) as usize;
+        // a 4-bit picture after a 16-byte shape header; its palette is the one the game built
+        let (fw, fh) = (u16le(&pfn, img_at + 4) as usize, u16le(&pfn, img_at + 6) as usize);
+        let pixels = pfn.get(img_at + 16..img_at + 16 + fw * fh / 2).context("font picture")?;
+        let rgba: Vec<u8> = (0..fw * fh)
+            .flat_map(|i| {
+                let b = pixels[i / 2];
+                let idx = if i % 2 == 0 { b >> 4 } else { b & 15 };
+                crate::formats::psh::ps1_color(setup.font_clut[idx as usize])
+            })
+            .collect();
+        let font_rect = atlas.add(fw as u32, fh as u32, &rgba);
+        let font_clut = (setup.number_uv[0] >> 16) as u16;
+        for i in 0..count {
+            let g = &pfn[32 + 11 * i..32 + 11 * i + 11];
+            let (w, h, u, v) = (g[2] as u16, g[3] as u16, u16le(g, 4), u16le(g, 6));
+            if w == 0 || h == 0 {
+                continue;
+            }
+            let rect = Rect { x: font_rect.x + u as u32, y: font_rect.y + v as u32, w: w as u32, h: h as u32 };
+            textures.push(Tex { u, v: v + 128, clut: font_clut, w, h, rect });
+        }
+        let white_semi = atlas.add(1, 1, &[255, 255, 255, 128]);
+        Ok(Self { setup, textures, shapes, white_semi, atlas_size: atlas.size as f32 })
+    }
+
+    fn find(&self, u: u16, v: u16, clut: u16) -> Option<(Tex, u16, u16)> {
+        self.textures.iter().find(|t| t.clut == clut && u >= t.u && u < t.u + t.w && v >= t.v && v < t.v + t.h).map(|t| (*t, u - t.u, v - t.v))
+    }
+
+    fn slot(&self, i: usize) -> &[u8] {
+        &self.setup.slots[i * 20..i * 20 + 20]
+    }
+
+    /// A SPRT slot as Hud_Init (and the per-frame code) left it; `uv_clut` overrides its texture.
+    fn sprite(&self, out: &mut Vec<Quad>, i: usize, uv_clut: Option<u32>) {
+        let s = self.slot(i);
+        let code = s[7];
+        let (x, y) = (i16le(s, 8) as f32, i16le(s, 10) as f32);
+        let w = u16le(s, 16);
+        let h = u16le(s, 18);
+        let (u, v, clut) = match uv_clut {
+            Some(t) => ((t & 0xFF) as u16, ((t >> 8) & 0xFF) as u16, (t >> 16) as u16),
+            None => (s[12] as u16, s[13] as u16, u16le(s, 14)),
+        };
+        self.textured(out, x, y, w, h, u, v, clut, [[s[4], s[5], s[6]]; 4], code & 2 != 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn textured(&self, out: &mut Vec<Quad>, x: f32, y: f32, w: u16, h: u16, u: u16, v: u16, clut: u16, colors: [[u8; 3]; 4], semi: bool) {
+        let Some((t, du, dv)) = self.find(u, v, clut) else {
+            if std::env::var_os("NFSHS_HUD_DEBUG").is_some() {
+                println!("hud: no texture at uv ({u},{v}) clut {clut:04x} ({w}x{h} at {x},{y})");
+            }
+            return;
+        };
+        let (w, h) = (w.min(t.w - du) as f32, h.min(t.h - dv) as f32);
+        let (u0, v0) = (du as f32, dv as f32);
+        out.push(Quad {
+            pts: [Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)],
+            uv: [Vec2::new(u0, v0), Vec2::new(u0 + w, v0), Vec2::new(u0 + w, v0 + h), Vec2::new(u0, v0 + h)],
+            rect: t.rect,
+            colors,
+            textured: true,
+            semi,
+        });
+    }
+
+    /// Shape `i` of HudPmx_gShapes at (x, y), as a gouraud quad (Hud_BuildGT4).
+    fn shape(&self, out: &mut Vec<Quad>, i: usize, x: f32, y: f32, colors: [[u8; 3]; 4]) {
+        let Some(&(u, v, clut, w, h)) = self.shapes.get(i) else { return };
+        self.textured(out, x, y, w, h, u, v, clut, colors, false);
+    }
+
+    fn panel(&self, out: &mut Vec<Quad>, k: usize) {
+        // POLY_G4: tag, (rgb code, xy) x 4
+        let p = &self.setup.panels[k * 36..k * 36 + 36];
+        let pt = |j: usize| Vec2::new(i16le(p, 8 + 8 * j) as f32, i16le(p, 10 + 8 * j) as f32);
+        let col = |j: usize| [p[4 + 8 * j], p[5 + 8 * j], p[6 + 8 * j]];
+        let pts = [pt(0), pt(1), pt(3), pt(2)];
+        out.push(Quad { pts, uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [col(0), col(1), col(3), col(2)], textured: false, semi: p[7] & 2 != 0 });
+    }
+
+    fn cap(&self, out: &mut Vec<Quad>, k: usize) {
+        // POLY_F4: tag, rgb code, xy x 4
+        let p = &self.setup.caps[k * 24..k * 24 + 24];
+        let pt = |j: usize| Vec2::new(i16le(p, 8 + 4 * j) as f32, i16le(p, 10 + 4 * j) as f32);
+        let c = [p[4], p[5], p[6]];
+        out.push(Quad { pts: [pt(0), pt(1), pt(3), pt(2)], uv: [Vec2::ZERO; 4], rect: self.white_semi, colors: [c; 4], textured: false, semi: p[7] & 2 != 0 });
+    }
+
+    /// Hud_BuildETimeString ("MM:SS.hh", 8 slots) / Hud_BuildTimeString ("M:SS.hh", 7 slots):
+    /// only the digits' glyphs change; the time is in 1/64 s.
+    fn time(&self, out: &mut Vec<Quad>, first: usize, t: i32, long: bool) {
+        let t = t.max(0);
+        let secs = t >> 6;
+        let hund = ((t - (secs << 6)) * 100) >> 6;
+        let (m, s) = (secs / 60, secs % 60);
+        let digits: Vec<Option<i32>> = if long {
+            vec![Some(m / 10 % 10), Some(m % 10), None, Some(s / 10), Some(s % 10), None, Some(hund / 10), Some(hund % 10)]
+        } else {
+            vec![Some(m % 10), None, Some(s / 10), Some(s % 10), None, Some(hund / 10), Some(hund % 10)]
+        };
+        for (k, d) in digits.iter().enumerate() {
+            let uv = d.map(|d| self.setup.number_uv[d as usize]);
+            self.sprite(out, first + k, uv);
+        }
+    }
+
+    /// The HUD for player 1 from this frame's DashHUD_gInfo.
+    fn build(&self, dash: &[u8], layout: &[u8], blink: bool) -> Vec<Quad> {
+        let mut out = Vec::new();
+        if dash.len() < 0x60 || layout.len() < 0x40 {
+            return out;
+        }
+        let d = |o: usize| i32le(dash, o);
+        let l = |o: usize| i16le(layout, o) as f32;
+        let ci = |o: usize| i32le(&self.setup.car_info, o);
+        // Hud_BuildNumbers0: race timer
+        if ci(0x84) != 0 {
+            self.panel(&mut out, 0);
+            self.cap(&mut out, 0);
+            for k in 4..6 {
+                self.sprite(&mut out, k, None);
+            }
+            if d(20) == 0 || !blink {
+                self.time(&mut out, 12, d(52), true);
+            }
+        }
+        // Hud_BuildNumbers: lap counter (only for races of more than one lap)
+        if ci(0x88) != 0 && d(60) != 1 {
+            self.panel(&mut out, 1);
+            self.cap(&mut out, 1);
+            for k in 6..8 {
+                self.sprite(&mut out, k, None);
+            }
+            self.sprite(&mut out, 20, Some(self.setup.number_uv[d(56).clamp(0, 9) as usize]));
+            self.sprite(&mut out, 21, None);
+            self.sprite(&mut out, 22, Some(self.setup.number_uv[d(60).clamp(0, 9) as usize]));
+        }
+        // best lap
+        let best = d(92);
+        if ci(0x84) != 0 && best != 0 && best <= 0x95FF && d(60) != 1 {
+            self.panel(&mut out, 3);
+            self.cap(&mut out, 2);
+            for k in 8..10 {
+                self.sprite(&mut out, k, None);
+            }
+            self.time(&mut out, 23, best, false);
+        }
+        // race position "p/n"
+        let (pos, cars) = (d(84), d(88));
+        if ci(0x8C) != 0 && cars >= 2 {
+            let w = |i: usize| self.shapes.get(i).map(|s| s.3 as f32).unwrap_or(0.0);
+            let big = BIG0 + pos.clamp(0, 9) as usize;
+            let x = l(56) + l(40) + w(BIG0) - 2.0 - w(big);
+            let s = self.slot(37);
+            if let Some(&(u, v, clut, sw, sh)) = self.shapes.get(big) {
+                self.textured(&mut out, x, i16le(s, 10) as f32, sw, sh, u, v, clut, [[s[4], s[5], s[6]]; 4], s[7] & 2 != 0);
+            }
+            self.sprite(&mut out, 38, None);
+            let small = SML0 + cars.clamp(1, 6) as usize;
+            let s = self.slot(39);
+            if let Some(&(u, v, clut, sw, sh)) = self.shapes.get(small) {
+                self.textured(&mut out, i16le(s, 8) as f32, i16le(s, 10) as f32, sw, sh, u, v, clut, [[s[4], s[5], s[6]]; 4], s[7] & 2 != 0);
+            }
+        }
+        // speedometer: units, gear and the big digits
+        if ci(0x78) != 0 {
+            self.sprite(&mut out, if ci(0x70) == 0 { 50 } else { 49 }, None);
+            let gear = d(72);
+            let slot = match gear {
+                0 => 48,
+                1 => 47,
+                g => (39 + g).clamp(41, 46) as usize,
+            };
+            self.sprite(&mut out, slot, None);
+            // speed in display units (rmult of the unit factor and the 16.16 speed)
+            let speed = ((ci(0x74) as i64 * d(76) as i64) >> 16) as i32;
+            let n = (speed.max(0) >> 16).min(999);
+            let (h, t, o) = (n / 100, n / 10 % 10, n % 10);
+            let w = |i: usize| self.shapes.get(i).map(|s| s.3 as f32).unwrap_or(0.0);
+            let step = w(BIG0) + 1.0;
+            let mut x = l(4) + l(48) + 4.0 + 2.0 * step;
+            let y = l(6) + l(50);
+            let grad = [[0xC8; 3], [0xC8; 3], [0x50; 3], [0x50; 3]];
+            self.shape(&mut out, BIG0 + o as usize, x, y, grad);
+            x -= match t {
+                1 => ((step + w(BIG0 + 1)) as i32 >> 1) as f32,
+                7 => ((step + w(BIG0 + 7)) as i32 >> 1) as f32,
+                _ => step,
+            };
+            if h != 0 || t != 0 {
+                self.shape(&mut out, BIG0 + t as usize, x, y, grad);
+            }
+            if t == 1 {
+                x -= step - ((step + w(BIG0 + 1)) as i32 >> 1) as f32;
+            }
+            x = x - 1.0 - w(BIG0 + h as usize);
+            if h != 0 {
+                self.shape(&mut out, BIG0 + h as usize, x, y, grad);
+            }
+        }
+        out
+    }
+
+    /// Vertices for the HUD, mapping the PS1 screen (320x240) into a `w` x `h` window.
+    pub fn vertices(&self, dash: &[u8], layout: &[u8], blink: bool, w: f32, h: f32) -> Vec<Vertex> {
+        let atlas_uv = |r: Rect, t: Vec2| [(r.x as f32 + t.x) / self.atlas_size, (r.y as f32 + t.y) / self.atlas_size];
+        let quads = self.build(dash, layout, blink);
+        // 4:3 area centred in the window
+        let scale = (h / 240.0).min(w / 320.0);
+        let ox = (w - 320.0 * scale) / 2.0;
+        let oy = (h - 240.0 * scale) / 2.0;
+        let mut v = Vec::with_capacity(quads.len() * 6);
+        for q in quads {
+            for k in [0, 1, 2, 0, 2, 3] {
+                let p = q.pts[k];
+                let c = q.colors[k];
+                // textured: colour / 128 modulates the texel (x2 in the shader); flat: the colour itself
+                let div = if q.textured { 256.0 } else { 510.0 };
+                v.push(Vertex {
+                    pos: [ox + p.x * scale, oy + p.y * scale, 0.0],
+                    uv: atlas_uv(q.rect, if q.textured { q.uv[k] } else { Vec2::new(0.5, 0.5) }),
+                    color: [c[0] as f32 / div, c[1] as f32 / div, c[2] as f32 / div, if q.semi { 0.5 } else { 1.0 }],
+                });
+            }
+        }
+        v
+    }
+}

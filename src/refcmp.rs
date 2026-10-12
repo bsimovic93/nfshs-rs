@@ -143,7 +143,21 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     let mut r = pollster::block_on(Renderer::new(None, (W, H), &atlas))?;
     r.set_world(&game.track.verts, &game.track.indices);
     let params = game.frame_params(W as f32 / H as f32);
-    let mine = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &game.hud(W as f32, H as f32));
+    // the HUD with the emulator's values for that frame
+    let hud = match &game.ps1hud {
+        Some(h) => {
+            let dash: Vec<u8> = (0..0x80u32).map(|i| ram.0[((0x8011_39E8u32 + i) & 0x1F_FFFF) as usize]).collect();
+            let lp = ram.i32(0x8013_D83C + 6352) as u32;
+            let layout: Vec<u8> = (0..0x40u32).map(|i| ram.0[((lp + i) & 0x1F_FFFF) as usize]).collect();
+            let counter = ram.i32(0x8011_F368);
+            h.vertices(&dash, &layout, (counter >> 4) & 1 != 0, W as f32, H as f32)
+        }
+        None => game.hud(W as f32, H as f32),
+    };
+    let mine = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
+    // DuckStation shows the picture with its overscan crop (CropMode = Overscan): rows 8..232
+    // of the 240-line frame. Crop ours the same way so both are the same 224 lines, at 320x240.
+    let mine = imageops::resize(&imageops::crop_imm(&mine, 0, 8, W, 224).to_image(), W, H, imageops::FilterType::Nearest);
     mine.save(dir.join("mine.png"))?;
 
     let reference = reference_picture(&image::open(dir.join("window.png"))?.to_rgba8());

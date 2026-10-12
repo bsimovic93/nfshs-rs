@@ -38,6 +38,8 @@ pub mod addr {
     pub const CAMERA_ZOOM: u32 = 0x8013_DAD0;
     /// `Chunk_lightTable`: the track's vertex colours (u32 RGB, indexed by the vertex "shade").
     pub const LIGHT_TABLE: u32 = 0x8013_DB0C;
+    /// `DashHUD_gInfo`: the HUD's values for this frame (computed by DashHUD_HUDCalc).
+    pub const DASHHUD: u32 = 0x8011_39E8;
     /// `simGlobal.counter`: simulation time in 128 Hz ticks (physics runs on even counts).
     pub const SIM_COUNTER: u32 = 0x8011_F368;
 }
@@ -263,6 +265,44 @@ impl SkyData {
     }
 }
 
+/// The HUD's pre-built data for player 1: sprite slots, panel quads, the HUD shape table,
+/// the digit glyph table and the car's HUD flags (`GameSetup_tCarData` +0x70..+0x8C).
+#[derive(Clone, Debug, Default)]
+pub struct HudSetup {
+    /// `*(gp + 6356)`: 64 SPRT slots of 20 bytes.
+    pub slots: Vec<u8>,
+    /// Gouraud panel quads (POLY_G4, 36 bytes each) and their flat end caps (POLY_F4, 24 bytes).
+    pub panels: Vec<u8>,
+    pub caps: Vec<u8>,
+    /// `HudPmx_gShapes`: 140 entries (Draw_tPixMap + width, height).
+    pub shapes: Vec<u8>,
+    /// `HudPmx_gHudNumberUV`: uv+clut word of the digits 0..9.
+    pub number_uv: [u32; 10],
+    /// The font's palette (the PFN picture has none; the game builds it).
+    pub font_clut: [u16; 16],
+    /// GameSetup carInfo[0].
+    pub car_info: Vec<u8>,
+}
+
+impl HudSetup {
+    pub fn read(m: &mut Mem, font_clut: [u16; 16]) -> Option<Self> {
+        let slots = m.r32(addr::GP + 6356);
+        if slots == 0 {
+            return None;
+        }
+        let bytes = |m: &mut Mem, a: u32, n: u32| (0..n).map(|i| m.r8(a + i)).collect::<Vec<u8>>();
+        Some(Self {
+            slots: bytes(m, slots, 64 * 20),
+            panels: bytes(m, 0x8013_FA38, 4 * 36),
+            caps: bytes(m, 0x8013_F758, 4 * 24),
+            shapes: bytes(m, 0x8011_1F5C, 140 * 20),
+            number_uv: std::array::from_fn(|i| m.r32(0x8011_1F34 + 4 * i as u32)),
+            car_info: bytes(m, addr::GAMESETUP + 0x3D4, 0xB4),
+            font_clut,
+        })
+    }
+}
+
 /// Simulation state at the top of a frame.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
@@ -284,6 +324,11 @@ pub struct Snapshot {
     pub camera_mode: i16,
     /// Sky and horizon set-up.
     pub sky: Option<SkyData>,
+    /// HUD inputs: `DashHUD_gInfo` (0x80 bytes) and the HUD layout record (0x40 bytes).
+    pub dash: Vec<u8>,
+    pub hud_layout: Vec<u8>,
+    /// The HUD as Hud_Init built it (read once, see [`HudSetup`]).
+    pub hud: Option<std::sync::Arc<HudSetup>>,
     /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
     pub light_table: Vec<u32>,
     /// The view's GTE environment (far colour, depth cue, H, back colour); see
@@ -325,6 +370,12 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         projection: c.m.r32(addr::CAMERA_ZOOM),
         view_env: info.view_env,
         sky: SkyData::read(&mut c.m),
+        hud: HudSetup::read(&mut c.m, info.font_clut).map(std::sync::Arc::new),
+        dash: (0..0x80).map(|i| c.m.r8(addr::DASHHUD + i)).collect(),
+        hud_layout: {
+            let l = c.m.r32(addr::GP + 6352);
+            if l == 0 { Vec::new() } else { (0..0x40).map(|i| c.m.r8(l + i)).collect() }
+        },
         light_table: {
             let t = c.m.r32(addr::LIGHT_TABLE);
             if t == 0 { Vec::new() } else { (0..256).map(|i| c.m.r32(t + 4 * i)).collect() }
