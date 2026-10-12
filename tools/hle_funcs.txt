@@ -138,3 +138,6 @@
 800fc7cc MemCardDeleteFile
 800fc988 MemCardFormat
 800f08bc PadInfoMode
+8004e74c front end shape emitter (quads drawn by the host)
+8004f12c PSXDrawSquare
+8004f3b8 PSXDrawTransSquare

@@ -16,6 +16,10 @@ pub struct GameHost {
     mounts: Vec<(u32, Vec<(String, Vec<u8>)>)>,
     next_handle: u32,
     memcard: super::memcard::MemCard,
+    /// Which part of the game is running (switched by the hooks on their entry points).
+    pub mode: Mode,
+    /// PS1_CALLLOG=addr,addr,...: calls the host sees that are logged (diagnostics).
+    call_log: Option<Vec<u32>>,
     /// The EA file layer's asynchronous operations (FILE_open, FILE_read, ...): they complete
     /// at once; id -> (result, user data).
     file_ops: HashMap<u32, (u32, u32)>,
@@ -37,6 +41,8 @@ pub struct GameHost {
     pub log: Vec<String>,
     /// 1024x512 16-bit VRAM, filled by the game's LoadImage/ClearImage/MoveImage.
     pub vram: Vec<u16>,
+    vram_dirty: bool,
+    vram_shared: Option<std::sync::Arc<Vec<u16>>>,
     /// Controller receive buffers registered with PadInitDirect (port 1, port 2).
     pub pad_buffers: [u32; 2],
     /// Callbacks the game registered (vsync, draw sync, ...), keyed by kind.
@@ -68,6 +74,10 @@ pub struct FrameInfo {
     pub overlay: Vec<OverlayCmd>,
     /// The font's 16 colour palettes (Font_TextColor 0..15).
     pub font_palettes: Vec<[u16; 16]>,
+    /// A front-end frame (else a race frame).
+    pub front_end: bool,
+    /// VRAM (1024x512) as of this front-end frame: the textures its quads use.
+    pub vram: Option<std::sync::Arc<Vec<u16>>>,
 }
 
 /// 2D drawing the game asked for this frame outside the HUD (pause menu and the like):
@@ -85,6 +95,18 @@ pub enum OverlayCmd {
     Shape { shape: u8, x: i16, y: i16, colour: u32 },
     /// Hud_BlackThinBox(x, y, w, h).
     ThinBox { x: i16, y: i16, w: i16, h: i16 },
+    /// A screen-space quad (front end): corners in order top-left, top-right, bottom-left,
+    /// bottom-right with their colours (0xBBGGRR, 0x80 = 1 on textured quads), optionally
+    /// textured from VRAM.
+    Quad { pts: [[i16; 2]; 4], colours: [u32; 4], tex: Option<QuadTex>, semi: bool },
+}
+
+/// A quad's texture in VRAM terms: texture page and CLUT ids, texel coordinates per corner.
+#[derive(Clone, Copy, Debug)]
+pub struct QuadTex {
+    pub tpage: u16,
+    pub clut: u16,
+    pub uv: [[u8; 2]; 4],
 }
 
 /// HUD functions whose drawing the host renders from its own port (Hud_RenderMapView,
@@ -175,6 +197,13 @@ impl CarFacet {
     }
 }
 
+/// Which part of the original is running.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    FrontEnd,
+    Race,
+}
+
 /// Paces the original main loop against the virtual clock: game time only passes while the
 /// game waits (VSync = until the next 60 Hz field, timer polling = until the next 128 Hz tick)
 /// and every main-loop iteration is locked to the next field boundary.
@@ -226,6 +255,8 @@ const SHADOW_COLOUR: u32 = 0x8013_D83C + 3652;
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
+/// Return address of the engine flip's PutDispEnv call.
+const FLIP_PUT_DISP_ENV_RA: u32 = 0x800B_F164;
 
 impl GameHost {
     /// 16 palette entries of CLUT id `clut` from VRAM.
@@ -252,6 +283,8 @@ impl GameHost {
             mounts: Vec::new(),
             next_handle: 0x100,
             memcard: super::memcard::MemCard::new(),
+            mode: Mode::FrontEnd,
+            call_log: std::env::var("PS1_CALLLOG").ok().map(|v| v.split(',').filter_map(|a| u32::from_str_radix(a.trim().trim_start_matches("0x"), 16).ok()).collect()),
             file_ops: HashMap::new(),
             next_op: 1,
             clock: 0,
@@ -263,10 +296,161 @@ impl GameHost {
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
+            vram_dirty: true,
+            vram_shared: None,
             pad_buffers: [0; 2],
             callbacks: HashMap::new(),
             next_event: 0xF000_0001,
             frame: FrameDriver::default(),
+        }
+    }
+
+    /// A game frame is done (race loop top or the front end's flip): hand this frame's state
+    /// to the frame callback and take the pad input for the next.
+    fn frame_top(&mut self, c: &mut Cpu) {
+        // top of the original main loop: game frames are locked to 60 Hz fields
+        if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
+            self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
+        }
+        self.frame.last_top = self.clock;
+        let field = self.clock / FIELD;
+        let info = FrameInfo {
+            field,
+            display: self.display,
+            view_env: self.view_env,
+            font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
+            car_facets: self.car_facets.clone(),
+            overlay: std::mem::take(&mut self.overlay),
+            front_end: self.mode == Mode::FrontEnd,
+            vram: (self.mode == Mode::FrontEnd).then(|| {
+                if self.vram_dirty || self.vram_shared.is_none() {
+                    self.vram_shared = Some(std::sync::Arc::new(self.vram.clone()));
+                    self.vram_dirty = false;
+                }
+                self.vram_shared.clone().unwrap()
+            }),
+            font_palettes: {
+                let (x, y) = (c.m.r16(FONT_CLUT_X) as u32, c.m.r16(FONT_CLUT_Y) as u32);
+                (0..16).map(|i| self.clut((y << 6) | ((x + 16 * i) >> 4))).collect()
+            },
+        };
+        // polling is detected within a frame
+        c.m.io_accesses = 0;
+        if std::env::var_os("PS1_SPINSTAT").is_some() {
+            eprintln!("frame: longest stretch without host calls {} backward branches", c.max_since_host);
+            c.max_since_host = 0;
+        }
+        match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
+            None if self.mode == Mode::FrontEnd => c.tick_limit = 0, // end the front end (watchdog)
+            None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
+            Some(buttons) => {
+                self.frame.frames_run += 1;
+                for b in self.pad_buffers {
+                    if b != 0 {
+                        c.m.w8(b, 0x00); // status: ok
+                        c.m.w8(b + 1, 0x41); // digital pad
+                        c.m.w16(b + 2, !buttons); // active low
+                    }
+                }
+            }
+        }
+        if c.trace || std::env::var("PS1_FRAMES").is_ok() {
+            eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
+        }
+    }
+
+    /// The front end's shape emitter (0x8004E74C) as quads: the shape is cut into strips that
+    /// stay inside one texture page, each a gouraud-textured quad.
+    #[allow(clippy::too_many_arguments)]
+    fn shape_quads(&mut self, c: &mut Cpu, info: u32, flags: u32, x: i32, y: i32, colours: [u32; 4], abr: u32) {
+        let clut = c.m.r32(info + 4) as u16;
+        let bpp = (c.m.r8(info + 8) as i32).max(1);
+        let mode = (c.m.r8(info + 9) & 3) as u16;
+        let w = c.m.r16(info + 16) as i16 as i32;
+        let h0 = c.m.r16(info + 18) as i16 as i32;
+        let vx = c.m.r16(info + 24) as i32;
+        let w26 = c.m.r16(info + 26);
+        let (mut top, mut h) = (y, h0);
+        let mut v0 = (w26 & 0xFF) as i32;
+        if flags & 2 != 0 {
+            top += h0;
+            h = -h0;
+            v0 -= 1;
+        }
+        let bottom = top + h;
+        let mut s1 = 0;
+        while s1 < w {
+            let first = (vx << 4) / bpp;
+            let col = vx + ((s1 * bpp) >> 4);
+            let page = ((col & !63) << 4) / bpp;
+            let u = s1 + first - page;
+            let mut width = (255 - u).min(w - s1);
+            let tpage = (mode << 7) | (((abr & 3) as u16) << 5) | ((w26 & 0x100) >> 4) | (((col & 0x3C0) >> 6) as u16) | ((w26 & 0x200) << 2);
+            let (mut u0, mut extra) = (u, 0);
+            if flags & 4 != 0 && h0 < 255 {
+                u0 = u - 1;
+                extra = 1;
+            }
+            if width <= 0 {
+                width = 1;
+            }
+            let (xa, xb) = if flags & 4 != 0 { (w + x - s1 + extra - 1, w + x - (s1 + width) + extra - 1) } else { (s1 + x, s1 + x + width) };
+            let (va, vb) = (v0 as u8, (h0 + v0) as u8);
+            let (ua, ub) = (u0 as u8, (u0 + width) as u8);
+            self.overlay.push(OverlayCmd::Quad {
+                pts: [[xa as i16, top as i16], [xb as i16, top as i16], [xa as i16, bottom as i16], [xb as i16, bottom as i16]],
+                colours,
+                tex: Some(QuadTex { tpage, clut, uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]] }),
+                semi: flags & 1 != 0,
+            });
+            s1 += width;
+        }
+    }
+
+    /// Font_TextXY in the front end: Font_Blit's sprites (glyphs of the current font's 4-bit
+    /// picture, CLUT gp+4880, colour gp+4872) as quads.
+    fn font_quads(&mut self, c: &mut Cpu, text: u32, x: i32, y: i32) {
+        let table = c.m.r32(0x8013_6F14);
+        let count = c.m.r32(0x8013_6F04);
+        let shape = c.m.r32(0x8013_6F18);
+        if table == 0 || shape == 0 {
+            return;
+        }
+        let pos = c.m.r32(shape + 12);
+        let (fx, fy) = ((pos & 0xFFF) as u16, ((pos >> 16) & 0xFFF) as u16);
+        let tpage = (fx / 64) | ((fy / 256) << 4);
+        let clut = c.m.r16(FONT_CURRENT_CLUT);
+        let colour = c.m.r32(0x8013_D83C + 4872) & 0xFF_FFFF;
+        let space = c.m.r8(FONT_SPACE) as i32;
+        let code = |c: &mut Cpu, a: u32| c.m.r8(a) as u16 | (c.m.r8(a + 1) as u16) << 8;
+        let mut x = x;
+        for i in 0..256 {
+            let ch = c.m.r8(text + i) as u16;
+            if ch == 0 {
+                break;
+            }
+            if ch < 33 {
+                x += space;
+                continue;
+            }
+            let k = ch as u32 - 32;
+            let direct = table + 11 * k;
+            let g = if k < count && code(c, direct) == ch { Some(direct) } else { (0..count).map(|k| table + 11 * k).find(|&a| code(c, a) == ch) };
+            let Some(g) = g else { continue };
+            let (w, h) = (c.m.r8(g + 2) as i32, c.m.r8(g + 3) as i32);
+            let (u, v) = (code(c, g + 4) as i32, code(c, g + 6) as i32);
+            let (adv, dx, dy) = (c.m.r8(g + 8) as i8 as i32, c.m.r8(g + 9) as i8 as i32, c.m.r8(g + 10) as i8 as i32);
+            if w > 0 && h > 0 {
+                let (u0, v0) = (u as u8, ((fy as i32 + v) & 0xFF) as u8);
+                let (u1, v1) = ((u + w) as u8, (v0 as i32 + h) as u8);
+                self.overlay.push(OverlayCmd::Quad {
+                    pts: rect_pts(x + dx, y + dy, w, h),
+                    colours: [colour; 4],
+                    tex: Some(QuadTex { tpage, clut, uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]] }),
+                    semi: true,
+                });
+            }
+            x += adv;
         }
     }
 
@@ -316,6 +500,11 @@ impl Host for GameHost {
 
     fn call(&mut self, c: &mut Cpu, addr: u32) -> bool {
         let (a0, a1, a2, a3) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+        if let Some(log) = &self.call_log {
+            if log.contains(&addr) {
+                eprintln!("[{:>8}] call {addr:#x}({a0:#x}, {a1:#x}, {a2:#x}, {a3:#x}) from {:#x}", self.clock, c.r[31]);
+            }
+        }
         if let Some(ret) = self.memcard.call(c, addr) {
             c.r[2] = ret;
             return true;
@@ -440,6 +629,7 @@ impl Host for GameHost {
             0x800E_E1D8 | 0x800F_0318 => 0,    // DrawSync
             0x800E_E35C => {
                 // ClearImage(rect, r, g, b)
+                self.vram_dirty = true;
                 let (x, y, w, h) = Self::rect(c, a0);
                 let col = ((a1 as u16 >> 3) & 31) | (((a2 as u16 >> 3) & 31) << 5) | (((a3 as u16 >> 3) & 31) << 10);
                 for yy in y..(y + h).min(VRAM_H) {
@@ -451,6 +641,7 @@ impl Host for GameHost {
             }
             0x800E_E3EC => {
                 // LoadImage(rect, data)
+                self.vram_dirty = true;
                 let (x, y, w, h) = Self::rect(c, a0);
                 let mut p = a1;
                 for yy in y..y + h {
@@ -479,6 +670,7 @@ impl Host for GameHost {
             }
             0x800E_E4AC => {
                 // MoveImage(rect, x, y)
+                self.vram_dirty = true;
                 let (x, y, w, h) = Self::rect(c, a0);
                 let (dx, dy) = (a1 as usize, a2 as usize);
                 let src: Vec<u16> = (0..h)
@@ -508,7 +700,45 @@ impl Host for GameHost {
             0x800E_E740 => {
                 // PutDispEnv: remember the display area (x, y, w, h)
                 self.display = [0, 2, 4, 6].map(|o| c.m.r16(a0 + o));
+                // the front end's frames end in the engine's flip (Draw_ flip: VSync, PutDispEnv,
+                // DrawOTag per view)
+                if self.mode == Mode::FrontEnd && self.frame.on_frame.is_some() && c.r[31] == FLIP_PUT_DISP_ENV_RA {
+                    self.frame_top(c);
+                }
                 a0
+            }
+            0x8004_E74C => {
+                // the front end's shape emitter (DrawShapeExtended and friends): shape info,
+                // flags (1 semi-transparent, 2 flip vertically, 4 flip horizontally), position,
+                // four corner colours, blend mode
+                let sp = c.r[29];
+                let (colours_at, abr) = (c.m.r32(sp + 16), c.m.r32(sp + 20));
+                let colours: [u32; 4] = std::array::from_fn(|k| c.m.r32(colours_at + 4 * k as u32) & 0xFF_FFFF);
+                self.shape_quads(c, a0, a1, a2 as i32, a3 as i32, colours, abr);
+                0
+            }
+            0x8004_F12C | 0x8004_F3B8 => {
+                // PSXDrawSquare(colour, x, y, w, h) / PSXDrawTransSquare(.., count): flat quads,
+                // the transparent one drawn `count` times over itself
+                let sp = c.r[29];
+                let h = c.m.r32(sp + 16) as i32;
+                let (x, y, w) = (a1 as i32, a2 as i32, a3 as i32);
+                let semi = addr == 0x8004_F3B8;
+                let n = if semi { c.m.r16(sp + 20) as i16 as i32 } else { 1 };
+                for _ in 0..n {
+                    self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, w, h), colours: [a0 & 0xFF_FFFF; 4], tex: None, semi });
+                }
+                0
+            }
+            0x8002_A7B0 => {
+                // Front_BuildStream: the front end runs
+                self.mode = Mode::FrontEnd;
+                return false;
+            }
+            0x800B_7A20 => {
+                // Sim_MainGameLoop: a race runs
+                self.mode = Mode::Race;
+                return false;
             }
             0x8010_53B8 => 0,                  // GPU_cw
             0x800F_24B8 => 0,                  // GetVideoMode: NTSC
@@ -580,46 +810,8 @@ impl Host for GameHost {
             }
             0x800E_77F0 => {
                 if self.frame.on_frame.is_some() && c.r[31] == MAIN_LOOP_YIELD_RA {
-                    // top of the original main loop: game frames are locked to 60 Hz fields
-                    if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
-                        self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
-                    }
-                    self.frame.last_top = self.clock;
-                    let field = self.clock / FIELD;
-                    let info = FrameInfo {
-                        field,
-                        display: self.display,
-                        view_env: self.view_env,
-                        font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
-                        car_facets: self.car_facets.clone(),
-                        overlay: std::mem::take(&mut self.overlay),
-                        font_palettes: {
-                            let (x, y) = (c.m.r16(FONT_CLUT_X) as u32, c.m.r16(FONT_CLUT_Y) as u32);
-                            (0..16).map(|i| self.clut((y << 6) | ((x + 16 * i) >> 4))).collect()
-                        },
-                    };
-                    // polling is detected within a frame
-                    c.m.io_accesses = 0;
-                    if std::env::var_os("PS1_SPINSTAT").is_some() {
-                        eprintln!("frame: longest stretch without host calls {} backward branches", c.max_since_host);
-                        c.max_since_host = 0;
-                    }
-                    match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
-                        None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
-                        Some(buttons) => {
-                            self.frame.frames_run += 1;
-                            for b in self.pad_buffers {
-                                if b != 0 {
-                                    c.m.w8(b, 0x00); // status: ok
-                                    c.m.w8(b + 1, 0x41); // digital pad
-                                    c.m.w16(b + 2, !buttons); // active low
-                                }
-                            }
-                        }
-                    }
-                    if c.trace || std::env::var("PS1_FRAMES").is_ok() {
-                        eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
-                    }
+                    // top of the original race loop
+                    self.frame_top(c);
                 } else {
                     // yield inside a wait loop: let time pass until the next timer tick
                     self.advance_to(c, (self.clock / TICK + 1) * TICK);
@@ -681,6 +873,10 @@ impl Host for GameHost {
 
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
+            0x800C_C7F0 if self.mode == Mode::FrontEnd => {
+                self.font_quads(c, a0, a1 as i32, a2 as i32);
+                0
+            }
             0x800C_C7F0 => {
                 // Font_TextXY(text, x, y)
                 let mut text = Vec::new();
@@ -824,4 +1020,10 @@ impl Host for GameHost {
         c.r[2] = ret;
         true
     }
+}
+
+/// An axis-aligned rectangle's corners in quad order (top-left, top-right, bottom-left,
+/// bottom-right).
+fn rect_pts(x: i32, y: i32, w: i32, h: i32) -> [[i16; 2]; 4] {
+    [[x as i16, y as i16], [(x + w) as i16, y as i16], [x as i16, (y + h) as i16], [(x + w) as i16, (y + h) as i16]]
 }

@@ -560,6 +560,7 @@ impl Ps1Hud {
                     }
                 }
                 &OverlayCmd::ThinBox { x, y, w, h } => self.black_thin_box(out, x as f32, y as f32, w as f32, h as f32),
+                OverlayCmd::Quad { .. } => {}
             }
         }
     }

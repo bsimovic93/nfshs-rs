@@ -1,5 +1,6 @@
 //! Gameplay: a circuit race between the player and AI opponents.
 
+pub mod fe;
 pub mod ai;
 pub mod car;
 pub mod collision;

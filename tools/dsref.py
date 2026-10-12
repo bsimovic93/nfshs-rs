@@ -1,4 +1,4 @@
-"""dsref.py OUTDIR [--state FILE] [--wait SECONDS] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS)
+"""dsref.py OUTDIR [--state FILE|none] [--wait SECONDS] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS)
 
 Capture a reference frame from DuckStation: start the emulator on a save state, let it run,
 pause it over GDB, capture the window (PrintWindow) and dump main RAM. The Rust side
@@ -26,7 +26,8 @@ def main():
     state = arg('--state', STATE)
     wait = float(arg('--wait', '3'))
     keys = [k for k in arg('--keys', '').split(',') if k]
-    proc = subprocess.Popen([EXE, '-nofullscreen', '-statefile', state, CUE])
+    # --state none: boot the disc from the start (front end)
+    proc = subprocess.Popen([EXE, '-nofullscreen'] + ([] if state == 'none' else ['-statefile', state]) + [CUE])
     try:
         time.sleep(wait)
         # DuckStation may show its update notice, which takes the keyboard: close it (= remind later)

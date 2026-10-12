@@ -380,8 +380,62 @@ fn real_main() -> Result<()> {
             cpu.tick_limit = std::env::var("TICKS").ok().and_then(|t| t.parse().ok()).unwrap_or(2_000_000_000);
             // busy-waits on the timer (a race frame stays far below this between host calls)
             cpu.spin_limit = 1_000_000;
+            // BOOT_SCRIPT="secs:buttons,...": pad input per stretch of frames (as boot-race; 'p'
+            // Start); the run ends after the script
+            let mut script: Vec<(u32, u16)> = Vec::new();
+            for st in std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "30:-".into()).split(',').filter(|s| !s.is_empty()) {
+                let (secs, b) = st.split_once(':').unwrap_or((st, "-"));
+                let mut buttons = 0u16;
+                for ch in b.chars() {
+                    use ps1::race::pad;
+                    buttons |= match ch {
+                        'x' => pad::CROSS, 's' => pad::SQUARE, 'c' => pad::CIRCLE, 't' => pad::TRIANGLE,
+                        'l' => pad::LEFT, 'r' => pad::RIGHT, 'u' => pad::UP, 'd' => pad::DOWN, 'p' => pad::START,
+                        _ => 0,
+                    };
+                }
+                script.push(((secs.parse::<f32>()? * 60.0).round() as u32, buttons));
+            }
+            let mut frame = 0u32;
+            // FE_SHOT=frame:out.png: render that front-end frame
+            let shot: Option<(u32, String)> = std::env::var("FE_SHOT").ok().and_then(|v| v.split_once(':').map(|(f, o)| (f.parse().unwrap_or(0), o.to_string())));
+            let shot_at = shot.as_ref().map(|s| s.0);
+            let grabbed = std::rc::Rc::new(std::cell::RefCell::new(None));
+            let grab = grabbed.clone();
+            let on_frame: ps1::host::FrameFn = Box::new(move |_c, info| {
+                frame += 1;
+                if Some(frame) == shot_at {
+                    *grab.borrow_mut() = Some((info.overlay.clone(), info.vram.clone()));
+                }
+                let mut t = frame;
+                for &(n, b) in &script {
+                    if t <= n {
+                        if std::env::var_os("BOOT_FRAMES").is_some() {
+                            println!("frame {frame} field {} {} overlay {}", info.field, if info.front_end { "fe" } else { "race" }, info.overlay.len());
+                            if std::env::var("BOOT_DUMP_FRAME").ok().and_then(|f| f.parse::<u32>().ok()) == Some(frame) {
+                                for o in &info.overlay {
+                                    println!("  {o:?}");
+                                }
+                            }
+                        }
+                        return Some(b);
+                    }
+                    t -= n;
+                }
+                None
+            });
+            let host = cpu.host.as_mut().expect("host");
+            let host = unsafe { &mut *(host.as_mut() as *mut dyn ps1::Host as *mut ps1::host::GameHost) };
+            host.frame.on_frame = Some(on_frame);
             let r = ps1::race::call(&mut cpu, 0x800A_52A4, &[]);
             println!("main returned: {r:?}");
+            if let (Some((_, out)), Some((overlay, Some(vram)))) = (shot, grabbed.borrow_mut().take()) {
+                let fe = game::fe::FeFrame::build(&overlay, &vram, 960.0, 720.0);
+                let mut r = pollster::block_on(render::Renderer::new(None, (960, 720), &fe.atlas))?;
+                let params = app::flat_params();
+                r.screenshot(&params, &[], &[], &fe.vertices).save(&out)?;
+                println!("front-end frame written to {out} ({} quads)", fe.vertices.len() / 6);
+            }
         }
         Some("heap-free") => {
             // heap-free <ram.bin>: the game's largest free heap block in a RAM image

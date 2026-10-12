@@ -1,3 +1,12 @@
 # Recompiled functions that are always called through Cpu::call so the host can observe them
 800e77f0 systemtask
 8009a5ac CopSpeak_Stop (pending requests are dropped first: speech is played by the host)
+8002a7b0 Front_BuildStream (the host switches to front-end frames)
+800b7a20 Sim_MainGameLoop (the host switches to race frames)
+8004eb60 DrawShapeExtended (observed)
+8004ef70 ScaleShapeExtended (observed)
+8004f1c4 PSXDrawGouraudSquare (observed)
+8004f2b4 PSXDrawTransGouraudSquare (observed)
+8004f49c FontUpsideDownBlit (observed)
+800f146c movfxya (observed)
+800bf1d4 Draw_DrawDirectScreen (observed)

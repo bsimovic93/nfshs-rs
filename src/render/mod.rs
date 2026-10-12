@@ -95,6 +95,7 @@ impl DynBuf {
 const TRACK_FRONT_FACE: wgpu::FrontFace = wgpu::FrontFace::Ccw;
 
 pub struct Renderer {
+    atlas_tex: wgpu::Texture,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     surface: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration)>,
@@ -209,7 +210,7 @@ impl Renderer {
         let world_globals = mk_globals();
         let hud_globals = mk_globals();
         let sky_globals = mk_globals();
-        let [world_bg, hud_bg, sky_bg] = make_bind_groups(&device, &queue, &bgl, &sampler, atlas, [&world_globals, &hud_globals, &sky_globals]);
+        let (atlas_tex, [world_bg, hud_bg, sky_bg]) = make_bind_groups(&device, &queue, &bgl, &sampler, atlas, [&world_globals, &hud_globals, &sky_globals]);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
@@ -314,15 +315,32 @@ impl Renderer {
             sub_pipeline,
             hud_vb,
             size,
+            atlas_tex,
         })
     }
 
     /// Replace the texture atlas (e.g. when switching from the menu to a race).
     pub fn set_atlas(&mut self, atlas: &crate::assets::Atlas) {
-        let [w, h, s] = make_bind_groups(&self.device, &self.queue, &self.bgl, &self.sampler, atlas, [&self.world_globals, &self.hud_globals, &self.sky_globals]);
+        let (tex, [w, h, s]) = make_bind_groups(&self.device, &self.queue, &self.bgl, &self.sampler, atlas, [&self.world_globals, &self.hud_globals, &self.sky_globals]);
+        self.atlas_tex = tex;
         self.world_bg = w;
         self.hud_bg = h;
         self.sky_bg = s;
+    }
+
+    /// Replace the atlas' pixels (same size: written into the existing texture; the front
+    /// end's per-frame atlas).
+    pub fn write_atlas(&mut self, atlas: &crate::assets::Atlas) {
+        if self.atlas_tex.width() != atlas.size {
+            self.set_atlas(atlas);
+            return;
+        }
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &self.atlas_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &atlas.rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(atlas.size * 4), rows_per_image: Some(atlas.size) },
+            wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
+        );
     }
 
     pub fn clear_world(&mut self) {
@@ -566,7 +584,7 @@ fn make_bind_groups(
     sampler: &wgpu::Sampler,
     atlas: &crate::assets::Atlas,
     globals: [&wgpu::Buffer; 3],
-) -> [wgpu::BindGroup; 3] {
+) -> (wgpu::Texture, [wgpu::BindGroup; 3]) {
     let tex = device.create_texture_with_data(
         queue,
         &wgpu::TextureDescriptor {
@@ -583,7 +601,7 @@ fn make_bind_groups(
         &atlas.rgba,
     );
     let view = tex.create_view(&Default::default());
-    globals.map(|buf| {
+    let groups = globals.map(|buf| {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: bgl,
@@ -593,5 +611,6 @@ fn make_bind_groups(
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
             ],
         })
-    })
+    });
+    (tex, groups)
 }
