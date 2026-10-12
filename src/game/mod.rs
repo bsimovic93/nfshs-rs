@@ -5,6 +5,7 @@ pub mod car;
 pub mod collision;
 pub mod hud;
 pub mod original;
+pub mod flare;
 pub mod ps1hud;
 
 use crate::assets::{self, Atlas, CarModel, GameData, TrackAssets, Vertex};
@@ -111,6 +112,10 @@ pub struct Game {
     pub sim: Option<original::OriginalSim>,
     /// The original HUD (when the simulation provides its layout).
     pub ps1hud: Option<ps1hud::Ps1Hud>,
+    /// The track's glowing lights (from the original's track data).
+    glares: Vec<crate::ps1::race::Glare>,
+    /// A white texel with the semi-transparency bit, for untextured blended primitives.
+    white_semi: [f32; 2],
     /// The cars' ground shadow texture (ZSFX.PSH "SHAD", gShadowPixmap), corners in
     /// POLY_FT4 order.
     shadow_tex: Option<[[f32; 2]; 4]>,
@@ -202,6 +207,13 @@ impl Game {
             _ => (track.sky_colors.1, 120.0, 420.0),
         };
         let player = &racers[0].car;
+        let glares: Vec<_> = sim.as_ref().map(|s| s.snapshot().glares.clone()).unwrap_or_default();
+        let glares: Vec<_> = glares.into_iter().filter(|g| (g.chunk as usize) < track.track.blocks.len()).collect();
+        log::info!("{} glowing lights", glares.len());
+        let white_semi = {
+            let r = atlas.add(1, 1, &[255, 255, 255, 128]);
+            atlas.uv(r, glam::Vec2::new(0.5, 0.5))
+        };
         // the ground shadow texture (gShadowPixmap: ZSFX.PSH "SHAD", 32x64)
         let shadow_tex = data.read("ZSFX.PSH").ok().and_then(|d| crate::formats::psh::Psh::parse(&d).ok()).and_then(|p| {
             let s = p.shapes.into_iter().find(|s| s.name == "SHAD")?;
@@ -225,6 +237,8 @@ impl Game {
             cam_mode: CameraMode::Chase,
             car_facets_override: None,
             shadow_tex,
+            glares,
+            white_semi,
             cam_up: Vec3::Y,
             tan_half_v: (1.05f32 / 2.0).tan(),
             y_scale: 1.0,
@@ -687,6 +701,23 @@ impl Game {
                     out.push(Vertex { pos: tm.transform_point3(Vec3::from(v.pos)).into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
                 }
             }
+        }
+        // the lights' glows last (additive)
+        if let Some(sim) = &self.sim {
+            let snap = sim.snapshot();
+            let forward = (self.cam_target - self.cam_pos).normalize_or(Vec3::Z);
+            let right = self.cam_up.cross(forward).normalize_or(Vec3::X) * -1.0;
+            let up = forward.cross(right) * -1.0;
+            let view = flare::FlareView {
+                pos: self.cam_pos,
+                right,
+                up,
+                forward,
+                h: snap.projection.max(1) as f32,
+                y_scale: self.y_scale,
+                counter: snap.sim_ticks,
+            };
+            flare::build(&self.glares, &view, self.white_semi, &mut out);
         }
         out
     }

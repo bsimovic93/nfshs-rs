@@ -401,6 +401,48 @@ impl MapView {
     }
 }
 
+/// A light on the track that glows (the track chunks' glare lists, drawn by
+/// BWorld_BuildGlareEffects): position (PS1 world, 16.16), flare type, pair id.
+#[derive(Clone, Copy, Debug)]
+pub struct Glare {
+    /// Track chunk (block) it belongs to.
+    pub chunk: u16,
+    pub pos: [i32; 3],
+    pub kind: i16,
+    pub id: u16,
+}
+
+/// Every chunk's glare list (`Track_chunkList[i] + 84`: count, then 16-byte entries). The
+/// chunk count is not kept in a variable: callers keep the chunks the track has.
+pub fn read_glares(m: &mut Mem) -> Vec<Glare> {
+    const TRACK_CHUNK_LIST: u32 = 0x8013_E79C;
+    let list = m.r32(TRACK_CHUNK_LIST);
+    let mut out = Vec::new();
+    if list == 0 {
+        return out;
+    }
+    for i in 0..1024 {
+        let g = m.r32(list + 112 * i + 84);
+        if g >> 21 != 0x80 << 3 {
+            continue;
+        }
+        let n = m.r32(g);
+        if n > 64 {
+            continue;
+        }
+        for k in 0..n {
+            let e = g + 4 + 16 * k;
+            out.push(Glare {
+                chunk: i as u16,
+                pos: [m.r32(e) as i32, m.r32(e + 4) as i32, m.r32(e + 8) as i32],
+                kind: m.r16(e + 12) as i16,
+                id: m.r16(e + 14),
+            });
+        }
+    }
+    out
+}
+
 /// Simulation state at the top of a frame.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
@@ -436,6 +478,8 @@ pub struct Snapshot {
     pub hud: Option<std::sync::Arc<HudSetup>>,
     /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
     pub light_table: Vec<u32>,
+    /// The track's glowing lights (read once the track is loaded).
+    pub glares: Vec<Glare>,
     /// The view's GTE environment (far colour, depth cue, H, back colour); see
     /// `GameHost::view_env`.
     pub view_env: [i32; 9],
@@ -490,6 +534,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             let l = c.m.r32(addr::GP + 6352);
             if l == 0 { Vec::new() } else { (0..0x60).map(|i| c.m.r8(l + i)).collect() }
         },
+        glares: if frame == 0 { read_glares(&mut c.m) } else { Vec::new() },
         light_table: {
             let t = c.m.r32(addr::LIGHT_TABLE);
             if t == 0 { Vec::new() } else { (0..256).map(|i| c.m.r32(t + 4 * i)).collect() }

@@ -80,7 +80,7 @@ fn shade(i: VOut) -> vec4<f32> {
         discard;
     }
     var vc = i.color.rgb;
-    if (g.cam_fwd.w > 0.5) {
+    if (g.cam_fwd.w > 0.5 && i.color.a >= 0.25) {
         // GTE depth cue: IR0 = clamp((DQB + DQA * H / SZ) / 4096, 0, 4096); SZ in GTE units (1/64 m)
         let sz = max(dot(i.world - g.cam_pos.xyz, g.cam_fwd.xyz), 0.01) * 64.0;
         let n = min(g.fog.z * 65536.0 / sz, 131071.0);
