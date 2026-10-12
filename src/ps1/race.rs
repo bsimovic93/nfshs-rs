@@ -480,6 +480,9 @@ pub struct Snapshot {
     pub light_table: Vec<u32>,
     /// The track's glowing lights (read once the track is loaded).
     pub glares: Vec<Glare>,
+    /// BWorld_gChunkBuildList: the track chunks the original draws this frame and how
+    /// (detail flags).
+    pub chunks: Vec<(i16, u16)>,
     /// The view's GTE environment (far colour, depth cue, H, back colour); see
     /// `GameHost::view_env`.
     pub view_env: [i32; 9],
@@ -535,6 +538,10 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             if l == 0 { Vec::new() } else { (0..0x60).map(|i| c.m.r8(l + i)).collect() }
         },
         glares: if frame == 0 { read_glares(&mut c.m) } else { Vec::new() },
+        chunks: {
+            let n = c.m.r32(addr::GP + 608).min(64);
+            (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()
+        },
         light_table: {
             let t = c.m.r32(addr::LIGHT_TABLE);
             if t == 0 { Vec::new() } else { (0..256).map(|i| c.m.r32(t + 4 * i)).collect() }

@@ -133,6 +133,14 @@ const R3DCAR_INSERT_ALL_LIST_FACET: u32 = 0x800B_38C0;
 /// `R3DCar_ObjectVisible`.
 const R3DCAR_INSERT_CAR_FACET_II: u32 = 0x800B_2E30;
 const R3DCAR_OBJECT_VISIBLE: u32 = 0x8011_7B64;
+/// BWorld_OnyxBuildFacets' set-up: SetupBuildMatrices(view, dcache), then
+/// DrawW_WorldSetUpMatrix(gWorldMat, dcache + 0x14), then SetupChunkBuildList(view) fills
+/// BWorld_gChunkBuildList (count kept at gp + 608): the chunks drawn this frame.
+const SETUP_BUILD_MATRICES: u32 = 0x8007_E2E8;
+const DRAWW_WORLD_SETUP_MATRIX: u32 = 0x800C_829C;
+const G_WORLD_MAT: u32 = 0x8011_0104;
+const SETUP_CHUNK_BUILD_LIST: u32 = 0x8007_E71C;
+const CHUNK_BUILD_COUNT: u32 = 0x8013_D83C + 608;
 /// BWorldSm_QuadLight(pos): the track lighting at a position.
 const BWORLDSM_QUAD_LIGHT: u32 = 0x8008_0868;
 /// R3DCar_InsertCarFacet's shadow switch and colour (gp-relative).
@@ -482,6 +490,11 @@ impl Host for GameHost {
                 // the original runs while rendering the HUD
                 let g = |r: usize| c.gte_read(32 + r) as i32;
                 self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
+                // which track chunks to draw, and how (detail level)
+                c.call_nested(SETUP_BUILD_MATRICES, &[RENDER_VIEW, 0x1F80_0000]);
+                c.call_nested(DRAWW_WORLD_SETUP_MATRIX, &[G_WORLD_MAT, 0x1F80_0014]);
+                let n = c.call_nested(SETUP_CHUNK_BUILD_LIST, &[RENDER_VIEW]);
+                c.m.w32(CHUNK_BUILD_COUNT, n);
                 c.call_nested(DASHHUD_CHECK_WRONG_WAY, &[a1]);
                 c.call_nested(DASHHUD_HUD_CALC, &[a1]);
                 // the cars: the original decides what is drawn of each (the host draws them).

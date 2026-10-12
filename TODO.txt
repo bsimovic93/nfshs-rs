@@ -1,0 +1,21 @@
+Improvments after we are done with the decompilation
+
+    - Clean up the code base and get ready for github repo deployment
+    - Create a new 'imporvment' branch
+    - Unlock fps to 240
+    - Fix pop in distance - prob don't need LOD for such an old game
+    - Fix shadow?
+    - Add track player like nfs mw and ability to add custom songs 
+    - Add higher quality ui elements (ill recreate these in 4k in photoshop)
+    - Add splitscreen/LAN support
+    - Add a better menu (audio / video / mapping controls)
+        - audio -> music, sound effects, engine volume sliders
+        - video -> borderless/windowed/fullscreen, resolution (most standard resolutions up to 4k), fps cap (30,60,120,144,240), AA, texture filtering, CRT effect toggle, 
+        - controls -> a few gamepad presets and option to map keyobard keys
+    
+    Nice to have:
+
+    - Add cool graphical effects like fog or weather?
+    - Add higher quality car texutres
+    - Add mod support (for now just adding cars)
+    - rewind mechanic

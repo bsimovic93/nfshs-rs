@@ -79,6 +79,8 @@ pub struct Quad {
 pub struct Mesh {
     pub verts: Vec<[i16; 4]>,
     pub quads: Vec<Quad>,
+    /// The low-detail version of the surface, for distant chunks (same vertex pool).
+    pub far: Vec<Quad>,
 }
 
 /// Object placement from a block's 0x03 chunk (length-prefixed records).
@@ -238,11 +240,22 @@ impl Track {
                                 0x18 => b.ground.verts = verts(s.body),
                                 // 0x19 holds the chunk's four render quad lists back to back
                                 // (Chunk::renderQuads, sized by 0x1B counts 6, 7, 10 and 11),
-                                // followed by copies of the detail lists (counts 8, 9)
-                                0x19 => quads(s.body, cnt(6) + cnt(7) + cnt(10) + cnt(11), &mut b.ground.quads),
-                                // 0x1A = Chunk::stripBuf; 0x25 = lorezstripBuf, a low-detail
-                                // version of the same surfaces for distant chunks (not drawn)
+                                // followed by copies of the detail lists (counts 8, 9).
+                                // DrawW_DoTrough draws lists 6 and 7 with the low-detail strips
+                                // (distant chunks) and list 11 with the full strips; list 10
+                                // is not drawn.
+                                0x19 => {
+                                    let mut all = Vec::new();
+                                    quads(s.body, cnt(6) + cnt(7) + cnt(10) + cnt(11), &mut all);
+                                    let far = (cnt(6) + cnt(7)).min(all.len());
+                                    let near = (far + cnt(10)).min(all.len());
+                                    b.ground.far.extend_from_slice(&all[..far]);
+                                    b.ground.quads.extend_from_slice(&all[near..]);
+                                }
+                                // 0x1A = Chunk::stripBuf; 0x25 = lorezstripBuf, the low-detail
+                                // version of the same surfaces for distant chunks
                                 0x1a => strips(s.body, s.count, &mut b.ground.quads),
+                                0x25 => strips(s.body, s.count, &mut b.ground.far),
                                 0x27 => b.detail.verts = verts(s.body),
                                 0x28 => quads(s.body, cnt(8), &mut b.detail.quads),
                                 0x29 => quads(s.body, cnt(9), &mut b.detail.quads),
@@ -279,7 +292,7 @@ impl Track {
                                     let np = b[o + 3] as usize;
                                     let vo = o + 4;
                                     let po = vo + nv * 8;
-                                    let mut m = Mesh { verts: verts(&b[vo..po.min(b.len())]), quads: Vec::new() };
+                                    let mut m = Mesh { verts: verts(&b[vo..po.min(b.len())]), quads: Vec::new(), far: Vec::new() };
                                     quads(&b[po.min(b.len())..], np, &mut m.quads);
                                     models.push(m);
                                     model_flags.push(u16le(b, o));

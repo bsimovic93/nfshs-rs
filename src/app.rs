@@ -255,6 +255,7 @@ impl App {
             Screen::Menu => {
                 let hud = self.menu_font.as_ref().map(|f| self.menu.draw(f, &self.menu_art, w as f32, h as f32)).unwrap_or_default();
                 let params = FrameParams {
+                    world_ranges: None,
                     shadows: Vec::new(),
                     ambient: 1.0,
                     headlight: (0.0, Vec3::ZERO, Vec3::Z),
@@ -425,6 +426,7 @@ pub fn menu_screenshot(data: &GameData, out: &std::path::Path) -> anyhow::Result
     let mut r = pollster::block_on(Renderer::new(None, (960, 720), &atlas))?;
     let menu = Menu::default();
     let params = FrameParams {
+        world_ranges: None,
         shadows: Vec::new(),
         ambient: 1.0,
         headlight: (0.0, Vec3::ZERO, Vec3::Z),

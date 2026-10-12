@@ -33,6 +33,8 @@ pub struct DepthCue {
 }
 
 pub struct FrameParams {
+    /// Index ranges of the world to draw (None: all of it).
+    pub world_ranges: Option<Vec<std::ops::Range<u32>>>,
     /// Subtractive primitives (PS1 semi-transparency mode 2: background - foreground), drawn
     /// over the track: the cars' ground shadows.
     pub shadows: Vec<Vertex>,
@@ -452,7 +454,14 @@ impl Renderer {
             if let Some((vb, ib, n)) = &self.static_vb {
                 rp.set_vertex_buffer(0, vb.slice(..));
                 rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                rp.draw_indexed(0..*n, 0, 0..1);
+                match &p.world_ranges {
+                    Some(ranges) => {
+                        for r in ranges.iter().filter(|r| r.end <= *n && r.start < r.end) {
+                            rp.draw_indexed(r.clone(), 0, 0..1);
+                        }
+                    }
+                    None => rp.draw_indexed(0..*n, 0, 0..1),
+                }
             }
             if !p.shadows.is_empty() {
                 rp.set_pipeline(&self.sub_pipeline);

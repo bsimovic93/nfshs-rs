@@ -102,6 +102,9 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     game.cam_up = rot(1);
     let h = ram.i32(at::CAMERA_ZOOM).max(1) as f32;
     game.tan_half_v = 160.0 / h * 0.75;
+    // the chunks the original drew (BWorld_gChunkBuildList)
+    let n = ram.i32(0x8013_D83C + 608).clamp(0, 64) as u32;
+    game.chunks_override = Some((0..n).map(|i| (ram.i32(0x8011_02B0 + 4 * i) as i16, (ram.i32(0x8011_02B0 + 4 * i) >> 16) as u16)).collect());
     // what is drawn of the player's car: the parts table as the game left it (after its last
     // car, usually the player's), its light and shadow
     let pc = race_cars[0];
@@ -126,7 +129,8 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         let psh = crate::formats::psh::Psh::parse(&data.read(&format!("ZTR{track:02}{variant}0.PSH"))?)?;
         let t = &game.track.track;
         for (bi, b) in t.blocks.iter().enumerate() {
-            for (mesh, kind) in [(&b.ground, "ground"), (&b.detail, "detail")] {
+            let far = crate::formats::grp::Mesh { verts: b.ground.verts.clone(), quads: b.ground.far.clone(), far: Vec::new() };
+            for (mesh, kind) in [(&b.ground, "ground"), (&far, "far"), (&b.detail, "detail")] {
                 for q in &mesh.quads {
                     let c = q.v.iter().map(|&i| mesh.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).sum::<Vec3>() / 4.0;
                     let w = crate::assets::ps1_to_world(b.origin + c);

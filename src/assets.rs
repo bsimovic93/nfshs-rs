@@ -90,6 +90,8 @@ pub struct CollTri {
 pub struct Sprite {
     pub pos: Vec3,
     pub verts: Vec<Vertex>,
+    /// The track block (chunk) it belongs to.
+    pub block: usize,
 }
 
 pub struct TrackAssets {
@@ -98,6 +100,9 @@ pub struct TrackAssets {
     /// Sky colour sampled from the cloud texture (zenith) and panorama top row (horizon).
     pub sky_colors: (Vec3, Vec3),
     pub sprites: Vec<Sprite>,
+    /// Per block (track chunk): index ranges of its ground (full detail, low detail), the
+    /// detail surfaces drawn at both, its objects and its road lines.
+    pub block_ranges: Vec<[std::ops::Range<u32>; 5]>,
     pub verts: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub tris: Vec<CollTri>,
@@ -243,7 +248,11 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
     // painted road lines (DrawW_BuildChunkCenterLineFacets / DrawW_OnyxLinePrim): each record
     // is a point on the line, widened left/right by the road slice's right vector / 8, and
     // consecutive points form a quad textured with LIN<type> from ZSFX.PSH (0xFF = gap)
-    for b in &track.blocks {
+    // per block: index ranges of its ground (trough), objects and road lines, so the chunks
+    // can be drawn as the original's build list says
+    let mut block_ranges = vec![[0u32..0, 0..0, 0..0, 0..0, 0..0]; track.blocks.len()];
+    for (bi, b) in track.blocks.iter().enumerate() {
+        let lines_start = indices.len() as u32;
         let point = |r: &[u8; 4]| -> Option<(Vec3, Vec3, i16)> {
             let v = b.ground.verts.get(r[0] as usize)?;
             let p = b.origin + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0;
@@ -268,13 +277,23 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             }
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2]);
         }
+        block_ranges[bi][4] = lines_start..indices.len() as u32;
     }
     let mut sprites = Vec::new();
-    for b in &track.blocks {
+    for (bi, b) in track.blocks.iter().enumerate() {
         let origin = b.origin;
-        for mesh in [&b.ground, &b.detail] {
-            emit(mesh, &|v| ps1_to_world(origin + v), true, &mut verts, &mut indices, &mut tris);
-        }
+        let place = |v| ps1_to_world(origin + v);
+        let start = indices.len() as u32;
+        emit(&b.ground, &place, true, &mut verts, &mut indices, &mut tris);
+        block_ranges[bi][0] = start..indices.len() as u32;
+        let start = indices.len() as u32;
+        let far = grp::Mesh { verts: b.ground.verts.clone(), quads: b.ground.far.clone(), far: Vec::new() };
+        emit(&far, &place, false, &mut verts, &mut indices, &mut tris);
+        block_ranges[bi][1] = start..indices.len() as u32;
+        let start = indices.len() as u32;
+        emit(&b.detail, &place, true, &mut verts, &mut indices, &mut tris);
+        block_ranges[bi][2] = start..indices.len() as u32;
+        let objects_start = indices.len() as u32;
         for pl in &b.placements {
             let Some(model) = track.models.get(pl.model as usize) else { continue };
             let flat_quad = model.quads.len() == 1 && model.verts.iter().all(|v| v[2] == 0);
@@ -314,7 +333,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                     let mut idx = Vec::new();
                     emit(model, &|v| Vec3::new(-v.x, v.y, v.z) * scale, false, &mut local, &mut idx, &mut Vec::new());
                     let tri_verts: Vec<Vertex> = idx.iter().map(|&i| local[i as usize]).collect();
-                    sprites.push(Sprite { pos: ps1_to_world(pl.pos), verts: tri_verts });
+                    sprites.push(Sprite { pos: ps1_to_world(pl.pos), verts: tri_verts, block: bi });
                 }
                 Placement::Fixed(m) => {
                     let pos = pl.pos;
@@ -323,6 +342,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                 }
             }
         }
+        block_ranges[bi][3] = objects_start..indices.len() as u32;
     }
     let nodes = track.nodes.iter().map(|&n| ps1_to_world(n)).collect();
     log::info!("{} sprites", sprites.len());
@@ -330,7 +350,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         Some(s) => build_original_sky(s, &psh, &rects, atlas),
         None => build_sky(&psh, &rects, atlas),
     };
-    Ok(TrackAssets { verts, indices, tris, track, nodes, sprites, sky, sky_colors })
+    Ok(TrackAssets { verts, indices, tris, track, nodes, sprites, sky, sky_colors, block_ranges })
 }
 
 fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {

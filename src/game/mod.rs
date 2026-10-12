@@ -119,6 +119,8 @@ pub struct Game {
     /// The cars' ground shadow texture (ZSFX.PSH "SHAD", gShadowPixmap), corners in
     /// POLY_FT4 order.
     shadow_tex: Option<[[f32; 2]; 4]>,
+    /// The chunk build list, instead of the simulation's (for comparisons with captures).
+    pub chunks_override: Option<Vec<(i16, u16)>>,
     /// What is drawn of each car, instead of the simulation's (for comparisons with
     /// captures).
     pub car_facets_override: Option<Vec<Option<crate::ps1::host::CarFacet>>>,
@@ -236,6 +238,7 @@ impl Game {
             race_time: 0.0,
             cam_mode: CameraMode::Chase,
             car_facets_override: None,
+            chunks_override: None,
             shadow_tex,
             glares,
             white_semi,
@@ -628,6 +631,26 @@ impl Game {
         let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, self.cam_up);
         let p = &self.racers[0].car;
         FrameParams {
+            world_ranges: self.chunk_list().map(|list| {
+                let mut r = Vec::new();
+                for (chunk, flags, rez) in list {
+                    let Some(b) = self.track.block_ranges.get(chunk) else { continue };
+                    // flags: 1 ground (DrawW_DoTrough: full or low detail by the chunk's
+                    // resolution, plus the detail surfaces), 2 objects (DrawW_DoObjects),
+                    // 4 road lines (DrawW_DoLines)
+                    if flags & 1 != 0 {
+                        r.push(if rez != 0 { b[0].clone() } else { b[1].clone() });
+                        r.push(b[2].clone());
+                    }
+                    if flags & 2 != 0 {
+                        r.push(b[3].clone());
+                    }
+                    if flags & 4 != 0 {
+                        r.push(b[4].clone());
+                    }
+                }
+                r
+            }),
             shadows: self.shadows(),
             ambient: self.ambient,
             headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
@@ -655,7 +678,10 @@ impl Game {
     /// Cars and camera-facing sprites transformed to world space.
     pub fn dynamic_geometry(&self) -> Vec<Vertex> {
         let mut out = Vec::new();
-        for s in &self.track.sprites {
+        // chunks whose objects are drawn
+        let list = self.chunk_list();
+        let objects_on = |block: usize| list.as_ref().is_none_or(|l| l.iter().any(|&(c, f, _)| c == block && f & 2 != 0));
+        for s in self.track.sprites.iter().filter(|s| objects_on(s.block)) {
             let to_cam = (self.cam_pos - s.pos).with_y(0.0);
             if to_cam.length_squared() > self.fog.2 * self.fog.2 {
                 continue;
@@ -705,6 +731,7 @@ impl Game {
         // the lights' glows last (additive)
         if let Some(sim) = &self.sim {
             let snap = sim.snapshot();
+
             let forward = (self.cam_target - self.cam_pos).normalize_or(Vec3::Z);
             let right = self.cam_up.cross(forward).normalize_or(Vec3::X) * -1.0;
             let up = forward.cross(right) * -1.0;
@@ -717,9 +744,24 @@ impl Game {
                 y_scale: self.y_scale,
                 counter: snap.sim_ticks,
             };
-            flare::build(&self.glares, &view, self.white_semi, &mut out);
+            // BWorld_BuildGlareEffects goes through the chunks in the build list
+            let listed: Vec<_> = match &list {
+                Some(l) => self.glares.iter().filter(|g| l.iter().any(|&(c, _, _)| c == g.chunk as usize)).copied().collect(),
+                None => self.glares.clone(),
+            };
+            flare::build(&listed, &view, self.white_semi, &mut out);
         }
         out
+    }
+
+    /// The original's chunk build list this frame: (chunk, draw flags); None without one.
+    fn chunk_list(&self) -> Option<Vec<(usize, u8, u8)>> {
+        let chunks = match &self.chunks_override {
+            Some(c) => c.as_slice(),
+            None => self.sim.as_ref()?.snapshot().chunks.as_slice(),
+        };
+        // (chunk, draw flags, resolution)
+        (!chunks.is_empty()).then(|| chunks.iter().filter(|c| c.0 >= 0).map(|&(c, f)| (c as usize, (f >> 8) as u8, f as u8)).collect())
     }
 
     /// What the game draws of each car this frame (None before it has put any car into a view).

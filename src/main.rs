@@ -116,6 +116,17 @@ fn real_main() -> Result<()> {
                 std::fs::write(&dst, cd.read_file(&e)?)?;
             }
         }
+        Some("dump-shape-pal") => {
+            // dump-shape-pal FILE.PSH NAME PALETTE_SHAPE out.png: a shape drawn with another
+            // shape's palette
+            let psh = formats::psh::Psh::parse(&std::fs::read(&args[2])?)?;
+            let sh = psh.shapes.iter().find(|s| s.name.eq_ignore_ascii_case(&args[3])).context("no such shape")?;
+            let pal = psh.shapes.iter().find(|s| s.name.eq_ignore_ascii_case(&args[4])).context("no palette shape")?;
+            println!("{} indices {} palette {} / {}", sh.name, sh.indices.len(), sh.palette.len(), pal.palette.len());
+            let rgba: Vec<u8> = sh.indices.iter().flat_map(|&i| formats::psh::ps1_color(pal.palette.get(i as usize).copied().unwrap_or(0))).collect();
+            let img = image::RgbaImage::from_raw(sh.width as u32, sh.height as u32, rgba).context("size")?;
+            image::imageops::resize(&img, img.width() * 2, img.height() * 2, image::imageops::FilterType::Nearest).save(&args[5])?;
+        }
         Some("dump-shape") => {
             // dump-shape FILE.PSH NAME out.png [scale]: one texture shape as PNG
             let psh = formats::psh::Psh::parse(&std::fs::read(&args[2])?)?;
@@ -505,6 +516,16 @@ fn dump_track(grp: &str, psh: &str, out: &Path, view: Option<&str>) -> Result<()
     let track = formats::grp::Track::parse(&std::fs::read(grp)?)?;
     let psh = formats::psh::Psh::parse(&std::fs::read(psh)?)?;
     println!("nodes={} blocks={} textures={} vroad={}", track.nodes.len(), track.blocks.len(), track.textures.len(), track.vroad.len());
+    if std::env::var_os("NFSHS_BLOCKS").is_some() {
+        for (i, b) in track.blocks.iter().enumerate().take(12) {
+            let ymax = |m: &formats::grp::Mesh| m.verts.iter().map(|v| v[1] as f32 / 64.0).fold(f32::MIN, f32::max);
+            let ymin = |m: &formats::grp::Mesh| m.verts.iter().map(|v| v[1] as f32 / 64.0).fold(f32::MAX, f32::min);
+            println!(
+                "block {i}: origin {:?} ground {}+{} far quads (y {:.1}..{:.1}), detail {} (y {:.1}..{:.1}), placements {}",
+                b.origin, b.ground.quads.len(), b.ground.far.len(), ymin(&b.ground), ymax(&b.ground), b.detail.quads.len(), ymin(&b.detail), ymax(&b.detail), b.placements.len()
+            );
+        }
+    }
     let textures: Vec<soft::Texture> = psh
         .shapes
         .iter()
