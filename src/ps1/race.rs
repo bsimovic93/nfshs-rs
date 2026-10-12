@@ -30,6 +30,11 @@ pub mod addr {
     pub const SOME_NAME: u32 = 0x8001_1550;
     /// `Sim_MainGameLoop`.
     pub const GAME_LOOP: u32 = 0x800B_7A20;
+    /// `simVar`: set when the race is to be restarted (pause menu "Restart"); main then
+    /// resets the game and runs the loop again.
+    pub const SIM_VAR: u32 = 0x8011_F37C;
+    /// `gSimQueue_BlockSelf`: the simulation is held (paused).
+    pub const SIM_PAUSED: u32 = 0x8013_E71C;
     /// `Cars_gList`: every simulated Car_tObj*, in `carInfo` order (player first).
     pub const CAR_LIST: u32 = 0x8011_0CA0;
     /// Start sequence stage read by `Hud_Render321Go`: 0 = intro, 1..3 = lights, 4 = go.
@@ -200,6 +205,8 @@ pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
     }
     call(&mut cpu, addr::NFS2_GAME_MODULE_STARTUP, &[changes])?;
     call(&mut cpu, addr::RACE_RESTART, &[])?;
+    // main clears the restart request before entering the game loop (it blocks pausing)
+    cpu.m.w32(addr::SIM_VAR, 0);
     Ok(cpu)
 }
 
@@ -302,6 +309,8 @@ pub struct HudSetup {
     pub font_clut: [u16; 16],
     /// GameSetup carInfo[0].
     pub car_info: Vec<u8>,
+    /// The font's colour palettes (Font_TextColor 0..15).
+    pub font_palettes: Vec<[u16; 16]>,
     /// Night race (GameSetup +0x54): the tachometer uses the night dial and needle colours.
     pub night: bool,
     /// Tachometer needle colour per car (Hud_BuildTach's day or night table).
@@ -309,7 +318,7 @@ pub struct HudSetup {
 }
 
 impl HudSetup {
-    pub fn read(m: &mut Mem, font_clut: [u16; 16]) -> Option<Self> {
+    pub fn read(m: &mut Mem, font_clut: [u16; 16], font_palettes: Vec<[u16; 16]>) -> Option<Self> {
         let slots = m.r32(addr::GP + 6356);
         if slots == 0 {
             return None;
@@ -324,6 +333,7 @@ impl HudSetup {
             number_uv: std::array::from_fn(|i| m.r32(0x8011_1F34 + 4 * i as u32)),
             car_info: bytes(m, addr::GAMESETUP + 0x3D4, 0xB4),
             font_clut,
+            font_palettes,
             night,
             needle_colors: std::array::from_fn(|i| m.r32(if night { 0x8012_1D24 } else { 0x8012_1CAC } + 4 * i as u32)),
         })
@@ -480,6 +490,10 @@ pub struct Snapshot {
     /// Per car (as in `cars`): what the game draws of it this frame (parts, light,
     /// shadow); `None` when the car is not in the view.
     pub car_facets: Vec<Option<super::host::CarFacet>>,
+    /// The 2D drawing (pause menu and the like) the game recorded this frame.
+    pub overlay: Vec<super::host::OverlayCmd>,
+    /// The race is paused (`gSimQueue_BlockSelf`).
+    pub paused: bool,
     /// The HUD as Hud_Init built it (read once, see [`HudSetup`]).
     pub hud: Option<std::sync::Arc<HudSetup>>,
     /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
@@ -535,9 +549,11 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         projection: c.m.r32(addr::CAMERA_ZOOM),
         view_env: info.view_env,
         sky: SkyData::read(&mut c.m),
-        hud: HudSetup::read(&mut c.m, info.font_clut).map(std::sync::Arc::new),
+        hud: HudSetup::read(&mut c.m, info.font_clut, info.font_palettes.clone()).map(std::sync::Arc::new),
         map: MapView::read(&mut |a| c.m.r32(a)),
         car_facets,
+        overlay: info.overlay.clone(),
+        paused: c.m.r32(addr::SIM_PAUSED) != 0,
         dash: (0..0x80).map(|i| c.m.r8(addr::DASHHUD + i)).collect(),
         hud_layout: {
             let l = c.m.r32(addr::GP + 6352);
@@ -586,9 +602,20 @@ impl RaceThread {
             let mut frame = 0u32;
             let mut want_ram = false;
             let mut quit = false;
+            // the pause menu as last drawn: the game only redraws it when it changes and
+            // shows the copied picture in between
+            let mut menu: Vec<super::host::OverlayCmd> = Vec::new();
             let on_frame: super::host::FrameFn = Box::new(move |c: &mut Cpu, info: super::host::FrameInfo| {
                 // report the state after the previous frame (or boot), then wait for input
-                if quit || out.send(Ok(snapshot(c, frame, info, want_ram))).is_err() {
+                let mut s = snapshot(c, frame, info, want_ram);
+                if !s.paused {
+                    menu.clear();
+                } else if s.overlay.iter().any(|o| !matches!(o, super::host::OverlayCmd::Rect { .. })) {
+                    menu = s.overlay.clone();
+                } else {
+                    s.overlay = menu.clone();
+                }
+                if quit || out.send(Ok(s)).is_err() {
                     return None;
                 }
                 let Some(input) = in_rx.recv().ok().flatten() else {
@@ -605,8 +632,21 @@ impl RaceThread {
             host.frame.on_frame = Some(on_frame);
             cpu.m.w32(super::host::MAIN_LOOP_EXIT_FLAG, 0);
             cpu.tick_limit = u64::MAX;
-            if let Err(e) = call(&mut cpu, addr::GAME_LOOP, &[]) {
-                let _ = out_tx.send(Err(format!("{e:#}")));
+            // main's loop: run the race, and again after a reset while a restart is requested
+            loop {
+                if let Err(e) = call(&mut cpu, addr::GAME_LOOP, &[]) {
+                    let _ = out_tx.send(Err(format!("{e:#}")));
+                    break;
+                }
+                if cpu.m.r32(addr::SIM_VAR) == 0 {
+                    break;
+                }
+                if let Err(e) = call(&mut cpu, addr::RACE_RESTART, &[]) {
+                    let _ = out_tx.send(Err(format!("{e:#}")));
+                    break;
+                }
+                cpu.m.w32(addr::SIM_VAR, 0);
+                cpu.m.w32(super::host::MAIN_LOOP_EXIT_FLAG, 0);
             }
         })?;
         let last = match out_rx.recv() {

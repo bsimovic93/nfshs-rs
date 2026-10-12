@@ -1,2 +1,3 @@
 # Recompiled functions that are always called through Cpu::call so the host can observe them
 800e77f0 systemtask
+8009a5ac CopSpeak_Stop (pending requests are dropped first: speech is played by the host)

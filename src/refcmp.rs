@@ -208,6 +208,24 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
             let layout: Vec<u8> = (0..0x60u32).map(|i| ram.0[((lp + i) & 0x1F_FFFF) as usize]).collect();
             let counter = ram.i32(0x8011_F368);
             let map = crate::ps1::race::MapView::read(&mut |a| ram.i32(a) as u32);
+            // NFSHS_REF_OVERLAY=pause: the pause menu as the game draws it (recorded from a
+            // run of the original), to compare with a capture of it
+            let overlay = match std::env::var("NFSHS_REF_OVERLAY").as_deref() {
+                Ok("pause") => {
+                    use crate::ps1::host::OverlayCmd::*;
+                    let t = |x, y, colour, s: &str| Text { x, y, colour, space: 3, text: s.as_bytes().to_vec() };
+                    vec![
+                        t(120, 98, 6, "Game Paused"),
+                        t(85, 117, 3, "Continue"),
+                        t(85, 130, 4, "Restart"),
+                        t(85, 143, 4, "Options"),
+                        t(85, 156, 4, "Quit Race"),
+                        Rect { semi: true, x: 80, y: 119, w: 160, h: 13, colour: 0, dx0: 0, dx1: 0 },
+                        PauseBox { x: 80, y: 100, w: 160, h: 85 },
+                    ]
+                }
+                _ => Vec::new(),
+            };
             let frame = crate::game::ps1hud::HudFrame {
                 dash: &dash,
                 layout: &layout,
@@ -215,6 +233,7 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
                 blink: (counter >> 4) & 1 != 0,
                 countdown: ram.0[0x13_D930],
                 countdown_ticks: ram.i32(0x8013_EF8C).wrapping_sub(ram.i32(0x8013_D83C + 6348)),
+                overlay: &overlay,
             };
             h.vertices(&frame, W as f32, H as f32)
         }

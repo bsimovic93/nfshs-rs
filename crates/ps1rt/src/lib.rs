@@ -14,10 +14,13 @@ const SCRATCH_SIZE: usize = 0x400;
 
 /// PS1 main RAM (2 MB, mirrored through KUSEG/KSEG0/KSEG1) plus the 1 KB scratchpad.
 /// Hardware registers are not emulated: reads return 0 and writes are dropped (counted so
-/// accidental hardware polling is detected).
+/// accidental hardware polling is detected), except for the SPU voices' current envelope
+/// volume, which the host keeps so the sound driver can tell when a voice has ended.
 pub struct Mem {
     pub ram: Vec<u8>,
     pub scratch: [u8; SCRATCH_SIZE],
+    /// The SPU voices' current ADSR volume (0x1F801C0C + 16 * voice).
+    pub spu_volume: [u16; 24],
     io: [u8; 4],
     pub io_accesses: u64,
     pub last_io: u32,
@@ -25,7 +28,7 @@ pub struct Mem {
 
 impl Default for Mem {
     fn default() -> Self {
-        Self { ram: vec![0; RAM_SIZE], scratch: [0; SCRATCH_SIZE], io: [0; 4], io_accesses: 0, last_io: 0 }
+        Self { ram: vec![0; RAM_SIZE], scratch: [0; SCRATCH_SIZE], spu_volume: [0; 24], io: [0; 4], io_accesses: 0, last_io: 0 }
     }
 }
 
@@ -43,6 +46,9 @@ impl Mem {
                 panic!("hardware polling at {a:#x}");
             }
             self.io = [0; 4];
+            if (0x1F80_1C00..0x1F80_1D80).contains(&a) && a & 0xF == 0xC {
+                self.io[..2].copy_from_slice(&self.spu_volume[((a - 0x1F80_1C00) >> 4) as usize].to_le_bytes());
+            }
             &mut self.io[..n]
         } else {
             let o = (a as usize) & (RAM_SIZE - 1);

@@ -25,6 +25,9 @@ pub struct Input {
     pub reset: bool,
     pub camera: bool,
     pub autopilot: bool,
+    /// Start (pause) and the menus' accept button.
+    pub start: bool,
+    pub accept: bool,
     /// Analog controls (gamepad); override the digital ones when non-zero.
     pub steer_axis: f32,
     pub throttle_axis: f32,
@@ -896,6 +899,7 @@ impl Game {
                 blink: (s.sim_ticks >> 4) & 1 != 0,
                 countdown: s.countdown,
                 countdown_ticks: s.ticks.wrapping_sub(s.countdown_start) as i32,
+                overlay: &s.overlay,
             };
             return hud.vertices(&frame, w, h);
         }

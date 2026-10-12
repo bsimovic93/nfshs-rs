@@ -99,7 +99,16 @@ fn real_main() -> Result<()> {
                 ..Default::default()
             };
             let out = opt(&args, "--out").unwrap_or("shot.png");
-            app::screenshot(&data, &cfg, Path::new(out), secs, input)?;
+            // --taps "s@5,d@5.5,x@6": press Start / Down / Up / accept (x) briefly at those times
+            let taps: Vec<(char, f32)> = opt(&args, "--taps")
+                .unwrap_or("")
+                .split(',')
+                .filter_map(|t| {
+                    let (k, at) = t.split_once('@')?;
+                    Some((k.chars().next()?, at.parse().ok()?))
+                })
+                .collect();
+            app::screenshot(&data, &cfg, Path::new(out), secs, input, &taps)?;
         }
         Some("extract") => {
             let bin = PathBuf::from(&args[2]);
@@ -317,6 +326,7 @@ fn real_main() -> Result<()> {
                         '2' => pad::R1,
                         '3' => pad::L2,
                         '4' => pad::R2,
+                        'p' => pad::START,
                         _ => 0,
                     };
                 }
@@ -345,7 +355,7 @@ fn real_main() -> Result<()> {
                         stage = s.countdown;
                     }
                 }
-                println!("{st}: frame {} in {:?}, game ticks +{}", sim.last.frame, t.elapsed(), sim.last.ticks.wrapping_sub(tick0));
+                println!("{st}: frame {} in {:?}, game ticks +{}, sim ticks {}, overlay {:?}", sim.last.frame, t.elapsed(), sim.last.ticks.wrapping_sub(tick0), sim.last.sim_ticks, sim.last.overlay);
                 show(&sim.last, st);
                 show_cam(&sim.last);
             }

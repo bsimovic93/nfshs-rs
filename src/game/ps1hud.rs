@@ -4,6 +4,7 @@
 //! drawing uses the original ZHUD.PSH shapes and ZFONT.PFN glyphs. Coordinates are the PS1's
 //! 320x240 screen.
 
+use crate::ps1::host::OverlayCmd;
 use crate::assets::{Atlas, GameData, Rect, Vertex};
 use crate::formats::psh::Psh;
 use crate::ps1::race::{HudSetup, MapView};
@@ -63,6 +64,21 @@ pub struct HudFrame<'a> {
     /// The start countdown's stage and the ticks since it began.
     pub countdown: u8,
     pub countdown_ticks: i32,
+    /// The pause menu and other 2D drawing the game recorded this frame.
+    pub overlay: &'a [OverlayCmd],
+}
+
+/// A ZFONT.PFN glyph: character code, size, place in the font picture, advance and offset.
+#[derive(Clone, Copy)]
+struct Glyph {
+    code: u16,
+    w: u16,
+    h: u16,
+    u: u16,
+    v: u16,
+    advance: i8,
+    dx: i8,
+    dy: i8,
 }
 
 /// HudPmx_gShapes index of player 1's dial.
@@ -88,6 +104,9 @@ pub struct Ps1Hud {
     shapes: Vec<(u16, u16, u16, u16, u16)>,
     /// 1x1 white with the semi-transparency bit (alpha 128).
     white_semi: Rect,
+    glyphs: Vec<Glyph>,
+    /// The font picture in each of the font's 16 colours (Font_TextColor).
+    font_pages: Vec<Rect>,
     atlas_size: f32,
 }
 
@@ -218,9 +237,25 @@ impl Ps1Hud {
             })
             .collect();
         let font_rect = atlas.add(fw as u32, fh as u32, &rgba);
+        let font_pages = setup
+            .font_palettes
+            .iter()
+            .map(|pal| {
+                let rgba: Vec<u8> = (0..fw * fh)
+                    .flat_map(|i| {
+                        let b = pixels[i / 2];
+                        let idx = if i % 2 == 0 { b >> 4 } else { b & 15 };
+                        crate::formats::psh::ps1_color(pal[idx as usize])
+                    })
+                    .collect();
+                atlas.add(fw as u32, fh as u32, &rgba)
+            })
+            .collect();
         let font_clut = (setup.number_uv[0] >> 16) as u16;
+        let mut glyphs = Vec::with_capacity(count);
         for i in 0..count {
             let g = &pfn[32 + 11 * i..32 + 11 * i + 11];
+            glyphs.push(Glyph { code: u16le(g, 0), w: g[2] as u16, h: g[3] as u16, u: u16le(g, 4), v: u16le(g, 6), advance: g[8] as i8, dx: g[9] as i8, dy: g[10] as i8 });
             let (w, h, u, v) = (g[2] as u16, g[3] as u16, u16le(g, 4), u16le(g, 6));
             if w == 0 || h == 0 {
                 continue;
@@ -229,7 +264,7 @@ impl Ps1Hud {
             textures.push(Tex { u, v: v + 128, clut: font_clut, w, h, rect });
         }
         let white_semi = atlas.add(1, 1, &[255, 255, 255, 128]);
-        Ok(Self { setup, textures, shapes, white_semi, atlas_size: atlas.size as f32 })
+        Ok(Self { setup, textures, shapes, white_semi, glyphs, font_pages, atlas_size: atlas.size as f32 })
     }
 
     fn find(&self, u: u16, v: u16, clut: u16) -> Option<(Tex, u16, u16)> {
@@ -451,6 +486,77 @@ impl Ps1Hud {
         self.shape(out, 17, x + w - cw, y + h - ch + 2.0, black);
     }
 
+    /// Font_TextXY: each character's glyph at (x + its x offset, y + its y offset), then
+    /// advance; characters below '!' advance by the space width.
+    fn text(&self, out: &mut Vec<Quad>, x: i16, y: i16, colour: u8, space: u8, text: &[u8]) {
+        let Some(&page) = self.font_pages.get(colour as usize) else { return };
+        let mut x = x as i32;
+        for &ch in text {
+            if ch < 33 {
+                x += space as i32;
+                continue;
+            }
+            let code = ch as u16;
+            let direct = self.glyphs.get(ch as usize - 32).filter(|g| g.code == code);
+            let Some(g) = direct.or_else(|| self.glyphs.iter().find(|g| g.code == code)) else { continue };
+            if g.w != 0 && g.h != 0 {
+                let (px, py) = ((x + g.dx as i32) as f32, (y as i32 + g.dy as i32) as f32);
+                let (w, h) = (g.w as f32, g.h as f32);
+                let (u, v) = (g.u as f32, g.v as f32);
+                out.push(Quad {
+                    pts: [Vec2::new(px, py), Vec2::new(px + w, py), Vec2::new(px + w, py + h), Vec2::new(px, py + h)],
+                    uv: [Vec2::new(u, v), Vec2::new(u + w, v), Vec2::new(u + w, v + h), Vec2::new(u, v + h)],
+                    rect: page,
+                    colors: [[0x80; 3]; 4],
+                    textured: true,
+                    semi: false,
+                    additive: false,
+                    clip: None,
+                });
+            }
+            x += g.advance as i32;
+        }
+    }
+
+    /// Hud_RenderPauseBox: a dark red semi-transparent box under a black title band, framed
+    /// by Hud_BlackThinBox, with black lower corners and bottom edge.
+    fn pause_box(&self, out: &mut Vec<Quad>, x: f32, y: f32, w: f32, h: f32) {
+        let (cw, ch) = self.shapes.get(17).map(|s| (s.3 as f32, s.4 as f32)).unwrap_or((7.0, 7.0));
+        let black = [[0; 3]; 4];
+        let rect = |out: &mut Vec<Quad>, x: f32, y: f32, w: f32, h: f32, rgb: u32, semi: bool| {
+            self.flat(out, [Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)], rgb, semi, None);
+        };
+        self.shape(out, 14, x - 2.0, y + 10.0, black);
+        self.shape(out, 15, x + w - cw, y + 10.0, black);
+        self.shape(out, 16, x - 2.0, y + h - ch, black);
+        self.shape(out, 17, x + w - cw, y + h - ch, black);
+        rect(out, x, y + h - 2.0, w, 2.0, 0, false);
+        self.black_thin_box(out, x, y, w, h);
+        rect(out, x, y, w, 12.0, 0, false);
+        rect(out, x, y + 12.0, w, h - 12.0, 0x46_1414, true);
+    }
+
+    /// The recorded overlay: boxes, then rectangles, then text.
+    fn overlay(&self, out: &mut Vec<Quad>, cmds: &[OverlayCmd]) {
+        for c in cmds {
+            if let &OverlayCmd::PauseBox { x, y, w, h } = c {
+                self.pause_box(out, x as f32, y as f32, w as f32, h as f32);
+            }
+        }
+        for c in cmds {
+            if let &OverlayCmd::Rect { semi, x, y, w, h, colour, dx0, dx1 } = c {
+                let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
+                let pts = [Vec2::new(x + dx0 as f32, y), Vec2::new(x + w + dx1 as f32, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)];
+                self.flat(out, pts, colour, semi, None);
+            }
+        }
+        for c in cmds {
+            if let OverlayCmd::Text { x, y, colour, space, text } = c {
+                self.text(out, *x, *y, *colour, *space, text);
+            }
+        }
+    }
+
     /// Hud_Render321Go / Hud_Draw321Num: the start lights, three panels of 5x5 lamps
     /// showing the count, the lit lamps glowing brightly when the number changes.
     fn countdown(&self, out: &mut Vec<Quad>, stage: u8, ticks: i32, y: f32) {
@@ -611,6 +717,7 @@ impl Ps1Hud {
             }
         }
         self.countdown(&mut out, f.countdown, f.countdown_ticks, l(70));
+        self.overlay(&mut out, f.overlay);
         out
     }
 

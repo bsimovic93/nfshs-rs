@@ -107,3 +107,6 @@
 80076b90 AudioClc_SoundCars (sizes match dev build)
 800b4024 Render_RenderPlayerView__Fii (3D view is drawn by the host renderer)
 800b2e30 R3DCar_InsertCarFacetII
+800cc7f0 Font_TextXY (text the game draws: recorded, drawn by the host)
+800d9abc Hud_RenderPauseBox (recorded, drawn by the host)
+800d3558 Hud_FBuildF4 (recorded, drawn by the host)

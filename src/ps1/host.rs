@@ -22,8 +22,12 @@ pub struct GameHost {
     pub view_env: [i32; 9],
     /// The cars the game put into the player view this frame (R3DCar_InsertCarFacetII).
     pub car_facets: Vec<CarFacet>,
+    /// 2D drawing recorded this frame (see [`OverlayCmd`]).
+    pub overlay: Vec<OverlayCmd>,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
+    /// When each SPU voice keyed on falls silent if not keyed off (virtual clock).
+    voice_end: [u64; 24],
     pub rcnt: u32,
     pub log: Vec<String>,
     /// 1024x512 16-bit VRAM, filled by the game's LoadImage/ClearImage/MoveImage.
@@ -55,6 +59,23 @@ pub struct FrameInfo {
     pub font_clut: [u16; 16],
     /// See [`GameHost::car_facets`].
     pub car_facets: Vec<CarFacet>,
+    /// See [`GameHost::overlay`].
+    pub overlay: Vec<OverlayCmd>,
+    /// The font's 16 colour palettes (Font_TextColor 0..15).
+    pub font_palettes: Vec<[u16; 16]>,
+}
+
+/// 2D drawing the game asked for this frame outside the HUD (pause menu and the like):
+/// recorded from its calls, drawn by the host.
+#[derive(Clone, Debug)]
+pub enum OverlayCmd {
+    /// Font_TextXY: text at (x, y) in font colour `colour` (Font_TextColor index); `space`
+    /// is the font's space width.
+    Text { x: i16, y: i16, colour: u8, space: u8, text: Vec<u8> },
+    /// Hud_RenderPauseBox(x, y, w, h).
+    PauseBox { x: i16, y: i16, w: i16, h: i16 },
+    /// Hud_FBuildF4(semi, x, y, w, h, colour 0xBBGGRR, top-left / top-right x offsets).
+    Rect { semi: bool, x: i16, y: i16, w: i16, h: i16, colour: u32, dx0: i8, dx1: i8 },
 }
 
 /// Inner hook for R3DCar_InsertCarFacetII(car): record what the original decided to draw
@@ -160,6 +181,12 @@ const R3DCAR_INSERT_ALL_LIST_FACET: u32 = 0x800B_38C0;
 /// `R3DCar_ObjectVisible`.
 const R3DCAR_INSERT_CAR_FACET_II: u32 = 0x800B_2E30;
 const R3DCAR_OBJECT_VISIBLE: u32 = 0x8011_7B64;
+/// The font: CLUT of colour 0 (x in gp + 4864, y in shpfontclut + 14), the current CLUT
+/// (gp + 4880) and the space width (gp + 4882).
+const FONT_CLUT_X: u32 = 0x8013_D83C + 4864;
+const FONT_CLUT_Y: u32 = 0x8012_10AE;
+const FONT_CURRENT_CLUT: u32 = 0x8013_D83C + 4880;
+const FONT_SPACE: u32 = 0x8013_D83C + 4882;
 /// DrawC_PrimStart(vertex, car, light level, cache) and its arguments' homes.
 const DRAWC_PRIM_START: u32 = 0x800B_FAC8;
 const R3DCAR_CENTER: u32 = 0x8013_E674;
@@ -193,6 +220,11 @@ impl GameHost {
     fn advance_to(&mut self, c: &mut Cpu, t: u64) {
         c.pending_ticks += (t / TICK - self.clock / TICK) as u32;
         self.clock = t;
+        for (v, &end) in c.m.spu_volume.iter_mut().zip(&self.voice_end) {
+            if t >= end {
+                *v = 0;
+            }
+        }
     }
 
     pub fn new(root: PathBuf) -> Self {
@@ -202,9 +234,11 @@ impl GameHost {
             mounts: Vec::new(),
             next_handle: 0x100,
             clock: 0,
+            voice_end: [0; 24],
             display: [0; 4],
             view_env: [0; 9],
             car_facets: Vec::new(),
+            overlay: Vec::new(),
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -446,6 +480,13 @@ impl Host for GameHost {
                 self.next_event += 1;
                 e
             }
+            0x8009_A5AC => {
+                // CopSpeak_Stop waits for the cop speech queue (read gp+2932, write gp+2928)
+                // to be played out; speech is the host's, so the requests are dropped
+                let write = c.m.r32(0x8013_D83C + 2928);
+                c.m.w32(0x8013_D83C + 2932, write);
+                return false;
+            }
             0x800E_77F0 => {
                 if self.frame.on_frame.is_some() && c.r[31] == MAIN_LOOP_YIELD_RA {
                     // top of the original main loop: game frames are locked to 60 Hz fields
@@ -460,7 +501,14 @@ impl Host for GameHost {
                         view_env: self.view_env,
                         font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
                         car_facets: self.car_facets.clone(),
+                        overlay: std::mem::take(&mut self.overlay),
+                        font_palettes: {
+                            let (x, y) = (c.m.r16(FONT_CLUT_X) as u32, c.m.r16(FONT_CLUT_Y) as u32);
+                            (0..16).map(|i| self.clut((y << 6) | ((x + 16 * i) >> 4))).collect()
+                        },
                     };
+                    // polling is detected within a frame
+                    c.m.io_accesses = 0;
                     match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
                         None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
                         Some(buttons) => {
@@ -480,6 +528,13 @@ impl Host for GameHost {
                 } else {
                     // yield inside a wait loop: let time pass until the next timer tick
                     self.advance_to(c, (self.clock / TICK + 1) * TICK);
+                    if let Ok(path) = std::env::var("PS1_STALL_DUMP") {
+                        if self.clock > self.frame.last_top + 1920 * 30 {
+                            std::fs::write(&path, &c.m.ram).ok();
+                            eprintln!("stalled: RAM written to {path}; stack {:x?}", c.stack);
+                            std::process::exit(3);
+                        }
+                    }
                 }
                 // then run the original systemtask
                 return false;
@@ -504,11 +559,65 @@ impl Host for GameHost {
             0x8010_B8FC | 0x8010_B9F0 => 1,               // iSNDdmqueue / queuesplit: transfer id
             0x8010_B4BC | 0x8010_B87C => 0,               // iSNDdmtransfer / iSNDdmservice
             0x8010_4360 => 0,                             // iSNDpsxzerospu
-            0x800F_FAEC | 0x800F_FB14 | 0x800F_FB3C | 0x800F_FB7C | 0x800F_FBBC => 0,
+            0x800F_FAEC => {
+                // iSNDpsxkeyon(voices): the voices sound (as far as the driver can see) until
+                // keyed off, or for a second
+                if std::env::var_os("PS1_SNDLOG").is_some() {
+                    eprintln!("keyon {a0:06x} at {}", self.clock);
+                }
+                for v in (0..24).filter(|v| a0 >> v & 1 != 0) {
+                    c.m.spu_volume[v] = 0x4000;
+                    self.voice_end[v] = self.clock + 1920;
+                }
+                0
+            }
+            0x800F_FB14 => {
+                // iSNDpsxkeyoff(voices)
+                if std::env::var_os("PS1_SNDLOG").is_some() {
+                    eprintln!("keyoff {a0:06x} at {}", self.clock);
+                }
+                for v in (0..24).filter(|v| a0 >> v & 1 != 0) {
+                    c.m.spu_volume[v] = 0;
+                }
+                0
+            }
+            0x800F_FB3C | 0x800F_FB7C | 0x800F_FBBC => 0,
             0x8010_CBDC | 0x8010_CC00 => 0,               // SPU IRQ enable/disable
 
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
+            0x800C_C7F0 => {
+                // Font_TextXY(text, x, y)
+                let mut text = Vec::new();
+                while text.len() < 256 {
+                    let b = c.m.r8(a0 + text.len() as u32);
+                    if b == 0 {
+                        break;
+                    }
+                    text.push(b);
+                }
+                let colour = ((c.m.r16(FONT_CURRENT_CLUT) as u32 & 0x3F) as i32 - (c.m.r16(FONT_CLUT_X) as i32 >> 4)).clamp(0, 15) as u8;
+                self.overlay.push(OverlayCmd::Text { x: a1 as i16, y: a2 as i16, colour, space: c.m.r8(FONT_SPACE), text });
+                0
+            }
+            0x800D_9ABC => {
+                self.overlay.push(OverlayCmd::PauseBox { x: a0 as i16, y: a1 as i16, w: a2 as i16, h: a3 as i16 });
+                0
+            }
+            0x800D_3558 => {
+                let sp = c.r[29];
+                self.overlay.push(OverlayCmd::Rect {
+                    semi: a0 != 0,
+                    x: a1 as i16,
+                    y: a2 as i16,
+                    w: a3 as i16,
+                    h: c.m.r32(sp + 16) as i16,
+                    colour: c.m.r32(sp + 20) & 0xFF_FFFF,
+                    dx0: c.m.r32(sp + 24) as i8,
+                    dx1: c.m.r32(sp + 28) as i8,
+                });
+                0
+            }
             0x800B_4024 => {
                 // Render_RenderPlayerView(view, player): the world itself is drawn by the host
                 // renderer. Run the original view set-up (Render_StartRenderingWorldView:

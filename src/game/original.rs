@@ -152,8 +152,20 @@ impl OriginalSim {
 
     /// PS1 controller buttons for the engine's input (the game's default layout:
     /// Cross accelerate, Square brake/reverse, Circle handbrake, d-pad steer).
-    fn buttons(input: &Input) -> u16 {
+    fn buttons(input: &Input, menu: bool) -> u16 {
         let mut b = 0;
+        if input.start {
+            b |= pad::START;
+        }
+        if menu {
+            // the pause menu: d-pad and Cross
+            for (on, bit) in [(input.up, pad::UP), (input.down, pad::DOWN), (input.left, pad::LEFT), (input.right, pad::RIGHT), (input.accept, pad::CROSS)] {
+                if on {
+                    b |= bit;
+                }
+            }
+            return b;
+        }
         if input.up || input.throttle_axis > 0.3 {
             b |= pad::CROSS;
         }
@@ -175,13 +187,19 @@ impl OriginalSim {
         b
     }
 
+    /// The original's main loop has ended (the race was quit from its menu).
+    pub fn stopped(&self) -> bool {
+        self.stopped
+    }
+
     /// Run the 60 Hz frames that fall into `dt` seconds of real time.
     pub fn advance(&mut self, dt: f32, input: &Input) {
         if self.stopped {
             return;
         }
         self.accum = (self.accum + dt).min(FRAME * 6.0);
-        let user_buttons = Self::buttons(input);
+        let paused = self.thread.last.paused;
+        let user_buttons = Self::buttons(input, paused);
         while self.accum >= FRAME {
             let mut buttons = user_buttons;
             let snap = &self.thread.last;

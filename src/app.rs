@@ -168,6 +168,8 @@ impl App {
             reset: k.reset,
             camera: k.camera,
             autopilot: self.autopilot,
+            start: k.escape,
+            accept: k.enter,
             ..Default::default()
         };
         if let Some(g) = &mut self.gilrs {
@@ -240,7 +242,13 @@ impl App {
                 if let Screen::Race(game) = &mut self.screen {
                     game.update(dt, input);
                     let finished = game.phase == Phase::Finished;
-                    if keys.escape || (finished && keys.enter) {
+                    // with the original running, Escape is its Start button (pause menu) and
+                    // the race ends when the original leaves it
+                    let quit = match &game.sim {
+                        Some(sim) => sim.stopped(),
+                        None => keys.escape,
+                    };
+                    if quit || (finished && keys.enter) {
                         self.keys.escape = false;
                         self.keys.enter = false;
                         self.enter_menu();
@@ -372,7 +380,7 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
 }
 
 /// Headless: simulate `seconds` with a scripted input and save a screenshot.
-pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seconds: f32, input: Input) -> anyhow::Result<()> {
+pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seconds: f32, input: Input, taps: &[(char, f32)]) -> anyhow::Result<()> {
     let mut atlas = Atlas::new(2048);
     let mut game = Game::load(data, &mut atlas, cfg)?;
     let mut r = pollster::block_on(Renderer::new(None, (960, 720), &atlas))?;
@@ -382,6 +390,18 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
     let trace = std::env::var_os("SHOT_TRACE").is_some();
     while t < seconds {
         let before = game.player().car.pos;
+        let mut input = input;
+        for &(k, at) in taps {
+            if (at..at + 0.1).contains(&t) {
+                match k {
+                    's' => input.start = true,
+                    'd' => input.down = true,
+                    'u' => input.up = true,
+                    'x' => input.accept = true,
+                    _ => {}
+                }
+            }
+        }
         game.update(1.0 / 60.0, input);
         t += 1.0 / 60.0;
         if trace && seconds - t < 0.5 {
