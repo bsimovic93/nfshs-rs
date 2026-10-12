@@ -203,6 +203,10 @@ pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
     for i in 0..4 {
         cpu.m.w32(changes + 4 * i, 0);
     }
+    if std::env::var_os("PS1_HEAPLOG").is_some() {
+        let free = call(&mut cpu, 0x800E_5E70, &[])?;
+        eprintln!("largest free block before the game module: {free:#x}");
+    }
     call(&mut cpu, addr::NFS2_GAME_MODULE_STARTUP, &[changes])?;
     call(&mut cpu, addr::RACE_RESTART, &[])?;
     // main clears the restart request before entering the game loop (it blocks pausing)
@@ -301,7 +305,7 @@ pub struct HudSetup {
     /// Gouraud panel quads (POLY_G4, 36 bytes each) and their flat end caps (POLY_F4, 24 bytes).
     pub panels: Vec<u8>,
     pub caps: Vec<u8>,
-    /// `HudPmx_gShapes`: 140 entries (Draw_tPixMap + width, height).
+    /// `HudPmx_gShapes`: 175 entries (Draw_tPixMap + width, height).
     pub shapes: Vec<u8>,
     /// `HudPmx_gHudNumberUV`: uv+clut word of the digits 0..9.
     pub number_uv: [u32; 10],
@@ -317,6 +321,9 @@ pub struct HudSetup {
     pub needle_colors: [u32; 30],
 }
 
+/// `HudPmx_gShapes`.
+pub const HUD_SHAPES: u32 = 0x8011_1F5C;
+
 impl HudSetup {
     pub fn read(m: &mut Mem, font_clut: [u16; 16], font_palettes: Vec<[u16; 16]>) -> Option<Self> {
         let slots = m.r32(addr::GP + 6356);
@@ -329,7 +336,7 @@ impl HudSetup {
             slots: bytes(m, slots, 72 * 20),
             panels: bytes(m, 0x8013_FA38, 4 * 36),
             caps: bytes(m, 0x8013_F758, 4 * 24),
-            shapes: bytes(m, 0x8011_1F5C, 140 * 20),
+            shapes: bytes(m, HUD_SHAPES, 175 * 20),
             number_uv: std::array::from_fn(|i| m.r32(0x8011_1F34 + 4 * i as u32)),
             car_info: bytes(m, addr::GAMESETUP + 0x3D4, 0xB4),
             font_clut,

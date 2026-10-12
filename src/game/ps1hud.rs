@@ -22,6 +22,10 @@ const SHAPE_NAMES: &[&str] = &[
     "a207", "a209", "a210", "a211", "a212", "a214", "a217", "a218", "a219", "a220", "A229", "time", "timb", "laps", "ejct", "play", "paus",
     "resg", "rad0", "rad1", "s1/4", "s1/2", "spd2", "spd1", "plus", "minu", "plr1", "oppn", "barl", "barr", "barb", "baXl", "baXr", "tacc",
     "<dial>", "tpno",
+    // the HUD's small font (Hud_BuildString) and the pad button symbols
+    "alpA", "alpB", "alpC", "alpD", "alpE", "alpF", "alpG", "alpH", "alpI", "alpJ", "alpK", "alpL", "alpM", "alpN", "alpO", "alpP", "alpQ",
+    "alpR", "alpS", "alpT", "alpU", "alpV", "alpW", "alpX", "alpY", "alpZ", "alp0", "alp1", "alp2", "alp3", "alp4", "alp5", "alp6", "alp7",
+    "alp8", "alp9", "alTR", "alCI", "alSQ", "negA", "negB", "neg2", "alUP",
 ];
 /// The tachometer dial per car (HudPmx_InitTextures' day and night tables; 29 and up: "bon").
 const DIALS_DAY: [&str; 29] = [
@@ -549,6 +553,13 @@ impl Ps1Hud {
                     self.flat(out, pts, colour, semi, None);
                 }
                 OverlayCmd::Text { x, y, colour, space, text } => self.text(out, *x, *y, *colour, *space, text),
+                &OverlayCmd::Shape { shape, x, y, colour } => {
+                    if let Some(&(u, v, clut, w, h)) = self.shapes.get(shape as usize) {
+                        let rgb = [colour as u8, (colour >> 8) as u8, (colour >> 16) as u8];
+                        self.textured(out, x as f32, y as f32, w, h, u, v, clut, [rgb; 4], true);
+                    }
+                }
+                &OverlayCmd::ThinBox { x, y, w, h } => self.black_thin_box(out, x as f32, y as f32, w as f32, h as f32),
             }
         }
     }

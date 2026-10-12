@@ -366,6 +366,14 @@ fn real_main() -> Result<()> {
                 println!("RAM written to re/boot/ram.bin");
             }
         }
+        Some("heap-free") => {
+            // heap-free <ram.bin>: the game's largest free heap block in a RAM image
+            let mut mem = ps1::Mem::default();
+            mem.ram.copy_from_slice(&std::fs::read(&args[2])?);
+            let mut cpu = ps1::new_cpu(mem);
+            cpu.host = Some(Box::new(ps1::host::GameHost::new(data.root.clone())));
+            println!("largest free block: {:#x}", ps1::race::call(&mut cpu, 0x800E_5E70, &[])?);
+        }
         Some("run-snap") => {
             // run-snap <snapdir> [--trace]: run the snapshotted function natively with host HLE
             let dir = Path::new(&args[2]);

@@ -76,6 +76,19 @@ pub enum OverlayCmd {
     PauseBox { x: i16, y: i16, w: i16, h: i16 },
     /// Hud_FBuildF4(semi, x, y, w, h, colour 0xBBGGRR, top-left / top-right x offsets).
     Rect { semi: bool, x: i16, y: i16, w: i16, h: i16, colour: u32, dx0: i8, dx1: i8 },
+    /// Hud_FBuildSprite: HudPmx_gShapes[shape] at (x, y) modulated by colour (0xBBGGRR).
+    Shape { shape: u8, x: i16, y: i16, colour: u32 },
+    /// Hud_BlackThinBox(x, y, w, h).
+    ThinBox { x: i16, y: i16, w: i16, h: i16 },
+}
+
+/// HUD functions whose drawing the host renders from its own port (Hud_RenderMapView,
+/// Hud_BlackThinBox's countdown use in Hud_Draw321Num / Hud_Render321Go, Hud_RenderHudView,
+/// Hud_RenderTacView): 2D calls made from them are not recorded again.
+const NATIVE_HUD: [std::ops::Range<u32>; 4] = [0x800D_840C..0x800D_8690, 0x800D_887C..0x800D_8B84, 0x800D_8EA4..0x800D_981C, 0x800D_981C..0x800D_9938];
+
+fn native_hud(ra: u32) -> bool {
+    NATIVE_HUD.iter().any(|r| r.contains(&ra))
 }
 
 /// Inner hook for R3DCar_InsertCarFacetII(car): record what the original decided to draw
@@ -600,12 +613,66 @@ impl Host for GameHost {
                 self.overlay.push(OverlayCmd::Text { x: a1 as i16, y: a2 as i16, colour, space: c.m.r8(FONT_SPACE), text });
                 0
             }
+            0x800D_4E9C => {
+                // Hud_BuildString(text, x, y, colour, pad, measure only): the HUD's small
+                // letters and digits and the pad button symbols; returns the width
+                let sp = c.r[29];
+                let measure = c.m.r32(sp + 20) != 0;
+                let record = !measure && !native_hud(c.r[31]);
+                let width = |c: &mut Cpu, s: u32| c.m.r16(super::race::HUD_SHAPES + 20 * s + 16) as i16 as i32;
+                let (x0, y) = (a1 as i32, a2 as i32);
+                let mut x = x0;
+                for i in 0..64 {
+                    let ch = c.m.r8(a0 + i) as u32;
+                    if ch == 0 {
+                        break;
+                    }
+                    // (shape, y offset); a standard pad's symbols
+                    let (shape, dy) = match ch {
+                        0x20 => {
+                            x += 3;
+                            continue;
+                        }
+                        0x2A => {
+                            // '*': the X button, two pixels in
+                            x += 2;
+                            (170, 0)
+                        }
+                        0x5E => (170, 0),
+                        0x28 => (169, 0),
+                        0x29 => (168, 0),
+                        0x26 => (174, 0),
+                        0x30..=0x39 => (ch + 110, 0),
+                        0x2D => (72, 0),
+                        0x3A => (73, 0),
+                        0xC0..=0xDC => (ch - 118, -1),
+                        0xE5 => (103, -1),
+                        _ => (ch + 67, 0),
+                    };
+                    let shape = shape & 0xFF;
+                    if record {
+                        self.overlay.push(OverlayCmd::Shape { shape: shape as u8, x: x as i16, y: (y + dy) as i16, colour: a3 & 0xFF_FFFF });
+                    }
+                    x += width(c, shape) + if ch == 0x2A { 3 } else { 1 };
+                }
+                (x - x0) as u32
+            }
+            0x800D_8690 => {
+                if !native_hud(c.r[31]) {
+                    self.overlay.push(OverlayCmd::ThinBox { x: a0 as i16, y: a1 as i16, w: a2 as i16, h: a3 as i16 });
+                }
+                0
+            }
             0x800D_9ABC => {
                 self.overlay.push(OverlayCmd::PauseBox { x: a0 as i16, y: a1 as i16, w: a2 as i16, h: a3 as i16 });
                 0
             }
+            0x800D_3558 if native_hud(c.r[31]) => 0,
             0x800D_3558 => {
                 let sp = c.r[29];
+                if std::env::var_os("PS1_OVLOG").is_some() {
+                    eprintln!("F4 ({a1},{a2}) {a3}x{} from {:#x}", c.m.r32(sp + 16) as i32, c.r[31]);
+                }
                 self.overlay.push(OverlayCmd::Rect {
                     semi: a0 != 0,
                     x: a1 as i16,

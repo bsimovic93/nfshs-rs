@@ -110,3 +110,5 @@
 800cc7f0 Font_TextXY (text the game draws: recorded, drawn by the host)
 800d9abc Hud_RenderPauseBox (recorded, drawn by the host)
 800d3558 Hud_FBuildF4 (recorded, drawn by the host)
+800d4e9c Hud_BuildString (recorded for the host HUD)
+800d8690 Hud_BlackThinBox (recorded for the host HUD)
