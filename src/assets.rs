@@ -539,6 +539,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
             page_of.insert(s.name.clone(), page);
         }
     }
+    // NFSHS_CAR_PAGES=DIR: save the assembled texture pages (for checking the layout)
     if let Ok(dir) = std::env::var("NFSHS_CAR_PAGES") {
         for (k, p) in pages.iter().enumerate() {
             if let Some(img) = image::RgbaImage::from_raw(256, 256, p.rgba.clone()) {
