@@ -4,6 +4,7 @@ pub mod ai;
 pub mod car;
 pub mod collision;
 pub mod hud;
+pub mod original;
 
 use crate::assets::{self, Atlas, CarModel, GameData, TrackAssets, Vertex};
 use crate::render::FrameParams;
@@ -37,6 +38,8 @@ pub enum CameraMode {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Phase {
+    /// The original game's intro fly-by before the start lights.
+    Intro,
     Countdown(f32),
     Racing,
     Finished,
@@ -95,6 +98,8 @@ pub struct Game {
     /// Ambient light multiplier (night < 1).
     pub ambient: f32,
     pub night: bool,
+    /// The recompiled original simulation, when it drives this race.
+    pub sim: Option<original::OriginalSim>,
 }
 
 const DT: f32 = 1.0 / 120.0;
@@ -162,8 +167,21 @@ impl Game {
             "W" => (Vec3::new(0.45, 0.48, 0.52), 50.0, 260.0),
             _ => (track.sky_colors.1, 120.0, 420.0),
         };
+        // the original game's simulation drives the race unless disabled (NFSHS_OWN_PHYSICS=1)
+        // or it cannot run this setup
+        let sim = if std::env::var_os("NFSHS_OWN_PHYSICS").is_some() {
+            None
+        } else {
+            match original::OriginalSim::start(data, cfg) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    log::warn!("original simulation unavailable, using the engine's physics: {e:#}");
+                    None
+                }
+            }
+        };
         let player = &racers[0].car;
-        Ok(Self {
+        let mut game = Self {
             cam_pos: player.pos - player.forward() * 7.0 + Vec3::Y * 2.5,
             cam_target: player.pos,
             track,
@@ -188,7 +206,47 @@ impl Game {
                 _ => 1.0,
             },
             night: cfg.variant == "N",
-        })
+            sim,
+        };
+        if game.sim.is_some() {
+            game.phase = Phase::Intro;
+            game.sync_original(0.0);
+            let p = &game.racers[0].car;
+            game.cam_pos = p.pos - p.forward() * 7.0 + Vec3::Y * 2.5;
+            game.cam_target = p.pos;
+            for i in 0..game.racers.len() {
+                game.racers[i].progress = Self::nearest_path(&game.path, game.racers[i].car.pos, 0, n / 2 + 1);
+                game.racers[i].laps_done = if game.racers[i].progress > n / 2 { -1 } else { 0 };
+            }
+        }
+        Ok(game)
+    }
+
+    /// Copy car poses and the start sequence from the original simulation.
+    fn sync_original(&mut self, frame_dt: f32) {
+        let Some(sim) = &self.sim else { return };
+        let snap = sim.snapshot();
+        for (r, c) in self.racers.iter_mut().zip(&snap.cars) {
+            let pose = original::pose(c);
+            let car = &mut r.car;
+            car.pos = pose.pos;
+            car.vel = pose.vel;
+            car.rot = Some(pose.rot);
+            car.up = pose.up;
+            car.yaw = pose.forward.x.atan2(pose.forward.z);
+            car.rpm = c.rpm as f32;
+            // control.gear: 0 reverse, 1 neutral, 2.. forward gears
+            car.reversing = c.gear == 0;
+            car.gear = (c.gear as i32 - 2).max(0) as usize;
+            car.steer = (c.steering as f32 / 128.0).clamp(-1.0, 1.0) * 0.5;
+            car.wheel_spin += car.vel.dot(pose.forward) / car.spec.wheel_radius.max(0.2) * frame_dt;
+        }
+        self.phase = match (snap.countdown, self.phase) {
+            (_, Phase::Finished) => Phase::Finished,
+            (0, _) => Phase::Intro,
+            (s @ 1..=3, _) => Phase::Countdown((4 - s) as f32),
+            _ => Phase::Racing,
+        };
     }
 
     pub fn font(&self) -> &hud::Font {
@@ -235,6 +293,30 @@ impl Game {
             };
         }
         self.prev_camera_key = input.camera;
+        if self.sim.is_some() {
+            let mut input = input;
+            if input.autopilot || self.racers[0].finish_time.is_some() {
+                // the engine's driver, through the digital pad
+                let r = &self.racers[0];
+                let c = self.autopilot.controls(&r.car, &self.path, r.progress, frame_dt);
+                input.up = c.throttle > 0.5;
+                input.down = c.brake > 0.5;
+                input.left = c.steer < -0.2;
+                input.right = c.steer > 0.2;
+                input.handbrake = c.handbrake;
+            }
+            for r in &mut self.racers {
+                r.throttle = 0.0;
+            }
+            self.racers[0].throttle = if input.up || input.throttle_axis > 0.3 { 1.0 } else { 0.0 };
+            if let Some(sim) = &mut self.sim {
+                sim.advance(frame_dt, &input);
+            }
+            self.sync_original(frame_dt);
+            let racing = matches!(self.phase, Phase::Racing | Phase::Finished);
+            self.track_progress(frame_dt, racing);
+            return;
+        }
         if input.reset {
             self.reset_racer(0);
         }
@@ -314,12 +396,19 @@ impl Game {
             self.accum -= DT;
         }
 
+        for i in 0..self.racers.len() {
+            self.enforce_walls(i);
+        }
+        self.track_progress(frame_dt, racing);
+    }
+
+    /// Race time, laps, standings and the camera after the cars moved.
+    fn track_progress(&mut self, frame_dt: f32, racing: bool) {
         let n = self.path.len();
         if racing && self.phase == Phase::Racing {
             self.race_time += frame_dt;
         }
         for i in 0..self.racers.len() {
-            self.enforce_walls(i);
             let r = &mut self.racers[i];
             if r.car.pos.y < self.path[r.progress].y - 40.0 {
                 self.reset_racer(i);
@@ -568,7 +657,7 @@ impl Game {
                     self.font.text(&mut out, &format!("{}. {:6} {}", k + 1, r.name, t), w * 0.5 - 90.0 * s, h * 0.2 + (30.0 + k as f32 * 12.0) * s, s * 1.5, col);
                 }
             }
-            Phase::Racing => {}
+            Phase::Racing | Phase::Intro => {}
         }
         out
     }

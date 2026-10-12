@@ -15,8 +15,8 @@ pub struct GameHost {
     /// Mounted BIGF archives (FILE_addbigsync): handle -> entries.
     mounts: Vec<(u32, Vec<(String, Vec<u8>)>)>,
     next_handle: u32,
-    pub vsync: u32,
-    tick_frac: u32,
+    /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
+    pub clock: u64,
     pub rcnt: u32,
     pub log: Vec<String>,
     /// 1024x512 16-bit VRAM, filled by the game's LoadImage/ClearImage/MoveImage.
@@ -30,29 +30,42 @@ pub struct GameHost {
     pub frame: FrameDriver,
 }
 
-/// Paces the original main loop: every `systemtask` yield at the top of the loop is one
-/// 60 Hz frame. Supplies controller state and stops the loop after `frames_left` frames.
+/// Called at the top of every main-loop iteration (one game frame, locked to a 60 Hz field)
+/// with the current field number; returns the PS1 digital buttons to hold during the frame
+/// (active-high: bit 14 = Cross, 15 = Square, 4 = Up, ...) or `None` to leave the loop.
+pub type FrameFn = Box<dyn FnMut(&mut Cpu, u64) -> Option<u16>>;
+
+/// Paces the original main loop against the virtual clock: game time only passes while the
+/// game waits (VSync = until the next 60 Hz field, timer polling = until the next 128 Hz tick)
+/// and every main-loop iteration is locked to the next field boundary.
 #[derive(Default)]
 pub struct FrameDriver {
-    pub active: bool,
-    pub frames_left: u32,
+    pub on_frame: Option<FrameFn>,
+    /// Main-loop iterations (game frames) run.
     pub frames_run: u32,
-    /// PS1 digital buttons, active-high (bit 14 = Cross, 15 = Square, 4 = Up, ...).
-    pub buttons: u16,
+    last_top: u64,
 }
 
 pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
+/// Virtual clock units per 128 Hz timer tick and per 60 Hz field.
+pub const TICK: u64 = 15;
+pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
 
 impl GameHost {
+    /// Move the virtual clock forward, queueing the timer interrupts that fall in between.
+    fn advance_to(&mut self, c: &mut Cpu, t: u64) {
+        c.pending_ticks += (t / TICK - self.clock / TICK) as u32;
+        self.clock = t;
+    }
+
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
             files: HashMap::new(),
             mounts: Vec::new(),
             next_handle: 0x100,
-            vsync: 0,
-            tick_frac: 0,
+            clock: 0,
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -103,6 +116,9 @@ impl Host for GameHost {
                         let h = self.next_handle;
                         self.next_handle += 1;
                         self.log.push(format!("open {name} ({} bytes)", data.len()));
+                        if std::env::var_os("PS1_FILES").is_some() {
+                            eprintln!("open {name}");
+                        }
                         self.files.insert(h, data);
                         c.m.w32(a3, h);
                         1
@@ -228,12 +244,11 @@ impl Host for GameHost {
 
             // ---- libetc / timers / callbacks
             0x800F_2C78 => {
-                // VSync: one 60 Hz field = 128/60 timer ticks
-                self.vsync += 1;
-                self.tick_frac += 128;
-                c.pending_ticks += self.tick_frac / 60;
-                self.tick_frac %= 60;
-                self.vsync
+                // VSync(mode): mode 0 waits for the next field; mode 1 just reads the counter
+                if a0 == 0 {
+                    self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
+                }
+                (self.clock / FIELD) as u32
             }
             0x800F_31A8 => 0, // ResetCallback
             0x800F_31D8 => {
@@ -285,31 +300,32 @@ impl Host for GameHost {
                 e
             }
             0x800E_77F0 => {
-                if self.frame.active && c.r[31] == MAIN_LOOP_YIELD_RA {
-                    // top of the original main loop: one 60 Hz frame
-                    if self.frame.frames_left == 0 {
-                        c.m.w32(MAIN_LOOP_EXIT_FLAG, 1);
-                    } else {
-                        self.frame.frames_left -= 1;
-                        self.frame.frames_run += 1;
+                if self.frame.on_frame.is_some() && c.r[31] == MAIN_LOOP_YIELD_RA {
+                    // top of the original main loop: game frames are locked to 60 Hz fields
+                    if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
+                        self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
                     }
-                    if c.trace || std::env::var("PS1_FRAMES").is_ok() {
-                        eprintln!("frame {} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
-                    }
-                    let pad = !self.frame.buttons; // active low
-                    for b in self.pad_buffers {
-                        if b != 0 {
-                            c.m.w8(b, 0x00); // status: ok
-                            c.m.w8(b + 1, 0x41); // digital pad
-                            c.m.w16(b + 2, pad);
+                    self.frame.last_top = self.clock;
+                    let field = self.clock / FIELD;
+                    match self.frame.on_frame.as_mut().and_then(|f| f(c, field)) {
+                        None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
+                        Some(buttons) => {
+                            self.frame.frames_run += 1;
+                            for b in self.pad_buffers {
+                                if b != 0 {
+                                    c.m.w8(b, 0x00); // status: ok
+                                    c.m.w8(b + 1, 0x41); // digital pad
+                                    c.m.w16(b + 2, !buttons); // active low
+                                }
+                            }
                         }
                     }
-                    self.tick_frac += 128;
-                    c.pending_ticks += self.tick_frac / 60;
-                    self.tick_frac %= 60;
+                    if c.trace || std::env::var("PS1_FRAMES").is_ok() {
+                        eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
+                    }
                 } else {
-                    // yield inside a wait loop: let one timer tick pass
-                    c.pending_ticks += 1;
+                    // yield inside a wait loop: let time pass until the next timer tick
+                    self.advance_to(c, (self.clock / TICK + 1) * TICK);
                 }
                 // then run the original systemtask
                 return false;

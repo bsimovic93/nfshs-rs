@@ -98,6 +98,8 @@ pub struct Car {
     pub steer: f32,
     pub wheel_spin: f32,
     pub reversing: bool,
+    /// Full orientation when driven by the original simulation (overrides yaw/up).
+    pub rot: Option<Quat>,
 }
 
 const G: f32 = 9.81;
@@ -117,6 +119,7 @@ impl Car {
             steer: 0.0,
             wheel_spin: 0.0,
             reversing: false,
+            rot: None,
         }
     }
 
@@ -135,6 +138,9 @@ impl Car {
     }
 
     pub fn orientation(&self) -> Quat {
+        if let Some(q) = self.rot {
+            return q;
+        }
         let f = self.forward();
         let up = self.up.normalize();
         let fwd = (f - up * f.dot(up)).normalize_or(f);

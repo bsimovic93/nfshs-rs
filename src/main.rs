@@ -208,55 +208,82 @@ fn real_main() -> Result<()> {
             println!("{func:#x}: {:?}, RAM words differing: {} {:x?}, scratch words differing: {sdiff}", el, diff.len(), &diff.iter().take(10).map(|i| 0x8000_0000u32 + *i as u32).collect::<Vec<_>>());
         }
         Some("boot-race") => {
-            // boot the recompiled original game straight into a race
-            let gs = std::fs::read("re/gamesetup_template.bin")?;
+            // boot-race [--track N --variant V --car C --opponents A,B --laps N]: run the
+            // recompiled original race simulation headless. BOOT_SCRIPT="secs:buttons,..."
+            // (x cross, s square, c circle, t triangle, l/r/u/d pad, 1-4 L1/R1/L2/R2, - none);
+            // GS_SET="hexoff=value,..." pokes GameSetup words.
+            use ps1::race::{FrameInput, RaceSetup, RaceThread, pad};
+            let mut cars = vec![car.clone()];
+            cars.extend(cfg.opponents.iter().cloned());
+            let setup = RaceSetup { track, variant: variant.clone(), cars, laps: laps as u32 };
+            let mut gs = setup.game_setup()?;
+            for kv in std::env::var("GS_SET").unwrap_or_default().split(',').filter(|s| !s.is_empty()) {
+                let (o, v) = kv.split_once('=').expect("off=value");
+                let o = usize::from_str_radix(o, 16)?;
+                gs[o..o + 4].copy_from_slice(&v.parse::<i32>()?.to_le_bytes());
+            }
             let t = std::time::Instant::now();
-            match ps1::race::OriginalGame::boot(&data.root, &gs) {
-                Ok(g) => {
-                    println!("booted into race in {:?}, {} calls, {} io accesses, {} interpreter fallbacks", t.elapsed(), g.cpu.calls, g.cpu.m.io_accesses, g.cpu.interpreted);
-                    std::fs::create_dir_all("re/boot")?;
-                    std::fs::write("re/boot/ram.bin", &g.cpu.m.ram)?;
-                    let mut g = g;
-                    let rd = |g: &mut ps1::race::OriginalGame, o: u32| { let car = g.player_car(); g.cpu.m.r32(car + o) as i32 };
-                    // BOOT_SCRIPT: comma-separated `seconds:buttons` steps (buttons: x=cross, l/r=left/right, -=none)
-                    let script = std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "1:-,3:x".into());
-                    let steps: Vec<(u32, u16, String)> = script
-                        .split(',')
-                        .filter_map(|st| {
-                            let (secs, b) = st.split_once(':')?;
-                            let mut m = 0u16;
-                            for ch in b.chars() {
-                                m |= match ch {
-                                    'x' => ps1::race::pad::CROSS,
-                                    's' => ps1::race::pad::SQUARE,
-                                    'l' => ps1::race::pad::LEFT,
-                                    'r' => ps1::race::pad::RIGHT,
-                                    'u' => ps1::race::pad::UP,
-                                    'd' => ps1::race::pad::DOWN,
-                                    _ => 0,
-                                };
-                            }
-                            Some((secs.parse().ok()?, m, st.to_string()))
-                        })
-                        .collect();
-                    for (secs, buttons, label) in steps {
-                        let t = std::time::Instant::now();
-                        let n = g.run_frames(secs * 60, buttons)?;
-                        let speed = rd(&mut g, 0xC0) as f32 / 65536.0;
-                        println!(
-                            "{label}: {n} frames in {:?}; pos=({:.2},{:.2},{:.2}) speed={:.2} m/s ({:.1} mph) rpm={} gear?={}",
-                            t.elapsed(),
-                            rd(&mut g, 0xA0) as f32 / 65536.0,
-                            rd(&mut g, 0xA4) as f32 / 65536.0,
-                            rd(&mut g, 0xA8) as f32 / 65536.0,
-                            speed,
-                            speed * 2.237,
-                            rd(&mut g, 0x468),
-                            rd(&mut g, 0x428)
-                        );
+            let mut sim = RaceThread::start(data.root.clone(), gs)?;
+            println!("booted into race in {:?}", t.elapsed());
+            let show = |s: &ps1::race::Snapshot, label: &str| {
+                for (k, c) in s.cars.iter().enumerate() {
+                    let f = |v: i32| v as f32 / 65536.0;
+                    println!(
+                        "  {label} car[{k}] {:4} pos=({:8.2},{:6.2},{:8.2}) speed={:6.2} m/s ({:5.1} mph) rpm={:5} gear={} steer={} lap={}",
+                        c.code,
+                        f(c.position[0]),
+                        f(c.position[1]),
+                        f(c.position[2]),
+                        f(c.speed),
+                        f(c.speed) * 2.237,
+                        c.rpm,
+                        c.gear,
+                        c.steering,
+                        c.lap
+                    );
+                }
+            };
+            show(&sim.last, "boot");
+            let script = std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "8:-,3:x".into());
+            let mut stage = sim.last.countdown;
+            for st in script.split(',').filter(|s| !s.is_empty()) {
+                let (secs, b) = st.split_once(':').unwrap_or((st, "-"));
+                let secs: f32 = secs.parse()?;
+                let mut buttons = 0u16;
+                for ch in b.chars() {
+                    buttons |= match ch {
+                        'x' => pad::CROSS,
+                        's' => pad::SQUARE,
+                        'c' => pad::CIRCLE,
+                        't' => pad::TRIANGLE,
+                        'l' => pad::LEFT,
+                        'r' => pad::RIGHT,
+                        'u' => pad::UP,
+                        'd' => pad::DOWN,
+                        '1' => pad::L1,
+                        '2' => pad::R1,
+                        '3' => pad::L2,
+                        '4' => pad::R2,
+                        _ => 0,
+                    };
+                }
+                let t = std::time::Instant::now();
+                let tick0 = sim.last.ticks;
+                for _ in 0..(secs * 60.0).round() as u32 {
+                    let s = sim.step(FrameInput { buttons, want_ram: false })?;
+                    if s.countdown != stage {
+                        println!("  frame {}: countdown stage {}", s.frame, s.countdown);
+                        stage = s.countdown;
                     }
                 }
-                Err(e) => println!("boot failed after {:?}: {e}", t.elapsed()),
+                println!("{st}: frame {} in {:?}, game ticks +{}", sim.last.frame, t.elapsed(), sim.last.ticks.wrapping_sub(tick0));
+                show(&sim.last, st);
+            }
+            if std::env::var_os("BOOT_RAM").is_some() {
+                let s = sim.step(FrameInput { buttons: 0, want_ram: true })?;
+                std::fs::create_dir_all("re/boot")?;
+                std::fs::write("re/boot/ram.bin", s.ram.as_deref().unwrap_or_default())?;
+                println!("RAM written to re/boot/ram.bin");
             }
         }
         Some("run-snap") => {
