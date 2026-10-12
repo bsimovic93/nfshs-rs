@@ -156,3 +156,47 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     println!("wrote {}", dir.join("compare.png").display());
     Ok(())
 }
+
+/// Find where texture shapes appear in a reference picture (template matching on the
+/// shape's opaque texels, mean squared error). For laying out 2D elements like the HUD.
+pub fn match_shapes(reference: &Path, psh: &Path, names: &[String]) -> Result<()> {
+    let img = image::open(reference)?.to_rgba8();
+    let psh = crate::formats::psh::Psh::parse(&std::fs::read(psh)?)?;
+    let (w, h) = img.dimensions();
+    for name in names {
+        let Some(sh) = psh.shapes.iter().find(|s| s.name.eq_ignore_ascii_case(name)) else {
+            println!("{name}: no such shape");
+            continue;
+        };
+        let (sw, shh) = (sh.width as u32, sh.height as u32);
+        let texels: Vec<(u32, u32, [i32; 3])> = (0..shh)
+            .flat_map(|y| (0..sw).map(move |x| (x, y)))
+            .filter_map(|(x, y)| {
+                let i = ((y * sw + x) * 4) as usize;
+                (sh.rgba[i + 3] > 0).then(|| (x, y, [sh.rgba[i] as i32, sh.rgba[i + 1] as i32, sh.rgba[i + 2] as i32]))
+            })
+            .collect();
+        if texels.is_empty() || sw > w || shh > h {
+            continue;
+        }
+        let mut best = (f64::MAX, 0, 0);
+        for oy in 0..=h - shh {
+            for ox in 0..=w - sw {
+                let mut e = 0i64;
+                for &(x, y, c) in &texels {
+                    let p = img.get_pixel(ox + x, oy + y);
+                    for k in 0..3 {
+                        let d = p[k] as i32 - c[k];
+                        e += (d * d) as i64;
+                    }
+                }
+                let e = e as f64 / texels.len() as f64;
+                if e < best.0 {
+                    best = (e, ox, oy);
+                }
+            }
+        }
+        println!("{name} {sw}x{shh}: best at ({}, {}) error {:.0}", best.1, best.2, best.0);
+    }
+    Ok(())
+}

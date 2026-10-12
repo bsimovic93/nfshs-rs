@@ -84,6 +84,8 @@ fn real_main() -> Result<()> {
         )?,
         Some("shot-menu") => app::menu_screenshot(&data, Path::new(opt(&args, "--out").unwrap_or("menu.png")))?,
         Some("ref-compare") => refcmp::compare(&data, Path::new(&args[2]))?,
+        // match-shapes REF.png FILE.PSH NAME...: where each shape appears in a reference picture
+        Some("match-shapes") => refcmp::match_shapes(Path::new(&args[2]), Path::new(&args[3]), &args[4..])?,
         Some("shot") => {
             let secs: f32 = opt(&args, "--time").unwrap_or("0").parse()?;
             let keys = opt(&args, "--keys").unwrap_or("");
