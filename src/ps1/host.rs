@@ -15,6 +15,8 @@ pub struct GameHost {
     /// Mounted BIGF archives (FILE_addbigsync): handle -> entries.
     mounts: Vec<(u32, Vec<(String, Vec<u8>)>)>,
     next_handle: u32,
+    /// Display area from the last PutDispEnv (x, y, w, h).
+    pub display: [u16; 4],
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     pub rcnt: u32,
@@ -33,7 +35,16 @@ pub struct GameHost {
 /// Called at the top of every main-loop iteration (one game frame, locked to a 60 Hz field)
 /// with the current field number; returns the PS1 digital buttons to hold during the frame
 /// (active-high: bit 14 = Cross, 15 = Square, 4 = Up, ...) or `None` to leave the loop.
-pub type FrameFn = Box<dyn FnMut(&mut Cpu, u64) -> Option<u16>>;
+pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<u16>>;
+
+/// Host-side state handed to the frame callback.
+#[derive(Clone, Copy)]
+pub struct FrameInfo {
+    /// 60 Hz field number of the virtual clock.
+    pub field: u64,
+    /// Display area (x, y, w, h) from the last PutDispEnv.
+    pub display: [u16; 4],
+}
 
 /// Paces the original main loop against the virtual clock: game time only passes while the
 /// game waits (VSync = until the next 60 Hz field, timer polling = until the next 128 Hz tick)
@@ -47,6 +58,9 @@ pub struct FrameDriver {
 }
 
 pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
+/// `DRender_tView` the game renders the player view with (id, player, DRender_tCalcView).
+pub const RENDER_VIEW: u32 = 0x8011_8234;
+const CAMERA_GET_VIEW_INFO: u32 = 0x8008_5A2C;
 /// Virtual clock units per 128 Hz timer tick and per 60 Hz field.
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
@@ -66,6 +80,7 @@ impl GameHost {
             mounts: Vec::new(),
             next_handle: 0x100,
             clock: 0,
+            display: [0; 4],
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -238,7 +253,12 @@ impl Host for GameHost {
                 a0
             }
             0x800E_E610 => 0,                  // DrawOTag: rendering is done by the host engine
-            0x800E_E680 | 0x800E_E740 => a0,   // PutDrawEnv / PutDispEnv
+            0x800E_E680 => a0, // PutDrawEnv
+            0x800E_E740 => {
+                // PutDispEnv: remember the display area (x, y, w, h)
+                self.display = [0, 2, 4, 6].map(|o| c.m.r16(a0 + o));
+                a0
+            }
             0x8010_53B8 => 0,                  // GPU_cw
             0x800F_24B8 => 0,                  // GetVideoMode: NTSC
 
@@ -307,7 +327,7 @@ impl Host for GameHost {
                     }
                     self.frame.last_top = self.clock;
                     let field = self.clock / FIELD;
-                    match self.frame.on_frame.as_mut().and_then(|f| f(c, field)) {
+                    match self.frame.on_frame.as_mut().and_then(|f| f(c, FrameInfo { field, display: self.display })) {
                         None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
                         Some(buttons) => {
                             self.frame.frames_run += 1;
@@ -355,7 +375,14 @@ impl Host for GameHost {
 
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
-            0x800B_4024 => 0, // Render_RenderPlayerView: 3D world is drawn by the host renderer
+            0x800B_4024 => {
+                // Render_RenderPlayerView(view, player): the 3D world is drawn by the host
+                // renderer; only set up the view's camera (Camera_SetCamera without the GTE part)
+                c.m.w32(RENDER_VIEW, a0);
+                c.m.w32(RENDER_VIEW + 4, a1);
+                c.call_nested(CAMERA_GET_VIEW_INFO, &[a1, RENDER_VIEW + 8, a0]);
+                0
+            }
 
             // ---- EA CD layer (only used for streaming once FILE_* is replaced)
             0x800F_AB04 | 0x800F_AB58 => 1,              // readsectorB / loaddirinfo

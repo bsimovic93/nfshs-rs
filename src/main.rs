@@ -250,6 +250,19 @@ fn real_main() -> Result<()> {
                 }
             };
             show(&sim.last, "boot");
+            let show_cam = |s: &ps1::race::Snapshot| {
+                let f = |v: i32| v as f32 / 65536.0;
+                println!(
+                    "  camera mode={} H={} display={:?} pos=({:.2},{:.2},{:.2}) rot={:?}",
+                    s.camera_mode,
+                    s.projection,
+                    s.display,
+                    f(s.camera_pos[0]),
+                    f(s.camera_pos[1]),
+                    f(s.camera_pos[2]),
+                    s.camera_rot
+                );
+            };
             let script = std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "8:-,3:x".into());
             let mut stage = sim.last.countdown;
             for st in script.split(',').filter(|s| !s.is_empty()) {
@@ -300,6 +313,7 @@ fn real_main() -> Result<()> {
                 }
                 println!("{st}: frame {} in {:?}, game ticks +{}", sim.last.frame, t.elapsed(), sim.last.ticks.wrapping_sub(tick0));
                 show(&sim.last, st);
+                show_cam(&sim.last);
             }
             if std::env::var_os("BOOT_RAM").is_some() {
                 let s = sim.step(FrameInput { buttons: 0, want_ram: true })?;

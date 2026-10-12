@@ -90,6 +90,9 @@ pub struct Game {
     pub cam_pos: Vec3,
     pub cam_target: Vec3,
     pub cam_mode: CameraMode,
+    pub cam_up: Vec3,
+    /// tan of half the vertical field of view.
+    pub tan_half_v: f32,
     prev_camera_key: bool,
     autopilot: ai::Driver,
     accum: f32,
@@ -194,6 +197,8 @@ impl Game {
             phase: Phase::Countdown(3.0),
             race_time: 0.0,
             cam_mode: CameraMode::Chase,
+            cam_up: Vec3::Y,
+            tan_half_v: (1.05f32 / 2.0).tan(),
             prev_camera_key: false,
             autopilot: ai::Driver::new(0.0, 1.0),
             accum: 0.0,
@@ -226,7 +231,19 @@ impl Game {
     fn sync_original(&mut self, frame_dt: f32) {
         let Some(sim) = &self.sim else { return };
         let snap = sim.snapshot();
-        let poses = sim.poses();
+        let (poses, camera) = sim.poses();
+        if let Some(cam) = camera {
+            self.cam_pos = cam.pos;
+            self.cam_target = cam.pos + cam.forward;
+            self.cam_up = cam.up;
+            // keep the original horizontal field of view on a 4:3 screen
+            self.tan_half_v = cam.tan_half_h * 0.75;
+            // the bumper view does not show the player's car
+            self.cam_mode = match self.racers.first() {
+                Some(r) if r.car.pos.distance(cam.pos) < 2.0 => CameraMode::Bumper,
+                _ => CameraMode::Chase,
+            };
+        }
         for ((r, c), pose) in self.racers.iter_mut().zip(&snap.cars).zip(poses) {
             let car = &mut r.car;
             car.pos = pose.pos;
@@ -285,7 +302,7 @@ impl Game {
     }
 
     pub fn update(&mut self, frame_dt: f32, input: Input) {
-        if input.camera && !self.prev_camera_key {
+        if input.camera && !self.prev_camera_key && self.sim.is_none() {
             self.cam_mode = match self.cam_mode {
                 CameraMode::Chase => CameraMode::Far,
                 CameraMode::Far => CameraMode::Bumper,
@@ -435,7 +452,9 @@ impl Game {
         if self.racers[0].finish_time.is_some() {
             self.phase = Phase::Finished;
         }
-        self.update_camera(frame_dt);
+        if self.sim.is_none() {
+            self.update_camera(frame_dt);
+        }
     }
 
     /// Circle-pair contacts between cars (two circles per car along its length).
@@ -550,14 +569,15 @@ impl Game {
     }
 
     pub fn frame_params(&self, aspect: f32) -> FrameParams {
-        let proj = Mat4::perspective_rh(1.05, aspect, 0.1, 2000.0);
-        let view = Mat4::look_at_rh(self.cam_pos, self.cam_target, Vec3::Y);
-        let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, Vec3::Y);
+        let fov = 2.0 * self.tan_half_v.atan();
+        let proj = Mat4::perspective_rh(fov, aspect, 0.1, 2000.0);
+        let view = Mat4::look_at_rh(self.cam_pos, self.cam_target, self.cam_up);
+        let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, self.cam_up);
         let p = &self.racers[0].car;
         FrameParams {
             ambient: self.ambient,
             headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
-            sky_view_proj: Mat4::perspective_rh(1.05, aspect, 1.0, 1000.0) * sky_view,
+            sky_view_proj: Mat4::perspective_rh(fov, aspect, 1.0, 1000.0) * sky_view,
             sky_top: self.track.sky_colors.0 * if self.night { 0.12 } else { 1.0 },
             view_proj: proj * view,
             cam_pos: self.cam_pos,

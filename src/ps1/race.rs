@@ -32,6 +32,10 @@ pub mod addr {
     pub const COUNTDOWN_STAGE: u32 = 0x8013_D930;
     /// 128 Hz timer tick counter.
     pub const TICKS: u32 = 0x8013_EF8C;
+    /// `Camera_gInfo`: per-player camera state (0x110 bytes each).
+    pub const CAMERA_INFO: u32 = 0x8011_0570;
+    /// Camera projection distance set by `SetCameraZoom` (gp + 0x294).
+    pub const CAMERA_ZOOM: u32 = 0x8013_DAD0;
     /// `simGlobal.counter`: simulation time in 128 Hz ticks (physics runs on even counts).
     pub const SIM_COUNTER: u32 = 0x8011_F368;
 }
@@ -226,6 +230,16 @@ pub struct Snapshot {
     pub ticks: u32,
     /// Simulation time of the car states, see [`addr::SIM_COUNTER`].
     pub sim_ticks: u32,
+    /// The player view's camera as the game computed it for the last rendered frame
+    /// (`DRender_tCalcView` translation and rotation).
+    pub camera_pos: [i32; 3],
+    pub camera_rot: [i32; 9],
+    /// Player 0 camera mode (`Camera_gInfo[0].mode`, cycled by Triangle).
+    pub camera_mode: i16,
+    /// Projection distance H of the camera (`SetCameraZoom`), in screen pixels.
+    pub projection: u32,
+    /// Display area (x, y, w, h) from PutDispEnv.
+    pub display: [u16; 4],
     /// Full RAM copy, when requested.
     pub ram: Option<Vec<u8>>,
 }
@@ -238,7 +252,7 @@ pub struct FrameInput {
     pub want_ram: bool,
 }
 
-fn snapshot(c: &mut Cpu, frame: u32, field: u64, want_ram: bool) -> Snapshot {
+fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: bool) -> Snapshot {
     let mut cars = Vec::new();
     for k in 0..9 {
         let car = c.m.r32(addr::CAR_LIST + 4 * k);
@@ -249,11 +263,16 @@ fn snapshot(c: &mut Cpu, frame: u32, field: u64, want_ram: bool) -> Snapshot {
     }
     Snapshot {
         frame,
-        field,
+        field: info.field,
         cars,
         countdown: c.m.r8(addr::COUNTDOWN_STAGE),
         ticks: c.m.r32(addr::TICKS),
         sim_ticks: c.m.r32(addr::SIM_COUNTER),
+        camera_pos: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 8 + 4 * i as u32) as i32),
+        projection: c.m.r32(addr::CAMERA_ZOOM),
+        camera_mode: c.m.r16(addr::CAMERA_INFO + 0x70) as i16,
+        display: info.display,
+        camera_rot: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 0x14 + 4 * i as u32) as i32),
         ram: want_ram.then(|| c.m.ram.to_vec()),
     }
 }
@@ -285,9 +304,9 @@ impl RaceThread {
             let mut frame = 0u32;
             let mut want_ram = false;
             let mut quit = false;
-            let on_frame: super::host::FrameFn = Box::new(move |c: &mut Cpu, field: u64| {
+            let on_frame: super::host::FrameFn = Box::new(move |c: &mut Cpu, info: super::host::FrameInfo| {
                 // report the state after the previous frame (or boot), then wait for input
-                if quit || out.send(Ok(snapshot(c, frame, field, want_ram))).is_err() {
+                if quit || out.send(Ok(snapshot(c, frame, info, want_ram))).is_err() {
                     return None;
                 }
                 let Some(input) = in_rx.recv().ok().flatten() else {

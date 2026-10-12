@@ -208,6 +208,20 @@ impl Cpu {
         let keep = if sh == 0 { 0 } else { 0xFFFF_FFFFu32 >> (32 - sh) };
         self.m.w32(a, (word & keep) | (v << sh));
     }
+    /// Call `f` from host code in the middle of the game (e.g. inside a replaced function):
+    /// registers are preserved and the callee gets a stack frame below the current one.
+    pub fn call_nested(&mut self, f: u32, args: &[u32]) -> u32 {
+        let (r, hi, lo) = (self.r, self.hi, self.lo);
+        for (i, a) in args.iter().enumerate() {
+            self.r[4 + i] = *a;
+        }
+        self.r[29] = (self.r[29] - 0x100) & !7;
+        self.r[31] = 0;
+        self.call(f);
+        let ret = self.r[2];
+        (self.r, self.hi, self.lo) = (r, hi, lo);
+        ret
+    }
     /// Call a function by address: BIOS vectors, host replacements, then recompiled code.
     pub fn call(&mut self, addr: u32) {
         self.calls += 1;

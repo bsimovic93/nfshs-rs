@@ -8,6 +8,12 @@ use crate::ps1::race::{CarState, FrameInput, RaceSetup, RaceThread, Snapshot, pa
 use anyhow::Result;
 use glam::{Mat3, Quat, Vec3};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicI16, Ordering};
+
+/// The game's camera modes, in the order Triangle cycles them (14 = intro fly-by).
+const CAMERA_MODES: [i16; 3] = [0, 3, 6]; // bumper, close chase, far chase
+/// Camera mode to switch to once the race starts; the last one the player chose.
+static PREFERRED_CAMERA: AtomicI16 = AtomicI16::new(3);
 
 const FRAME: f32 = 1.0 / 60.0;
 
@@ -18,9 +24,28 @@ pub struct OriginalSim {
     pub stopped: bool,
     /// Recent car poses stamped with simulation time (s). Physics runs at 64 Hz but frames at
     /// 60 Hz, so every 15th frame advances two steps; rendering interpolates on this timeline.
-    history: VecDeque<(f64, Vec<Pose>)>,
+    history: VecDeque<(f64, State)>,
     /// Time the rendered poses show, a little behind the newest simulation state.
     render_t: f64,
+    /// Camera mode still to reach once the race starts (None when done).
+    camera_target: Option<i16>,
+    camera_wait: u32,
+}
+
+/// The game's camera for the player view, in engine world space.
+#[derive(Clone, Copy)]
+pub struct Camera {
+    pub pos: Vec3,
+    pub forward: Vec3,
+    pub up: Vec3,
+    /// tan of half the horizontal field of view on the PS1's 320-pixel-wide screen.
+    pub tan_half_h: f32,
+}
+
+#[derive(Clone)]
+struct State {
+    cars: Vec<Pose>,
+    camera: Camera,
 }
 
 /// Pose of a simulated car in engine world space.
@@ -39,7 +64,15 @@ impl OriginalSim {
         cars.extend(cfg.opponents.iter().cloned());
         let setup = RaceSetup { track: cfg.track, variant: cfg.variant.to_string(), cars, laps: cfg.laps.max(1) as u32 };
         let thread = RaceThread::start(data.root.clone(), setup.game_setup()?)?;
-        let mut sim = Self { thread, accum: 0.0, stopped: false, history: VecDeque::new(), render_t: 0.0 };
+        let mut sim = Self {
+            thread,
+            accum: 0.0,
+            stopped: false,
+            history: VecDeque::new(),
+            render_t: 0.0,
+            camera_target: Some(PREFERRED_CAMERA.load(Ordering::Relaxed)),
+            camera_wait: 0,
+        };
         sim.record();
         sim.render_t = sim.history.back().map_or(0.0, |h| h.0);
         Ok(sim)
@@ -48,29 +81,40 @@ impl OriginalSim {
     fn record(&mut self) {
         let s = &self.thread.last;
         let t = s.sim_ticks as f64 / 64.0;
-        let poses: Vec<Pose> = s.cars.iter().map(pose).collect();
+        let row = |i: usize| v3([s.camera_rot[i * 3], s.camera_rot[i * 3 + 1], s.camera_rot[i * 3 + 2]]).normalize_or_zero();
+        let camera = Camera {
+            pos: v3(s.camera_pos),
+            forward: row(2),
+            up: row(1),
+            tan_half_h: (s.display[2].max(1) as f32 / 2.0) / s.projection.max(1) as f32,
+        };
+        let state = State { cars: s.cars.iter().map(pose).collect(), camera };
         match self.history.back_mut() {
             // no physics step this frame (start sequence): keep the newest state
-            Some(h) if h.0 >= t => h.1 = poses,
-            _ => self.history.push_back((t, poses)),
+            Some(h) if h.0 >= t => h.1 = state,
+            _ => self.history.push_back((t, state)),
         }
         while self.history.len() > 8 {
             self.history.pop_front();
         }
     }
 
-    /// Car poses at the render time, interpolated between simulation steps.
-    pub fn poses(&self) -> Vec<Pose> {
-        let Some(newest) = self.history.back() else { return Vec::new() };
+    /// Car poses and camera at the render time, interpolated between simulation steps.
+    pub fn poses(&self) -> (Vec<Pose>, Option<Camera>) {
+        let Some(newest) = self.history.back() else { return (Vec::new(), None) };
         let t = self.render_t;
-        let Some(i) = self.history.iter().position(|h| h.0 > t) else { return newest.1.clone() };
-        if i == 0 {
-            return self.history[0].1.clone();
-        }
-        let (a, b) = (&self.history[i - 1], &self.history[i]);
-        let f = ((t - a.0) / (b.0 - a.0)).clamp(0.0, 1.0) as f32;
-        a.1.iter()
-            .zip(&b.1)
+        let (a, b, f) = match self.history.iter().position(|h| h.0 > t) {
+            None => (&newest.1, &newest.1, 0.0),
+            Some(0) => (&self.history[0].1, &self.history[0].1, 0.0),
+            Some(i) => {
+                let (a, b) = (&self.history[i - 1], &self.history[i]);
+                (&a.1, &b.1, ((t - a.0) / (b.0 - a.0)).clamp(0.0, 1.0) as f32)
+            }
+        };
+        let cars = a
+            .cars
+            .iter()
+            .zip(&b.cars)
             .map(|(p, q)| Pose {
                 pos: p.pos.lerp(q.pos, f),
                 rot: p.rot.slerp(q.rot, f),
@@ -78,7 +122,21 @@ impl OriginalSim {
                 up: p.up.lerp(q.up, f).normalize_or(q.up),
                 vel: p.vel.lerp(q.vel, f),
             })
-            .collect()
+            .collect();
+        let (p, q) = (&a.camera, &b.camera);
+        // a camera cut (new mode or intro shot) is not interpolated
+        let cut = p.pos.distance(q.pos) > 3.0 || p.forward.dot(q.forward) < 0.9;
+        let camera = if cut {
+            *q
+        } else {
+            Camera {
+                pos: p.pos.lerp(q.pos, f),
+                forward: p.forward.lerp(q.forward, f).normalize_or(q.forward),
+                up: p.up.lerp(q.up, f).normalize_or(q.up),
+                tan_half_h: q.tan_half_h,
+            }
+        };
+        (cars, Some(camera))
     }
 
     pub fn snapshot(&self) -> &Snapshot {
@@ -98,6 +156,9 @@ impl OriginalSim {
         if input.handbrake {
             b |= pad::CIRCLE;
         }
+        if input.camera {
+            b |= pad::TRIANGLE;
+        }
         if input.left || input.steer_axis < -0.3 {
             b |= pad::LEFT;
         }
@@ -113,8 +174,28 @@ impl OriginalSim {
             return;
         }
         self.accum = (self.accum + dt).min(FRAME * 6.0);
-        let buttons = Self::buttons(input);
+        let user_buttons = Self::buttons(input);
         while self.accum >= FRAME {
+            let mut buttons = user_buttons;
+            let snap = &self.thread.last;
+            let mode = snap.camera_mode;
+            match self.camera_target {
+                // the game starts every race in the bumper view: after the start, press
+                // Triangle (like the player would) until the preferred view is up
+                Some(target) if snap.countdown >= 4 && CAMERA_MODES.contains(&mode) => {
+                    if mode == target {
+                        self.camera_target = None;
+                    } else if self.camera_wait == 0 {
+                        buttons |= pad::TRIANGLE;
+                        self.camera_wait = 10;
+                    } else {
+                        self.camera_wait -= 1;
+                    }
+                }
+                Some(_) => {}
+                None if CAMERA_MODES.contains(&mode) => PREFERRED_CAMERA.store(mode, Ordering::Relaxed),
+                None => {}
+            }
             if let Err(e) = self.thread.step(FrameInput { buttons, want_ram: false }) {
                 log::warn!("original simulation ended: {e:#}");
                 self.stopped = true;
