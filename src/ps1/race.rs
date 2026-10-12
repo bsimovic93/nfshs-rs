@@ -24,6 +24,10 @@ pub mod addr {
     pub const LOAD_FRONTEND_OVERLAY: u32 = 0x800A_506C;
     pub const NFS2_GAME_MODULE_STARTUP: u32 = 0x800A_4D1C;
     pub const RACE_RESTART: u32 = 0x800A_4A0C;
+    /// `reservememadr(name, size, pool)`: the game's heap allocator.
+    pub const RESERVE_MEM: u32 = 0x800E_5F28;
+    /// A string in the executable, for naming allocations.
+    pub const SOME_NAME: u32 = 0x8001_1550;
     /// `Sim_MainGameLoop`.
     pub const GAME_LOOP: u32 = 0x800B_7A20;
     /// `Cars_gList`: every simulated Car_tObj*, in `carInfo` order (player first).
@@ -178,7 +182,17 @@ pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
     call(&mut cpu, addr::NFS2_SYSTEM_N_LIB_STARTUP, &[])?;
     call(&mut cpu, addr::LOAD_FRONTEND_OVERLAY, &[])?;
     cpu.m.write_bytes(addr::GAMESETUP, &gamesetup[..addr::GAMESETUP_SIZE.min(gamesetup.len())]);
-    call(&mut cpu, addr::NFS2_GAME_MODULE_STARTUP, &[addr::GAMESETUP])?;
+    // the module takes a list of setting changes (field, player, value; 0-terminated) that
+    // GameSetup_StartUp applies to GameSetup_gData and then frees: the setup is already in
+    // place, so pass an empty list from the game's heap
+    let changes = call(&mut cpu, addr::RESERVE_MEM, &[addr::SOME_NAME, 16, 0])?;
+    if changes == 0 {
+        bail!("reservememadr failed");
+    }
+    for i in 0..4 {
+        cpu.m.w32(changes + 4 * i, 0);
+    }
+    call(&mut cpu, addr::NFS2_GAME_MODULE_STARTUP, &[changes])?;
     call(&mut cpu, addr::RACE_RESTART, &[])?;
     Ok(cpu)
 }

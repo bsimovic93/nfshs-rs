@@ -507,6 +507,9 @@ impl Ps1Hud {
         let d = |o: usize| i32le(dash, o);
         let l = |o: usize| i16le(layout, o) as f32;
         let ci = |o: usize| i32le(&self.setup.car_info, o);
+        if std::env::var_os("NFSHS_HUD_DEBUG").is_some() {
+            println!("hud: lap {}/{} position {}/{} best {} rpm {} countdown {} +{}", d(56), d(60), d(84), d(88), d(92), d(64), f.countdown, f.countdown_ticks);
+        }
         // Hud_BuildNumbers0: race timer
         if ci(0x84) != 0 {
             self.panel(&mut out, 0);
