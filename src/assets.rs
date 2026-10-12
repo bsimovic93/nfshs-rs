@@ -136,6 +136,15 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
     let mut verts = Vec::new();
     let mut indices = Vec::new();
     let mut tris = Vec::new();
+    let line_rects: Vec<Option<Rect>> = match data.read("ZSFX.PSH").and_then(|d| Psh::parse(&d)) {
+        Ok(sfx) => (0..10)
+            .map(|i| sfx.shapes.iter().find(|s| s.name == format!("LIN{i}")).map(|s| atlas.add(s.width as u32, s.height as u32, &s.rgba)))
+            .collect(),
+        Err(e) => {
+            log::warn!("no road line textures: {e:#}");
+            Vec::new()
+        }
+    };
     let quad_uvs = |tex: u16| -> (Rect, [Vec2; 4]) {
         let te = track.textures.get(tex as usize);
         let rect = te.and_then(|t| rects.get(t.shape as usize)).copied().unwrap_or(atlas.white);
@@ -230,6 +239,35 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             }
         }
         println!("track quads by material flag: {hist:02x?}");
+    }
+    // painted road lines (DrawW_BuildChunkCenterLineFacets / DrawW_OnyxLinePrim): each record
+    // is a point on the line, widened left/right by the road slice's right vector / 8, and
+    // consecutive points form a quad textured with LIN<type> from ZSFX.PSH (0xFF = gap)
+    for b in &track.blocks {
+        let point = |r: &[u8; 4]| -> Option<(Vec3, Vec3, i16)> {
+            let v = b.ground.verts.get(r[0] as usize)?;
+            let p = b.origin + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0;
+            // the road slice the point lies on
+            let slice = track.vroad.iter().min_by(|a, c| a.pos.distance_squared(p).total_cmp(&c.pos.distance_squared(p)))?;
+            let right = Vec3::new((slice.raw[6] as i8 >> 3) as f32, (slice.raw[7] as i8 >> 3) as f32, (slice.raw[8] as i8 >> 3) as f32) / 64.0;
+            Some((p, right, v[3]))
+        };
+        for w in b.lines.windows(2) {
+            let (r0, r1) = (&w[0], &w[1]);
+            if r0[2] == 0xFF {
+                continue;
+            }
+            let Some(Some(rect)) = line_rects.get(r0[2] as usize).copied() else { continue };
+            let (Some((p0, d0, s0)), Some((p1, d1, s1))) = (point(r0), point(r1)) else { continue };
+            let lift = Vec3::Y * 0.02;
+            let (tw, th) = (rect.w as f32, rect.h as f32);
+            let corners = [(p0 - d0, s0, Vec2::new(0.0, 0.0)), (p0 + d0, s0, Vec2::new(0.0, th)), (p1 + d1, s1, Vec2::new(tw, th)), (p1 - d1, s1, Vec2::new(tw, 0.0))];
+            let base = verts.len() as u32;
+            for (p, s, uv) in corners {
+                verts.push(Vertex { pos: (ps1_to_world(p) + lift).into(), uv: atlas.uv(rect, uv), color: shade(s) });
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
     }
     let mut sprites = Vec::new();
     for b in &track.blocks {

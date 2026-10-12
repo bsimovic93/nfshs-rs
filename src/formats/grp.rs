@@ -105,6 +105,9 @@ pub struct Block {
     pub ground: Mesh,
     /// Roadside detail (vertex pool 0x27).
     pub detail: Mesh,
+    /// Painted road lines (0x09, Chunk::lineBuf): `Trk_Line` records
+    /// (first point in the ground vertex pool, slice in the chunk, type, quad index).
+    pub lines: Vec<[u8; 4]>,
 }
 
 /// Virtual-road sample (0x21/0x0f): fine centre line with frame vectors and lane widths.
@@ -224,6 +227,9 @@ impl Track {
                             o += len;
                         }
                     }
+                    if let Some(l) = find(c.body, 0x09) {
+                        b.lines = l.body.chunks_exact(4).take(l.count as usize).map(|r| [r[0], r[1], r[2], r[3]]).collect();
+                    }
                     if let Some(g) = find(c.body, 0x17) {
                         let hdr = find(g.body, 0x1b).map(|h| h.body).unwrap_or(&[]);
                         let cnt = |i: usize| if hdr.len() >= i * 2 + 2 { u16le(hdr, i * 2) as usize } else { 0 };
@@ -234,7 +240,9 @@ impl Track {
                                 // (Chunk::renderQuads, sized by 0x1B counts 6, 7, 10 and 11),
                                 // followed by copies of the detail lists (counts 8, 9)
                                 0x19 => quads(s.body, cnt(6) + cnt(7) + cnt(10) + cnt(11), &mut b.ground.quads),
-                                0x1a | 0x25 => strips(s.body, s.count, &mut b.ground.quads),
+                                // 0x1A = Chunk::stripBuf; 0x25 = lorezstripBuf, a low-detail
+                                // version of the same surfaces for distant chunks (not drawn)
+                                0x1a => strips(s.body, s.count, &mut b.ground.quads),
                                 0x27 => b.detail.verts = verts(s.body),
                                 0x28 => quads(s.body, cnt(8), &mut b.detail.quads),
                                 0x29 => quads(s.body, cnt(9), &mut b.detail.quads),
