@@ -139,19 +139,27 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         let te = track.textures.get(tex as usize);
         let rect = te.and_then(|t| rects.get(t.shape as usize)).copied().unwrap_or(atlas.white);
         let (w, h) = (rect.w as f32, rect.h as f32);
-        let mut corners = [Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)];
-        // texture-table orientation bits: 0x02 rotate 90, 0x04 flip V, 0x08 flip U
+        // UV slots as the PS1 pixmap stores them: top-left, top-right, bottom-left, bottom-right
+        let mut pmx = [Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(0.0, h), Vec2::new(w, h)];
+        // Trk_Material::uvFlag, applied in the order of Track_ProcessFlipAndUVFlags:
+        // 0x10 flip U, 0x40 flip V, then one of 0x02 / 0x04 / 0x08 = rotate 90 / 180 / 270
         let fl = te.map(|t| t.flags).unwrap_or(0);
-        if fl & 0x08 != 0 {
-            corners.iter_mut().for_each(|c| c.x = w - c.x);
+        let remap = |p: [Vec2; 4], o: [usize; 4]| o.map(|i| p[i]);
+        if fl & 0x10 != 0 {
+            pmx = remap(pmx, [1, 0, 3, 2]);
         }
-        if fl & 0x04 != 0 {
-            corners.iter_mut().for_each(|c| c.y = h - c.y);
+        if fl & 0x40 != 0 {
+            pmx = remap(pmx, [2, 3, 0, 1]);
         }
         if fl & 0x02 != 0 {
-            corners.rotate_left(1);
+            pmx = remap(pmx, [2, 0, 3, 1]);
+        } else if fl & 0x04 != 0 {
+            pmx = remap(pmx, [3, 2, 1, 0]);
+        } else if fl & 0x08 != 0 {
+            pmx = remap(pmx, [1, 3, 0, 2]);
         }
-        (rect, corners)
+        // quad vertices go round the quad: 0 = top-left, 1 = top-right, 2 = bottom-right, 3 = bottom-left
+        (rect, [pmx[0], pmx[1], pmx[3], pmx[2]])
     };
     let shade = |s: i16| {
         let k = 1.0 - (s as f32 / 32.0).clamp(0.0, 0.6);
@@ -174,7 +182,13 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                 let s = mesh.verts.get(q.v[k] as usize).map(|v| v[3]).unwrap_or(0);
                 verts.push(Vertex { pos: p[k].into(), uv: atlas.uv(rect, corners[k]), color: shade(s) });
             }
-            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            let front = [base, base + 1, base + 2, base, base + 2, base + 3];
+            let back = [base, base + 2, base + 1, base, base + 3, base + 2];
+            indices.extend_from_slice(if q.strip { &back } else { &front });
+            // Trk_Material flag 0x10: drawn without the back-face test (DrawW_DrawQuad)
+            if track.textures.get(q.tex as usize).is_some_and(|t| t.mode & 0x10 != 0) {
+                indices.extend_from_slice(if q.strip { &front } else { &back });
+            }
             if collide {
                 for (a, b2, c) in [(0, 1, 2), (0, 2, 3)] {
                     let n = (p[b2] - p[a]).cross(p[c] - p[a]);
@@ -185,6 +199,16 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             }
         }
     };
+    if std::env::var_os("NFSHS_DUMP_PROPS").is_some() {
+        let mut hist = std::collections::BTreeMap::new();
+        for b in &track.blocks {
+            for q in b.ground.quads.iter().chain(&b.detail.quads) {
+                let m = track.textures.get(q.tex as usize).map(|t| t.mode).unwrap_or(0);
+                *hist.entry(m).or_insert(0) += 1;
+            }
+        }
+        println!("track quads by material flag: {hist:02x?}");
+    }
     let mut sprites = Vec::new();
     for b in &track.blocks {
         let origin = b.origin;
@@ -194,6 +218,35 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         for pl in &b.placements {
             let Some(model) = track.models.get(pl.model as usize) else { continue };
             let flat_quad = model.quads.len() == 1 && model.verts.iter().all(|v| v[2] == 0);
+            if std::env::var("NFSHS_DUMP_MODEL").ok().and_then(|v| v.parse::<u16>().ok()) == Some(pl.model) {
+                for q in &model.quads {
+                    let te = track.textures.get(q.tex as usize);
+                    let name = te.and_then(|t| psh.shapes.get(t.shape as usize)).map(|s| s.name.as_str()).unwrap_or("?");
+                    let p: Vec<Vec3> = q.v.iter().map(|&i| model.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).collect();
+                    let n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+                    println!("  quad tex {} {name} uv {:02x} mode {:02x} n(ps1) {n:.2} verts {p:.2?}", q.tex, te.map(|t| t.flags).unwrap_or(0), te.map(|t| t.mode).unwrap_or(0));
+                }
+            }
+            if std::env::var_os("NFSHS_DUMP_PROPS").is_some() {
+                let tex = model.quads.first().map(|q| q.tex).unwrap_or(0);
+                let shape = track.textures.get(tex as usize).map(|t| t.shape as usize).unwrap_or(0);
+                let name = psh.shapes.get(shape).map(|s| s.name.as_str()).unwrap_or("?");
+                let te = track.textures.get(tex as usize);
+                println!(
+                    "prop model {:3} at {:?} flags {:04x} quads {:2} flat {} kind {} tex {} {} texflags {:02x} mode {:02x} raw {:02x?}",
+                    pl.model,
+                    ps1_to_world(pl.pos),
+                    track.model_flags.get(pl.model as usize).copied().unwrap_or(0),
+                    model.quads.len(),
+                    flat_quad,
+                    pl.kind,
+                    tex,
+                    name,
+                    te.map(|t| t.flags).unwrap_or(0),
+                    te.map(|t| t.mode).unwrap_or(0),
+                    pl.raw
+                );
+            }
             let scale = if pl.scale.max_element() > 0.0 { pl.scale } else { Vec3::ONE };
             if flat_quad {
                 // cut-out tree / sign: rotated to face the camera every frame

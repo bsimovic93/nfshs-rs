@@ -570,7 +570,8 @@ impl Game {
 
     pub fn frame_params(&self, aspect: f32) -> FrameParams {
         let fov = 2.0 * self.tan_half_v.atan();
-        let proj = Mat4::perspective_rh(fov, aspect, 0.1, 2000.0);
+        // reversed-Z projection (the renderer's depth test is Greater, cleared to 0)
+        let proj = Mat4::perspective_infinite_reverse_rh(fov, aspect, 0.1);
         let view = Mat4::look_at_rh(self.cam_pos, self.cam_target, self.cam_up);
         let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, self.cam_up);
         let p = &self.racers[0].car;

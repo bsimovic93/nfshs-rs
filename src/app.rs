@@ -399,6 +399,15 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         game.path.len(),
         p.car.on_ground
     );
+    // NFSHS_CAM="x,y,z,tx,ty,tz": look from a fixed point (debugging)
+    if let Ok(c) = std::env::var("NFSHS_CAM") {
+        let v: Vec<f32> = c.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if v.len() == 6 {
+            game.cam_pos = glam::Vec3::new(v[0], v[1], v[2]);
+            game.cam_target = glam::Vec3::new(v[3], v[4], v[5]);
+            game.cam_up = glam::Vec3::Y;
+        }
+    }
     let params = game.frame_params(960.0 / 720.0);
     let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &game.hud(960.0, 720.0));
     img.save(out)?;

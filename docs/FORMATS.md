@@ -85,15 +85,21 @@ Chunk tree, each chunk `u32 type, u32 size (incl. 16-byte header), u32 0xCDCDCDC
 * Geometry `0x17`: `0x1B` counts (`[6]` quads in 0x19, `[8]` 0x28, `[9]` 0x29); `0x18` and
   `0x27` vertex pools `{i16 x,y,z, u16 shade}`, world = node + v/64; `0x19/0x28/0x29` quads
   `{u16 tex, u8 v[4]}`; `0x1A/0x25` strip rows `{u8 next_row, u8 row, u8 n, u8 2(n+2), u16 tex[n]}`.
-* Texture table `0x21/0x02`, 10-byte entries: `u16 shape, u8 mode, u8 flags, u8 rgb[3], u8, u16`.
-  Flags: `0x08` flip U, `0x04` flip V, `0x02` rotate 90° (confirmed visually);
-  `0x01/0x10/0x40` base modes (unknown, probably transparency/lighting).
-  Each quad maps the whole shape.
+* Texture table `0x21/0x02`, 10-byte entries (`Trk_Material`): `u16 shapeIndex, u8 flag,
+  u8 uvFlag, u8 r, g, b, i8 textureCount, u8 interval, u8`. `uvFlag` is applied by
+  `Track_ProcessFlipAndUVFlags` to the PS1 UV slots (TL, TR, BL, BR) in this order: `0x10` flip
+  U, `0x40` flip V, then one of `0x02` / `0x04` / `0x08` = rotate 90° / 180° / 270°.
+  `textureCount`/`interval` describe animated textures. Each quad maps the whole shape.
 * Prop models `0x21/0x08`: `{u16 flags, u8 nv, u8 nq}`, then vertices and quads as above, padded to 4.
 * Placements (`0x03`, length-prefixed records): `u8 len, u8 0, u8 type, u8 sub, u16 ?, u16 model,
   i32 pos[3]`. Type 5 (36 bytes) adds `i32 cos, i32 sin` (2.30) and `u16 scale[3]` (0x100 = 1.0);
-  type 9 (28 bytes) adds `i16 ?, u16 sx, u16 sy, u16 flags`. Flat single-quad models are
-  camera-facing sprites (trees).
+  type 9 (28 bytes) adds `i16 ?, u16 height scale, u16 width scale, u16 flags` (0x100 = 1.0;
+  height first, checked on Celtic Ruins' trees). Flat single-quad models are camera-facing
+  sprites (trees).
+* Sidedness: track quads are single-sided (front = clockwise in the X-mirrored engine space
+  for stored quads; strip rows run the other way). Materials with flag `0x10` skip the
+  back-face test (`DrawW_DrawQuad`), e.g. fences and poles. Sign models are a front quad
+  plus a coplanar back quad of opposite winding.
 * Virtual road `0x21/0x0F` (32-byte samples, about 6 m apart): `i32 pos[3]`, `i8 normal[3]`,
   `i8 forward[3]`, `i8 right[3]`, `u8`, `u16 flags`, `u16 left_wall`, `u16 right_wall`
   (1/256 m), `u8 block, u8 ?, u8 ?, u8 ?`. These walls are the drivable boundary.

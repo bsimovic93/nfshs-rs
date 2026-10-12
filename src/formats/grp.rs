@@ -71,6 +71,8 @@ pub struct TexEntry {
 pub struct Quad {
     pub tex: u16,
     pub v: [u16; 4],
+    /// Built from a strip row (0x1A/0x25): wound the other way round than stored quads.
+    pub strip: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -91,6 +93,8 @@ pub struct Placement {
     pub rot: (f32, f32),
     /// Scale (x, y, z), 0x100 = 1.0.
     pub scale: Vec3,
+    /// The whole record (up to 36 bytes).
+    pub raw: [u8; 36],
 }
 
 #[derive(Clone, Debug, Default)]
@@ -125,6 +129,8 @@ pub struct Track {
     pub vroad: Vec<VRoad>,
     /// Prop models (0x21/0x08), vertices in 1/64 m around the placement point.
     pub models: Vec<Mesh>,
+    /// Header flags of each prop model.
+    pub model_flags: Vec<u16>,
 }
 
 pub fn fx(v: i32) -> f32 {
@@ -144,7 +150,7 @@ fn strips(body: &[u8], n_rows: u32, out: &mut Vec<Quad>) {
         for i in 0..n {
             let tex = u16le(body, o + 4 + i * 2);
             let i = i as u16;
-            out.push(Quad { tex, v: [row + i, row + i + 1, next + i + 1, next + i] });
+            out.push(Quad { tex, v: [row + i, row + i + 1, next + i + 1, next + i], strip: true });
         }
         o += len.max(4 + 2 * n);
     }
@@ -153,7 +159,7 @@ fn strips(body: &[u8], n_rows: u32, out: &mut Vec<Quad>) {
 fn quads(body: &[u8], n: usize, out: &mut Vec<Quad>) {
     for i in 0..n.min(body.len() / 6) {
         let q = &body[i * 6..i * 6 + 6];
-        out.push(Quad { tex: u16le(q, 0), v: [q[2] as u16, q[3] as u16, q[4] as u16, q[5] as u16] });
+        out.push(Quad { tex: u16le(q, 0), v: [q[2] as u16, q[3] as u16, q[4] as u16, q[5] as u16], strip: false });
     }
 }
 
@@ -171,6 +177,7 @@ impl Track {
         let mut textures = Vec::new();
         let mut vroad = Vec::new();
         let mut models = Vec::new();
+        let mut model_flags = Vec::new();
         for c in chunks(root.body) {
             match c.kind {
                 0x20 => {
@@ -200,7 +207,7 @@ impl Track {
                                     scale = Vec3::new(u16le(r, 28) as f32, u16le(r, 30) as f32, u16le(r, 32) as f32) / 256.0;
                                 }
                                 (9, 28) => {
-                                    let (sx, sy) = (u16le(r, 22) as f32 / 256.0, u16le(r, 24) as f32 / 256.0);
+                                    let (sy, sx) = (u16le(r, 22) as f32 / 256.0, u16le(r, 24) as f32 / 256.0);
                                     scale = Vec3::new(sx, sy, sx);
                                 }
                                 _ => {}
@@ -211,6 +218,7 @@ impl Track {
                                 pos: Vec3::new(fx(i32le(r, 8)), fx(i32le(r, 12)), fx(i32le(r, 16))),
                                 rot,
                                 scale,
+                                raw: std::array::from_fn(|i| r.get(i).copied().unwrap_or(0)),
                             });
                             o += len;
                         }
@@ -262,6 +270,7 @@ impl Track {
                                     let mut m = Mesh { verts: verts(&b[vo..po.min(b.len())]), quads: Vec::new() };
                                     quads(&b[po.min(b.len())..], np, &mut m.quads);
                                     models.push(m);
+                                    model_flags.push(u16le(b, o));
                                     o = (po + np * 6 + 3) & !3;
                                 }
                             }
@@ -295,6 +304,6 @@ impl Track {
                 _ => {}
             }
         }
-        Ok(Self { nodes, blocks, textures, vroad, models })
+        Ok(Self { nodes, blocks, textures, vroad, models, model_flags })
     }
 }

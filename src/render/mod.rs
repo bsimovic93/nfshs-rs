@@ -68,12 +68,16 @@ impl DynBuf {
     }
 }
 
+/// Winding of the front side of track polygons (with the PS1 X axis mirrored).
+const TRACK_FRONT_FACE: wgpu::FrontFace = wgpu::FrontFace::Cw;
+
 pub struct Renderer {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     surface: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration)>,
     pub format: wgpu::TextureFormat,
     world_pipeline: wgpu::RenderPipeline,
+    track_pipeline: wgpu::RenderPipeline,
     hud_pipeline: wgpu::RenderPipeline,
     sky_pipeline: wgpu::RenderPipeline,
     world_globals: wgpu::Buffer,
@@ -194,7 +198,12 @@ impl Renderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &vattrs,
         };
-        let mk_pipeline = |vs: &str, fs: &str, buffers: &[Option<wgpu::VertexBufferLayout>], depth: Option<(bool, wgpu::CompareFunction)>, blend: bool| {
+        let mk_pipeline = |vs: &str,
+                           fs: &str,
+                           buffers: &[Option<wgpu::VertexBufferLayout>],
+                           depth: Option<(bool, wgpu::CompareFunction)>,
+                           blend: bool,
+                           cull: Option<wgpu::Face>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
                 layout: Some(&layout),
@@ -204,7 +213,7 @@ impl Renderer {
                     compilation_options: Default::default(),
                     buffers,
                 },
-                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                primitive: wgpu::PrimitiveState { cull_mode: cull, front_face: TRACK_FRONT_FACE, ..Default::default() },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH,
                     depth_write_enabled: Some(depth.map(|d| d.0).unwrap_or(false)),
@@ -227,9 +236,13 @@ impl Renderer {
                 cache: None,
             })
         };
-        let world_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], Some((true, wgpu::CompareFunction::Less)), false);
-        let hud_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl)], None, true);
-        let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, false);
+        // reversed Z (1 = near, 0 = infinitely far): even precision over the whole track
+        let depth = Some((true, wgpu::CompareFunction::Greater));
+        // the track is single-sided like on the PS1 (double-sided materials are emitted twice)
+        let track_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, false, Some(wgpu::Face::Back));
+        let world_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl.clone())], depth, false, None);
+        let hud_pipeline = mk_pipeline("vs_main", "fs_main", &[Some(vbl)], None, true, None);
+        let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, false, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");
         let hud_vb = DynBuf::new(&device, "hud");
         let sky_vb = DynBuf::new(&device, "sky");
@@ -239,6 +252,7 @@ impl Renderer {
             surface,
             format,
             world_pipeline,
+            track_pipeline,
             hud_pipeline,
             sky_pipeline,
             world_globals,
@@ -369,7 +383,7 @@ impl Renderer {
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
@@ -386,12 +400,13 @@ impl Renderer {
                 rp.draw(0..sky.len() as u32, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);
             }
-            rp.set_pipeline(&self.world_pipeline);
+            rp.set_pipeline(&self.track_pipeline);
             if let Some((vb, ib, n)) = &self.static_vb {
                 rp.set_vertex_buffer(0, vb.slice(..));
                 rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                 rp.draw_indexed(0..*n, 0, 0..1);
             }
+            rp.set_pipeline(&self.world_pipeline);
             if !dynamic.is_empty() {
                 rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
                 rp.draw(0..dynamic.len() as u32, 0..1);
