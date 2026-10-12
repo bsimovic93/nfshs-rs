@@ -135,7 +135,6 @@ pub fn call(cpu: &mut Cpu, f: u32, args: &[u32]) -> Result<u32> {
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cpu.call(f)));
     match res {
         Ok(()) => Ok(cpu.r[2]),
-        Err(e) if e.is::<super::host::QuitGame>() => Ok(0),
         Err(e) => {
             let msg = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
             let names = names();
@@ -158,8 +157,8 @@ pub fn names() -> std::collections::HashMap<u32, String> {
         .collect()
 }
 
-/// A fresh 2 MB RAM image with NFS4.EXE loaded and the host attached.
-fn load(data_root: &Path) -> Result<Cpu> {
+/// Boot NFS4.EXE into a race: a fresh 2 MB RAM image and the start-up `main` performs.
+pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
     let exe = std::fs::read(data_root.join("NFS4.EXE"))?;
     let mut mem = Mem::default();
     mem.load_exe(&exe);
@@ -169,12 +168,6 @@ fn load(data_root: &Path) -> Result<Cpu> {
     let mut cpu = new_cpu(mem);
     cpu.host = Some(Box::new(GameHost::new(data_root.to_path_buf())));
     cpu.trace = std::env::var("PS1_TRACE").is_ok();
-    Ok(cpu)
-}
-
-/// Boot NFS4.EXE into a race: the start-up `main` performs, then the race module.
-pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
-    let mut cpu = load(data_root)?;
     cpu.tick_limit = 300_000_000;
     call(&mut cpu, addr::INIT_A, &[])?;
     call(&mut cpu, addr::INIT_B, &[])?;
@@ -287,17 +280,6 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
     }
 }
 
-/// How to start the original game.
-pub enum Boot {
-    /// Straight into a race described by a GameSetup (see [`RaceSetup::game_setup`]).
-    Race(Vec<u8>),
-    /// The whole game from `main`: front end, races and everything in between.
-    Main,
-}
-
-/// `main`.
-const MAIN: u32 = 0x800A_52A4;
-
 /// The original game running on its own thread in lockstep with the caller: each
 /// [`step`](Self::step) runs exactly one game frame with the given input.
 pub struct RaceThread {
@@ -311,19 +293,10 @@ pub struct RaceThread {
 impl RaceThread {
     /// Boot the race described by `gamesetup` and wait until it is ready for its first frame.
     pub fn start(data_root: PathBuf, gamesetup: Vec<u8>) -> Result<Self> {
-        Self::start_with(data_root, Boot::Race(gamesetup))
-    }
-
-    /// Start the game and wait until its first frame is ready.
-    pub fn start_with(data_root: PathBuf, how: Boot) -> Result<Self> {
         let (in_tx, in_rx) = mpsc::sync_channel::<Option<FrameInput>>(1);
         let (out_tx, out_rx) = mpsc::sync_channel::<Result<Snapshot, String>>(1);
         let thread = std::thread::Builder::new().name("nfs4-sim".into()).stack_size(256 << 20).spawn(move || {
-            let booted = match &how {
-                Boot::Race(gs) => boot(&data_root, gs),
-                Boot::Main => load(&data_root),
-            };
-            let mut cpu = match booted {
+            let mut cpu = match boot(&data_root, &gamesetup) {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = out_tx.send(Err(format!("{e:#}")));
@@ -353,11 +326,7 @@ impl RaceThread {
             host.frame.on_frame = Some(on_frame);
             cpu.m.w32(super::host::MAIN_LOOP_EXIT_FLAG, 0);
             cpu.tick_limit = u64::MAX;
-            let entry = match how {
-                Boot::Race(_) => addr::GAME_LOOP,
-                Boot::Main => MAIN,
-            };
-            if let Err(e) = call(&mut cpu, entry, &[]) {
+            if let Err(e) = call(&mut cpu, addr::GAME_LOOP, &[]) {
                 let _ = out_tx.send(Err(format!("{e:#}")));
             }
         })?;

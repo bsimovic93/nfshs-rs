@@ -229,11 +229,7 @@ fn real_main() -> Result<()> {
                 gs[o..o + 4].copy_from_slice(&v.parse::<i32>()?.to_le_bytes());
             }
             let t = std::time::Instant::now();
-            let mut sim = if std::env::var_os("BOOT_MAIN").is_some() {
-                RaceThread::start_with(data.root.clone(), ps1::race::Boot::Main)?
-            } else {
-                RaceThread::start(data.root.clone(), gs)?
-            };
+            let mut sim = RaceThread::start(data.root.clone(), gs)?;
             println!("booted into race in {:?}", t.elapsed());
             let show = |s: &ps1::race::Snapshot, label: &str| {
                 for (k, c) in s.cars.iter().enumerate() {
@@ -316,13 +312,6 @@ fn real_main() -> Result<()> {
                     }
                 }
                 println!("{st}: frame {} in {:?}, game ticks +{}", sim.last.frame, t.elapsed(), sim.last.ticks.wrapping_sub(tick0));
-                if std::env::var_os("BOOT_FRAMES").is_some() {
-                    let (w, h, px) = &*sim.last.image;
-                    std::fs::create_dir_all("re/boot")?;
-                    let name = format!("re/boot/f{:05}.png", sim.last.frame);
-                    image::RgbaImage::from_raw(*w, *h, px.clone()).unwrap().save(&name)?;
-                    println!("  picture {name}");
-                }
                 show(&sim.last, st);
                 show_cam(&sim.last);
             }
