@@ -227,6 +227,11 @@ impl Game {
         Ok(game)
     }
 
+    /// The picture the original game rendered for the current frame (width, height, RGBA8).
+    pub fn ps1_frame(&self) -> Option<std::sync::Arc<(u32, u32, Vec<u8>)>> {
+        self.sim.as_ref().map(|s| s.snapshot().image.clone())
+    }
+
     /// Copy car poses and the start sequence from the original simulation.
     fn sync_original(&mut self, frame_dt: f32) {
         let Some(sim) = &self.sim else { return };
