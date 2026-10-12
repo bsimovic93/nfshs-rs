@@ -17,6 +17,9 @@ pub struct GameHost {
     next_handle: u32,
     /// Display area from the last PutDispEnv (x, y, w, h).
     pub display: [u16; 4],
+    /// GTE environment the game set up for the player view: far colour R, G, B, DQA, DQB,
+    /// H, back colour R, G, B.
+    pub view_env: [i32; 9],
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     pub rcnt: u32,
@@ -44,6 +47,8 @@ pub struct FrameInfo {
     pub field: u64,
     /// Display area (x, y, w, h) from the last PutDispEnv.
     pub display: [u16; 4],
+    /// See [`GameHost::view_env`].
+    pub view_env: [i32; 9],
 }
 
 /// Paces the original main loop against the virtual clock: game time only passes while the
@@ -60,7 +65,7 @@ pub struct FrameDriver {
 pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
 /// `DRender_tView` the game renders the player view with (id, player, DRender_tCalcView).
 pub const RENDER_VIEW: u32 = 0x8011_8234;
-const CAMERA_GET_VIEW_INFO: u32 = 0x8008_5A2C;
+const RENDER_START_WORLD_VIEW: u32 = 0x800B_3EE4;
 /// Virtual clock units per 128 Hz timer tick and per 60 Hz field.
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
@@ -81,6 +86,7 @@ impl GameHost {
             next_handle: 0x100,
             clock: 0,
             display: [0; 4],
+            view_env: [0; 9],
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -327,7 +333,7 @@ impl Host for GameHost {
                     }
                     self.frame.last_top = self.clock;
                     let field = self.clock / FIELD;
-                    match self.frame.on_frame.as_mut().and_then(|f| f(c, FrameInfo { field, display: self.display })) {
+                    match self.frame.on_frame.as_mut().and_then(|f| f(c, FrameInfo { field, display: self.display, view_env: self.view_env })) {
                         None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
                         Some(buttons) => {
                             self.frame.frames_run += 1;
@@ -376,11 +382,15 @@ impl Host for GameHost {
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
             0x800B_4024 => {
-                // Render_RenderPlayerView(view, player): the 3D world is drawn by the host
-                // renderer; only set up the view's camera (Camera_SetCamera without the GTE part)
+                // Render_RenderPlayerView(view, player): the world itself is drawn by the host
+                // renderer. Run the original view set-up (Render_StartRenderingWorldView:
+                // camera, fog keys, environment colours) and keep what it programs into the
+                // GTE, but skip Render_RenderWorld.
                 c.m.w32(RENDER_VIEW, a0);
                 c.m.w32(RENDER_VIEW + 4, a1);
-                c.call_nested(CAMERA_GET_VIEW_INFO, &[a1, RENDER_VIEW + 8, a0]);
+                c.call_nested(RENDER_START_WORLD_VIEW, &[a0]);
+                let g = |r: usize| c.gte_read(32 + r) as i32;
+                self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
                 0
             }
 

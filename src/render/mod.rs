@@ -17,6 +17,19 @@ struct Globals {
     light: [f32; 4],
     head_pos: [f32; 4],
     head_dir: [f32; 4],
+    /// Camera forward axis; w = 1 when `fog` holds PS1 depth-cue parameters.
+    cam_fwd: [f32; 4],
+}
+
+/// The PS1's depth cueing (GTE DPCS/DPCT): vertex colours fade towards `far` by
+/// IR0 = clamp((DQB + DQA * H / SZ) >> 12, 0, 4096), SZ being the view depth in GTE units.
+#[derive(Clone, Copy)]
+pub struct DepthCue {
+    /// Far colour (8-bit per channel, as the game sets it).
+    pub far: Vec3,
+    pub dqa: f32,
+    pub dqb: f32,
+    pub h: f32,
 }
 
 pub struct FrameParams {
@@ -31,6 +44,9 @@ pub struct FrameParams {
     pub fog_color: Vec3,
     pub fog_start: f32,
     pub fog_end: f32,
+    pub cam_fwd: Vec3,
+    /// When set, replaces the linear fog.
+    pub depth_cue: Option<DepthCue>,
 }
 
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -125,13 +141,15 @@ impl Renderer {
             Some(s) => {
                 let mut config = s.get_default_config(&adapter, size.0.max(1), size.1.max(1)).context("surface config")?;
                 let caps = s.get_capabilities(&adapter);
-                config.format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
+                // the PS1 does its colour maths on raw 8-bit values (texture x colour / 128,
+                // blending, depth cueing): render in that space, without sRGB conversion
+                config.format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
                 config.present_mode = wgpu::PresentMode::AutoVsync;
                 s.configure(&device, &config);
                 let f = config.format;
                 (Some((s, config)), f)
             }
-            None => (None, wgpu::TextureFormat::Rgba8UnormSrgb),
+            None => (None, wgpu::TextureFormat::Rgba8Unorm),
         };
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -336,12 +354,19 @@ impl Renderer {
         let g = Globals {
             view_proj: p.view_proj.to_cols_array_2d(),
             cam_pos: p.cam_pos.extend(1.0).into(),
-            fog_color: p.fog_color.extend(1.0).into(),
-            fog: Vec4::new(p.fog_start, p.fog_end, 0.0, 0.0).into(),
+            fog_color: match p.depth_cue {
+                Some(d) => (d.far / 256.0).extend(1.0).into(),
+                None => p.fog_color.extend(1.0).into(),
+            },
+            fog: match p.depth_cue {
+                Some(d) => [d.dqa, d.dqb, d.h, 0.0],
+                None => Vec4::new(p.fog_start, p.fog_end, 0.0, 0.0).into(),
+            },
             sky_top: p.sky_top.extend(1.0).into(),
             light: [p.ambient, p.headlight.0, 0.0, 0.0],
             head_pos: p.headlight.1.extend(1.0).into(),
             head_dir: p.headlight.2.extend(0.0).into(),
+            cam_fwd: p.cam_fwd.extend(if p.depth_cue.is_some() { 1.0 } else { 0.0 }).into(),
         };
         self.queue.write_buffer(&self.world_globals, 0, bytemuck::bytes_of(&g));
         let (w, h) = (self.size.0 as f32, self.size.1 as f32);
@@ -354,6 +379,7 @@ impl Renderer {
             light: [1.0, 0.0, 0.0, 0.0],
             head_pos: [0.0; 4],
             head_dir: [0.0; 4],
+            cam_fwd: [0.0; 4],
         };
         self.queue.write_buffer(&self.hud_globals, 0, bytemuck::bytes_of(&hud_g));
         let sky_g = Globals {
@@ -365,6 +391,7 @@ impl Renderer {
             light: [if p.ambient < 0.5 { p.ambient * 0.5 } else { p.ambient }, 0.0, 0.0, 0.0],
             head_pos: [0.0; 4],
             head_dir: [0.0; 4],
+            cam_fwd: [0.0; 4],
         };
         self.queue.write_buffer(&self.sky_globals, 0, bytemuck::bytes_of(&sky_g));
         self.sky_vb.upload(&self.device, &self.queue, sky);
@@ -502,7 +529,7 @@ fn make_bind_groups(
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         },

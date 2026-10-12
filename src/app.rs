@@ -63,7 +63,7 @@ pub struct RaceConfigOwned {
 impl App {
     fn start_race(&mut self, cfg: RaceConfigOwned) {
         let mut atlas = Atlas::new(2048);
-        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps };
+        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true };
         let game = match Game::load(&self.data, &mut atlas, &rc) {
             Ok(g) => g,
             Err(e) => {
@@ -264,6 +264,8 @@ impl App {
                     fog_color: Vec3::new(0.0, 0.0, 0.01),
                     fog_start: 0.0,
                     fog_end: 1.0,
+                    cam_fwd: Vec3::Z,
+                    depth_cue: None,
                 };
                 r.render(&params, &[], &[], &hud);
             }
@@ -431,6 +433,8 @@ pub fn menu_screenshot(data: &GameData, out: &std::path::Path) -> anyhow::Result
         fog_color: Vec3::new(0.0, 0.0, 0.01),
         fog_start: 0.0,
         fog_end: 1.0,
+                    cam_fwd: Vec3::Z,
+                    depth_cue: None,
     };
     r.screenshot(&params, &[], &[], &menu.draw(&font, &art, 960.0, 720.0)).save(out)?;
     Ok(())

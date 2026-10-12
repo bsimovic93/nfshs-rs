@@ -121,7 +121,8 @@ impl GameData {
 }
 
 /// Variant suffix for the GRP/PSH files: "" day, "N" night, "S" snow, "W" wet.
-pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &str) -> Result<TrackAssets> {
+/// `light`: the game's vertex colour table (`Chunk_lightTable`); without it vertices are grey.
+pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &str, light: &[u32], sky: Option<&crate::ps1::race::SkyData>) -> Result<TrackAssets> {
     let grp_name = format!("ZTR{track_no:02}{variant}.GRP");
     let psh_name = format!("ZTR{track_no:02}{variant}0.PSH");
     let track = grp::Track::parse(&data.read(&grp_name)?)?;
@@ -162,6 +163,10 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         (rect, [pmx[0], pmx[1], pmx[3], pmx[2]])
     };
     let shade = |s: i16| {
+        // vertex colour from the light table: 0x80 per channel is neutral (texture x 1)
+        if let Some(&c) = light.get(s as usize) {
+            return [(c & 0xFF) as f32 / 256.0, ((c >> 8) & 0xFF) as f32 / 256.0, ((c >> 16) & 0xFF) as f32 / 256.0, 1.0];
+        }
         let k = 1.0 - (s as f32 / 32.0).clamp(0.0, 0.6);
         [k * 0.5, k * 0.5, k * 0.5, 1.0]
     };
@@ -199,6 +204,11 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             }
         }
     };
+    if std::env::var_os("NFSHS_DUMP_SHADES").is_some() {
+        let all = track.blocks.iter().flat_map(|b| b.ground.verts.iter().chain(&b.detail.verts)).chain(track.models.iter().flat_map(|m| m.verts.iter()));
+        let (mn, mx) = all.fold((i16::MAX, i16::MIN), |(a, b), v| (a.min(v[3]), b.max(v[3])));
+        println!("vertex shade index range {mn}..={mx}");
+    }
     if std::env::var_os("NFSHS_DUMP_PROPS").is_some() {
         let mut hist = std::collections::BTreeMap::new();
         for b in &track.blocks {
@@ -267,7 +277,10 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
     }
     let nodes = track.nodes.iter().map(|&n| ps1_to_world(n)).collect();
     log::info!("{} sprites", sprites.len());
-    let (sky, sky_colors) = build_sky(&psh, &rects, atlas);
+    let (sky, sky_colors) = match sky {
+        Some(s) => build_original_sky(s, &psh, &rects, atlas),
+        None => build_sky(&psh, &rects, atlas),
+    };
     Ok(TrackAssets { verts, indices, tris, track, nodes, sprites, sky, sky_colors })
 }
 
@@ -287,6 +300,51 @@ fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
 }
 
 /// Horizon cylinder from the HZ01..HZ04 panorama strips (8 segments, ~22 degrees tall).
+/// The original's sky: a gouraud-shaded dome (`Hrz_BuildSky`) and the textured horizon band
+/// (`Hrz_BuildHorizon`), camera-centred and scaled to radius 100.
+fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, Vec3)) {
+    let mut verts = Vec::new();
+    // untextured: the PS1 draws the vertex colour itself (x2 cancels the shader's modulation)
+    let flat = |c: [u8; 3]| [c[0] as f32 / 510.0, c[1] as f32 / 510.0, c[2] as f32 / 510.0, 1.0];
+    let white = atlas.uv(atlas.white, Vec2::new(0.5, 0.5));
+    let dome = |i: usize| {
+        let v = s.dome[i];
+        Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) * 0.1
+    };
+    for ring in 0..4 {
+        for seg in 0..16 {
+            let q = [ring * 17 + seg, ring * 17 + seg + 1, (ring + 1) * 17 + seg + 1, (ring + 1) * 17 + seg];
+            for k in [0, 1, 2, 0, 2, 3] {
+                verts.push(Vertex { pos: dome(q[k]).into(), uv: white, color: flat(s.dome_colors[q[k]]) });
+            }
+        }
+    }
+    // horizon band
+    let names = if std::env::var_os("NFSHS_NO_HORIZON").is_some() { [""; 4] } else { ["HZ01", "HZ02", "HZ03", "HZ04"] };
+    let shapes: Vec<Option<usize>> = names.iter().map(|n| psh.shapes.iter().position(|sh| sh.name == *n)).collect();
+    let k = 100.0 / 32000.0;
+    let (y0, y1) = (s.bottom as f32 * k, (s.bottom as f32 + s.height as f32) * k);
+    let modulate = |c: [u8; 3]| [c[0] as f32 / 256.0, c[1] as f32 / 256.0, c[2] as f32 / 256.0, 1.0];
+    for seg in 0..16 {
+        let t = s.segment_tex[seg] as usize;
+        let Some(Some(shape)) = shapes.get(t) else { continue };
+        let rect = rects[*shape];
+        let (w, h) = (rect.w as f32, rect.h as f32);
+        let p = |i: usize, y: f32| [-(s.ring[i][0] as f32) * k, y, s.ring[i][1] as f32 * k];
+        let quad = [
+            (p(seg, y1), Vec2::new(0.0, 0.0), modulate(s.top_colors[seg])),
+            (p(seg + 1, y1), Vec2::new(w, 0.0), modulate(s.top_colors[seg + 1])),
+            (p(seg + 1, y0), Vec2::new(w, h), modulate(s.bottom_colors[seg + 1])),
+            (p(seg, y0), Vec2::new(0.0, h), modulate(s.bottom_colors[seg])),
+        ];
+        for i in [0, 1, 2, 0, 2, 3] {
+            verts.push(Vertex { pos: quad[i].0, uv: atlas.uv(rect, quad[i].1), color: quad[i].2 });
+        }
+    }
+    let c = |c: [u8; 3]| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0;
+    (verts, (c(s.dome_colors[4 * 17]), c(s.dome_colors[0])))
+}
+
 fn build_sky(psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, Vec3)) {
     let panels: Vec<usize> = ["HZ01", "HZ02", "HZ03", "HZ04"]
         .iter()

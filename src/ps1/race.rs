@@ -36,6 +36,8 @@ pub mod addr {
     pub const CAMERA_INFO: u32 = 0x8011_0570;
     /// Camera projection distance set by `SetCameraZoom` (gp + 0x294).
     pub const CAMERA_ZOOM: u32 = 0x8013_DAD0;
+    /// `Chunk_lightTable`: the track's vertex colours (u32 RGB, indexed by the vertex "shade").
+    pub const LIGHT_TABLE: u32 = 0x8013_DB0C;
     /// `simGlobal.counter`: simulation time in 128 Hz ticks (physics runs on even counts).
     pub const SIM_COUNTER: u32 = 0x8011_F368;
 }
@@ -217,6 +219,47 @@ impl CarState {
     }
 }
 
+/// Sky and horizon as the original set them up for the track (`Hrz_InitSky`,
+/// `Hrz_InitSkyColor`, `Hrz_InitHorizon`), in PS1 view units.
+#[derive(Clone, Debug, Default)]
+pub struct SkyData {
+    /// `gSkyMesh`: 5 rings x 17 points of a radius-1000 dome (x, y, z), horizon first.
+    pub dome: Vec<[i16; 3]>,
+    /// `gSkyColor`: RGB per dome point.
+    pub dome_colors: Vec<[u8; 3]>,
+    /// Horizon ring: 17 points (x, z) of radius 32000.
+    pub ring: Vec<[i16; 2]>,
+    /// Horizon band bottom height and height (ring units).
+    pub bottom: i16,
+    pub height: i16,
+    /// Vertex colours of the band's top and bottom edge, per ring point.
+    pub top_colors: Vec<[u8; 3]>,
+    pub bottom_colors: Vec<[u8; 3]>,
+    /// Horizon texture (0..3 = HZ01..HZ04, 16 = none) per segment.
+    pub segment_tex: Vec<u8>,
+}
+
+impl SkyData {
+    fn read(m: &mut Mem) -> Option<Self> {
+        let gp = addr::GP;
+        let (hrec, ring) = (m.r32(gp + 4916), m.r32(gp + 4924));
+        if hrec == 0 || ring == 0 {
+            return None;
+        }
+        let rgb = |m: &mut Mem, a: u32| [m.r8(a), m.r8(a + 1), m.r8(a + 2)];
+        Some(Self {
+            dome: (0..85).map(|i| [0, 2, 4].map(|o| m.r16(0x8012_1668 + 8 * i + o) as i16)).collect(),
+            dome_colors: (0..85).map(|i| rgb(m, 0x8012_1910 + 4 * i)).collect(),
+            ring: (0..17).map(|i| [m.r16(ring + 8 * i) as i16, m.r16(ring + 8 * i + 4) as i16]).collect(),
+            bottom: m.r16(hrec + 8) as i16,
+            height: m.r16(hrec + 12) as i16,
+            top_colors: (0..17).map(|i| rgb(m, 0x8012_1B28 + 4 * i)).collect(),
+            bottom_colors: (0..17).map(|i| rgb(m, 0x8012_1AE8 + 4 * i)).collect(),
+            segment_tex: (0..16).map(|i| m.r8(hrec + 32 + i)).collect(),
+        })
+    }
+}
+
 /// Simulation state at the top of a frame.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
@@ -236,6 +279,13 @@ pub struct Snapshot {
     pub camera_rot: [i32; 9],
     /// Player 0 camera mode (`Camera_gInfo[0].mode`, cycled by Triangle).
     pub camera_mode: i16,
+    /// Sky and horizon set-up.
+    pub sky: Option<SkyData>,
+    /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
+    pub light_table: Vec<u32>,
+    /// The view's GTE environment (far colour, depth cue, H, back colour); see
+    /// `GameHost::view_env`.
+    pub view_env: [i32; 9],
     /// Projection distance H of the camera (`SetCameraZoom`), in screen pixels.
     pub projection: u32,
     /// Display area (x, y, w, h) from PutDispEnv.
@@ -270,6 +320,12 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         sim_ticks: c.m.r32(addr::SIM_COUNTER),
         camera_pos: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 8 + 4 * i as u32) as i32),
         projection: c.m.r32(addr::CAMERA_ZOOM),
+        view_env: info.view_env,
+        sky: SkyData::read(&mut c.m),
+        light_table: {
+            let t = c.m.r32(addr::LIGHT_TABLE);
+            if t == 0 { Vec::new() } else { (0..256).map(|i| c.m.r32(t + 4 * i)).collect() }
+        },
         camera_mode: c.m.r16(addr::CAMERA_INFO + 0x70) as i16,
         display: info.display,
         camera_rot: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 0x14 + 4 * i as u32) as i32),

@@ -6,6 +6,7 @@ mod game;
 mod iso;
 mod menu;
 mod ps1;
+mod refcmp;
 mod render;
 mod soft;
 
@@ -67,7 +68,7 @@ fn real_main() -> Result<()> {
         .map(|s| s.to_ascii_uppercase())
         .collect();
     let laps: i32 = opt(&args, "--laps").unwrap_or("2").parse()?;
-    let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps };
+    let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps, original_sim: true };
     match args.get(1).map(String::as_str) {
         None | Some("menu") => app::run(&data, None)?,
         Some("play") => app::run(
@@ -81,6 +82,7 @@ fn real_main() -> Result<()> {
             }),
         )?,
         Some("shot-menu") => app::menu_screenshot(&data, Path::new(opt(&args, "--out").unwrap_or("menu.png")))?,
+        Some("ref-compare") => refcmp::compare(&data, Path::new(&args[2]))?,
         Some("shot") => {
             let secs: f32 = opt(&args, "--time").unwrap_or("0").parse()?;
             let keys = opt(&args, "--keys").unwrap_or("");
@@ -253,7 +255,9 @@ fn real_main() -> Result<()> {
             let show_cam = |s: &ps1::race::Snapshot| {
                 let f = |v: i32| v as f32 / 65536.0;
                 println!(
-                    "  camera mode={} H={} display={:?} pos=({:.2},{:.2},{:.2}) rot={:?}",
+                    "  env {:?}
+  camera mode={} H={} display={:?} pos=({:.2},{:.2},{:.2}) rot={:?}",
+                    s.view_env,
                     s.camera_mode,
                     s.projection,
                     s.display,

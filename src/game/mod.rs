@@ -73,6 +73,9 @@ pub struct RaceConfig<'a> {
     pub player_car: &'a str,
     pub opponents: Vec<String>,
     pub laps: i32,
+    /// Run the recompiled original simulation (false: the engine's own physics, e.g. when
+    /// poses come from elsewhere).
+    pub original_sim: bool,
 }
 
 pub struct Game {
@@ -119,7 +122,23 @@ fn load_spec(data: &GameData, code: &str, model: &CarModel) -> CarSpec {
 
 impl Game {
     pub fn load(data: &GameData, atlas: &mut Atlas, cfg: &RaceConfig) -> Result<Self> {
-        let track = assets::load_track(data, atlas, cfg.track, cfg.variant)?;
+        // the original game's simulation drives the race unless disabled (NFSHS_OWN_PHYSICS=1)
+        // or it cannot run this setup
+        let sim = if !cfg.original_sim || std::env::var_os("NFSHS_OWN_PHYSICS").is_some() {
+            None
+        } else {
+            match original::OriginalSim::start(data, cfg) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    log::warn!("original simulation unavailable, using the engine's physics: {e:#}");
+                    None
+                }
+            }
+        };
+        // the track's vertex colours come from the original's light table
+        let light = sim.as_ref().map(|s| s.snapshot().light_table.clone()).unwrap_or_default();
+        let sky = sim.as_ref().and_then(|s| s.snapshot().sky.clone());
+        let track = assets::load_track(data, atlas, cfg.track, cfg.variant, &light, sky.as_ref())?;
         let font = hud::Font::new(atlas);
         let world = CollisionWorld::new(track.tris.clone());
         let mut path: Vec<Vec3> = track.track.vroad.iter().map(|v| assets::ps1_to_world(v.pos)).collect();
@@ -169,19 +188,6 @@ impl Game {
             "S" => (Vec3::new(0.75, 0.78, 0.82), 40.0, 220.0),
             "W" => (Vec3::new(0.45, 0.48, 0.52), 50.0, 260.0),
             _ => (track.sky_colors.1, 120.0, 420.0),
-        };
-        // the original game's simulation drives the race unless disabled (NFSHS_OWN_PHYSICS=1)
-        // or it cannot run this setup
-        let sim = if std::env::var_os("NFSHS_OWN_PHYSICS").is_some() {
-            None
-        } else {
-            match original::OriginalSim::start(data, cfg) {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    log::warn!("original simulation unavailable, using the engine's physics: {e:#}");
-                    None
-                }
-            }
         };
         let player = &racers[0].car;
         let mut game = Self {
@@ -585,6 +591,17 @@ impl Game {
             fog_color: self.fog.0,
             fog_start: self.fog.1,
             fog_end: self.fog.2,
+            cam_fwd: (self.cam_target - self.cam_pos).normalize_or(Vec3::Z),
+            depth_cue: self.sim.as_ref().map(|s| {
+                // the GTE far colour / depth-cue values the game set for this view
+                let e = s.snapshot().view_env;
+                crate::render::DepthCue {
+                    far: Vec3::new(e[0] as f32, e[1] as f32, e[2] as f32) / 16.0,
+                    dqa: e[3] as f32,
+                    dqb: e[4] as f32,
+                    h: e[5].max(1) as f32,
+                }
+            }),
         }
     }
 

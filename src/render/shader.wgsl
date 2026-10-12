@@ -11,6 +11,8 @@ struct Globals {
     light: vec4<f32>,
     head_pos: vec4<f32>,
     head_dir: vec4<f32>,
+    // camera forward axis; w = 1: `fog` holds the PS1 depth cue (DQA, DQB, H), fog_color the far colour
+    cam_fwd: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -48,7 +50,15 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
     if (t.a < 0.5) {
         discard;
     }
-    var c = min(t.rgb * i.color.rgb * 2.0, vec3<f32>(1.0));
+    var vc = i.color.rgb;
+    if (g.cam_fwd.w > 0.5) {
+        // GTE depth cue: IR0 = clamp((DQB + DQA * H / SZ) / 4096, 0, 4096); SZ in GTE units (1/64 m)
+        let sz = max(dot(i.world - g.cam_pos.xyz, g.cam_fwd.xyz), 0.01) * 64.0;
+        let n = min(g.fog.z * 65536.0 / sz, 131071.0);
+        let ir0 = clamp((g.fog.y + g.fog.x * n) / 4096.0, 0.0, 4096.0) / 4096.0;
+        vc = mix(vc, g.fog_color.rgb, ir0);
+    }
+    var c = min(t.rgb * vc * 2.0, vec3<f32>(1.0));
     // ambient (night darkening) + player headlight cone
     var lit = g.light.x;
     if (g.light.y > 0.0) {
@@ -59,8 +69,10 @@ fn fs_main(i: VOut) -> @location(0) vec4<f32> {
         lit = lit + g.light.y * cone * fall * fall;
     }
     c = c * min(lit, 1.25);
-    let f = clamp((i.dist - g.fog.x) / max(g.fog.y - g.fog.x, 1.0), 0.0, 1.0);
-    c = mix(c, g.fog_color.rgb, f);
+    if (g.cam_fwd.w < 0.5) {
+        let f = clamp((i.dist - g.fog.x) / max(g.fog.y - g.fog.x, 1.0), 0.0, 1.0);
+        c = mix(c, g.fog_color.rgb, f);
+    }
     return vec4<f32>(c, i.color.a);
 }
 
