@@ -43,6 +43,11 @@ fn opt<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 }
 
 fn main() -> Result<()> {
+    // the recompiled game code recurses like the original; give it a generous stack
+    std::thread::Builder::new().stack_size(256 << 20).spawn(real_main)?.join().map_err(|_| anyhow::anyhow!("main thread panicked"))?
+}
+
+fn real_main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<String> = std::env::args().collect();
     let data = assets::GameData::new(&find_data_dir(opt(&args, "--data")));
@@ -202,6 +207,58 @@ fn main() -> Result<()> {
             let sdiff = (0..after_scratch.len()).step_by(4).filter(|&i| cpu.m.scratch[i..i + 4] != after_scratch[i..i + 4]).count();
             println!("{func:#x}: {:?}, RAM words differing: {} {:x?}, scratch words differing: {sdiff}", el, diff.len(), &diff.iter().take(10).map(|i| 0x8000_0000u32 + *i as u32).collect::<Vec<_>>());
         }
+        Some("boot-race") => {
+            // boot the recompiled original game straight into a race
+            let gs = std::fs::read("re/gamesetup_template.bin")?;
+            let t = std::time::Instant::now();
+            match ps1::race::OriginalGame::boot(&data.root, &gs) {
+                Ok(g) => {
+                    println!("booted into race in {:?}, {} calls, {} io accesses, {} interpreter fallbacks", t.elapsed(), g.cpu.calls, g.cpu.m.io_accesses, g.cpu.interpreted);
+                    std::fs::create_dir_all("re/boot")?;
+                    std::fs::write("re/boot/ram.bin", &g.cpu.m.ram)?;
+                    let mut g = g;
+                    let rd = |g: &mut ps1::race::OriginalGame, o: u32| { let car = g.player_car(); g.cpu.m.r32(car + o) as i32 };
+                    // BOOT_SCRIPT: comma-separated `seconds:buttons` steps (buttons: x=cross, l/r=left/right, -=none)
+                    let script = std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "1:-,3:x".into());
+                    let steps: Vec<(u32, u16, String)> = script
+                        .split(',')
+                        .filter_map(|st| {
+                            let (secs, b) = st.split_once(':')?;
+                            let mut m = 0u16;
+                            for ch in b.chars() {
+                                m |= match ch {
+                                    'x' => ps1::race::pad::CROSS,
+                                    's' => ps1::race::pad::SQUARE,
+                                    'l' => ps1::race::pad::LEFT,
+                                    'r' => ps1::race::pad::RIGHT,
+                                    'u' => ps1::race::pad::UP,
+                                    'd' => ps1::race::pad::DOWN,
+                                    _ => 0,
+                                };
+                            }
+                            Some((secs.parse().ok()?, m, st.to_string()))
+                        })
+                        .collect();
+                    for (secs, buttons, label) in steps {
+                        let t = std::time::Instant::now();
+                        let n = g.run_frames(secs * 60, buttons)?;
+                        let speed = rd(&mut g, 0xC0) as f32 / 65536.0;
+                        println!(
+                            "{label}: {n} frames in {:?}; pos=({:.2},{:.2},{:.2}) speed={:.2} m/s ({:.1} mph) rpm={} gear?={}",
+                            t.elapsed(),
+                            rd(&mut g, 0xA0) as f32 / 65536.0,
+                            rd(&mut g, 0xA4) as f32 / 65536.0,
+                            rd(&mut g, 0xA8) as f32 / 65536.0,
+                            speed,
+                            speed * 2.237,
+                            rd(&mut g, 0x468),
+                            rd(&mut g, 0x428)
+                        );
+                    }
+                }
+                Err(e) => println!("boot failed after {:?}: {e}", t.elapsed()),
+            }
+        }
         Some("run-snap") => {
             // run-snap <snapdir> [--trace]: run the snapshotted function natively with host HLE
             let dir = Path::new(&args[2]);
@@ -217,20 +274,27 @@ fn main() -> Result<()> {
             cpu.trace = args.iter().any(|a| a == "--trace");
             cpu.host = Some(Box::new(ps1::host::GameHost::new(data.root.clone())));
             let func = u32::from_str_radix(std::fs::read_to_string(dir.join("func.txt"))?.trim().trim_start_matches("0x"), 16)?;
+            let names: std::collections::HashMap<u32, String> = std::fs::read_to_string("re/retail_syms.tsv")
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|l| {
+                    let mut it = l.split('\t');
+                    Some((u32::from_str_radix(it.next()?, 16).ok()?, it.next()?.to_string()))
+                })
+                .collect();
             let t = std::time::Instant::now();
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                cpu.call(func);
-                cpu
-            }));
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cpu.call(func)));
             match res {
-                Ok(mut cpu) => {
+                Ok(()) => {
                     println!("{func:#x} returned v0={:#x} in {:?}, {} calls, {} io accesses", cpu.r[2], t.elapsed(), cpu.calls, cpu.m.io_accesses);
-                    if let Some(h) = cpu.host.take() {
-                        let _ = h;
-                    }
                     std::fs::write(dir.join("native_after_ram.bin"), &cpu.m.ram)?;
                 }
-                Err(_) => println!("{func:#x} panicked after {:?}", t.elapsed()),
+                Err(_) => {
+                    println!("{func:#x} stopped after {:?} (last io {:#x}); call stack:", t.elapsed(), cpu.m.last_io);
+                    for a in cpu.stack.iter().rev().take(12) {
+                        println!("    {a:#010x} {}", names.get(a).map(String::as_str).unwrap_or("?"));
+                    }
+                }
             }
         }
         Some("dump-car") => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,

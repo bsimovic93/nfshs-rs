@@ -5,6 +5,7 @@
 //! Hardware is not emulated: functions that talk to it are replaced by a [`Host`].
 
 pub mod bios;
+mod interp;
 
 pub const RAM_SIZE: usize = 0x20_0000;
 const SCRATCH_BASE: u32 = 0x1F80_0000;
@@ -113,17 +114,37 @@ pub struct Cpu {
     pub hi: u32,
     pub lo: u32,
     pub cop0: [u32; 32],
+    /// GTE data (0..31) and control (32..63) registers. Commands are not executed: they only
+    /// appear in rendering code, which the host engine replaces.
+    pub gte_regs: [u32; 64],
+    pub gte_commands: u64,
+    /// Interrupt handlers for the 128 Hz root-counter timer (registered via OpenEvent).
+    pub timer_handlers: Vec<u32>,
+    /// Timer interrupts waiting to be delivered.
+    pub pending_ticks: u32,
+    in_irq: bool,
+    /// Pending continuation address (a function ran past its end); see [`Cpu::run_cont`].
+    pub cont: u32,
+    /// Number of times execution fell back to the interpreter.
+    pub interpreted: u64,
+    /// Backward-branch counter (loop watchdog).
+    pub ticks: u64,
+    pub tick_limit: u64,
     pub m: Mem,
     pub host: Option<Box<dyn Host>>,
     pub calls: u64,
     pub trace: bool,
+    /// Recompiled-function call stack (entry addresses), for diagnostics.
+    pub stack: Vec<u32>,
     /// Entry point into recompiled code: returns false if `addr` is not a known function.
     pub dispatch: fn(&mut Cpu, u32) -> bool,
+    /// Resume at an arbitrary address inside recompiled code (cross-function fall-through).
+    pub dispatch_at: fn(&mut Cpu, u32) -> bool,
 }
 
 impl Cpu {
     pub fn new(m: Mem) -> Self {
-        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], m, host: None, calls: 0, trace: false, dispatch: |_, _| false }
+        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false }
     }
     #[inline]
     pub fn mult(&mut self, a: u32, b: u32) {
@@ -190,6 +211,7 @@ impl Cpu {
     /// Call a function by address: BIOS vectors, host replacements, then recompiled code.
     pub fn call(&mut self, addr: u32) {
         self.calls += 1;
+        self.tick();
         if self.trace {
             eprintln!("call {addr:#x} a0={:#x} a1={:#x} a2={:#x} ra={:#x}", self.r[4], self.r[5], self.r[6], self.r[31]);
         }
@@ -200,12 +222,70 @@ impl Cpu {
         if let Some(mut h) = self.host.take() {
             let handled = h.call(self, addr);
             self.host = Some(h);
+            self.service_interrupts();
             if handled {
                 return;
             }
         }
         if !(self.dispatch)(self, addr) {
-            panic!("call to non-recompiled function {addr:#x}");
+            if self.trace {
+                eprintln!("interpreting {addr:#x}");
+            }
+            self.interpreted += 1;
+            self.interpret(addr);
+        }
+        if self.cont != 0 {
+            self.run_cont();
+        }
+    }
+    /// Deliver pending timer interrupts: run each registered handler with the CPU state saved
+    /// and restored around it, as the PS1 interrupt dispatcher does.
+    pub fn service_interrupts(&mut self) {
+        if self.in_irq || self.pending_ticks == 0 || self.timer_handlers.is_empty() {
+            return;
+        }
+        self.in_irq = true;
+        let saved = (self.r, self.hi, self.lo, self.stack.len());
+        while self.pending_ticks > 0 {
+            self.pending_ticks -= 1;
+            for h in self.timer_handlers.clone() {
+                self.r[29] = saved.0[29].wrapping_sub(0x200) & !7; // interrupt stack below the current frame
+                self.r[31] = 0;
+                self.call(h);
+            }
+        }
+        self.r = saved.0;
+        self.hi = saved.1;
+        self.lo = saved.2;
+        self.stack.truncate(saved.3);
+        self.in_irq = false;
+    }
+
+    #[inline]
+    pub fn tick(&mut self) {
+        self.ticks += 1;
+        if self.ticks > self.tick_limit {
+            panic!("watchdog: {} backward branches", self.ticks);
+        }
+    }
+    /// Trampoline for cross-function continuations: keeps resuming until no function leaves
+    /// a continuation behind, without growing the Rust stack.
+    pub fn run_cont(&mut self) {
+        while self.cont != 0 {
+            let pc = std::mem::take(&mut self.cont);
+            self.tick();
+            self.jump(pc);
+        }
+    }
+
+    /// Control flowed past the end of a recompiled function (shared code / second entry).
+    pub fn jump(&mut self, pc: u32) {
+        if (self.dispatch)(self, pc) {
+            return;
+        }
+        if !(self.dispatch_at)(self, pc) {
+            self.interpreted += 1;
+            self.interpret(pc);
         }
     }
     pub fn syscall(&mut self) {
@@ -213,6 +293,39 @@ impl Cpu {
         self.r[2] = 1;
     }
     pub fn gte(&mut self, w: u32) {
-        panic!("GTE instruction {w:#010x} not supported");
+        let op = w >> 26;
+        let rs = (w >> 21) & 31;
+        let rt = ((w >> 16) & 31) as usize;
+        let rd = ((w >> 11) & 31) as usize;
+        match op {
+            18 if w & (1 << 25) != 0 => self.gte_commands += 1,
+            18 => match rs {
+                0 => {
+                    if rt != 0 {
+                        self.r[rt] = self.gte_regs[rd];
+                    }
+                }
+                2 => {
+                    if rt != 0 {
+                        self.r[rt] = self.gte_regs[32 + rd];
+                    }
+                }
+                4 => self.gte_regs[rd] = self.r[rt],
+                6 => self.gte_regs[32 + rd] = self.r[rt],
+                _ => {}
+            },
+            50 | 58 => {
+                let base = ((w >> 21) & 31) as usize;
+                let off = (w & 0xFFFF) as i16 as i32 as u32;
+                let addr = self.r[base].wrapping_add(off);
+                if op == 50 {
+                    self.gte_regs[rt] = self.m.r32(addr);
+                } else {
+                    let v = self.gte_regs[rt];
+                    self.m.w32(addr, v);
+                }
+            }
+            _ => {}
+        }
     }
 }

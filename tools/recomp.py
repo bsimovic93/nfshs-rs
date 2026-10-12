@@ -11,6 +11,13 @@ sys.path.insert(0, __file__.rsplit('\\', 1)[0] if '\\' in __file__ else '.')
 import mips
 
 e = mips.Exe('../gamedata/NFS4.EXE')
+# The front-end overlay (FRONT.BIN) stays resident at 0x80010000 during races and race code
+# calls into it. NFS4.EXE has no code in that range (start-up rdata only), so recompile the
+# combined image: executable with the overlay laid over its low region.
+_front = open('../gamedata/FRONT.BIN', 'rb').read()
+_img = bytearray(e.data)
+_img[0:len(_front)] = _front
+e.data = bytes(_img)
 
 # all direct call targets in the executable -> function starts
 ALL_CALLS = set()
@@ -110,6 +117,20 @@ def calls_of(start):
 
 
 HLE_SET = set()
+
+# Optional names transferred from the 1999 development build (tools/symmatch.py output).
+NAMES = {}
+SRC = {}
+try:
+    for line in open('../re/retail_syms.tsv'):
+        r, n, d = line.rstrip(chr(10)).split(chr(9))
+        NAMES[int(r, 16)] = (n, int(d, 16))
+    for line in open('../re/nfs4_funcs.tsv', encoding='latin1'):
+        a, loc, n = line.split(chr(9))[:3]
+        SRC[int(a, 16)] = loc.split('nfs4' + chr(92))[-1]
+except FileNotFoundError:
+    pass
+
 
 
 def collect(roots):
@@ -258,7 +279,12 @@ def gen_function(f, known):
     if has_indirect:
         leaders |= set(words)
     leaders = sorted(x for x in leaders if f <= x < end)
-    out = [f'pub fn f_{f:08x}(c: &mut Cpu) {{', f'    let mut pc: u32 = {f:#x};', '    loop {', '        match pc {']
+    doc = []
+    if f in NAMES:
+        n, dev = NAMES[f]
+        doc.append(f'/// `{n}`' + (f' ({SRC[dev]})' if dev in SRC else ''))
+    out = doc + [f'pub fn f_{f:08x}(c: &mut Cpu) {{ f_{f:08x}_at(c, {f:#x}) }}',
+                 f'pub fn f_{f:08x}_at(c: &mut Cpu, mut pc: u32) {{', f'    c.stack.push({f:#x});', '    loop {', '        match pc {']
     for li, start in enumerate(leaders):
         stop = leaders[li + 1] if li + 1 < len(leaders) else end
         body = []
@@ -283,36 +309,38 @@ def gen_function(f, known):
             if kind == 'b':
                 body.append(f'                let cond = {bi[1]};{comment}')
                 if dl: body.append(dl)
-                body.append(f'                if cond {{ pc = {bi[2]:#x}; continue; }}')
+                tick = 'c.tick(); ' if bi[2] <= pc else ''
+                body.append(f'                if cond {{ {tick}pc = {bi[2]:#x}; continue; }}')
                 body.append(f'                pc = {pc + 8:#x}; continue;')
             elif kind == 'bal':
                 raise ValueError(f'bltzal/bgezal at {pc:#x}')
             elif kind == 'j':
                 if dl: body.append(dl)
                 if f <= bi[2] < end:
-                    body.append(f'                pc = {bi[2]:#x}; continue;{comment}')
+                    tick = 'c.tick(); ' if bi[2] <= pc else ''
+                    body.append(f'                {tick}pc = {bi[2]:#x}; continue;{comment}')
                 else:  # tail call
-                    body.append(f'                {call_expr(bi[2], known)} return;{comment}')
+                    body.append(f'                c.stack.pop(); {call_expr(bi[2], known)} return;{comment}')
             elif kind == 'jal':
                 if dl: body.append(dl)
                 body.append(f'                c.r[31] = {pc + 8:#x};{comment}')
-                body.append(f'                {call_expr(bi[2], known)}')
+                body.append(f'                {call_expr(bi[2], known)} if c.cont != 0 {{ c.run_cont(); }}')
                 body.append(f'                pc = {pc + 8:#x}; continue;')
             elif kind == 'jr':
                 rs = bi[1]
                 body.append(f'                let target = {reg(rs)};{comment}')
                 if dl: body.append(dl)
                 if rs == 31:
-                    body.append('                let _ = target; return;')
+                    body.append('                let _ = target; c.stack.pop(); return;')
                 else:
                     body.append(f'                if ({f:#x}..{end:#x}).contains(&target) {{ pc = target; continue; }}')
-                    body.append('                c.call(target); return;')
+                    body.append('                c.stack.pop(); c.call(target); return;')
             elif kind == 'jalr':
                 rs, rd = bi[1], bi[2]
                 body.append(f'                let target = {reg(rs)};{comment}')
                 if dl: body.append(dl)
                 if rd: body.append(f'                c.r[{rd}] = {pc + 8:#x};')
-                body.append('                c.call(target);')
+                body.append('                c.call(target); if c.cont != 0 { c.run_cont(); }')
                 body.append(f'                pc = {pc + 8:#x}; continue;')
             elif kind == 'syscall':
                 body.append(f'                c.syscall();{comment}')
@@ -326,13 +354,23 @@ def gen_function(f, known):
         out.append(f'            {start:#x} => {{')
         out.extend(body)
         out.append('            }')
-    out.append(f'            _ => panic!("f_{f:08x}: bad pc {{pc:#x}}"),')
+    # control left the traced extent (fall-through into a neighbouring function): tail call
+    out.append('            _ => { c.stack.pop(); c.cont = pc; return; }')
     out += ['        }', '    }', '}', '']
     return '\n'.join(out)
 
 
+HOOK_SET = set()
+try:
+    for _l in open('hook_funcs.txt'):
+        if _l.strip() and not _l.startswith('#'):
+            HOOK_SET.add(int(_l.split()[0], 16))
+except FileNotFoundError:
+    pass
+
+
 def call_expr(t, known):
-    return f'f_{t:08x}(c);' if t in known else f'c.call({t:#x});'
+    return f'f_{t:08x}(c);' if t in known and t not in HOOK_SET else f'c.call({t:#x});'
 
 
 def all_starts():
@@ -362,6 +400,9 @@ if __name__ == '__main__':
         i = args.index('--hle')
         HLE_SET.update(int(x, 16) for x in args[i + 1:])
         args = args[:i]
+    for line in open('hle_funcs.txt'):
+        if line.strip() and not line.startswith('#'):
+            HLE_SET.add(int(line.split()[0], 16))
     parts_n = 48
     if '--parts' in args:
         i = args.index('--parts'); parts_n = int(args[i + 1]); args = args[:i] + args[i + 2:]
@@ -386,6 +427,20 @@ if __name__ == '__main__':
         lib.append(f'pub use part_{k:02}::*;')
     lib.append('/// Functions replaced on the host side (excluded from recompilation).')
     lib.append('pub const HLE: &[u32] = &[' + ', '.join(f'{x:#x}' for x in sorted(HLE_SET)) + '];')
+    lib.append('/// Extents of all recompiled functions: (start, end, entry-at-pc).')
+    lib.append('pub static RANGES: &[(u32, u32, fn(&mut Cpu, u32))] = &[')
+    for f in funcs:
+        lib.append(f'    ({f:#x}, {func_end(f):#x}, f_{f:08x}_at),')
+    lib.append('];')
+    lib.append('/// Continue execution at an arbitrary address inside a recompiled function.')
+    lib.append('pub fn dispatch_at(c: &mut Cpu, pc: u32) -> bool {')
+    lib.append('    // innermost (latest-starting) function whose extent contains pc')
+    lib.append('    let i = RANGES.partition_point(|r| r.0 <= pc);')
+    lib.append('    for r in RANGES[..i].iter().rev().take(8) {')
+    lib.append('        if pc < r.1 { (r.2)(c, pc); return true; }')
+    lib.append('    }')
+    lib.append('    false')
+    lib.append('}')
     lib.append('/// Dispatch a call by address into recompiled code.')
     lib.append('pub fn dispatch(c: &mut Cpu, addr: u32) -> bool {')
     lib.append('    match addr {')

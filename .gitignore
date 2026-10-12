@@ -2,3 +2,7 @@ target
 /gamedata
 /re
 __pycache__/
+/crates/nfs4rc/src/
+/NFS4.CPE
+/NFS4.MAP
+/NFS4.SYM

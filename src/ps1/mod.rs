@@ -2,6 +2,7 @@
 //! (`nfs4rc`) and the host-side hardware replacements.
 
 pub mod host;
+pub mod race;
 
 pub use ps1rt::*;
 
@@ -9,5 +10,6 @@ pub use ps1rt::*;
 pub fn new_cpu(m: Mem) -> Cpu {
     let mut c = Cpu::new(m);
     c.dispatch = nfs4rc::dispatch;
+    c.dispatch_at = nfs4rc::dispatch_at;
     c
 }
