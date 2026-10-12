@@ -526,33 +526,29 @@ impl Ps1Hud {
         let rect = |out: &mut Vec<Quad>, x: f32, y: f32, w: f32, h: f32, rgb: u32, semi: bool| {
             self.flat(out, [Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)], rgb, semi, None);
         };
-        self.shape(out, 14, x - 2.0, y + 10.0, black);
-        self.shape(out, 15, x + w - cw, y + 10.0, black);
-        self.shape(out, 16, x - 2.0, y + h - ch, black);
-        self.shape(out, 17, x + w - cw, y + h - ch, black);
-        rect(out, x, y + h - 2.0, w, 2.0, 0, false);
-        self.black_thin_box(out, x, y, w, h);
-        rect(out, x, y, w, 12.0, 0, false);
+        // in the reverse of the order the game adds them to the ordering table
         rect(out, x, y + 12.0, w, h - 12.0, 0x46_1414, true);
+        rect(out, x, y, w, 12.0, 0, false);
+        self.black_thin_box(out, x, y, w, h);
+        rect(out, x, y + h - 2.0, w, 2.0, 0, false);
+        self.shape(out, 17, x + w - cw, y + h - ch, black);
+        self.shape(out, 16, x - 2.0, y + h - ch, black);
+        self.shape(out, 15, x + w - cw, y + 10.0, black);
+        self.shape(out, 14, x - 2.0, y + 10.0, black);
     }
 
-    /// The recorded overlay: boxes, then rectangles, then text.
+    /// The recorded overlay. The game adds each primitive at the head of its ordering table
+    /// slot, so what it asked for last is drawn first.
     fn overlay(&self, out: &mut Vec<Quad>, cmds: &[OverlayCmd]) {
-        for c in cmds {
-            if let &OverlayCmd::PauseBox { x, y, w, h } = c {
-                self.pause_box(out, x as f32, y as f32, w as f32, h as f32);
-            }
-        }
-        for c in cmds {
-            if let &OverlayCmd::Rect { semi, x, y, w, h, colour, dx0, dx1 } = c {
-                let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
-                let pts = [Vec2::new(x + dx0 as f32, y), Vec2::new(x + w + dx1 as f32, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)];
-                self.flat(out, pts, colour, semi, None);
-            }
-        }
-        for c in cmds {
-            if let OverlayCmd::Text { x, y, colour, space, text } = c {
-                self.text(out, *x, *y, *colour, *space, text);
+        for c in cmds.iter().rev() {
+            match c {
+                &OverlayCmd::PauseBox { x, y, w, h } => self.pause_box(out, x as f32, y as f32, w as f32, h as f32),
+                &OverlayCmd::Rect { semi, x, y, w, h, colour, dx0, dx1 } => {
+                    let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
+                    let pts = [Vec2::new(x + dx0 as f32, y), Vec2::new(x + w + dx1 as f32, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)];
+                    self.flat(out, pts, colour, semi, None);
+                }
+                OverlayCmd::Text { x, y, colour, space, text } => self.text(out, *x, *y, *colour, *space, text),
             }
         }
     }
