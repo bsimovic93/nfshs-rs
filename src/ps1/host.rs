@@ -35,6 +35,9 @@ pub struct GameHost {
 /// Called at the top of every main-loop iteration (one game frame, locked to a 60 Hz field)
 /// with the current field number; returns the PS1 digital buttons to hold during the frame
 /// (active-high: bit 14 = Cross, 15 = Square, 4 = Up, ...) or `None` to leave the loop.
+/// Unwinds the game thread when the host stops the game (see `FrameFn`).
+pub struct QuitGame;
+
 pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<u16>>;
 
 /// Host-side state handed to the frame callback.
@@ -57,6 +60,7 @@ pub struct FrameDriver {
     /// Main-loop iterations (game frames) run.
     pub frames_run: u32,
     last_top: u64,
+    last_sync: u64,
 }
 
 pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
@@ -69,6 +73,36 @@ pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
 
 impl GameHost {
+    /// One displayed frame: at least one 60 Hz field passes, the frame callback gets the
+    /// picture and returns the controller state (or asks to stop the game).
+    fn frame_sync(&mut self, c: &mut Cpu) {
+        if self.frame.on_frame.is_none() {
+            return;
+        }
+        if self.clock / FIELD <= self.frame.last_sync / FIELD {
+            self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
+        }
+        self.frame.last_sync = self.clock;
+        let field = self.clock / FIELD;
+        let info = FrameInfo { image: std::sync::Arc::new(self.gpu.display_rgba()), field, display: self.display };
+        match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
+            None => std::panic::resume_unwind(Box::new(QuitGame)),
+            Some(buttons) => {
+                self.frame.frames_run += 1;
+                for b in self.pad_buffers {
+                    if b != 0 {
+                        c.m.w8(b, 0x00); // status: ok
+                        c.m.w8(b + 1, 0x41); // digital pad
+                        c.m.w16(b + 2, !buttons); // active low
+                    }
+                }
+            }
+        }
+        if c.trace || std::env::var("PS1_FRAMES").is_ok() {
+            eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
+        }
+    }
+
     /// Move the virtual clock forward, queueing the timer interrupts that fall in between.
     fn advance_to(&mut self, c: &mut Cpu, t: u64) {
         c.pending_ticks += (t / TICK - self.clock / TICK) as u32;
@@ -273,9 +307,12 @@ impl Host for GameHost {
                 a0
             }
             0x800E_E740 => {
-                // PutDispEnv: the displayed VRAM area (x, y, w, h)
+                // PutDispEnv: the displayed VRAM area (x, y, w, h). The game swaps buffers here
+                // once per frame, so this is where a finished picture is handed to the host
+                // and the controller is read.
                 self.display = [0, 2, 4, 6].map(|o| c.m.r16(a0 + o));
                 self.gpu.put_disp_env(&mut c.m, a0);
+                self.frame_sync(c);
                 a0
             }
             0x8010_53B8 => {
@@ -343,29 +380,12 @@ impl Host for GameHost {
                 e
             }
             0x800E_77F0 => {
-                if self.frame.on_frame.is_some() && c.r[31] == MAIN_LOOP_YIELD_RA {
-                    // top of the original main loop: game frames are locked to 60 Hz fields
+                if c.r[31] == MAIN_LOOP_YIELD_RA {
+                    // top of the race loop: game frames are locked to 60 Hz fields
                     if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
                         self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
                     }
                     self.frame.last_top = self.clock;
-                    let field = self.clock / FIELD;
-                    match self.frame.on_frame.as_mut().and_then(|f| f(c, FrameInfo { image: std::sync::Arc::new(self.gpu.display_rgba()), field, display: self.display })) {
-                        None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
-                        Some(buttons) => {
-                            self.frame.frames_run += 1;
-                            for b in self.pad_buffers {
-                                if b != 0 {
-                                    c.m.w8(b, 0x00); // status: ok
-                                    c.m.w8(b + 1, 0x41); // digital pad
-                                    c.m.w16(b + 2, !buttons); // active low
-                                }
-                            }
-                        }
-                    }
-                    if c.trace || std::env::var("PS1_FRAMES").is_ok() {
-                        eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
-                    }
                 } else {
                     // yield inside a wait loop: let time pass until the next timer tick
                     self.advance_to(c, (self.clock / TICK + 1) * TICK);
