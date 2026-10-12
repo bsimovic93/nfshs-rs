@@ -297,7 +297,7 @@ impl HudSetup {
         let bytes = |m: &mut Mem, a: u32, n: u32| (0..n).map(|i| m.r8(a + i)).collect::<Vec<u8>>();
         let night = m.r32(addr::GAMESETUP + 0x54) != 0;
         Some(Self {
-            slots: bytes(m, slots, 64 * 20),
+            slots: bytes(m, slots, 72 * 20),
             panels: bytes(m, 0x8013_FA38, 4 * 36),
             caps: bytes(m, 0x8013_F758, 4 * 24),
             shapes: bytes(m, 0x8011_1F5C, 140 * 20),
@@ -307,6 +307,83 @@ impl HudSetup {
             night,
             needle_colors: std::array::from_fn(|i| m.r32(if night { 0x8012_1D24 } else { 0x8012_1CAC } + 4 * i as u32)),
         })
+    }
+}
+
+/// One car on the track map: a HudPmx_gShapes sprite at (x, y) in the map view.
+#[derive(Clone, Copy, Debug)]
+pub struct MapMarker {
+    pub shape: u8,
+    pub x: i32,
+    pub y: i32,
+    /// 0xBBGGRR
+    pub color: u32,
+}
+
+/// The track map view of player 1 (Hud_RenderMapView): the map polygon (POLY_FT4) and the
+/// car markers (Hud_BuildMapMarkers), in the order they are linked.
+#[derive(Clone, Debug, Default)]
+pub struct MapView {
+    pub prim: Vec<u8>,
+    pub markers: Vec<MapMarker>,
+}
+
+impl MapView {
+    /// Read through `r32` (word reads of main RAM), so a RAM dump works as well as the
+    /// running game.
+    pub fn read(r32: &mut dyn FnMut(u32) -> u32) -> Self {
+        const GP: u32 = addr::GP;
+        let prim = (0..10).flat_map(|i| r32(0x8013_F8A8 + 4 * i).to_le_bytes()).collect();
+        let slices = r32(0x8013_DAB4);
+        let (scale_x, scale_z) = (r32(GP + 5144) as i32, r32(GP + 5148) as i32);
+        let (cos, sin) = (r32(GP + 5100) as i32, r32(GP + 5104) as i32);
+        let (ox, oy) = (r32(GP + 5152) as i32, r32(GP + 5156) as i32 + 2);
+        let mirror = r32(addr::GAMESETUP + 0x2C) != 0;
+        let rmult = |a: i32, b: i32| ((a as i64 * b as i64 + 0x8000) >> 16) as i32;
+        let flash = |r32: &mut dyn FnMut(u32) -> u32| if r32(0x8013_EA9C) != 0 || r32(0x8011_F38C) != 0 { 0xFF } else { 0xFF_0000 };
+        let mut markers = Vec::new();
+        // position on the map: the car's track slice, scaled and turned
+        let mut place = |r32: &mut dyn FnMut(u32) -> u32, car: u32| -> Option<(i32, i32)> {
+            if (r32(car + 144) >> 8) & 0xFF == 0 || scale_x == 0 || scale_z == 0 || slices == 0 {
+                return None;
+            }
+            let slice = slices.wrapping_add(((r32(car + 8) as i16 as i32) << 5) as u32);
+            let x = r32(slice) as i32 / scale_x;
+            let z = r32(slice + 8) as i32 / scale_z;
+            let mut mx = ox + rmult(cos, x) - rmult(sin, z);
+            let my = oy + rmult(sin, x) + rmult(cos, z);
+            if mirror {
+                mx = -mx;
+            }
+            Some((22 + mx, 24 - my))
+        };
+        // police first, then the race cars
+        for i in 0..r32(0x8013_DB00).min(16) {
+            let car = r32(0x8011_0D78 + 4 * i);
+            if let Some((x, y)) = place(r32, car) {
+                let color = if r32(car + 1392) & 2 != 0 { flash(r32) } else { r32(0x8012_1E80 + 4 * i) };
+                markers.push(MapMarker { shape: 122, x: x - 2, y, color });
+            }
+        }
+        for i in 0..r32(0x8013_DAEC).min(16) {
+            let car = r32(0x8011_0CC4 + 4 * i);
+            if let Some((x, y)) = place(r32, car) {
+                let flags = r32(car + 608);
+                let mut color = r32(0x8012_1E50 + 4 * i);
+                let (shape, dx) = if flags & 0x200 != 0 {
+                    if r32(car + 1392) & 2 != 0 {
+                        color = flash(r32);
+                    }
+                    (121, -3)
+                } else if flags & 4 != 0 {
+                    (121, -3)
+                } else {
+                    (122, -2)
+                };
+                markers.push(MapMarker { shape, x: x + dx, y, color });
+            }
+        }
+        Self { prim, markers }
     }
 }
 
@@ -334,6 +411,8 @@ pub struct Snapshot {
     /// HUD inputs: `DashHUD_gInfo` (0x80 bytes) and the HUD layout record (0x40 bytes).
     pub dash: Vec<u8>,
     pub hud_layout: Vec<u8>,
+    /// The track map (when the HUD shows it).
+    pub map: MapView,
     /// The HUD as Hud_Init built it (read once, see [`HudSetup`]).
     pub hud: Option<std::sync::Arc<HudSetup>>,
     /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
@@ -378,6 +457,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         view_env: info.view_env,
         sky: SkyData::read(&mut c.m),
         hud: HudSetup::read(&mut c.m, info.font_clut).map(std::sync::Arc::new),
+        map: MapView::read(&mut |a| c.m.r32(a)),
         dash: (0..0x80).map(|i| c.m.r8(addr::DASHHUD + i)).collect(),
         hud_layout: {
             let l = c.m.r32(addr::GP + 6352);

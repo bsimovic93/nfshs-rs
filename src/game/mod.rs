@@ -671,7 +671,7 @@ impl Game {
     pub fn hud(&self, w: f32, h: f32) -> Vec<Vertex> {
         if let (Some(hud), Some(sim)) = (&self.ps1hud, &self.sim) {
             let s = sim.snapshot();
-            return hud.vertices(&s.dash, &s.hud_layout, (s.sim_ticks >> 4) & 1 != 0, w, h);
+            return hud.vertices(&s.dash, &s.hud_layout, &s.map, (s.sim_ticks >> 4) & 1 != 0, w, h);
         }
         let mut out = Vec::new();
         let s = (h / 240.0).max(1.0).floor();

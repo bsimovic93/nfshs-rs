@@ -6,7 +6,7 @@
 
 use crate::assets::{Atlas, GameData, Rect, Vertex};
 use crate::formats::psh::Psh;
-use crate::ps1::race::HudSetup;
+use crate::ps1::race::{HudSetup, MapView};
 use anyhow::{Context, Result};
 use glam::Vec2;
 use std::sync::Arc;
@@ -90,23 +90,26 @@ fn fixed_sin_cos(a: i32) -> (i32, i32) {
     ((t.sin() * 65536.0).round() as i32, (t.cos() * 65536.0).round() as i32)
 }
 
-/// Clip a convex polygon (with per-vertex colours) to a rectangle (Sutherland-Hodgman).
-fn clip_polygon(pts: Vec<(Vec2, [f32; 3])>, r: [f32; 4]) -> Vec<(Vec2, [f32; 3])> {
+/// A polygon corner: position, colour, texture coordinate.
+type Corner = (Vec2, [f32; 3], Vec2);
+
+/// Clip a convex polygon to a rectangle (Sutherland-Hodgman).
+fn clip_polygon(pts: Vec<Corner>, r: [f32; 4]) -> Vec<Corner> {
     let mut poly = pts;
     let edges: [(usize, f32, bool); 4] = [(0, r[0], true), (0, r[2], false), (1, r[1], true), (1, r[3], false)];
     for (axis, at, keep_above) in edges {
         let inside = |p: Vec2| if keep_above { p[axis] >= at } else { p[axis] <= at };
         let mut out = Vec::new();
         for i in 0..poly.len() {
-            let (a, ca) = poly[i];
-            let (b, cb) = poly[(i + 1) % poly.len()];
+            let (a, ca, ta) = poly[i];
+            let (b, cb, tb) = poly[(i + 1) % poly.len()];
             if inside(a) {
-                out.push((a, ca));
+                out.push((a, ca, ta));
             }
             if inside(a) != inside(b) {
                 let t = (at - a[axis]) / (b[axis] - a[axis]);
                 let c = [ca[0] + (cb[0] - ca[0]) * t, ca[1] + (cb[1] - ca[1]) * t, ca[2] + (cb[2] - ca[2]) * t];
-                out.push((a + (b - a) * t, c));
+                out.push((a + (b - a) * t, c, ta + (tb - ta) * t));
             }
         }
         poly = out;
@@ -217,6 +220,24 @@ impl Ps1Hud {
 
     #[allow(clippy::too_many_arguments)]
     fn textured(&self, out: &mut Vec<Quad>, x: f32, y: f32, w: u16, h: u16, u: u16, v: u16, clut: u16, colors: [[u8; 3]; 4], semi: bool) {
+        self.textured_clipped(out, x, y, w, h, u, v, clut, colors, semi, None);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn textured_clipped(
+        &self,
+        out: &mut Vec<Quad>,
+        x: f32,
+        y: f32,
+        w: u16,
+        h: u16,
+        u: u16,
+        v: u16,
+        clut: u16,
+        colors: [[u8; 3]; 4],
+        semi: bool,
+        clip: Option<[f32; 4]>,
+    ) {
         let Some((t, du, dv)) = self.find(u, v, clut) else {
             if std::env::var_os("NFSHS_HUD_DEBUG").is_some() {
                 println!("hud: no texture at uv ({u},{v}) clut {clut:04x} ({w}x{h} at {x},{y})");
@@ -232,7 +253,7 @@ impl Ps1Hud {
             colors,
             textured: true,
             semi,
-            clip: None,
+            clip,
         });
     }
 
@@ -302,6 +323,44 @@ impl Ps1Hud {
         self.flat(out, [base, t0, t1, t1], color, false, clip);
     }
 
+    /// Hud_RenderMapView: the track map, a 45x48 view at (255, 172) (Hud_CreateHudViews),
+    /// with a marker per car.
+    fn map(&self, out: &mut Vec<Quad>, map: &MapView) {
+        let (vx, vy) = (255.0, 172.0);
+        let clip = Some([vx, vy, vx + 45.0, vy + 48.0]);
+        // the map: POLY_FT4 (tag, rgb code, then xy + uv (+ clut / tpage) per corner)
+        if let [_, _, _, _, r, g, b, code, ..] = map.prim[..] {
+            let p = &map.prim;
+            let pt = |k: usize| Vec2::new(vx + i16le(p, 8 + 8 * k) as f32, vy + i16le(p, 10 + 8 * k) as f32);
+            let uv = |k: usize| (p[12 + 8 * k] as u16, p[13 + 8 * k] as u16);
+            let clut = u16le(p, 14);
+            let (u0, v0) = (0..4).map(uv).fold((u16::MAX, u16::MAX), |(a, b), (u, v)| (a.min(u), b.min(v)));
+            if code & 0xFC == 0x2C {
+                if let Some((t, du, dv)) = self.find(u0, v0, clut) {
+                    let tc = |k: usize| {
+                        let (u, v) = uv(k);
+                        Vec2::new((du + u - u0) as f32, (dv + v - v0) as f32)
+                    };
+                    out.push(Quad {
+                        pts: [pt(0), pt(1), pt(3), pt(2)],
+                        uv: [tc(0), tc(1), tc(3), tc(2)],
+                        rect: t.rect,
+                        colors: [[r, g, b]; 4],
+                        textured: true,
+                        semi: code & 2 != 0,
+                        clip,
+                    });
+                }
+            }
+        }
+        // the markers, last linked drawn first
+        for m in map.markers.iter().rev() {
+            let Some(&(u, v, clut, w, h)) = self.shapes.get(m.shape as usize) else { continue };
+            let c = [m.color as u8, (m.color >> 8) as u8, (m.color >> 16) as u8];
+            self.textured_clipped(out, vx + m.x as f32, vy + m.y as f32, w, h, u, v, clut, [c; 4], false, clip);
+        }
+    }
+
     /// Hud_BuildETimeString ("MM:SS.hh", 8 slots) / Hud_BuildTimeString ("M:SS.hh", 7 slots):
     /// only the digits' glyphs change; the time is in 1/64 s.
     fn time(&self, out: &mut Vec<Quad>, first: usize, t: i32, long: bool) {
@@ -321,7 +380,7 @@ impl Ps1Hud {
     }
 
     /// The HUD for player 1 from this frame's DashHUD_gInfo.
-    fn build(&self, dash: &[u8], layout: &[u8], blink: bool) -> Vec<Quad> {
+    fn build(&self, dash: &[u8], layout: &[u8], map: &MapView, blink: bool) -> Vec<Quad> {
         let mut out = Vec::new();
         if dash.len() < 0x60 || layout.len() < 0x40 {
             return out;
@@ -420,13 +479,22 @@ impl Ps1Hud {
                 self.tach(&mut out, d(64));
             }
         }
+        // the track map and its frame (slots 63..70)
+        if ci(0x7C) != 0 {
+            if d(28) != 0 {
+                self.map(&mut out, map);
+            }
+            for k in (63..71).rev() {
+                self.sprite(&mut out, k, None);
+            }
+        }
         out
     }
 
     /// Vertices for the HUD, mapping the PS1 screen (320x240) into a `w` x `h` window.
-    pub fn vertices(&self, dash: &[u8], layout: &[u8], blink: bool, w: f32, h: f32) -> Vec<Vertex> {
+    pub fn vertices(&self, dash: &[u8], layout: &[u8], map: &MapView, blink: bool, w: f32, h: f32) -> Vec<Vertex> {
         let atlas_uv = |r: Rect, t: Vec2| [(r.x as f32 + t.x) / self.atlas_size, (r.y as f32 + t.y) / self.atlas_size];
-        let quads = self.build(dash, layout, blink);
+        let quads = self.build(dash, layout, map, blink);
         // 4:3 area centred in the window
         let scale = (h / 240.0).min(w / 320.0);
         let ox = (w - 320.0 * scale) / 2.0;
@@ -450,12 +518,11 @@ impl Ps1Hud {
             };
             let color = |k: usize| q.colors[k].map(|c| c as f32);
             match q.clip {
-                // (only flat primitives are clipped)
                 Some(r) => {
-                    let poly = clip_polygon((0..4).map(|k| (q.pts[k], color(k))).collect(), r);
+                    let poly = clip_polygon((0..4).map(|k| (q.pts[k], color(k), q.uv[k])).collect(), r);
                     for k in 1..poly.len().saturating_sub(1) {
-                        for (p, c) in [poly[0], poly[k], poly[k + 1]] {
-                            vert(p, c, Vec2::ZERO);
+                        for (p, c, t) in [poly[0], poly[k], poly[k + 1]] {
+                            vert(p, c, t);
                         }
                     }
                 }

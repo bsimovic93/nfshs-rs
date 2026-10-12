@@ -150,7 +150,8 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
             let lp = ram.i32(0x8013_D83C + 6352) as u32;
             let layout: Vec<u8> = (0..0x40u32).map(|i| ram.0[((lp + i) & 0x1F_FFFF) as usize]).collect();
             let counter = ram.i32(0x8011_F368);
-            h.vertices(&dash, &layout, (counter >> 4) & 1 != 0, W as f32, H as f32)
+            let map = crate::ps1::race::MapView::read(&mut |a| ram.i32(a) as u32);
+            h.vertices(&dash, &layout, &map, (counter >> 4) & 1 != 0, W as f32, H as f32)
         }
         None => game.hud(W as f32, H as f32),
     };
