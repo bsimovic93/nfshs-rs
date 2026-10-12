@@ -177,7 +177,9 @@ impl Game {
         let slots = codes.len();
         for (k, code) in codes.iter().enumerate() {
             let night = matches!(cfg.variant, "N" | "S");
-            let model = assets::load_car(data, atlas, code, k == 0, night)?;
+            // the number plate shows the player's name (GameSetup carInfo + 0x68)
+            let plate = crate::ps1::race::player_plate();
+            let model = assets::load_car(data, atlas, code, k == 0, night, (k == 0).then_some(plate.as_str()))?;
             let spec = load_spec(data, code, &model);
             // two-wide grid behind the start line, ~12 m between rows; the player starts last
             let slot = if k == 0 { slots - 1 } else { k - 1 };
@@ -717,7 +719,7 @@ impl Game {
                 },
                 None => (&assets::CAR_PARTS_VISIBLE, 1.0),
             };
-            for (part, &on) in m.parts.iter().zip(visible) {
+            for (pi, (part, &on)) in m.parts.iter().zip(visible).enumerate() {
                 if on == 0 {
                     continue;
                 }
@@ -729,9 +731,14 @@ impl Game {
                     }
                     None => model,
                 };
+                // parts sorted in front of their surroundings (negative bias) are drawn a little
+                // towards the camera: the original orders by depth, not a depth buffer
+                let pull = (-(assets::CAR_PART_BIAS.get(pi).copied().unwrap_or(0) as f32)).max(0.0) * 0.003;
                 for v in &part.verts {
                     let c = v.color;
-                    out.push(Vertex { pos: tm.transform_point3(Vec3::from(v.pos)).into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
+                    let p = tm.transform_point3(Vec3::from(v.pos));
+                    let p = p + (self.cam_pos - p).normalize_or_zero() * pull;
+                    out.push(Vertex { pos: p.into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
                 }
             }
         }

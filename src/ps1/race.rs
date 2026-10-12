@@ -77,6 +77,12 @@ const CAR_TYPES: &[&str] = &[
     "BNS1", "BNS2",
 ];
 
+/// The player's licence plate text (GameSetup carInfo[0] + 0x68) of the race setup.
+pub fn player_plate() -> String {
+    let o = gs::CAR_INFO + 0x68;
+    GAMESETUP_TEMPLATE[o..o + 12].iter().take_while(|&&b| b != 0).map(|&b| b as char).collect()
+}
+
 pub fn car_type(code: &str) -> Option<u32> {
     CAR_TYPES.iter().position(|c| !c.is_empty() && c.eq_ignore_ascii_case(code)).map(|i| i as u32)
 }

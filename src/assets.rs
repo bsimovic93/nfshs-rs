@@ -479,6 +479,13 @@ pub const CAR_PARTS_VISIBLE: [u8; 57] = [
     0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0,
 ];
 
+/// R3DCar_ObjectInfo byte 0 per part: the ordering-table bias the part is sorted with
+/// (negative = drawn over the parts around it: plates, lights, decals).
+pub const CAR_PART_BIAS: [i8; 57] = [
+    0, 0, 32, 48, -8, -16, -32, -32, -20, -16, -20, -16, -24, -24, -44, -44, -31, -31, -44, -30, -30, -44, -30, -30, -44, -30, -30, -44, -24, -24,
+    -44, -40, -12, -12, -44, 48, 40, 38, 38, 36, 36, 0, 0, -16, -16, -24, -24, 31, 31, 32, 32, 32, 32, 32, 32, 32, 32,
+];
+
 /// The car's texture names by a GEO polygon's texture number (CarIO's table): each is a
 /// shape of the car's PSH files, placed at its own VRAM position.
 const CAR_TEXTURES: [&str; 51] = [
@@ -534,7 +541,7 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
 /// player's car from `ZZZ<code>H.VIV`, the others from `ZZZ<code>S.VIV`. The PSH files hold
 /// the texture pages: the interior and underside ("i") on a page of their own, the body in
 /// a day ("l") and a night ("d", wheels "g") version.
-pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool) -> Result<CarModel> {
+pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool, plate: Option<&str>) -> Result<CarModel> {
     let name = format!("ZZZ{code}{}.VIV", if player { "H" } else { "S" });
     let viv = Viv::parse(&data.read(&name).or_else(|_| data.read(&format!("ZZZ{code}.VIV")))?)?;
     let (_, geo) = viv.find_suffix(".geo").context("car viv has no .geo")?;
@@ -567,6 +574,42 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         for (k, p) in pages.iter().enumerate() {
             if let Some(img) = image::RgbaImage::from_raw(256, 256, p.rgba.clone()) {
                 let _ = img.save(format!("{dir}/{code}_{k}.png"));
+            }
+        }
+    }
+    // the player's number plate (CarIO_CreateLicense): the name in ZLICENSE.PSH letters on
+    // "blnk", split into the two halves the plate polygons show ("sFOf" and "sFOn" slots)
+    if let (Some(name), Ok(lic)) = (plate, data.read("ZLICENSE.PSH").and_then(|d| Psh::parse(&d))) {
+        let shape_pos = |n: &str| files.iter().flat_map(|(_, p)| p.shapes.iter()).find(|s| s.name == n).map(|s| ((s.vram.0 as usize % 64) * 4, s.vram.1 as usize % 256));
+        if let (Some(blnk), Some(left), Some(right)) = (lic.shapes.iter().find(|s| s.name == "blnk"), shape_pos("sFOf"), shape_pos("sFOn")) {
+            let (w, h) = (blnk.width as usize, blnk.height as usize);
+            let mut idx = blnk.indices.clone();
+            let name: Vec<char> = name.chars().map(|c| c.to_ascii_lowercase()).collect();
+            let mut x = 24 - 3 * name.len() as isize;
+            for &c in &name {
+                if let Some(l) = lic.shapes.iter().find(|s| s.name.trim_end() == c.to_string() && c != ' ') {
+                    for ly in 0..l.height as usize {
+                        for lx in 0..l.width as usize {
+                            let (px, py) = (x + lx as isize, 5 + ly);
+                            if px >= 0 && (px as usize) < w && py < h {
+                                idx[py * w + px as usize] = l.indices[ly * l.width as usize + lx];
+                            }
+                        }
+                    }
+                }
+                x += 6;
+            }
+            for (half, (ox, oy)) in [(0, left), (1, right)] {
+                for y in 0..h {
+                    for xx in 0..24 {
+                        let (dx, dy) = (ox + xx, oy + y);
+                        if dx < 256 && dy < 256 {
+                            let c = crate::formats::psh::ps1_color(blnk.palette.get(idx[y * w + half * 24 + xx] as usize).copied().unwrap_or(0));
+                            let o = (dy * 256 + dx) * 4;
+                            pages[0].rgba[o..o + 4].copy_from_slice(&c);
+                        }
+                    }
+                }
             }
         }
     }
