@@ -20,9 +20,8 @@ pub struct GameHost {
     /// GTE environment the game set up for the player view: far colour R, G, B, DQA, DQB,
     /// H, back colour R, G, B.
     pub view_env: [i32; 9],
-    /// The cars the game put into the player view this frame (R3DCar_InsertCarFacetII):
-    /// car object and the parts drawn (`R3DCar_ObjectVisible`).
-    pub car_facets: Vec<(u32, Vec<u8>)>,
+    /// The cars the game put into the player view this frame (R3DCar_InsertCarFacetII).
+    pub car_facets: Vec<CarFacet>,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     pub rcnt: u32,
@@ -55,7 +54,20 @@ pub struct FrameInfo {
     /// The HUD font's palette as the game uploaded it (CLUT of the digits' glyphs).
     pub font_clut: [u16; 16],
     /// See [`GameHost::car_facets`].
-    pub car_facets: Vec<(u32, Vec<u8>)>,
+    pub car_facets: Vec<CarFacet>,
+}
+
+/// What the game decided to draw of one car this frame.
+#[derive(Clone, Debug, Default)]
+pub struct CarFacet {
+    /// `Car_tObj` address.
+    pub car: u32,
+    /// `R3DCar_ObjectVisible`: the model parts drawn.
+    pub parts: Vec<u8>,
+    /// The track's light at the car (BWorldSm_QuadLight, 0xBBGGRR).
+    pub light: u32,
+    /// The ground shadow's corners (world, 16.16) and colour, when drawn.
+    pub shadow: Option<([[i32; 3]; 4], [u8; 3])>,
 }
 
 /// Paces the original main loop against the virtual clock: game time only passes while the
@@ -82,6 +94,11 @@ const R3DCAR_INSERT_ALL_LIST_FACET: u32 = 0x800B_38C0;
 /// `R3DCar_ObjectVisible`.
 const R3DCAR_INSERT_CAR_FACET_II: u32 = 0x800B_2E30;
 const R3DCAR_OBJECT_VISIBLE: u32 = 0x8011_7B64;
+/// BWorldSm_QuadLight(pos): the track lighting at a position.
+const BWORLDSM_QUAD_LIGHT: u32 = 0x8008_0868;
+/// R3DCar_InsertCarFacet's shadow switch and colour (gp-relative).
+const SHADOW_ON: u32 = 0x8013_D83C + 3648;
+const SHADOW_COLOUR: u32 = 0x8013_D83C + 3652;
 /// Virtual clock units per 128 Hz timer tick and per 60 Hz field.
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
@@ -416,7 +433,13 @@ impl Host for GameHost {
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
             R3DCAR_INSERT_CAR_FACET_II => {
                 let parts = (0..57).map(|i| c.m.r8(R3DCAR_OBJECT_VISIBLE + i)).collect();
-                self.car_facets.push((a0, parts));
+                let light = c.call_nested(BWORLDSM_QUAD_LIGHT, &[a0 + 8]) & 0xFF_FFFF;
+                // Newton_CalcRealShadowCoordinates left the corners at car + 488
+                let shadow = (c.m.r32(SHADOW_ON) != 0).then(|| {
+                    let corners = std::array::from_fn(|k| std::array::from_fn(|i| c.m.r32(a0 + 488 + 12 * k as u32 + 4 * i as u32) as i32));
+                    (corners, std::array::from_fn(|i| c.m.r8(SHADOW_COLOUR + i as u32)))
+                });
+                self.car_facets.push(CarFacet { car: a0, parts, light, shadow });
                 0
             }
             0x800B_4024 => {

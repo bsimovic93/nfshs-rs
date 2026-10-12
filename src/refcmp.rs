@@ -102,8 +102,19 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     game.cam_up = rot(1);
     let h = ram.i32(at::CAMERA_ZOOM).max(1) as f32;
     game.tan_half_v = 160.0 / h * 0.75;
-    // the parts drawn: the table as the game left it (after its last car, usually the player's)
-    game.car_parts_override = Some(vec![(0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect()]);
+    // what is drawn of the player's car: the parts table as the game left it (after its last
+    // car, usually the player's), its light and shadow
+    let pc = race_cars[0];
+    let gp = 0x8013_D83Cu32;
+    game.car_facets_override = Some(vec![Some(crate::ps1::host::CarFacet {
+        car: pc,
+        parts: (0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect(),
+        light: ram.i32(pc + 2176) as u32 & 0xFF_FFFF,
+        shadow: (ram.i32(gp + 3648) != 0).then(|| {
+            let corners = std::array::from_fn(|k| std::array::from_fn(|i| ram.i32(pc + 488 + 12 * k as u32 + 4 * i as u32)));
+            (corners, std::array::from_fn(|i| ram.0[((gp + 3652 + i as u32) & 0x1F_FFFF) as usize]))
+        }),
+    })]);
     game.cam_mode = if game.racers[0].car.pos.distance(game.cam_pos) < 2.0 { crate::game::CameraMode::Bumper } else { crate::game::CameraMode::Chase };
 
     // NFSHS_PICK="x0,y0,x1,y1": list the track quads whose centre projects into that screen

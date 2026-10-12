@@ -111,8 +111,12 @@ pub struct Game {
     pub sim: Option<original::OriginalSim>,
     /// The original HUD (when the simulation provides its layout).
     pub ps1hud: Option<ps1hud::Ps1Hud>,
-    /// Parts drawn per car, instead of the simulation's (for comparisons with captures).
-    pub car_parts_override: Option<Vec<Vec<u8>>>,
+    /// The cars' ground shadow texture (ZSFX.PSH "SHAD", gShadowPixmap), corners in
+    /// POLY_FT4 order.
+    shadow_tex: Option<[[f32; 2]; 4]>,
+    /// What is drawn of each car, instead of the simulation's (for comparisons with
+    /// captures).
+    pub car_facets_override: Option<Vec<Option<crate::ps1::host::CarFacet>>>,
 }
 
 const DT: f32 = 1.0 / 120.0;
@@ -198,6 +202,14 @@ impl Game {
             _ => (track.sky_colors.1, 120.0, 420.0),
         };
         let player = &racers[0].car;
+        // the ground shadow texture (gShadowPixmap: ZSFX.PSH "SHAD", 32x64)
+        let shadow_tex = data.read("ZSFX.PSH").ok().and_then(|d| crate::formats::psh::Psh::parse(&d).ok()).and_then(|p| {
+            let s = p.shapes.into_iter().find(|s| s.name == "SHAD")?;
+            let r = atlas.add(s.width as u32, s.height as u32, &s.rgba);
+            let (w, h) = (s.width as f32 - 0.5, s.height as f32 - 0.5);
+            let uv = |x: f32, y: f32| atlas.uv(r, glam::Vec2::new(x, y));
+            Some([uv(0.5, 0.5), uv(w, 0.5), uv(0.5, h), uv(w, h)])
+        });
         let mut game = Self {
             cam_pos: player.pos - player.forward() * 7.0 + Vec3::Y * 2.5,
             cam_target: player.pos,
@@ -211,7 +223,8 @@ impl Game {
             phase: Phase::Countdown(3.0),
             race_time: 0.0,
             cam_mode: CameraMode::Chase,
-            car_parts_override: None,
+            car_facets_override: None,
+            shadow_tex,
             cam_up: Vec3::Y,
             tan_half_v: (1.05f32 / 2.0).tan(),
             y_scale: 1.0,
@@ -601,6 +614,7 @@ impl Game {
         let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, self.cam_up);
         let p = &self.racers[0].car;
         FrameParams {
+            shadows: self.shadows(),
             ambient: self.ambient,
             headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
             sky_view_proj: squash * Mat4::perspective_rh(fov, aspect, 1.0, 1000.0) * sky_view,
@@ -646,11 +660,15 @@ impl Game {
             }
             let m = &self.models[r.model];
             let model = Mat4::from_rotation_translation(r.car.orientation(), r.car.pos);
-            // the parts the game draws (R3DCar_ObjectVisible), once it has put cars into a view
-            let tables = self.car_parts_override.as_ref().or_else(|| self.sim.as_ref().map(|s| &s.snapshot().car_parts));
-            let visible: &[u8] = match tables {
-                Some(t) if t.iter().any(|p| !p.is_empty()) => t.get(i).map(Vec::as_slice).unwrap_or(&[]),
-                _ => &assets::CAR_PARTS_VISIBLE,
+            // the parts the game draws (R3DCar_ObjectVisible), once it has put cars into a view,
+            // lit by the track's light at the car (DrawC: the average of its channels)
+            let facets = self.car_facets();
+            let (visible, tint): (&[u8], f32) = match facets {
+                Some(f) => match f.get(i).and_then(Option::as_ref) {
+                    Some(f) => (&f.parts, car_light(f.light) as f32 / 128.0),
+                    None => (&[], 1.0),
+                },
+                None => (&assets::CAR_PARTS_VISIBLE, 1.0),
             };
             for (part, &on) in m.parts.iter().zip(visible) {
                 if on == 0 {
@@ -665,8 +683,35 @@ impl Game {
                     None => model,
                 };
                 for v in &part.verts {
-                    out.push(Vertex { pos: tm.transform_point3(Vec3::from(v.pos)).into(), ..*v });
+                    let c = v.color;
+                    out.push(Vertex { pos: tm.transform_point3(Vec3::from(v.pos)).into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
                 }
+            }
+        }
+        out
+    }
+
+    /// What the game draws of each car this frame (None before it has put any car into a view).
+    fn car_facets(&self) -> Option<&[Option<crate::ps1::host::CarFacet>]> {
+        let f = self.car_facets_override.as_deref().or_else(|| self.sim.as_ref().map(|s| s.snapshot().car_facets.as_slice()))?;
+        f.iter().any(Option::is_some).then_some(f)
+    }
+
+    /// The cars' ground shadows (DrawC_ShadowPrim): the "shdw" texture on the quad
+    /// Newton_CalcRealShadowCoordinates computed, coloured by the light, subtracted.
+    fn shadows(&self) -> Vec<Vertex> {
+        let mut out = Vec::new();
+        let Some(facets) = self.car_facets() else { return out };
+        for (r, f) in self.racers.iter().zip(facets) {
+            let (Some(f), Some(uv)) = (f, self.shadow_tex) else { continue };
+            let Some((corners, rgb)) = f.shadow else { continue };
+            let s = car_light(f.light);
+            let c = rgb.map(|k| ((s * k as u32) >> 8) as f32 / 256.0);
+            // (the corners' heights are left at 0: put them on the ground under the car)
+            let ground = r.car.pos.y + 0.05;
+            let p = corners.map(|v| Vec3::new(-(v[0] as f32) / 65536.0, ground, v[2] as f32 / 65536.0));
+            for k in [0, 1, 3, 0, 3, 2] {
+                out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
             }
         }
         out
@@ -741,4 +786,11 @@ impl Game {
         }
         out
     }
+}
+
+/// A car's flat lighting level from the track light (R3DCar_InsertCarFacetII: the average
+/// of the light's channels, at least 24).
+fn car_light(light: u32) -> u32 {
+    let (r, g, b) = (light & 0xFF, (light >> 8) & 0xFF, (light >> 16) & 0xFF);
+    ((r + g + b) / 3).max(24)
 }

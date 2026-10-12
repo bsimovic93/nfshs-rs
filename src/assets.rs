@@ -539,6 +539,13 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
             page_of.insert(s.name.clone(), page);
         }
     }
+    if let Ok(dir) = std::env::var("NFSHS_CAR_PAGES") {
+        for (k, p) in pages.iter().enumerate() {
+            if let Some(img) = image::RgbaImage::from_raw(256, 256, p.rgba.clone()) {
+                let _ = img.save(format!("{dir}/{code}_{k}.png"));
+            }
+        }
+    }
     let rects = [atlas.add(256, 256, &pages[0].rgba), atlas.add(256, 256, &pages[1].rgba)];
     let mut parts = Vec::with_capacity(geo.parts.len());
     for (pi, part) in geo.parts.iter().enumerate() {

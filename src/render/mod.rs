@@ -33,6 +33,9 @@ pub struct DepthCue {
 }
 
 pub struct FrameParams {
+    /// Subtractive primitives (PS1 semi-transparency mode 2: background - foreground), drawn
+    /// over the track: the cars' ground shadows.
+    pub shadows: Vec<Vertex>,
     pub ambient: f32,
     /// Headlight strength (0 = off), position and direction.
     pub headlight: (f32, Vec3, Vec3),
@@ -108,6 +111,8 @@ pub struct Renderer {
     depth: Option<(wgpu::TextureView, u32, u32)>,
     static_vb: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     dyn_vb: DynBuf,
+    shadow_vb: DynBuf,
+    sub_pipeline: wgpu::RenderPipeline,
     hud_vb: DynBuf,
     pub size: (u32, u32),
 }
@@ -261,9 +266,20 @@ impl Renderer {
         let blend = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
         let track_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], depth, blend, Some(wgpu::Face::Back));
         let world_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], depth, blend, None);
+        // background - foreground, depth-tested but not written
+        let subtract = wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::ReverseSubtract };
+        let sub_pipeline = mk_pipeline(
+            "vs_main",
+            "fs_sub",
+            &[Some(vbl.clone())],
+            Some((false, wgpu::CompareFunction::GreaterEqual)),
+            Some(wgpu::BlendState { color: subtract, alpha: subtract }),
+            None,
+        );
         let hud_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl)], None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
         let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");
+        let shadow_vb = DynBuf::new(&device, "shadows");
         let hud_vb = DynBuf::new(&device, "hud");
         let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
@@ -287,6 +303,8 @@ impl Renderer {
             depth: None,
             static_vb: None,
             dyn_vb,
+            shadow_vb,
+            sub_pipeline,
             hud_vb,
             size,
         })
@@ -398,6 +416,7 @@ impl Renderer {
         self.queue.write_buffer(&self.sky_globals, 0, bytemuck::bytes_of(&sky_g));
         self.sky_vb.upload(&self.device, &self.queue, sky);
         self.dyn_vb.upload(&self.device, &self.queue, dynamic);
+        self.shadow_vb.upload(&self.device, &self.queue, &p.shadows);
         self.hud_vb.upload(&self.device, &self.queue, hud);
         let depth = self.depth_view();
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -434,6 +453,11 @@ impl Renderer {
                 rp.set_vertex_buffer(0, vb.slice(..));
                 rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                 rp.draw_indexed(0..*n, 0, 0..1);
+            }
+            if !p.shadows.is_empty() {
+                rp.set_pipeline(&self.sub_pipeline);
+                rp.set_vertex_buffer(0, self.shadow_vb.buf.slice(..));
+                rp.draw(0..p.shadows.len() as u32, 0..1);
             }
             rp.set_pipeline(&self.world_pipeline);
             if !dynamic.is_empty() {

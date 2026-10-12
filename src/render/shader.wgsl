@@ -64,6 +64,16 @@ fn fs_hud(i: VOut) -> @location(0) vec4<f32> {
     return vec4<f32>(o.rgb, 1.0);
 }
 
+// PS1 semi-transparency mode 2 (background - foreground), with the blend set to subtract.
+@fragment
+fn fs_sub(i: VOut) -> @location(0) vec4<f32> {
+    let t = textureSample(atlas, samp, i.uv);
+    if (t.a < 0.25) {
+        discard;
+    }
+    return vec4<f32>(min(t.rgb * i.color.rgb * 2.0, vec3<f32>(1.0)), 0.0);
+}
+
 fn shade(i: VOut) -> vec4<f32> {
     let t = textureSample(atlas, samp, i.uv);
     if (t.a < 0.25) {
