@@ -106,3 +106,4 @@
 800968e8 Speech_Server__Fv
 80076b90 AudioClc_SoundCars (sizes match dev build)
 800b4024 Render_RenderPlayerView__Fii (3D view is drawn by the host renderer)
+800b2e30 R3DCar_InsertCarFacetII

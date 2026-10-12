@@ -738,9 +738,15 @@ impl Game {
             let Some((corners, rgb)) = f.shadow else { continue };
             let s = car_light(f.light);
             let c = rgb.map(|k| ((s * k as u32) >> 8) as f32 / 256.0);
-            // (the corners' heights are left at 0: put them on the ground under the car)
-            let ground = r.car.pos.y + 0.05;
-            let p = corners.map(|v| Vec3::new(-(v[0] as f32) / 65536.0, ground, v[2] as f32 / 65536.0));
+            if corners.iter().all(|c| *c == [0; 3]) {
+                continue;
+            }
+            // (the original has no depth buffer: keep the quad from sinking under the road)
+            let ground = r.car.pos.y;
+            let p = corners.map(|v| {
+                let q = Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) / 65536.0;
+                Vec3::new(r.car.pos.x + q.x, q.y.max(ground) + 0.03, r.car.pos.z + q.z)
+            });
             for k in [0, 1, 3, 0, 3, 2] {
                 out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
             }

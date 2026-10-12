@@ -57,6 +57,26 @@ pub struct FrameInfo {
     pub car_facets: Vec<CarFacet>,
 }
 
+/// Inner hook for R3DCar_InsertCarFacetII(car): record what the original decided to draw
+/// (see [`CarFacet::parse`]) instead of building primitives.
+fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
+    if addr != R3DCAR_INSERT_CAR_FACET_II {
+        return false;
+    }
+    let car = c.r[4];
+    let light = c.call_nested(BWORLDSM_QUAD_LIGHT, &[car + 8]) & 0xFF_FFFF;
+    let mut rec = vec![car, light, c.m.r32(SHADOW_ON)];
+    // Newton_CalcRealShadowCoordinates left the shadow's corners at car + 488; keep them
+    // relative to the car's position in x and z (the car is drawn at an interpolated pose)
+    let pos = [c.m.r32(car + 0xA0), 0, c.m.r32(car + 0xA8)];
+    rec.extend((0..12).map(|i| c.m.r32(car + 488 + 4 * i).wrapping_sub(pos[i as usize % 3])));
+    rec.push(c.m.r32(SHADOW_COLOUR) & 0xFF_FFFF);
+    rec.extend((0..57).map(|i| c.m.r8(R3DCAR_OBJECT_VISIBLE + i) as u32));
+    c.capture.extend(rec);
+    c.r[2] = 0;
+    true
+}
+
 /// What the game decided to draw of one car this frame.
 #[derive(Clone, Debug, Default)]
 pub struct CarFacet {
@@ -66,8 +86,27 @@ pub struct CarFacet {
     pub parts: Vec<u8>,
     /// The track's light at the car (BWorldSm_QuadLight, 0xBBGGRR).
     pub light: u32,
-    /// The ground shadow's corners (world, 16.16) and colour, when drawn.
+    /// The ground shadow's corners (16.16: x and z relative to the car's position, y the
+    /// world height) and colour, when drawn.
     pub shadow: Option<([[i32; 3]; 4], [u8; 3])>,
+}
+
+impl CarFacet {
+    const WORDS: usize = 3 + 12 + 1 + 57;
+
+    /// Records left by `record_car_facet`.
+    fn parse(w: &[u32]) -> Vec<Self> {
+        w.chunks_exact(Self::WORDS)
+            .map(|r| Self {
+                car: r[0],
+                light: r[1],
+                shadow: (r[2] != 0).then(|| {
+                    (std::array::from_fn(|k| std::array::from_fn(|i| r[3 + 3 * k + i] as i32)), std::array::from_fn(|i| (r[15] >> (8 * i)) as u8))
+                }),
+                parts: r[16..].iter().map(|&p| p as u8).collect(),
+            })
+            .collect()
+    }
 }
 
 /// Paces the original main loop against the virtual clock: game time only passes while the
@@ -431,17 +470,6 @@ impl Host for GameHost {
 
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
-            R3DCAR_INSERT_CAR_FACET_II => {
-                let parts = (0..57).map(|i| c.m.r8(R3DCAR_OBJECT_VISIBLE + i)).collect();
-                let light = c.call_nested(BWORLDSM_QUAD_LIGHT, &[a0 + 8]) & 0xFF_FFFF;
-                // Newton_CalcRealShadowCoordinates left the corners at car + 488
-                let shadow = (c.m.r32(SHADOW_ON) != 0).then(|| {
-                    let corners = std::array::from_fn(|k| std::array::from_fn(|i| c.m.r32(a0 + 488 + 12 * k as u32 + 4 * i as u32) as i32));
-                    (corners, std::array::from_fn(|i| c.m.r8(SHADOW_COLOUR + i as u32)))
-                });
-                self.car_facets.push(CarFacet { car: a0, parts, light, shadow });
-                0
-            }
             0x800B_4024 => {
                 // Render_RenderPlayerView(view, player): the world itself is drawn by the host
                 // renderer. Run the original view set-up (Render_StartRenderingWorldView:
@@ -452,13 +480,18 @@ impl Host for GameHost {
                 c.call_nested(RENDER_START_WORLD_VIEW, &[a0]);
                 // the HUD's values (speed in display units, gear, times, position): game logic
                 // the original runs while rendering the HUD
-                c.call_nested(DASHHUD_CHECK_WRONG_WAY, &[a1]);
-                c.call_nested(DASHHUD_HUD_CALC, &[a1]);
-                // the cars: the original decides what is drawn of each (the host draws them)
-                self.car_facets.clear();
-                c.call_nested(R3DCAR_INSERT_ALL_LIST_FACET, &[a0]);
                 let g = |r: usize| c.gte_read(32 + r) as i32;
                 self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
+                c.call_nested(DASHHUD_CHECK_WRONG_WAY, &[a1]);
+                c.call_nested(DASHHUD_HUD_CALC, &[a1]);
+                // the cars: the original decides what is drawn of each (the host draws them).
+                // Its calls cannot reach the host from here: R3DCar_InsertCarFacetII is
+                // replaced by an inner hook that records the decision instead of drawing.
+                c.capture.clear();
+                c.inner_hook = Some(record_car_facet);
+                c.call_nested(R3DCAR_INSERT_ALL_LIST_FACET, &[RENDER_VIEW]);
+                c.inner_hook = None;
+                self.car_facets = CarFacet::parse(&c.capture);
                 0
             }
 

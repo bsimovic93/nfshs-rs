@@ -141,11 +141,17 @@ pub struct Cpu {
     pub dispatch: fn(&mut Cpu, u32) -> bool,
     /// Resume at an arbitrary address inside recompiled code (cross-function fall-through).
     pub dispatch_at: fn(&mut Cpu, u32) -> bool,
+    /// Replacements consulted while the host itself is running (its nested calls cannot
+    /// re-enter it): return true when handled. Results can be left in `capture`.
+    pub inner_hook: Option<fn(&mut Cpu, u32) -> bool>,
+    pub capture: Vec<u32>,
+    /// State of the BIOS rand().
+    pub rand_seed: u32,
 }
 
 impl Cpu {
     pub fn new(m: Mem) -> Self {
-        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false }
+        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false, inner_hook: None, capture: Vec::new(), rand_seed: 0 }
     }
     #[inline]
     pub fn mult(&mut self, a: u32, b: u32) {
@@ -239,6 +245,10 @@ impl Cpu {
             self.host = Some(h);
             self.service_interrupts();
             if handled {
+                return;
+            }
+        } else if let Some(hook) = self.inner_hook {
+            if hook(self, addr) {
                 return;
             }
         }

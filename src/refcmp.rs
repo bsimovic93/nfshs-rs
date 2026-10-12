@@ -111,7 +111,8 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         parts: (0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect(),
         light: ram.i32(pc + 2176) as u32 & 0xFF_FFFF,
         shadow: (ram.i32(gp + 3648) != 0).then(|| {
-            let corners = std::array::from_fn(|k| std::array::from_fn(|i| ram.i32(pc + 488 + 12 * k as u32 + 4 * i as u32)));
+            let pos = [ram.i32(pc + 0xA0), 0, ram.i32(pc + 0xA8)];
+            let corners = std::array::from_fn(|k| std::array::from_fn(|i| ram.i32(pc + 488 + 12 * k as u32 + 4 * i as u32).wrapping_sub(pos[i])));
             (corners, std::array::from_fn(|i| ram.0[((gp + 3652 + i as u32) & 0x1F_FFFF) as usize]))
         }),
     })]);
