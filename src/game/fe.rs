@@ -239,7 +239,7 @@ impl Showroom {
         let mut out = Vec::new();
         let mut proj = None;
         for cmd in cmds {
-            let OverlayCmd::ShowroomCar { car, parts, cam_pos, cam_rot, h: dist, ofx, ofy, mirrored } = cmd else { continue };
+            let OverlayCmd::ShowroomCar { car, parts, cam_pos, cam_rot, h: dist, ofx, ofy, mirrored, level } = cmd else { continue };
             if proj.is_none() {
                 let raw = |i: usize| v3([cam_rot[i * 3], cam_rot[i * 3 + 1], cam_rot[i * 3 + 2]]);
                 let (up, fwd) = (raw(1).normalize_or_zero(), raw(2).normalize_or_zero());
@@ -272,12 +272,11 @@ impl Showroom {
             }
             let ps = pose(&c);
             let mut model = Mat4::from_rotation_translation(ps.rot, ps.pos);
-            let tint = if *mirrored {
+            // lit by the level the game gives it (128 = as textured; halved in the reflection)
+            let tint = *level as f32 / 128.0;
+            if *mirrored {
                 model = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * model;
-                0.45
-            } else {
-                1.0
-            };
+            }
             for (pi, (part, &on)) in self.model.parts.iter().zip(parts.iter()).enumerate() {
                 if on == 0 {
                     continue;
@@ -316,6 +315,11 @@ impl FeScene {
             None => (Vec::new(), None),
         };
         let split = if view_proj.is_some() { f.under } else { 0 };
+        let mut atlas = f.atlas;
+        let mut car = car;
+        if view_proj.is_some() {
+            car.extend(floor(cmds, vram, &mut atlas));
+        }
         let mut vertices = f.vertices;
         let over = vertices.split_off(split);
         let subtract = f
@@ -324,7 +328,7 @@ impl FeScene {
             .filter(|r| r.start as usize >= split)
             .map(|r| (r.start - split as u32)..(r.end - split as u32))
             .collect();
-        Self { atlas: f.atlas, under: vertices, over, subtract, car, view_proj }
+        Self { atlas, under: vertices, over, subtract, car, view_proj }
     }
 
     /// The showroom car's code, when the front end shows one.
@@ -334,5 +338,55 @@ impl FeScene {
             _ => None,
         })
     }
+}
+
+/// The showroom's turntable ring as world geometry (after the cars: drawn additively over
+/// them), its texture decoded from VRAM into `atlas`.
+fn floor(cmds: &[OverlayCmd], vram: &[u16], atlas: &mut Atlas) -> Vec<Vertex> {
+    let mut out = Vec::new();
+    for cmd in cmds {
+        let OverlayCmd::ShowroomFloor { ring, tex, base, lights, rim, spot } = cmd else { continue };
+        let clut = (tex[0] >> 16) as u16;
+        let tpage = (tex[1] >> 16) as u16;
+        let uv: [[u8; 2]; 4] = std::array::from_fn(|i| [tex[i] as u8, (tex[i] >> 8) as u8]);
+        let (umin, umax) = (uv.iter().map(|t| t[0]).min().unwrap(), uv.iter().map(|t| t[0]).max().unwrap());
+        let (vmin, vmax) = (uv.iter().map(|t| t[1]).min().unwrap(), uv.iter().map(|t| t[1]).max().unwrap());
+        let (tw, th) = ((umax - umin) as u32 + 1, (vmax - vmin) as u32 + 1);
+        let mut rgba = Vec::with_capacity((tw * th * 4) as usize);
+        for v in 0..th {
+            for u in 0..tw {
+                rgba.extend(texel(vram, tpage, clut, umin as u32 + u, vmin as u32 + v));
+            }
+        }
+        let r = atlas.add(tw, th, &rgba);
+        let size = atlas.size as f32;
+        let tc = |k: usize| [(r.x as f32 + (uv[k][0] - umin) as f32) / size, (r.y as f32 + (uv[k][1] - vmin) as f32) / size];
+        // engine space: PS1 x mirrored, 1/256 m
+        let p = |v: [i16; 3]| [-(v[0] as f32) / 256.0, v[1] as f32 / 256.0, v[2] as f32 / 256.0];
+        let additive = (tpage >> 5) & 3 == 1;
+        for t in 0..32usize {
+            let (a, b) = (2 * t, (2 * t + 2) % 64);
+            let corners = [p(ring[a]), p(ring[b]), p(ring[a + 1]), p(ring[b + 1])];
+            for colour in std::iter::once(*base).chain(lights[t]) {
+                let c = [(colour & 0xFF) as f32 / 256.0, ((colour >> 8) & 0xFF) as f32 / 256.0, ((colour >> 16) & 0xFF) as f32 / 256.0, if additive { 0.0 } else { 0.5 }];
+                for k in [0, 1, 3, 0, 3, 2] {
+                    out.push(Vertex { pos: corners[k], uv: tc(k), color: c });
+                }
+            }
+        }
+        // the spot's fan (POLY_G3, added; untextured, through a white semi-transparent texel),
+        // after the ring, where its rim is black: both lie on the floor and the later one fails
+        // the depth test
+        let white = atlas.add(1, 1, &[255, 255, 255, 128]);
+        let wuv = [(white.x as f32 + 0.5) / size, (white.y as f32 + 0.5) / size];
+        let centre = [(*spot & 0xFF) as f32 / 510.0, ((*spot >> 8) & 0xFF) as f32 / 510.0, ((*spot >> 16) & 0xFF) as f32 / 510.0, 0.0];
+        for t in 0..32usize {
+            let (a, b) = (rim[t], rim[(t + 1) % 32]);
+            out.push(Vertex { pos: [0.0; 3], uv: wuv, color: centre });
+            out.push(Vertex { pos: p(a), uv: wuv, color: [0.0; 4] });
+            out.push(Vertex { pos: p(b), uv: wuv, color: [0.0; 4] });
+        }
+    }
+    out
 }
 

@@ -115,7 +115,11 @@ pub enum OverlayCmd {
     /// The showroom's car (R3DCar_InsertCarFacetMenuII): the car, the camera (the view's
     /// position and rotation rows, 16.16 / 4096 scaled as in races) and the GTE projection
     /// (distance H, screen centre OFX/OFY 16.16); `mirrored` is its reflection in the floor.
-    ShowroomCar { car: Box<super::race::CarState>, parts: Vec<u8>, cam_pos: [i32; 3], cam_rot: [i32; 9], h: u32, ofx: i32, ofy: i32, mirrored: bool },
+    ShowroomCar { car: Box<super::race::CarState>, parts: Vec<u8>, cam_pos: [i32; 3], cam_rot: [i32; 9], h: u32, ofx: i32, ofy: i32, mirrored: bool, level: u32 },
+    /// The showroom's turntable (DrawC_ShowroomPrims): a ring of 32 quads on the floor
+    /// (64 vertices, inner/outer pairs, 1/256 m), textured (`tex`: the four uv words with clut
+    /// and texture page) and each drawn in `base` and, when lit, again in its light's colour.
+    ShowroomFloor { ring: Vec<[i16; 3]>, tex: [u32; 4], base: u32, lights: Vec<Option<u32>>, rim: Vec<[i16; 3]>, spot: u32 },
 }
 
 /// A quad's texture in VRAM terms: texture page and CLUT ids, texel coordinates per corner.
@@ -272,6 +276,13 @@ const SHADOW_COLOUR: u32 = 0x8013_D83C + 3652;
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
+/// The showroom turntable: its ring (Fe3D_InitShowroom), texture words and light colours.
+const SHOWROOM_RING: u32 = 0x8005_181C;
+const SHOWROOM_TEX: u32 = 0x8012_22CC;
+const SHOWROOM_RIM: u32 = 0x8005_1754;
+const SHOWROOM_LIGHTS: u32 = 0x8012_07A4;
+const TICKS: u32 = 0x8013_EF8C;
+const GP: u32 = 0x8013_D83C;
 /// A string in NFS4.EXE's data to name the video handles' heap blocks ("audio heap").
 const VIDEO_BLOCK_NAME: u32 = 0x8005_6F08;
 /// Front-end routines that build GPU primitives themselves (the video wall's DrawTV and
@@ -987,6 +998,10 @@ impl Host for GameHost {
             0x800B_3428 if self.mode == Mode::FrontEnd => {
                 // R3DCar_InsertCarFacetMenuII(car, ..): the showroom car, drawn by the host
                 let mut car = Box::new(super::race::CarState::read(&mut c.m, a0));
+                // its light level (halved for the reflection), left in the car cache as the
+                // original does (the floor's light uses it)
+                let level = if c.m.r32(GP + 3532) & 0x80 != 0 { a1 >> 1 } else { a1 } & 0xFF;
+                c.m.w32(0x1F80_0000 + 140, level * 0x01_0101);
                 // the model is the selected one (DrawCar's); the object keeps an older code
                 if let Some(code) = self.showroom_car.and_then(|(t, _)| u32::try_from(t).ok()).and_then(super::race::car_code) {
                     car.code = code.to_string();
@@ -1001,7 +1016,35 @@ impl Host for GameHost {
                     ofx: c.gte_regs[32 + 24] as i32,
                     ofy: c.gte_regs[32 + 25] as i32,
                     mirrored: c.m.r32(0x8013_E608) & 0x80 != 0,
+                    level,
                 });
+                0
+            }
+            0x800B_3850 if self.mode == Mode::FrontEnd => {
+                // R3DCar_Showroom(view): the turntable, drawn by the host. DrawC_ShowroomPrims'
+                // chasing lights: two runs of five segments from the tick counter (the second
+                // one opposite, or turning the other way), each segment taking the dimmest
+                // light that covers it
+                let t = (c.m.r32(TICKS) as i32 % 256) >> 3;
+                let (head, dir): ([i32; 2], [i32; 2]) = if c.m.r32(GP + 4792) == 0 { ([t, (t + 16) & 31], [-1, -1]) } else { ([t, 32 - t], [-1, 1]) };
+                let mut seg = [-1i8; 32];
+                for k in 0..2 {
+                    for i in 0..5 {
+                        let s = ((head[k] + i * dir[k]) & 31) as usize;
+                        if (seg[s] as i32) < i {
+                            seg[s] = i as i8;
+                        }
+                    }
+                }
+                let ring = (0..64).map(|i| std::array::from_fn(|k| c.m.r16(SHOWROOM_RING + 6 * i + 2 * k as u32) as i16)).collect();
+                let tex_at = c.m.r32(SHOWROOM_TEX);
+                let tex = std::array::from_fn(|i| c.m.r32(tex_at + 4 * i as u32));
+                let lights = seg.iter().map(|&s| (s >= 0).then(|| c.m.r32(SHOWROOM_LIGHTS + 4 * s as u32) & 0xFF_FFFF)).collect();
+                // DrawC_SpotPrims: the light on the floor, a fan from the centre (the car
+                // cache's light level) to a black rim
+                let rim = (0..32).map(|i| std::array::from_fn(|k| c.m.r16(SHOWROOM_RIM + 6 * i + 2 * k as u32) as i16)).collect();
+                let spot = c.m.r32(0x1F80_0000 + 140) & 0xFF_FFFF;
+                self.overlay.push(OverlayCmd::ShowroomFloor { ring, tex, base: 0x30_0A00, lights, rim, spot });
                 0
             }
             0x8002_A7B0 => {
