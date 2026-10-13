@@ -307,6 +307,9 @@ pub struct SkyData {
     /// The horizon band is drawn at all (the halfword Hrz's draw checks first; off on the
     /// raceways).
     pub band: bool,
+    /// Hrz_BuildSky textures the dome (the sky record's first word is 1): per quad (64, ring
+    /// by ring) the pixmap index (0..11 HZ01..HZ12, 12..15 HZ09..HZ12 mirrored).
+    pub dome_tex: Option<Vec<u8>>,
 }
 
 impl SkyData {
@@ -327,6 +330,10 @@ impl SkyData {
             bottom_colors: (0..17).map(|i| rgb(m, 0x8012_1AE8 + 4 * i)).collect(),
             segment_tex: (0..16).map(|i| m.r8(hrec + 32 + i)).collect(),
             band: m.r16(0x8012_4570) != 0,
+            dome_tex: {
+                let rec = m.r32(gp + 4920);
+                (rec != 0 && m.r32(rec) == 1).then(|| (0..64).map(|i| m.r8(0x8012_1A64 + i)).collect())
+            },
         })
     }
 }

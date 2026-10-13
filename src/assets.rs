@@ -374,6 +374,7 @@ fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
 /// (`Hrz_BuildHorizon`), camera-centred and scaled to radius 100.
 fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, Vec3)) {
     let mut verts = Vec::new();
+    log::debug!("sky dome rings {:?}", (0..5).map(|r| s.dome_colors[r * 17 + 8]).collect::<Vec<_>>());
     // untextured: the PS1 draws the vertex colour itself (x2 cancels the shader's modulation)
     let flat = |c: [u8; 3]| [c[0] as f32 / 510.0, c[1] as f32 / 510.0, c[2] as f32 / 510.0, 1.0];
     let white = atlas.uv(atlas.white, Vec2::new(0.5, 0.5));
@@ -381,11 +382,28 @@ fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], 
         let v = s.dome[i];
         Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) * 0.1
     };
+    let modulate = |c: [u8; 3]| [c[0] as f32 / 256.0, c[1] as f32 / 256.0, c[2] as f32 / 256.0, 1.0];
     for ring in 0..4 {
         for seg in 0..16 {
             let q = [ring * 17 + seg, ring * 17 + seg + 1, (ring + 1) * 17 + seg + 1, (ring + 1) * 17 + seg];
+            // a textured sky (Hrz_BuildSky's GT4s): the quad's texture's top edge on the upper
+            // ring, its colours modulating it
+            let tex = s.dome_tex.as_ref().and_then(|t| {
+                let k = t[ring * 16 + seg] as usize;
+                let name = format!("HZ{:02}", if k < 12 { k + 1 } else { k - 3 });
+                psh.shapes.iter().position(|sh| sh.name == name).map(|i| (rects[i], k >= 12))
+            });
             for k in [0, 1, 2, 0, 2, 3] {
-                verts.push(Vertex { pos: dome(q[k]).into(), uv: white, color: flat(s.dome_colors[q[k]]) });
+                let (uv, color) = match tex {
+                    Some((rect, mirrored)) => {
+                        let (w, h) = (rect.w as f32, rect.h as f32);
+                        let (left, right) = if mirrored { (w, 0.0) } else { (0.0, w) };
+                        let corner = [Vec2::new(left, h), Vec2::new(right, h), Vec2::new(right, 0.0), Vec2::new(left, 0.0)][k];
+                        (atlas.uv(rect, corner), modulate(s.dome_colors[q[k]]))
+                    }
+                    None => (white, flat(s.dome_colors[q[k]])),
+                };
+                verts.push(Vertex { pos: dome(q[k]).into(), uv, color });
             }
         }
     }
@@ -398,7 +416,6 @@ fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], 
     let extent = |t: usize| shapes[t & 7].map_or(0, |i| psh.shapes[i].height.saturating_sub(1) as i32);
     let tallest = (0..16).map(|seg| extent(s.segment_tex[seg] as usize)).fold(1, i32::max);
     let k = 100.0 / 32000.0;
-    let modulate = |c: [u8; 3]| [c[0] as f32 / 256.0, c[1] as f32 / 256.0, c[2] as f32 / 256.0, 1.0];
     for seg in 0..16 {
         let t = s.segment_tex[seg] as usize;
         let Some(shape) = shapes[t & 7] else { continue };
@@ -406,6 +423,8 @@ fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], 
         if ratio <= 0.0 {
             continue;
         }
+        // from `bottom` (the texture's bottom edge) up as far as the segment's ratio of
+        // `height` (HrzSetPsxMatrix negates y: world heights, up positive)
         let (y0, y1) = (s.bottom as f32 * k, (s.bottom as f32 + s.height as f32 * ratio) * k);
         let rect = rects[shape];
         let (w, h) = (rect.w as f32, rect.h as f32);
