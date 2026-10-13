@@ -430,7 +430,7 @@ impl App {
                 if let Some(vram) = &snap.vram {
                     // the showroom car, loaded when the front end shows a different one
                     match crate::game::fe::FeScene::car_code(&snap.overlay) {
-                        Some(code) if self.showroom.as_ref().is_none_or(|s| s.code != code) => {
+                        Some(code) if self.showroom.as_ref().is_none_or(|s| s.car != code) => {
                             self.showroom = crate::game::fe::Showroom::load(&self.data, &code);
                         }
                         _ => {}
@@ -706,7 +706,7 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                 let snap = s.snapshot();
                 let Some(vram) = &snap.vram else { continue };
                 if let Some(code) = crate::game::fe::FeScene::car_code(&snap.overlay) {
-                    if showroom.as_ref().is_none_or(|sr| sr.code != code) {
+                    if showroom.as_ref().is_none_or(|sr| sr.car != code) {
                         showroom = crate::game::fe::Showroom::load(data, &code);
                     }
                 }

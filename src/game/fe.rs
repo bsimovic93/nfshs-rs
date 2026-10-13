@@ -218,16 +218,17 @@ impl MoviePlayer {
 
 /// The showroom's car model (with its textures in an atlas the front end's are added to).
 pub struct Showroom {
-    pub code: String,
+    /// The car's code and paint.
+    pub car: (String, u8),
     model: crate::assets::CarModel,
     pub atlas: Atlas,
 }
 
 impl Showroom {
-    pub fn load(data: &crate::assets::GameData, code: &str) -> Option<Self> {
+    pub fn load(data: &crate::assets::GameData, car: &(String, u8)) -> Option<Self> {
         let mut atlas = Atlas::new(1024);
-        let model = crate::assets::load_car(data, &mut atlas, code, true, false, None).ok()?;
-        Some(Self { code: code.to_string(), model, atlas })
+        let model = crate::assets::load_car(data, &mut atlas, &car.0, true, false, None, car.1).ok()?;
+        Some(Self { car: car.clone(), model, atlas })
     }
 
     /// The cars the front end asked for (the car and its reflection in the floor) as world
@@ -331,10 +332,10 @@ impl FeScene {
         Self { atlas, under: vertices, over, subtract, car, view_proj }
     }
 
-    /// The showroom car's code, when the front end shows one.
-    pub fn car_code(cmds: &[OverlayCmd]) -> Option<String> {
+    /// The showroom car's code and paint, when the front end shows one.
+    pub fn car_code(cmds: &[OverlayCmd]) -> Option<(String, u8)> {
         cmds.iter().find_map(|c| match c {
-            OverlayCmd::ShowroomCar { car, .. } => Some(car.code.clone()),
+            OverlayCmd::ShowroomCar { car, .. } => Some((car.code.clone(), car.colour)),
             _ => None,
         })
     }

@@ -129,6 +129,23 @@ impl Psh {
         Ok(Shape { name, kind, width: w, height: h, center, vram, rgba, indices, palette })
     }
 
+    /// Paint a car (`Texture_ColorCarPalette`): a 4bpp body shape followed by its 1x1 "P"
+    /// holder, whose 256-entry palette is 16 rows of 16 colours, takes row `row` as its CLUT.
+    pub fn paint(&mut self, row: usize) {
+        for i in 1..self.shapes.len() {
+            let holder = &self.shapes[i];
+            if holder.kind != 0x41 || holder.width != 1 || holder.height != 1 || holder.palette.len() < 16 * (row + 1) || self.shapes[i - 1].kind != 0x40 {
+                continue;
+            }
+            let pal = holder.palette[16 * row..16 * row + 16].to_vec();
+            let body = &mut self.shapes[i - 1];
+            for (k, &ix) in body.indices.iter().enumerate() {
+                body.rgba[k * 4..k * 4 + 4].copy_from_slice(&ps1_color(pal[ix as usize & 15]));
+            }
+            body.palette = pal;
+        }
+    }
+
     pub fn get(&self, name: &str) -> Option<&Shape> {
         self.shapes.iter().find(|s| s.name == name)
     }

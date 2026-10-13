@@ -192,11 +192,19 @@ impl Game {
         let mut models = Vec::new();
         let mut racers = Vec::new();
         let slots = codes.len();
+        // the paint of each car, as the original picked it (cars in the order race_of lists them)
+        let colours: Vec<u8> = sim
+            .as_ref()
+            .map(|s| {
+                let cars = &s.snapshot().cars;
+                cars.iter().take(1).chain(cars.iter().skip(1).filter(|c| crate::ps1::race::car_type(&c.code).is_some())).map(|c| c.colour).collect()
+            })
+            .unwrap_or_default();
         for (k, code) in codes.iter().enumerate() {
             let night = matches!(cfg.variant, "N" | "S");
             // the number plate shows the player's name (GameSetup carInfo + 0x68)
             let plate = crate::ps1::race::player_plate();
-            let model = assets::load_car(data, atlas, code, k == 0, night, (k == 0).then_some(plate.as_str()))?;
+            let model = assets::load_car(data, atlas, code, k == 0, night, (k == 0).then_some(plate.as_str()), colours.get(k).copied().unwrap_or(0))?;
             let spec = load_spec(data, code, &model);
             // two-wide grid behind the start line, ~12 m between rows; the player starts last
             let slot = if k == 0 { slots - 1 } else { k - 1 };

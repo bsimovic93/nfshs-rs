@@ -255,6 +255,10 @@ const FONT_CLUT_X: u32 = 0x8013_D83C + 4864;
 const FONT_CLUT_Y: u32 = 0x8012_10AE;
 const FONT_CURRENT_CLUT: u32 = 0x8013_D83C + 4880;
 const FONT_SPACE: u32 = 0x8013_D83C + 4882;
+/// Font_TextXY's blitter (gp+6328) and the two the game uses.
+const FONT_BLITTER: u32 = 0x8013_D83C + 6328;
+const FONT_BLIT: u32 = 0x800C_C00C;
+const FONT_UPSIDE_DOWN_BLIT: u32 = 0x8004_F49C;
 /// DrawC_PrimStart(vertex, car, light level, cache) and its arguments' homes.
 const DRAWC_PRIM_START: u32 = 0x800B_FAC8;
 const R3DCAR_CENTER: u32 = 0x8013_E674;
@@ -456,9 +460,19 @@ impl GameHost {
         }
     }
 
-    /// Font_TextXY in the front end: Font_Blit's sprites (glyphs of the current font's 4-bit
-    /// picture, CLUT gp+4880, colour gp+4872) as quads.
+    /// Font_TextXY in the front end: the blitter's glyphs (of the current font's 4-bit
+    /// picture) as quads. Font_Blit: sprites in CLUT gp+4880 and colour gp+4872, blended;
+    /// FontUpsideDownBlit (the menu's reflection in the showroom floor): flipped opaque quads
+    /// in its own CLUT and colour.
     fn font_quads(&mut self, c: &mut Cpu, text: u32, x: i32, y: i32) {
+        let upside_down = match c.m.r32(FONT_BLITTER) {
+            FONT_UPSIDE_DOWN_BLIT => true,
+            FONT_BLIT => false,
+            b => {
+                log::warn!("front-end text with an unknown blitter {b:#x}");
+                false
+            }
+        };
         let table = c.m.r32(0x8013_6F14);
         let count = c.m.r32(0x8013_6F04);
         let shape = c.m.r32(0x8013_6F18);
@@ -468,8 +482,11 @@ impl GameHost {
         let pos = c.m.r32(shape + 12);
         let (fx, fy) = ((pos & 0xFFF) as u16, ((pos >> 16) & 0xFFF) as u16);
         let tpage = (fx / 64) | ((fy / 256) << 4);
-        let clut = c.m.r16(FONT_CURRENT_CLUT);
-        let colour = c.m.r32(0x8013_D83C + 4872) & 0xFF_FFFF;
+        let (clut, colour) = if upside_down {
+            (c.m.r16(0x8013_EB4C), c.m.r32(0x8013_EB44) & 0xFF_FFFF)
+        } else {
+            (c.m.r16(FONT_CURRENT_CLUT), c.m.r32(0x8013_D83C + 4872) & 0xFF_FFFF)
+        };
         let space = c.m.r8(FONT_SPACE) as i32;
         let code = |c: &mut Cpu, a: u32| c.m.r8(a) as u16 | (c.m.r8(a + 1) as u16) << 8;
         let mut x = x;
@@ -489,7 +506,20 @@ impl GameHost {
             let (w, h) = (c.m.r8(g + 2) as i32, c.m.r8(g + 3) as i32);
             let (u, v) = (code(c, g + 4) as i32, code(c, g + 6) as i32);
             let (adv, dx, dy) = (c.m.r8(g + 8) as i8 as i32, c.m.r8(g + 9) as i8 as i32, c.m.r8(g + 10) as i8 as i32);
-            if w > 0 && h > 0 {
+            if w > 0 && h > 0 && upside_down {
+                // the glyph's top row (from one texel above it) at the bottom, around y + 5
+                let (u0, v0) = (u as u8, (((fy as i32 + v) & 0xFF) - 1) as u8);
+                let (u1, v1) = ((u + w) as u8, (v0 as i32 + h) as u8);
+                let (top, bottom) = (y + 5 - h - dy, y + 5 - dy);
+                let (l, r) = (x + dx, x + dx + w);
+                self.overlay.push(OverlayCmd::Quad {
+                    pts: [[l, bottom], [r, bottom], [l, top], [r, top]].map(|[a, b]| [a as i16, b as i16]),
+                    colours: [colour; 4],
+                    tex: Some(QuadTex { tpage, clut, uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]] }),
+                    semi: false,
+                    abr: 0,
+                });
+            } else if w > 0 && h > 0 {
                 let (u0, v0) = (u as u8, ((fy as i32 + v) & 0xFF) as u8);
                 let (u1, v1) = ((u + w) as u8, (v0 as i32 + h) as u8);
                 self.overlay.push(OverlayCmd::Quad {

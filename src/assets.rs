@@ -542,7 +542,7 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
 /// player's car from `ZZZ<code>H.VIV`, the others from `ZZZ<code>S.VIV`. The PSH files hold
 /// the texture pages: the interior and underside ("i") on a page of their own, the body in
 /// a day ("l") and a night ("d", wheels "g") version.
-pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool, plate: Option<&str>) -> Result<CarModel> {
+pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool, plate: Option<&str>, colour: u8) -> Result<CarModel> {
     let name = format!("ZZZ{code}{}.VIV", if player { "H" } else { "S" });
     let viv = Viv::parse(&data.read(&name).or_else(|_| data.read(&format!("ZZZ{code}.VIV")))?)?;
     let (_, geo) = viv.find_suffix(".geo").context("car viv has no .geo")?;
@@ -559,7 +559,9 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         if skip.contains(&kind) || (kind == 'g' && !night) {
             continue;
         }
-        files.push((kind, Psh::parse(d)?));
+        let mut psh = Psh::parse(d)?;
+        psh.paint(colour as usize);
+        files.push((kind, psh));
     }
     // night replacements ("d", "g") last, so they cover the day shapes
     files.sort_by_key(|(k, _)| matches!(k, 'd' | 'g'));
