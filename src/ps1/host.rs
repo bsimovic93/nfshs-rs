@@ -1094,6 +1094,9 @@ impl Host for GameHost {
         self.overlay_ot.truncate(self.overlay.len());
         self.current_ot = if std::env::var_os("PS1_OTLOG_PRIM").is_some() { c.m.r32(0x1F80_0004) & 0xFFF_0000 } else { c.m.r32(0x1F80_0000) };
         if let Some(log) = &self.call_log {
+            if log.contains(&addr) && std::env::var_os("PS1_CALLSTACK").is_some() {
+                eprintln!("  stack {:x?}", c.stack);
+            }
             if log.contains(&addr) {
                 eprintln!("[{:>8}] call {addr:#x}({a0:#x}, {a1:#x}, {a2:#x}, {a3:#x}) from {:#x}", self.clock, c.r[31]);
             }
@@ -1559,6 +1562,13 @@ impl Host for GameHost {
                 // Loading_UpdateLoadingScreen(step): show the screen for the time loading took
                 // so far, then let the game draw the progress bar's next part
                 self.loading_frames(c);
+                return false;
+            }
+            0x8002_7B38 => {
+                // Front_Menu: the front end runs (also its post-race screens, before
+                // Front_BuildStream)
+                self.mode = Mode::FrontEnd;
+                self.from_main = true;
                 return false;
             }
             0x8002_A7B0 => {

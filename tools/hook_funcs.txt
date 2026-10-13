@@ -26,3 +26,4 @@
 800d4e9c Hud_BuildString (the front end's drawn by the host; in races the original runs and the HUD view is recorded)
 800d8690 Hud_BlackThinBox (the front end's drawn by the host; in races the original runs and the HUD view is recorded)
 800eed6c SetDrawEnv (logged with PS1_CALLLOG; the original runs)
+80027b38 Front_Menu (the front end runs: frames are its)
