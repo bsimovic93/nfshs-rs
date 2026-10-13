@@ -102,6 +102,7 @@ impl OriginalSim {
             (input.circle, pad::CIRCLE),
             (input.square, pad::SQUARE),
             (input.start, pad::START),
+            (input.select, pad::SELECT),
         ] {
             if on {
                 b |= bit;

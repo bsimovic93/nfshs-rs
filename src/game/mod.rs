@@ -33,6 +33,7 @@ pub struct Input {
     pub back: bool,
     pub circle: bool,
     pub square: bool,
+    pub select: bool,
     /// Analog controls (gamepad); override the digital ones when non-zero.
     pub steer_axis: f32,
     pub throttle_axis: f32,

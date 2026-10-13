@@ -388,8 +388,8 @@ impl GameHost {
         }
         let input = self.frame.on_frame.as_mut().and_then(|f| f(c, info));
         match input {
-            None if self.mode == Mode::FrontEnd => c.tick_limit = 0, // end the front end (watchdog)
-            None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
+            // the host is done with the program: stop it where it is
+            None => c.tick_limit = 0,
             Some(buttons) => {
                 self.frame.frames_run += 1;
                 for b in self.pad_buffers {
@@ -706,6 +706,10 @@ impl Host for GameHost {
             if log.contains(&addr) {
                 eprintln!("[{:>8}] call {addr:#x}({a0:#x}, {a1:#x}, {a2:#x}, {a3:#x}) from {:#x}", self.clock, c.r[31]);
             }
+        }
+        // drawing recorded without a frame to take it (should not happen): don't let it grow
+        if self.overlay.len() > 200_000 {
+            self.overlay.clear();
         }
         if self.mode == Mode::FrontEnd && !self.capturing && CAPTURED_FE_DRAWING.contains(&addr) {
             c.r[2] = self.capture_prims(c, addr);

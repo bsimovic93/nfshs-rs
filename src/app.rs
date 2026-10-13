@@ -122,12 +122,9 @@ impl App {
 
     /// The original left its front end for a race: load what it races and show it.
     fn front_end_race(&mut self, sim: Box<crate::game::original::OriginalSim>) {
-        let snap = sim.snapshot();
-        let player = snap.cars.first().map(|c| c.code.clone()).unwrap_or_default();
-        let opponents: Vec<String> = snap.cars.iter().skip(1).map(|c| c.code.clone()).filter(|c| crate::ps1::race::car_type(c).is_some()).collect();
-        let variant = snap.variant.clone();
-        let rc = RaceConfig { track: snap.track, variant: &variant, player_car: &player, opponents, laps: snap.laps.max(1) as i32, original_sim: true };
-        log::info!("the original starts a race: track {}{} with {player}", snap.track, variant);
+        let cfg = race_of(sim.snapshot());
+        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true };
+        log::info!("the original starts a race: track {}{} with {}", cfg.track, cfg.variant, cfg.player_car);
         let mut atlas = Atlas::new(2048);
         match Game::load_with(&self.data, &mut atlas, &rc, Some(*sim)) {
             Ok(game) => self.begin_race(game, atlas),
@@ -188,6 +185,7 @@ impl App {
                 i.circle |= pad.is_pressed(Button::East);
                 i.square |= pad.is_pressed(Button::West);
                 i.start |= pad.is_pressed(Button::Start);
+                i.select |= pad.is_pressed(Button::Select);
             }
         }
         i
@@ -645,6 +643,85 @@ pub fn flat_params() -> FrameParams {
         cam_fwd: Vec3::Z,
         depth_cue: None,
     }
+}
+
+/// The race the original has started (its first race frame): track, cars and laps.
+pub fn race_of(snap: &crate::ps1::race::Snapshot) -> RaceConfigOwned {
+    RaceConfigOwned {
+        track: snap.track,
+        variant: snap.variant.clone(),
+        player_car: snap.cars.first().map(|c| c.code.clone()).unwrap_or_default(),
+        opponents: snap.cars.iter().skip(1).map(|c| c.code.clone()).filter(|c| crate::ps1::race::car_type(c).is_some()).collect(),
+        laps: snap.laps.max(1) as i32,
+    }
+}
+
+/// Headless: the app's own path through the original game (front end, its race, back), with
+/// pad input per stretch of frames (`script`: seconds and an Input) and screenshots of the
+/// frames in `shots` written to `dir`.
+pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], dir: &std::path::Path) -> anyhow::Result<()> {
+    use crate::game::original::OriginalSim;
+    let (w, h) = (960u32, 720u32);
+    let mut sim = Some(Box::new(OriginalSim::start_main(data)?));
+    let mut game: Option<Box<Game>> = None;
+    let mut showroom: Option<crate::game::fe::Showroom> = None;
+    let mut r = pollster::block_on(Renderer::new(None, (w, h), &Atlas::new(256)))?;
+    let total: u32 = script.iter().map(|(s, _)| (s * 60.0).round() as u32).sum();
+    let mut frame = 0u32;
+    for &(secs, input) in script {
+        for _ in 0..(secs * 60.0).round() as u32 {
+            frame += 1;
+            if let Some(s) = &mut sim {
+                s.advance(1.0 / 60.0, &input);
+                if s.stopped() {
+                    println!("frame {frame}: the original stopped");
+                    return Ok(());
+                }
+                if !s.in_front_end() {
+                    let mut s = sim.take().unwrap();
+                    s.reset_race();
+                    let cfg = race_of(s.snapshot());
+                    println!("frame {frame}: race {}{} with {} vs {:?}, {} laps", cfg.track, cfg.variant, cfg.player_car, cfg.opponents, cfg.laps);
+                    let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true };
+                    let mut atlas = Atlas::new(2048);
+                    let g = Game::load_with(data, &mut atlas, &rc, Some(*s))?;
+                    r.set_atlas(&atlas);
+                    r.set_world(&g.track.verts, &g.track.indices);
+                    game = Some(Box::new(g));
+                }
+            } else if let Some(g) = &mut game {
+                g.update(1.0 / 60.0, input);
+                if g.sim.as_ref().is_some_and(|s| s.in_front_end()) {
+                    println!("frame {frame}: back in the front end");
+                    sim = g.sim.take().map(Box::new);
+                    game = None;
+                    r.clear_world();
+                }
+            }
+            if !shots.contains(&frame) && frame != total {
+                continue;
+            }
+            let out = dir.join(format!("play_{frame}.png"));
+            if let Some(s) = &sim {
+                let snap = s.snapshot();
+                let Some(vram) = &snap.vram else { continue };
+                if let Some(code) = crate::game::fe::FeScene::car_code(&snap.overlay) {
+                    if showroom.as_ref().is_none_or(|sr| sr.code != code) {
+                        showroom = crate::game::fe::Showroom::load(data, &code);
+                    }
+                }
+                let scene = crate::game::fe::FeScene::build(&snap.overlay, vram, (snap.display[2], snap.display[3]), w as f32, h as f32, showroom.as_ref());
+                if let Some(img) = draw_front_end(&mut r, scene, true) {
+                    img.save(&out)?;
+                }
+            } else if let Some(g) = &game {
+                let params = g.frame_params(w as f32 / h as f32);
+                r.screenshot(&params, &g.track.sky, &g.dynamic_geometry(), &g.hud(w as f32, h as f32)).save(&out)?;
+            }
+            println!("frame {frame}: {} written", out.display());
+        }
+    }
+    Ok(())
 }
 
 /// Draw a front-end scene (2D, and the showroom car in 3D between its layers).

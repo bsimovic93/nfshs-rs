@@ -511,6 +511,32 @@ fn real_main() -> Result<()> {
                 std::fs::write(wav, out)?;
             }
         }
+        Some("fe-play") => {
+            // fe-play SCRIPT SHOTS DIR: the app's path through the original (front end, race,
+            // back) headless. SCRIPT "secs:keys,..." (x Cross/accept, t Triangle, c Circle,
+            // s Square, p Start, u/d/l/r d-pad; in races u accelerates as in the window), SHOTS
+            // "frame,frame,..." screenshots into DIR
+            let mut script = Vec::new();
+            for st in args[2].split(',').filter(|s| !s.is_empty()) {
+                let (secs, keys) = st.split_once(':').unwrap_or((st, "-"));
+                let i = game::Input {
+                    up: keys.contains('u'),
+                    down: keys.contains('d'),
+                    left: keys.contains('l'),
+                    right: keys.contains('r'),
+                    accept: keys.contains('x'),
+                    back: keys.contains('t'),
+                    circle: keys.contains('c'),
+                    square: keys.contains('s'),
+                    start: keys.contains('p'),
+                    select: keys.contains('e'),
+                    ..Default::default()
+                };
+                script.push((secs.parse::<f32>()?, i));
+            }
+            let shots: Vec<u32> = args[3].split(',').filter_map(|s| s.parse().ok()).collect();
+            app::front_end_play(&data, &script, &shots, Path::new(&args[4]))?;
+        }
         Some("heap-free") => {
             // heap-free <ram.bin>: the game's largest free heap block in a RAM image
             let mut mem = ps1::Mem::default();

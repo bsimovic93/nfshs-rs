@@ -118,6 +118,9 @@ pub trait Host {
     fn idle(&mut self, _c: &mut Cpu) {}
 }
 
+/// Unwind payload when the host stops the program (`tick_limit` 0).
+pub struct Stop;
+
 pub struct Cpu {
     pub r: [u32; 32],
     pub hi: u32,
@@ -335,6 +338,10 @@ impl Cpu {
                 self.host = Some(h);
                 self.service_interrupts();
             }
+        }
+        if self.tick_limit == 0 {
+            // the host asked the program to stop: unwind out of it (quietly, no panic hook)
+            std::panic::resume_unwind(Box::new(Stop));
         }
         if self.ticks > self.tick_limit {
             let recent: Vec<String> = (0..16).map(|i| self.recent[(self.recent_at + i) % 16]).map(|(a, ra)| format!("{a:#x}<-{ra:#x}")).collect();
