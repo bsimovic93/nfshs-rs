@@ -387,7 +387,7 @@ impl App {
             Screen::FrontEnd(sim) => {
                 let snap = sim.snapshot();
                 if let Some(vram) = &snap.vram {
-                    let fe = crate::game::fe::FeFrame::build(&snap.overlay, vram, w as f32, h as f32);
+                    let fe = crate::game::fe::FeFrame::build(&snap.overlay, vram, (snap.display[2], snap.display[3]), w as f32, h as f32);
                     r.write_atlas(&fe.atlas);
                     r.hud_subtract = fe.subtract;
                     r.render(&flat_params(), &[], &[], &fe.vertices);

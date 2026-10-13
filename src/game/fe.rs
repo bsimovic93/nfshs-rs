@@ -13,7 +13,8 @@ use crate::ps1::host::{OverlayCmd, QuadTex};
 const VRAM_W: usize = 1024;
 
 /// One front-end frame ready to draw: its texture atlas and its vertices for a `w` x `h`
-/// window (the PS1's 320x240 screen fitted at 4:3).
+/// window (the PS1 screen, `screen` pixels wide and high (the front end uses 512x240), shown
+/// at 4:3 as a television does).
 pub struct FeFrame {
     pub atlas: Atlas,
     pub vertices: Vec<Vertex>,
@@ -37,15 +38,17 @@ fn texel(vram: &[u16], tpage: u16, clut: u16, u: u32, v: u32) -> [u8; 4] {
 }
 
 impl FeFrame {
-    pub fn build(cmds: &[OverlayCmd], vram: &[u16], w: f32, h: f32) -> Self {
+    pub fn build(cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {
         let mut atlas = Atlas::new(1024);
         let mut cache: HashMap<(u16, u16, u8, u8, u8, u8), Rect> = HashMap::new();
-        let scale = (h / 240.0).min(w / 320.0);
-        let (ox, oy) = ((w - 320.0 * scale) / 2.0, (h - 240.0 * scale) / 2.0);
+        let (sw, sh) = (screen.0.max(1) as f32, screen.1.max(1) as f32);
+        let (aw, ah) = if w * 3.0 > h * 4.0 { (h * 4.0 / 3.0, h) } else { (w, w * 0.75) };
+        let (scale_x, scale_y) = (aw / sw, ah / sh);
+        let (ox, oy) = ((w - aw) / 2.0, (h - ah) / 2.0);
         let size = atlas.size as f32;
         let mut vertices = Vec::new();
         let mut subtract: Vec<std::ops::Range<u32>> = Vec::new();
-        let mut clip = [0.0, 0.0, 320.0, 240.0];
+        let mut clip = [0.0, 0.0, sw, sh];
         // the game adds each primitive at the head of its ordering table: last asked, first drawn
         for cmd in cmds.iter().rev() {
             if let &OverlayCmd::Clip { x, y, w, h } = cmd {
@@ -104,7 +107,7 @@ impl FeFrame {
             };
             // clipped to the drawing area, in PS1 screen pixels, then placed in the window
             let poly = clip_polygon(vec![corner(0), corner(1), corner(3), corner(2)], clip);
-            let place = |v: Vertex| Vertex { pos: [ox + (v.pos[0] + shift) * scale, oy + (v.pos[1] + shift) * scale, 0.0], ..v };
+            let place = |v: Vertex| Vertex { pos: [ox + (v.pos[0] + shift) * scale_x, oy + (v.pos[1] + shift) * scale_y, 0.0], ..v };
             for k in 1..poly.len().saturating_sub(1) {
                 vertices.extend([place(poly[0]), place(poly[k]), place(poly[k + 1])]);
             }

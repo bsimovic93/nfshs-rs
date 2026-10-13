@@ -397,10 +397,12 @@ fn real_main() -> Result<()> {
                 script.push(((secs.parse::<f32>()? * 60.0).round() as u32, buttons));
             }
             let mut frame = 0u32;
-            // FE_SHOT=frame:out.png: render that front-end frame
-            let shot: Option<(u32, String)> = std::env::var("FE_SHOT").ok().and_then(|v| v.split_once(':').map(|(f, o)| (f.parse().unwrap_or(0), o.to_string())));
-            let shot_at = shot.as_ref().map(|s| s.0);
-            let grabbed = std::rc::Rc::new(std::cell::RefCell::new(None));
+            // FE_SHOT=frame,frame,...:dir: render those front-end frames to dir/fe_<frame>.png
+            let shot: Option<(Vec<u32>, String)> = std::env::var("FE_SHOT")
+                .ok()
+                .and_then(|v| v.split_once(':').map(|(f, o)| (f.split(',').filter_map(|n| n.parse().ok()).collect(), o.to_string())));
+            let shot_at: Vec<u32> = shot.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+            let grabbed = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
             let grab = grabbed.clone();
             let ram_at: Option<u32> = std::env::var("BOOT_RAM_FRAME").ok().and_then(|f| f.parse().ok());
             let on_frame: ps1::host::FrameFn = Box::new(move |c, info| {
@@ -409,8 +411,8 @@ fn real_main() -> Result<()> {
                     let _ = std::fs::create_dir_all("re/boot");
                     let _ = std::fs::write("re/boot/fe_ram.bin", &c.m.ram);
                 }
-                if Some(frame) == shot_at {
-                    *grab.borrow_mut() = Some((info.overlay.clone(), info.vram.clone()));
+                if shot_at.contains(&frame) {
+                    grab.borrow_mut().push((frame, info.overlay.clone(), info.vram.clone(), (info.display[2], info.display[3])));
                 }
                 let mut t = frame;
                 for &(n, b) in &script {
@@ -434,13 +436,21 @@ fn real_main() -> Result<()> {
             host.frame.on_frame = Some(on_frame);
             let r = ps1::race::call(&mut cpu, 0x800A_52A4, &[]);
             println!("main returned: {r:?}");
-            if let (Some((_, out)), Some((overlay, Some(vram)))) = (shot, grabbed.borrow_mut().take()) {
-                let fe = game::fe::FeFrame::build(&overlay, &vram, 960.0, 720.0);
-                let mut r = pollster::block_on(render::Renderer::new(None, (960, 720), &fe.atlas))?;
-                let params = app::flat_params();
-                r.hud_subtract = fe.subtract.clone();
-                r.screenshot(&params, &[], &[], &fe.vertices).save(&out)?;
-                println!("front-end frame written to {out} ({} quads)", fe.vertices.len() / 6);
+            if let Some((_, dir)) = shot {
+                let mut r = None;
+                for (f, overlay, vram, screen) in grabbed.borrow_mut().drain(..) {
+                    let Some(vram) = vram else { continue };
+                    let fe = game::fe::FeFrame::build(&overlay, &vram, screen, 960.0, 720.0);
+                    let r = match &mut r {
+                        Some(r) => r,
+                        None => r.insert(pollster::block_on(render::Renderer::new(None, (960, 720), &fe.atlas))?),
+                    };
+                    r.write_atlas(&fe.atlas);
+                    r.hud_subtract = fe.subtract.clone();
+                    let out = std::path::Path::new(&dir).join(format!("fe_{f}.png"));
+                    r.screenshot(&app::flat_params(), &[], &[], &fe.vertices).save(&out)?;
+                    println!("front-end frame {f} written ({} quads)", fe.vertices.len() / 6);
+                }
             }
         }
         Some("heap-free") => {
