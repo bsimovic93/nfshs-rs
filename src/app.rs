@@ -722,8 +722,13 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                     }
                 }
                 if std::env::var_os("NFSHS_PARTSLOG").is_some() && frame % 30 == 0 {
-                    if let Some(f) = g.sim.as_ref().and_then(|s| s.snapshot().car_facets.first().cloned().flatten()) {
-                        println!("frame {frame}: parts {:?}", f.parts.iter().enumerate().filter(|(_, v)| **v != 0).map(|(i, v)| format!("{i}:{v}")).collect::<Vec<_>>().join(" "));
+                    if let Some(s) = g.sim.as_ref() {
+                        let snap = s.snapshot();
+                        for (k, f) in snap.car_facets.iter().enumerate() {
+                            let Some(f) = f else { continue };
+                            let c = &snap.cars[k];
+                            println!("frame {frame}: car {k} {} pos {:?} orient {:?} parts {}", c.code, c.position.map(|v| v >> 16), &c.orient[..3], f.parts.iter().enumerate().filter(|(_, v)| **v != 0).map(|(i, v)| format!("{i}:{v}")).collect::<Vec<_>>().join(" "));
+                        }
                     }
                 }
                 if std::env::var_os("NFSHS_FLIPLOG").is_some() {

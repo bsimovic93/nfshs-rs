@@ -955,24 +955,20 @@ impl Game {
                 eprintln!("traffic {k}: origin y {:.2} ground {g:?} up {:.2?}", pose.pos.y, pose.up);
             }
             let facet = facets.get(k).and_then(Option::as_ref);
-            // not put into the view by the original this frame: not drawn
+            // not put into the view by the original this frame, or its drawing set-up
+            // (DrawC_PrimStart) refused the car (parked traffic waiting to enter): not drawn
             let Some(facet) = facet else { continue };
+            if self.traffic_override.is_none() && facet.env.is_none() {
+                continue;
+            }
             let tint = car_light(facet.light) as f32 / 128.0;
             let model = Mat4::from_rotation_translation(pose.rot, pose.pos);
             for (pi, (part, &on)) in m.parts.iter().zip(&facet.parts).enumerate() {
                 if on == 0 || on >= 17 || part.subtract {
                     continue;
                 }
-                // traffic models have one wheel (part 47, front left): drawn at all four
-                // corners, mirrored for the other side
-                let placements: Vec<Mat4> = match (pi, part.wheel.is_some()) {
-                    (47, true) => [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)]
-                        .iter()
-                        .map(|&(sx, sz)| model * Mat4::from_translation(part.hub * Vec3::new(sx, 1.0, sz)) * Mat4::from_scale(Vec3::new(sx, 1.0, 1.0)))
-                        .collect(),
-                    (_, true) => vec![model * Mat4::from_translation(part.hub)],
-                    _ => vec![model],
-                };
+                let _ = pi;
+                let placements = [if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model }];
                 for tm in placements {
                 for v in &part.verts {
                     let c = v.color;
@@ -1046,6 +1042,9 @@ impl Game {
             let snap = sim.snapshot();
             for &(k, _) in &self.traffic {
                 let Some(f) = snap.car_facets.get(k).and_then(Option::as_ref) else { continue };
+                if f.env.is_none() {
+                    continue;
+                }
                 let Some((corners, rgb)) = f.shadow else { continue };
                 let Some(car) = snap.cars.get(k) else { continue };
                 if corners.iter().all(|c| *c == [0; 3]) {

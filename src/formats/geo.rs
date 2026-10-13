@@ -109,20 +109,29 @@ impl Geo {
     }
 
     /// The traffic cars' layout: no pointers, the parts one after another from 0x24C, each a
-    /// part header, its vertices and its polygons (no normals); parts 0..47 (the last one
-    /// the wheel disc).
+    /// part header, its vertices and its polygons (no normals).
     fn parse_packed(d: &[u8]) -> Self {
         let mut parts = Vec::with_capacity(PART_COUNT);
         let mut o = 0x24C;
         while parts.len() < PART_COUNT && o + PART_HEADER <= d.len() {
             let (nv, np) = (u16le(d, o) as usize, u16le(d, o + 2) as usize);
-            let end = o + PART_HEADER + nv * 6 + np * 12;
-            if nv > 1000 || end > d.len() {
+            if nv > 1000 || o + PART_HEADER + nv * 6 + np * 12 > d.len() {
                 break;
             }
             let position = [i32le(d, o + 4), i32le(d, o + 8), i32le(d, o + 12)];
             let vo = o + PART_HEADER;
-            let po = vo + nv * 6;
+            // the polygons follow the vertices, sometimes padded to 4 bytes: take the start
+            // where they read as polygons (flags 0..3, flags2 0 or 0x80, vertex indices in range)
+            let valid = |po: usize| {
+                po + np * 12 <= d.len()
+                    && (0..np).all(|i| {
+                        let q = &d[po + i * 12..po + i * 12 + 6];
+                        q[0] < 4 && (q[1] == 0 || q[1] == 0x80) && (q[3] as usize) < nv && (q[4] as usize) < nv && (q[5] as usize) < nv
+                    })
+            };
+            let ve = vo + nv * 6;
+            let po = if valid(ve) { ve } else { (ve + 3) & !3 };
+            let end = po + np * 12;
             let verts = (0..nv).map(|i| [i16le(d, vo + i * 6), i16le(d, vo + i * 6 + 2), i16le(d, vo + i * 6 + 4)]).collect();
             let polys = (0..np)
                 .map(|i| {
