@@ -108,7 +108,8 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         _ => "",
     };
     let cars: Vec<u32> = (0..9).map(|k| ram.i32(at::CAR_LIST + 4 * k) as u32).take_while(|&c| c != 0).collect();
-    let player = ram.code(cars[0]);
+    // (NFSHS_REF_CAR=CODE: another car's model at the player's pose)
+    let player = std::env::var("NFSHS_REF_CAR").unwrap_or_else(|_| ram.code(cars[0]));
     // the race cars (player first); traffic is not part of the engine's race yet
     let opponents: Vec<String> = cars[1..].iter().map(|&c| ram.code(c)).filter(|c| car_type(c).is_some()).collect();
     println!("track {track}{variant}, player {player}, opponents {opponents:?}");

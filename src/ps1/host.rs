@@ -206,6 +206,9 @@ pub struct Glow {
     pub anchor: [i32; 3],
     pub car: Option<u32>,
     pub cmds: Vec<OverlayCmd>,
+    /// A smoke or dust puff (Sfx_BuildSouffleFacet), sorted at its own depth; otherwise a
+    /// light's glow.
+    pub smoke: bool,
 }
 
 thread_local! {
@@ -214,6 +217,21 @@ thread_local! {
     static GLARE_MARKS: std::cell::RefCell<Vec<(u32, [i32; 3])>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 const FLARE_HALO: u32 = 0x800C_EBFC;
+/// Souffle_InsertFacet(view): the smoke and dust puffs (Sfx_BuildSouffleFacet for each in
+/// view), as Render_RenderWorld calls it.
+const SOUFFLE_INSERT_FACET: u32 = 0x800B_8ABC;
+const SFX_BUILD_SOUFFLE_FACET: u32 = 0x800D_E39C;
+
+fn smoke_marker(c: &mut Cpu, addr: u32) -> bool {
+    if addr == SFX_BUILD_SOUFFLE_FACET {
+        // Souffle_tISouffle: its position (coorddef) at +12
+        let p = c.r[5] + 12;
+        let anchor = [c.m.r32(p) as i32, c.m.r32(p + 4) as i32, c.m.r32(p + 8) as i32];
+        let at = c.m.r32(0x1F80_0004);
+        GLARE_MARKS.with_borrow_mut(|m| m.push((at, anchor)));
+    }
+    false
+}
 const FLARE_HALO2: u32 = 0x800C_E290;
 
 fn glare_marker(c: &mut Cpu, addr: u32) -> bool {
@@ -1959,7 +1977,42 @@ impl Host for GameHost {
                                 self.record_packets(c, from, to);
                                 let cmds = std::mem::take(&mut self.overlay);
                                 if !cmds.is_empty() {
-                                    self.track_glows.push(Glow { anchor, car: None, cmds });
+                                    self.track_glows.push(Glow { anchor, car: None, cmds, smoke: false });
+                                }
+                            }
+                        }
+                        self.overlay = saved;
+                    }
+                }
+                // the tyre smoke and dust (Souffle_InsertFacet), each puff recorded with its
+                // position
+                if self.hud_prims {
+                    let start = c.m.r32(0x1F80_0004);
+                    GLARE_MARKS.with_borrow_mut(Vec::clear);
+                    c.inner_hook = Some(smoke_marker);
+                    c.call_nested(SOUFFLE_INSERT_FACET, &[RENDER_VIEW]);
+                    c.inner_hook = None;
+                    let end = c.m.r32(0x1F80_0004);
+                    if std::env::var_os("NFSHS_SMOKELOG").is_some() {
+                        let n = c.m.r32(GP + 3828);
+                        let arr = c.m.r32(GP + 3824);
+                        let live = (0..n.min(64)).filter(|&i| c.m.r8(arr + 68 * i) != 0).count();
+                        eprintln!("smoke: {n} souffles ({live} live), {} built, {} bytes", GLARE_MARKS.with_borrow(Vec::len), end.wrapping_sub(start));
+                    }
+                    if end > start && end - start < 0x4_0000 {
+                        let marks = GLARE_MARKS.with_borrow(Clone::clone);
+                        let saved = std::mem::take(&mut self.overlay);
+                        self.prim_offset = [0, 0];
+                        for (k, &(from, anchor)) in marks.iter().enumerate() {
+                            let to = marks.get(k + 1).map_or(end, |m| m.0);
+                            if to > from {
+                                self.record_packets(c, from, to);
+                                let cmds = std::mem::take(&mut self.overlay);
+                                if std::env::var_os("NFSHS_SMOKELOG").is_some() {
+                                    eprintln!("puff at {:?}: {}", anchor.map(|v| v >> 16), format!("{cmds:?}").chars().take(300).collect::<String>());
+                                }
+                                if !cmds.is_empty() {
+                                    self.track_glows.push(Glow { anchor, car: None, cmds, smoke: true });
                                 }
                             }
                         }
@@ -2017,7 +2070,7 @@ impl Host for GameHost {
                         self.record_packets(c, start, end);
                         let cmds = std::mem::take(&mut self.overlay);
                         let anchor = [c.m.r32(car + 0xA0) as i32, c.m.r32(car + 0xA4) as i32, c.m.r32(car + 0xA8) as i32];
-                        self.car_glows.push(Glow { anchor, car: Some(car), cmds });
+                        self.car_glows.push(Glow { anchor, car: Some(car), cmds, smoke: false });
                     }
                     self.overlay = saved;
                 }

@@ -139,6 +139,19 @@ pub struct Track {
     /// Scenery placed for the whole track (0x21/0x24, 20-byte records like a block's plain
     /// placements, absolute positions): distant islands, headlands.
     pub globals: Vec<Placement>,
+    /// Keyframed track-wide scenery (0x21/0x24 records of type 3: the windmills' sails).
+    pub keyframed: Vec<Keyframed>,
+}
+
+/// A model moved through keyframes, looping: `{u16 len, u8 3, u8 id, u16 ?, u16 model,
+/// u16 frames, u16 ticks per frame}` then per frame `{i32 x, y, z (16.16), i16 qx, qy, qz,
+/// qw (2.14)}`.
+#[derive(Clone, Debug)]
+pub struct Keyframed {
+    pub model: u16,
+    pub ticks: u16,
+    /// Position (PS1 space) and rotation quaternion (x, y, z, w) per frame.
+    pub frames: Vec<(Vec3, [f32; 4])>,
 }
 
 pub fn fx(v: i32) -> f32 {
@@ -188,6 +201,7 @@ impl Track {
         let mut models = Vec::new();
         let mut model_flags = Vec::new();
         let mut globals = Vec::new();
+        let mut keyframed = Vec::new();
         for c in chunks(root.body) {
             match c.kind {
                 0x20 => {
@@ -312,6 +326,22 @@ impl Track {
                                         break;
                                     }
                                     let r = &d[o..(o + len).min(d.len())];
+                                    if r[2] == 3 && r.len() >= 12 {
+                                        let n = u16le(r, 8) as usize;
+                                        let frames: Vec<(Vec3, [f32; 4])> = (0..n)
+                                            .map(|k| 12 + 20 * k)
+                                            .take_while(|&f| f + 20 <= r.len())
+                                            .map(|f| {
+                                                let q = [0, 1, 2, 3].map(|i| i16le(r, f + 12 + 2 * i) as f32 / 16384.0);
+                                                (Vec3::new(fx(i32le(r, f)), fx(i32le(r, f + 4)), fx(i32le(r, f + 8))), q)
+                                            })
+                                            .collect();
+                                        if !frames.is_empty() {
+                                            keyframed.push(Keyframed { model: u16le(r, 6), ticks: u16le(r, 10).max(1), frames });
+                                        }
+                                        o += len;
+                                        continue;
+                                    }
                                     globals.push(Placement {
                                         kind: r[2],
                                         model: u16le(r, 6),
@@ -353,6 +383,6 @@ impl Track {
                 _ => {}
             }
         }
-        Ok(Self { nodes, blocks, textures, vroad, models, model_flags, globals })
+        Ok(Self { nodes, blocks, textures, vroad, models, model_flags, globals, keyframed })
     }
 }

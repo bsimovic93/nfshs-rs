@@ -5,7 +5,7 @@
 
 use crate::formats::{geo::Geo, grp, psh::Psh, viv::Viv};
 use anyhow::{Context, Result};
-use glam::{Vec2, Vec3};
+use glam::{Quat, Vec2, Vec3};
 use std::path::{Path, PathBuf};
 
 #[repr(C)]
@@ -95,7 +95,17 @@ pub struct Sprite {
     pub block: usize,
 }
 
+/// Keyframed scenery (the windmills' sails): the model's triangles in its own space
+/// (world-handed), placed each frame from its keyframes.
+pub struct AnimatedObject {
+    pub verts: Vec<Vertex>,
+    pub ticks: f32,
+    /// Position (world) and rotation (world-handed) per keyframe.
+    pub frames: Vec<(Vec3, Quat)>,
+}
+
 pub struct TrackAssets {
+    pub animated: Vec<AnimatedObject>,
     /// Camera-relative sky cylinder (horizon panorama).
     pub sky: Vec<Vertex>,
     /// Sky colour sampled from the cloud texture (zenith) and panorama top row (horizon).
@@ -368,6 +378,20 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         }
     }
     let global_range = global_start..indices.len() as u32;
+    let animated: Vec<AnimatedObject> = track
+        .keyframed
+        .iter()
+        .filter_map(|k| {
+            let model = track.models.get(k.model as usize)?;
+            let mut local = Vec::new();
+            let mut idx = Vec::new();
+            emit(model, &|v| Vec3::new(-v.x, v.y, v.z), false, &mut local, &mut idx, &mut Vec::new());
+            // the PS1's rotation seen in the mirrored world: axis (x, -y, -z)
+            let frames = k.frames.iter().map(|&(p, q)| (ps1_to_world(p), Quat::from_xyzw(q[0], -q[1], -q[2], q[3]).normalize())).collect();
+            Some(AnimatedObject { verts: idx.iter().map(|&i| local[i as usize]).collect(), ticks: k.ticks as f32, frames })
+        })
+        .collect();
+    log::info!("{} keyframed scenery objects", animated.len());
     log::info!("{} track-wide scenery objects", track.globals.len());
     let nodes = track.nodes.iter().map(|&n| ps1_to_world(n)).collect();
     log::info!("{} sprites", sprites.len());
@@ -375,7 +399,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         Some(s) => build_original_sky(s, &psh, &rects, atlas),
         None => build_sky(&psh, &rects, atlas),
     };
-    Ok(TrackAssets { verts, indices, tris, track, nodes, sprites, sky, sky_colors, block_ranges, global_range })
+    Ok(TrackAssets { animated, verts, indices, tris, track, nodes, sprites, sky, sky_colors, block_ranges, global_range })
 }
 
 fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {

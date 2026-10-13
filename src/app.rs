@@ -779,16 +779,18 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
 /// A race's 2D: the HUD the original drew (recorded, with its own atlas), or the host's port.
 pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::assets::Vertex> {
     match game.hud_frame(w, h) {
-        Some((f, sky, glows)) if !game.paused() => {
+        Some((f, sky, glows, glows_sub)) if !game.paused() => {
             r.write_overlay_atlas(&f.atlas);
             r.use_overlay_atlas = true;
             r.hud_subtract = f.subtract;
             r.sky_layer = sky;
             r.glows = glows;
+            r.glows_sub = glows_sub;
             f.vertices
         }
-        Some((f, sky, glows)) => {
+        Some((f, sky, glows, glows_sub)) => {
             r.glows = glows;
+            r.glows_sub = glows_sub;
             // paused: the host's pause menu over the kept picture, the sky layer as recorded
             r.write_overlay_atlas(&f.atlas);
             r.use_overlay_atlas = false;
@@ -801,6 +803,7 @@ pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::ass
             r.hud_subtract = Vec::new();
             r.sky_layer = Vec::new();
             r.glows = Vec::new();
+            r.glows_sub = Vec::new();
             game.hud(w, h)
         }
     }
@@ -812,6 +815,7 @@ pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: b
     r.use_overlay_atlas = false;
     r.sky_layer = Vec::new();
     r.glows = Vec::new();
+    r.glows_sub = Vec::new();
     let mut params = flat_params();
     if let Some(vp) = scene.view_proj {
         params.view_proj = vp;

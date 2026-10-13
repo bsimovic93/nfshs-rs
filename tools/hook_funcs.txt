@@ -36,3 +36,4 @@
 800c0a08 DrawC_PrimStop (skipped while the halos are recorded)
 800cebfc Flare_Halo (a light glow: its anchor is recorded)
 800ce290 Flare_Halo2 (a light glow: its anchor is recorded)
+800de39c Sfx_BuildSouffleFacet (a smoke puff: its position is recorded)

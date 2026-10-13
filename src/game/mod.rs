@@ -791,6 +791,23 @@ impl Game {
                 out.push(Vertex { pos: (s.pos + rot * Vec3::from(v.pos)).into(), ..*v });
             }
         }
+        // keyframed scenery (windmill sails), looping through its frames (ticks per frame
+        // counted in 60 Hz fields)
+        let fields = match &self.sim {
+            Some(s) => s.snapshot().field as f64,
+            None => self.race_time as f64 * 60.0,
+        };
+        for a in &self.track.animated {
+            let n = a.frames.len();
+            let t = (fields / a.ticks as f64).rem_euclid(n as f64);
+            let (k, f) = (t as usize % n, t.fract() as f32);
+            let (p0, q0) = a.frames[k];
+            let (p1, q1) = a.frames[(k + 1) % n];
+            let (pos, rot) = (p0.lerp(p1, f), q0.slerp(q1, f));
+            for v in &a.verts {
+                out.push(Vertex { pos: (pos + rot * Vec3::from(v.pos)).into(), ..*v });
+            }
+        }
         for (i, r) in self.racers.iter().enumerate() {
             if i == 0 && self.cam_mode == CameraMode::Bumper {
                 continue;
@@ -836,11 +853,16 @@ impl Game {
                 if part.subtract {
                     continue;
                 }
-                for v in &part.verts {
-                    let c = v.color;
-                    let p = tm.transform_point3(Vec3::from(v.pos));
-                    let p = p + (self.cam_pos - p).normalize_or_zero() * pull;
-                    out.push(Vertex { pos: p.into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
+                for tri in part.verts.chunks_exact(3) {
+                    let w = [0, 1, 2].map(|k| tm.transform_point3(Vec3::from(tri[k].pos)));
+                    if !front_facing(self.cam_pos, w) {
+                        continue;
+                    }
+                    for (v, p) in tri.iter().zip(w) {
+                        let c = v.color;
+                        let p = p + (self.cam_pos - p).normalize_or_zero() * pull;
+                        out.push(Vertex { pos: p.into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
+                    }
                 }
             }
         }
@@ -993,12 +1015,16 @@ impl Game {
                     continue;
                 }
                 let _ = pi;
-                let placements = [if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model }];
-                for tm in placements {
-                for v in &part.verts {
-                    let c = v.color;
-                    out.push(Vertex { pos: tm.transform_point3(Vec3::from(v.pos)).into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
-                }
+                let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
+                for tri in part.verts.chunks_exact(3) {
+                    let w = [0, 1, 2].map(|k| tm.transform_point3(Vec3::from(tri[k].pos)));
+                    if !front_facing(self.cam_pos, w) {
+                        continue;
+                    }
+                    for (v, p) in tri.iter().zip(w) {
+                        let c = v.color;
+                        out.push(Vertex { pos: p.into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
+                    }
                 }
             }
         }
@@ -1019,8 +1045,9 @@ impl Game {
                 None => &assets::CAR_PARTS_VISIBLE,
             };
             let model = Mat4::from_rotation_translation(r.car.orientation(), r.car.pos);
-            for (part, &on) in m.parts.iter().zip(visible) {
-                if on == 0 || on >= 17 || !part.subtract {
+            let hide: Vec<usize> = std::env::var("NFSHS_HIDE_PART").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
+            for (pi, (part, &on)) in m.parts.iter().zip(visible).enumerate() {
+                if on == 0 || on >= 17 || !part.subtract || hide.contains(&pi) {
                     continue;
                 }
                 for v in &part.verts {
@@ -1145,7 +1172,7 @@ impl Game {
 
     /// The HUD as the original drew it this frame (its views' primitives, recorded), when it
     /// was recorded: 2D for a `w` x `h` window with its own atlas.
-    pub fn hud_frame(&self, w: f32, h: f32) -> Option<(fe::FeFrame, Vec<Vertex>, Vec<Vertex>)> {
+    pub fn hud_frame(&self, w: f32, h: f32) -> Option<(fe::FeFrame, Vec<Vertex>, Vec<Vertex>, Vec<Vertex>)> {
         let sim = self.sim.as_ref()?;
         let s = sim.snapshot();
         let vram = s.vram.as_ref()?;
@@ -1155,6 +1182,8 @@ impl Game {
         let sky = fe::FeFrame::build_in(crate::assets::Atlas::new(1024), &s.sky_overlay, vram, screen, w, h);
         let mut atlas = sky.atlas;
         let mut glows = Vec::new();
+        // (the subtracted ones: PS1 semi-transparency mode 2, the smoke's dark puffs)
+        let mut glows_sub = Vec::new();
         // each glow moved from where the original's camera saw its light to where this
         // frame's (interpolated) camera sees it, and set at the depth the original sorts it
         // at (half way to the light: drawn over what is further, behind what is nearer)
@@ -1178,10 +1207,48 @@ impl Game {
             let f = fe::FeFrame::build_in(atlas, &g.cmds, vram, screen, w, h);
             atlas = f.atlas;
             let d = p_now - p_orig;
-            glows.extend(f.vertices.into_iter().map(|v| Vertex { pos: [v.pos[0] + d.x, v.pos[1] + d.y, 1.0 - 2.0 * depth], ..v }));
+            if g.smoke && std::env::var_os("NFSHS_NOSMOKE").is_some() {
+                continue;
+            }
+            let is_sub = |i: usize| f.subtract.iter().any(|r| r.contains(&(i as u32)));
+            if !g.smoke {
+                for (i, v) in f.vertices.iter().enumerate() {
+                    let v = Vertex { pos: [v.pos[0] + d.x, v.pos[1] + d.y, 1.0 - 2.0 * depth], ..*v };
+                    if is_sub(i) { glows_sub.push(v) } else { glows.push(v) }
+                }
+                continue;
+            }
+            // a smoke puff, close to the camera: each corner taken back into the world at the
+            // puff's depth as the original's camera saw it, then seen by this frame's camera
+            let Some((_, z_orig)) = to_px(orig_vp, raw) else { continue };
+            let (orig_inv, inv) = (orig_vp.inverse(), now.inverse());
+            let ndc = |x: f32, y: f32| Vec2::new(x / w * 2.0 - 1.0, 1.0 - y / h * 2.0);
+            // the puff is a flat picture standing on the ground: below its anchor it covers the
+            // road nearer the camera, which must not hide it (the PS1 draws it whole, sorted by
+            // its anchor), so there it takes the depth of the road it covers
+            let road_depth = |x: f32, y: f32| -> Option<f32> {
+                let n = ndc(x, y);
+                let near = inv.project_point3(n.extend(1.0));
+                let dir = (inv.project_point3(n.extend(0.5)) - near).normalize_or_zero();
+                let t = (raw.y + 0.05 - near.y) / dir.y;
+                (dir.y < -1e-4 && t > 0.0).then(|| to_px(now, near + dir * t).map(|(_, z)| z)).flatten()
+            };
+            for (i, &v) in f.vertices.iter().enumerate() {
+                let world = orig_inv.project_point3(ndc(v.pos[0], v.pos[1]).extend(z_orig));
+                // (a vertex is never dropped: the list is triangles)
+                let p = to_px(now, world).map_or(Vec2::new(v.pos[0] + d.x, v.pos[1] + d.y), |(p, _)| p);
+                let pulled = world + (self.cam_pos - world).normalize_or_zero() * 0.5;
+                let z = to_px(now, pulled).map_or(depth, |(_, z)| z);
+                let z = match road_depth(p.x, p.y) {
+                    Some(r) if r > z => r,
+                    _ => z,
+                };
+                let v = Vertex { pos: [p.x, p.y, 1.0 - 2.0 * z], ..v };
+                if is_sub(i) { glows_sub.push(v) } else { glows.push(v) }
+            }
         }
         let hud = fe::FeFrame::build_in(atlas, if s.paused { &[] } else { &s.overlay }, vram, screen, w, h);
-        Some((hud, sky.vertices, glows))
+        Some((hud, sky.vertices, glows, glows_sub))
     }
 
     /// The view-projection of a camera the original computed (as `frame_params` builds it).
@@ -1260,3 +1327,13 @@ fn car_light(light: u32) -> u32 {
     let (r, g, b) = (light & 0xFF, (light >> 8) & 0xFF, (light >> 16) & 0xFF);
     ((r + g + b) / 3).max(24)
 }
+
+/// A car polygon facing the camera: the PS1 draws the cars' polygons one-sided (DrawC_Prim
+/// skips those whose NCLIP is not positive), so the underside and the far side are not seen.
+pub(crate) fn front_facing(cam: Vec3, p: [Vec3; 3]) -> bool {
+    (p[1] - p[0]).cross(p[2] - p[0]).dot(cam - p[0]) * CAR_WINDING > 0.0
+}
+
+/// The car models' winding in world space (their x is mirrored from the PS1's).
+const CAR_WINDING: f32 = -1.0;
+

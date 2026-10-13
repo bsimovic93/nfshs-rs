@@ -28,7 +28,7 @@ pub struct FeFrame {
 
 /// Texel `(u, v)` of texture page `tpage` through CLUT `clut`, as RGBA (alpha 0 transparent,
 /// 128 semi-transparent texel, 255 opaque).
-fn texel(vram: &[u16], tpage: u16, clut: u16, u: u32, v: u32) -> [u8; 4] {
+pub(crate) fn texel(vram: &[u16], tpage: u16, clut: u16, u: u32, v: u32) -> [u8; 4] {
     let px = (tpage & 0xF) as usize * 64;
     let py = ((tpage >> 4) & 1) as usize * 256 + v as usize;
     let at = |x: usize, y: usize| vram.get((y % 512) * VRAM_W + (x % VRAM_W)).copied().unwrap_or(0);

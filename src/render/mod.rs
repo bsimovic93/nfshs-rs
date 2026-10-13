@@ -125,6 +125,10 @@ pub struct Renderer {
     pub glows: Vec<Vertex>,
     glow_vb: DynBuf,
     glow_pipeline: wgpu::RenderPipeline,
+    /// Glows subtracted (PS1 mode 2: the smoke's dark puffs), tested like `glows`.
+    pub glows_sub: Vec<Vertex>,
+    glow_sub_vb: DynBuf,
+    glow_sub_pipeline: wgpu::RenderPipeline,
     /// The 2D pass's own atlas (a race's HUD recorded from the original, textured from its
     /// VRAM), when set.
     overlay_atlas: Option<(wgpu::Texture, wgpu::BindGroup)>,
@@ -320,6 +324,8 @@ impl Renderer {
         let mid_vb = DynBuf::new(&device, "hud mid");
         let sky_layer_vb = DynBuf::new(&device, "sky layer");
         let glow_vb = DynBuf::new(&device, "glows");
+        let glow_sub_vb = DynBuf::new(&device, "glows subtracted");
+        let glow_sub_pipeline = mk_pipeline("vs_main", "fs_sub", &[Some(vbl.clone())], Some((false, wgpu::CompareFunction::GreaterEqual)), Some(wgpu::BlendState { color: subtract, alpha: subtract }), None);
         let glow_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], Some((false, wgpu::CompareFunction::GreaterEqual)), Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
         let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
@@ -343,6 +349,9 @@ impl Renderer {
             glows: Vec::new(),
             glow_vb,
             glow_pipeline,
+            glows_sub: Vec::new(),
+            glow_sub_vb,
+            glow_sub_pipeline,
             overlay_atlas: None,
             use_overlay_atlas: false,
             mid_vb,
@@ -514,6 +523,7 @@ impl Renderer {
         self.mid_vb.upload(&self.device, &self.queue, &self.hud_mid);
         self.sky_layer_vb.upload(&self.device, &self.queue, &self.sky_layer);
         self.glow_vb.upload(&self.device, &self.queue, &self.glows);
+        self.glow_sub_vb.upload(&self.device, &self.queue, &self.glows_sub);
         let depth = self.depth_view();
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -640,6 +650,14 @@ impl Renderer {
                     rp.set_bind_group(0, bg, &[]);
                     rp.set_vertex_buffer(0, self.glow_vb.buf.slice(..));
                     rp.draw(0..self.glows.len() as u32, 0..1);
+                }
+            }
+            if !self.glows_sub.is_empty() {
+                if let Some((_, bg)) = &self.overlay_atlas {
+                    rp.set_pipeline(&self.glow_sub_pipeline);
+                    rp.set_bind_group(0, bg, &[]);
+                    rp.set_vertex_buffer(0, self.glow_sub_vb.buf.slice(..));
+                    rp.draw(0..self.glows_sub.len() as u32, 0..1);
                 }
             }
             if !hud.is_empty() {
