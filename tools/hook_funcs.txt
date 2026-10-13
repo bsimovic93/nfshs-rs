@@ -14,3 +14,6 @@
 800b3428 R3DCar_InsertCarFacetMenuII (the front end's showroom car is drawn by the host)
 8003ac64 DrawCar (the showroom's car type is noted)
 800b3850 R3DCar_Showroom (the front end's turntable is drawn by the host)
+800bf1d4 Draw_DrawDirectScreen (pictures on the loading screen are recorded)
+800dbca4 Loading_DrawLoadingScreen (the host shows the loading screen)
+800dbdec Loading_UpdateLoadingScreen (the host shows the loading screen)

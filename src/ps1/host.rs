@@ -37,6 +37,12 @@ pub struct GameHost {
     pub car_facets: Vec<CarFacet>,
     /// 2D drawing recorded this frame (see [`OverlayCmd`]).
     pub overlay: Vec<OverlayCmd>,
+    /// The race's loading screen as drawn so far (Draw_DrawDirectScreen's pictures, in the
+    /// order drawn) and the clock of the last frame shown of it.
+    loading: Vec<OverlayCmd>,
+    loading_shown: u64,
+    /// The front end has run (the game started from main, not straight into a race).
+    front_end_ran: bool,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     /// When each SPU voice keyed on falls silent if not keyed off (virtual clock).
@@ -120,6 +126,8 @@ pub enum OverlayCmd {
     /// (64 vertices, inner/outer pairs, 1/256 m), textured (`tex`: the four uv words with clut
     /// and texture page) and each drawn in `base` and, when lit, again in its light's colour.
     ShowroomFloor { ring: Vec<[i16; 3]>, tex: [u32; 4], base: u32, lights: Vec<Option<u32>>, rim: Vec<[i16; 3]>, spot: u32 },
+    /// Draw_DrawDirectScreen: a picture put straight onto the screen at (x, y), opaque.
+    Bitmap { x: i16, y: i16, w: u16, h: u16, rgba: std::sync::Arc<Vec<u8>> },
 }
 
 /// A quad's texture in VRAM terms: texture page and CLUT ids, texel coordinates per corner.
@@ -341,6 +349,9 @@ impl GameHost {
             view_env: [0; 9],
             car_facets: Vec::new(),
             overlay: Vec::new(),
+            loading: Vec::new(),
+            loading_shown: 0,
+            front_end_ran: false,
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -357,6 +368,59 @@ impl GameHost {
 
     /// A game frame is done (race loop top or the front end's flip): hand this frame's state
     /// to the frame callback and take the pad input for the next.
+    /// Frames of the race's loading screen for the fields the loading has taken since the
+    /// last one (the original shows it while it reads the track from the CD).
+    fn loading_frames(&mut self, c: &mut Cpu) {
+        while self.front_end_ran && self.loading_shown + FIELD <= self.clock && self.frame.on_frame.is_some() && c.tick_limit != 0 {
+            self.loading_shown += FIELD;
+            let mut overlay = self.loading.clone();
+            // drawn last asked first (as an ordering table)
+            overlay.reverse();
+            let info = FrameInfo {
+                field: self.loading_shown / FIELD,
+                display: [0, 256, 512, 240],
+                view_env: self.view_env,
+                font_clut: [0; 16],
+                car_facets: Vec::new(),
+                overlay,
+                front_end: true,
+                vram: Some({
+                    if self.vram_dirty || self.vram_shared.is_none() {
+                        self.vram_shared = Some(std::sync::Arc::new(self.vram.clone()));
+                        self.vram_dirty = false;
+                    }
+                    self.vram_shared.clone().unwrap()
+                }),
+                font_palettes: Vec::new(),
+            };
+            if self.frame.on_frame.as_mut().and_then(|f| f(c, info)).is_none() {
+                c.tick_limit = 0;
+            }
+        }
+    }
+
+    /// A shape (shapetbl) in RAM as RGBA, opaque.
+    fn shape_rgba(c: &mut Cpu, shape: u32) -> Option<(u16, u16, Vec<u8>)> {
+        let (w, h) = (c.m.r16(shape + 4), c.m.r16(shape + 6));
+        let len = 16 + w as u32 * h as u32 * 2 + 16 + 512 + 64;
+        if w == 0 || h == 0 || len > 0x10_0000 {
+            return None;
+        }
+        let mut d: Vec<u8> = (0..len).map(|i| c.m.r8(shape + i)).collect();
+        // flag 0x08 of the type does not change the pixels (Texture_Vramcf masks it)
+        d[0] &= 0xF7;
+        let s = crate::formats::psh::Psh::parse_shape(&d, 0, String::new()).ok()?;
+        if !matches!(s.kind, 0x40..=0x42) {
+            log::warn!("direct screen picture of type {:#x} not drawn", s.kind);
+            return None;
+        }
+        let mut rgba = s.rgba;
+        for px in rgba.chunks_mut(4) {
+            px[3] = 255;
+        }
+        Some((w, h, rgba))
+    }
+
     fn frame_top(&mut self, c: &mut Cpu) -> Option<u16> {
         // top of the original main loop: game frames are locked to 60 Hz fields
         if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
@@ -1081,13 +1145,38 @@ impl Host for GameHost {
                 self.overlay.push(OverlayCmd::ShowroomFloor { ring, tex, base: 0x30_0A00, lights, rim, spot });
                 0
             }
+            0x800B_F1D4 => {
+                // Draw_DrawDirectScreen(shape, x, y): a picture loaded straight into the
+                // display buffer (the loading screen); recorded, and loaded as the game does
+                if let Some((w, h, rgba)) = Self::shape_rgba(c, a0) {
+                    self.loading.push(OverlayCmd::Bitmap { x: a1 as i16, y: a2 as i16, w, h, rgba: std::sync::Arc::new(rgba) });
+                }
+                return false;
+            }
+            0x800D_BCA4 => {
+                // Loading_DrawLoadingScreen: a new loading screen (background and track map)
+                self.loading.clear();
+                self.loading_shown = self.clock;
+                return false;
+            }
+            0x800D_BDEC => {
+                // Loading_UpdateLoadingScreen(step): show the screen for the time loading took
+                // so far, then let the game draw the progress bar's next part
+                self.loading_frames(c);
+                return false;
+            }
             0x8002_A7B0 => {
                 // Front_BuildStream: the front end runs
                 self.mode = Mode::FrontEnd;
+                self.front_end_ran = true;
                 return false;
             }
             0x800B_7A20 => {
-                // Sim_MainGameLoop: a race runs
+                // Sim_MainGameLoop: a race runs (after the rest of the loading screen's time)
+                if !self.loading.is_empty() {
+                    self.loading_frames(c);
+                    self.loading.clear();
+                }
                 self.mode = Mode::Race;
                 return false;
             }

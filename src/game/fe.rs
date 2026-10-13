@@ -71,6 +71,20 @@ impl FeFrame {
                 clip = [x as f32, y as f32, (x + w) as f32, (y + h) as f32];
                 continue;
             }
+            if let OverlayCmd::Bitmap { x, y, w: bw, h: bh, rgba } = cmd {
+                // a picture put on the screen as it is
+                let r = atlas.add(*bw as u32, *bh as u32, rgba);
+                let (x0, y0, x1, y1) = (*x as f32, *y as f32, (*x as f32 + *bw as f32), (*y as f32 + *bh as f32));
+                let v = |px: f32, py: f32, u: f32, t: f32| Vertex {
+                    pos: [ox + px * scale_x, oy + py * scale_y, 0.0],
+                    uv: [(r.x as f32 + u) / size, (r.y as f32 + t) / size],
+                    color: [0.5, 0.5, 0.5, 1.0],
+                };
+                let (bw, bh) = (*bw as f32, *bh as f32);
+                let q = [v(x0, y0, 0.0, 0.0), v(x1, y0, bw, 0.0), v(x1, y1, bw, bh), v(x0, y1, 0.0, bh)];
+                vertices.extend([q[0], q[1], q[2], q[0], q[2], q[3]]);
+                continue;
+            }
             let &OverlayCmd::Quad { ref pts, ref colours, ref tex, semi, abr } = cmd else { continue };
             let semi = &semi;
             let sub = *semi && abr == 2;
