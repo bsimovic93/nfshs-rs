@@ -328,7 +328,7 @@ impl Showroom {
                 model = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * model;
             }
             for (pi, (part, &on)) in self.model.parts.iter().zip(parts.iter()).enumerate() {
-                if on == 0 {
+                if on == 0 || on >= 17 {
                     continue;
                 }
                 let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };

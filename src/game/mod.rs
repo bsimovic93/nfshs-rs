@@ -797,7 +797,7 @@ impl Game {
             };
             let hide: Vec<usize> = std::env::var("NFSHS_HIDE_PART").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
             for (pi, (part, &on)) in m.parts.iter().zip(visible).enumerate() {
-                if on == 0 || hide.contains(&pi) {
+                if on == 0 || on >= 17 || hide.contains(&pi) {
                     continue;
                 }
                 let tm = match part.wheel {
@@ -867,6 +867,8 @@ impl Game {
         f.iter().any(Option::is_some).then_some(f)
     }
 
+    /// (R3DCar_ObjectVisible values 17 and up are light halos, drawn by the original's
+    /// DrawC_PrimHalo as 2D, not the part's polygons.)
     /// The cars' reflections (DrawC_Prim's environment path, flags 9): each polygon of a
     /// reflection-mapped part again with reflection map A and, for polygons flagged 0x3F3,
     /// map B (scrolled), blended as the maps' texture pages say. The map coordinates come
@@ -958,7 +960,7 @@ impl Game {
             let tint = car_light(facet.light) as f32 / 128.0;
             let model = Mat4::from_rotation_translation(pose.rot, pose.pos);
             for (pi, (part, &on)) in m.parts.iter().zip(&facet.parts).enumerate() {
-                if on == 0 || part.subtract {
+                if on == 0 || on >= 17 || part.subtract {
                     continue;
                 }
                 // traffic models have one wheel (part 47, front left): drawn at all four
@@ -997,7 +999,7 @@ impl Game {
             };
             let model = Mat4::from_rotation_translation(r.car.orientation(), r.car.pos);
             for (part, &on) in m.parts.iter().zip(visible) {
-                if on == 0 || !part.subtract {
+                if on == 0 || on >= 17 || !part.subtract {
                     continue;
                 }
                 for v in &part.verts {
@@ -1006,6 +1008,14 @@ impl Game {
             }
         }
         out
+    }
+
+    /// A point on the road moved towards the camera along its view ray: the same place on
+    /// screen, in front of the road (the PS1 draws the shadow over the road it lies on).
+    fn over_road(&self, p: Vec3) -> Vec3 {
+        let to_cam = self.cam_pos - p;
+        let d = to_cam.length();
+        p + to_cam / d.max(1e-3) * (0.35f32).min(d * 0.5)
     }
 
     /// The cars' ground shadows (DrawC_ShadowPrim): the "shdw" texture on the quad
@@ -1025,7 +1035,7 @@ impl Game {
             let ground = r.car.pos.y;
             let p = corners.map(|v| {
                 let q = Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) / 65536.0;
-                Vec3::new(r.car.pos.x + q.x, q.y.max(ground) + 0.03, r.car.pos.z + q.z)
+                self.over_road(Vec3::new(r.car.pos.x + q.x, q.y.max(ground) + 0.03, r.car.pos.z + q.z))
             });
             for k in [0, 1, 3, 0, 3, 2] {
                 out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
@@ -1047,7 +1057,7 @@ impl Game {
                 let ground = car.position[1] as f32 / 65536.0 - car.dimension[1] as f32 / 65536.0;
                 let p = corners.map(|v| {
                     let q = Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) / 65536.0;
-                    Vec3::new(cx + q.x, q.y.max(ground) + 0.03, cz + q.z)
+                    self.over_road(Vec3::new(cx + q.x, q.y.max(ground) + 0.03, cz + q.z))
                 });
                 for k in [0, 1, 3, 0, 3, 2] {
                     out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });

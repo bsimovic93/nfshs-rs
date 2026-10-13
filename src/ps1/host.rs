@@ -59,6 +59,8 @@ pub struct GameHost {
     /// This frame's sky layer (Flare_Sun's primitives), and the last one (kept while paused).
     sky_overlay: Vec<OverlayCmd>,
     last_sky: Vec<OverlayCmd>,
+    /// The race cars' light halos (DrawC_PrimHalo's primitives), drawn over the 3D.
+    car_glows: Vec<OverlayCmd>,
     /// The showroom car's shadow (DrawC_ShadowPrimClip's primitives), for the floor.
     showroom_shadow: Vec<OverlayCmd>,
     /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
@@ -181,7 +183,25 @@ fn native_hud(ra: u32) -> bool {
 
 /// Inner hook for R3DCar_InsertCarFacetII(car): record what the original decided to draw
 /// (see [`CarFacet::parse`]) instead of building primitives.
+thread_local! {
+    /// While the original's R3DCar_InsertCarFacetII runs for its halos (see
+    /// `record_car_facet`); and the primitive buffer ranges they were built in.
+    static HALO_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static HALO_RANGES: std::cell::RefCell<Vec<(u32, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The car body's drawing in R3DCar_InsertCarFacetII (the host draws the body).
+const CAR_BODY_DRAWING: [u32; 4] = [0x800C_22E0, 0x800C_0AC8, 0x800C_5054, 0x800C_4C68];
+
 fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
+    if HALO_PASS.get() {
+        // the original's car drawing for its halos: the body's primitives are skipped
+        if CAR_BODY_DRAWING.contains(&addr) {
+            c.r[2] = 0;
+            return true;
+        }
+        return false;
+    }
     if addr != R3DCAR_INSERT_CAR_FACET_II {
         return false;
     }
@@ -204,6 +224,16 @@ fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     rec.extend((0..8).map(|i| c.m.r32(CAR_CACHE + 100 + 4 * i)));
     rec.extend([c.m.r32(CAR_CACHE + 132), c.m.r32(CAR_CACHE + 144), c.m.r16(R3DCAR_CENTER + 0x14) as u32]);
     c.capture.extend(rec);
+    // then the original itself, which adds the lights' halos (DrawC_PrimHalo: brake lights,
+    // headlights) to the primitive buffer, everything else skipped
+    let start = c.m.r32(0x1F80_0004);
+    HALO_PASS.set(true);
+    c.call_nested(R3DCAR_INSERT_CAR_FACET_II, &[car]);
+    HALO_PASS.set(false);
+    let end = c.m.r32(0x1F80_0004);
+    if end > start && end - start < 0x1_0000 {
+        HALO_RANGES.with_borrow_mut(|r| r.push((start, end)));
+    }
     c.r[2] = 0;
     true
 }
@@ -395,6 +425,7 @@ impl GameHost {
             sky_overlay: Vec::new(),
             last_sky: Vec::new(),
             showroom_shadow: Vec::new(),
+            car_glows: Vec::new(),
             paused_buffers: HashMap::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],
@@ -629,6 +660,9 @@ impl GameHost {
                     hud
                 }
             };
+            // the halos first (over the 3D, under the HUD)
+            let glows = std::mem::take(&mut self.car_glows);
+            self.overlay.extend(glows);
             self.overlay.extend(hud);
             self.overlay.reverse();
         }
@@ -857,6 +891,12 @@ impl GameHost {
         let ret = c.call_nested(addr, &args);
         self.capturing = false;
         let end = c.m.r32(0x1F80_0004);
+        self.record_packets(c, start, end);
+        ret
+    }
+
+    /// Record the GPU packets built in the primitive buffer from `start` to `end`.
+    fn record_packets(&mut self, c: &mut Cpu, start: u32, end: u32) {
         let mut packets = Vec::new();
         let mut p = start;
         while p < end && end - p < 0x10_0000 {
@@ -888,7 +928,6 @@ impl GameHost {
             }
         }
         self.draw_mode = entry_mode;
-        ret
     }
 
     /// Points moved by the recorded view's drawing offset.
@@ -1865,10 +1904,24 @@ impl Host for GameHost {
                 // Its calls cannot reach the host from here: R3DCar_InsertCarFacetII is
                 // replaced by an inner hook that records the decision instead of drawing.
                 c.capture.clear();
+                HALO_RANGES.with_borrow_mut(Vec::clear);
                 c.inner_hook = Some(record_car_facet);
                 c.call_nested(R3DCAR_INSERT_ALL_LIST_FACET, &[RENDER_VIEW]);
                 c.inner_hook = None;
                 self.car_facets = CarFacet::parse(&c.capture);
+                // the cars' light halos, as the original built them (screen space)
+                if self.hud_prims {
+                    let ranges = HALO_RANGES.with_borrow(Clone::clone);
+                    let saved = std::mem::take(&mut self.overlay);
+                    self.prim_offset = [0, 0];
+                    for (start, end) in ranges {
+                        self.record_packets(c, start, end);
+                    }
+                    self.car_glows = std::mem::replace(&mut self.overlay, saved);
+                    if std::env::var_os("NFSHS_HALOLOG").is_some() {
+                        eprintln!("halos: {} prims {:?}", self.car_glows.len(), self.car_glows.first().map(|q| format!("{q:?}").chars().take(200).collect::<String>()));
+                    }
+                }
                 0
             }
 
