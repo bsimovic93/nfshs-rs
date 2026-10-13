@@ -1,9 +1,76 @@
-//! Audio output (cpal) and a small software mixer: looped engine layers with per-frame pitch
-//! and gain control, plus a streamed music track.
+//! Audio output (cpal) and a small software mixer: the original's own sound (the modelled
+//! SPU's output, streamed from the game thread) plus voices the host plays itself (movie
+//! soundtracks).
 
 use crate::formats::audio::Sample;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+/// The SPU's output waiting to be played: the game thread adds a frame's worth at a time
+/// (game time), the output device takes it in real time.
+struct SpuQueue {
+    buf: VecDeque<[i16; 2]>,
+    /// Fraction of the way from `buf[0]` to `buf[1]`.
+    pos: f64,
+    /// Playing (false: filling up to the target first).
+    started: bool,
+}
+
+static SPU_QUEUE: Mutex<SpuQueue> = Mutex::new(SpuQueue { buf: VecDeque::new(), pos: 0.0, started: false });
+/// Queued SPU samples aimed for: enough to cover a late game frame.
+const SPU_TARGET: usize = 44_100 * 3 / 40;
+const SPU_MAX: usize = 44_100 / 2;
+
+/// Queue SPU output (44.1 kHz, interleaved stereo).
+pub fn push_spu(samples: &[i16]) {
+    // NFSHS_PCM=file: also append it there (raw 44.1 kHz stereo s16le), for checking headless
+    if let Some(path) = std::env::var_os("NFSHS_PCM") {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+            let _ = f.write_all(&bytes);
+        }
+    }
+    let Ok(mut q) = SPU_QUEUE.lock() else { return };
+    q.buf.extend(samples.chunks_exact(2).map(|c| [c[0], c[1]]));
+    // far ahead of the output (or no output at all): drop the oldest
+    let excess = q.buf.len().saturating_sub(SPU_MAX);
+    if excess > 0 {
+        q.buf.drain(..excess + SPU_TARGET / 2);
+    }
+}
+
+/// Take `frames` output frames of SPU sound at `rate` Hz, added into `out` (interleaved by
+/// `channels`). The playback rate leans slightly towards keeping the queue at its target.
+fn pull_spu(out: &mut [f32], channels: usize, rate: f32) {
+    let Ok(mut q) = SPU_QUEUE.lock() else { return };
+    if !q.started {
+        if q.buf.len() < SPU_TARGET {
+            return;
+        }
+        q.started = true;
+    }
+    let fill = q.buf.len() as f64;
+    let lean = ((fill - SPU_TARGET as f64) / SPU_TARGET as f64 * 0.004).clamp(-0.01, 0.01);
+    let step = 44_100.0 / rate as f64 * (1.0 + lean);
+    for frame in out.chunks_mut(channels) {
+        if q.buf.len() < 2 {
+            q.started = false;
+            break;
+        }
+        let (a, b, t) = (q.buf[0], q.buf[1], q.pos as f32);
+        for (c, s) in frame.iter_mut().enumerate() {
+            let k = c.min(1);
+            *s += (a[k] as f32 * (1.0 - t) + b[k] as f32 * t) / 32768.0;
+        }
+        q.pos += step;
+        while q.pos >= 1.0 && !q.buf.is_empty() {
+            q.buf.pop_front();
+            q.pos -= 1.0;
+        }
+    }
+}
 
 struct Voice {
     sample: Arc<Sample>,
@@ -61,7 +128,11 @@ pub struct Audio {
 impl Audio {
     pub fn new() -> anyhow::Result<Self> {
         let host = cpal::default_host();
-        let device = host.default_output_device().ok_or_else(|| anyhow::anyhow!("no audio output device"))?;
+        // NFSHS_AUDIO_DEVICE=name: an output device other than the default (by part of its name)
+        let chosen = std::env::var("NFSHS_AUDIO_DEVICE").ok().and_then(|want| {
+            host.output_devices().ok()?.find(|d| d.description().is_ok_and(|n| n.name().contains(want.as_str())))
+        });
+        let device = chosen.or_else(|| host.default_output_device()).ok_or_else(|| anyhow::anyhow!("no audio output device"))?;
         let supported = device.default_output_config()?;
         let config: cpal::StreamConfig = supported.clone().into();
         let rate = config.sample_rate as f32;
@@ -84,6 +155,12 @@ impl Audio {
                     *s = if c % 2 == 0 { l } else { r };
                 }
             }
+            drop(mx);
+            pull_spu(data, channels, rate);
+            for s in data.iter_mut() {
+                *s = s.clamp(-1.0, 1.0);
+            }
+            let Ok(mut mx) = m.lock() else { return };
             mx.voices.iter_mut().for_each(|v| {
                 if v.as_ref().is_some_and(|v| v.done) {
                     *v = None;

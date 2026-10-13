@@ -89,7 +89,8 @@ impl App {
             r.set_world(&game.track.verts, &game.track.indices);
         }
         self.stop_sounds();
-        if let Some(audio) = &self.audio {
+        // (a race the original runs makes its own sound)
+        if let (Some(audio), None) = (&self.audio, &game.sim) {
             let code = &game.player().name;
             let bank = self
                 .data
@@ -99,7 +100,9 @@ impl App {
                 .and_then(|v| v.find_suffix(".bnk").and_then(|(_, b)| crate::formats::audio::Bank::parse(b).ok()));
             self.engine = bank.and_then(|b| crate::audio::EngineSound::new(audio, &b));
         }
-        self.queue_music("game");
+        if game.sim.is_none() {
+            self.queue_music("game");
+        }
         self.screen = Screen::Race(Box::new(game));
     }
 
@@ -111,7 +114,6 @@ impl App {
                     r.clear_world();
                 }
                 self.stop_sounds();
-                self.queue_music("zmenu");
                 self.screen = Screen::FrontEnd(Box::new(sim));
             }
             Err(e) => {
@@ -143,7 +145,8 @@ impl App {
             r.set_world(&game.track.verts, &game.track.indices);
         }
         self.stop_sounds();
-        if let Some(audio) = &self.audio {
+        // (a race the original runs makes its own sound)
+        if let (Some(audio), None) = (&self.audio, &game.sim) {
             let code = &game.player().name;
             let bank = self
                 .data
@@ -153,7 +156,9 @@ impl App {
                 .and_then(|v| v.find_suffix(".bnk").and_then(|(_, b)| crate::formats::audio::Bank::parse(b).ok()));
             self.engine = bank.and_then(|b| crate::audio::EngineSound::new(audio, &b));
         }
-        self.queue_music("game");
+        if game.sim.is_none() {
+            self.queue_music("game");
+        }
         self.screen = Screen::Race(Box::new(game));
     }
 
@@ -378,7 +383,6 @@ impl App {
                         if let (Some(sim), Some(r)) = (sim, &mut self.renderer) {
                             r.clear_world();
                             self.stop_sounds();
-                            self.queue_music("zmenu");
                             self.screen = Screen::FrontEnd(sim);
                         }
                         return;
@@ -399,7 +403,7 @@ impl App {
             }
         }
         self.update_audio(dt);
-        // a front-end movie has ended: its soundtrack stops and the menu music comes back
+        // a front-end movie has ended: its soundtrack stops
         let playing = match &self.screen {
             Screen::FrontEnd(sim) => sim.snapshot().overlay.iter().any(|o| matches!(o, crate::ps1::host::OverlayCmd::Movie { .. })),
             _ => false,
@@ -407,9 +411,6 @@ impl App {
         if !playing && self.movie.take().is_some() {
             if let (Some(audio), Some(v)) = (&self.audio, self.movie_voice.take()) {
                 audio.stop(v);
-            }
-            if self.music.is_none() && self.music_rx.is_none() {
-                self.queue_music("zmenu");
             }
         }
         let Some(r) = &mut self.renderer else { return };

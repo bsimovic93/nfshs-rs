@@ -90,21 +90,6 @@
 800fb2b0 CD_Stopread
 800fb2cc CD_Getinfo
 800f9954 StSetStream
-8010bac8 iSNDdmcomplete
-8010b4bc iSNDdmtransfer
-8010b87c iSNDdmservice
-8010b8fc iSNDdmqueue
-8010b9f0 iSNDdmqueuesplit
-80104360 iSNDpsxzerospu
-800ffaec iSNDpsxkeyon
-800ffb14 iSNDpsxkeyoff
-800ffb3c iSNDpsxeffecton
-800ffb7c iSNDpsxeffectoff
-800ffbbc iSNDpsxeffectvol
-8010cbdc iSNDpsxenablespuirq
-8010cc00 iSNDpsxdisablespuirq
-800968e8 Speech_Server__Fv
-80076b90 AudioClc_SoundCars (sizes match dev build)
 800b4024 Render_RenderPlayerView__Fii (3D view is drawn by the host renderer)
 800eccc8 FILE_open (asynchronous file operations complete at once)
 800ece48 FILE_read

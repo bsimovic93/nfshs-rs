@@ -2,7 +2,8 @@
 //!
 //! The original NFS4.EXE routines are translated 1:1 into Rust functions that operate on
 //! this register file and memory image, so they reproduce the console's integer maths exactly.
-//! Hardware is not emulated: functions that talk to it are replaced by a [`Host`].
+//! Hardware is not emulated: functions that talk to it are replaced by a [`Host`], and the
+//! registers the remaining code touches go to an [`IoBus`] the host plugs in.
 
 pub mod bios;
 mod interp;
@@ -16,23 +17,57 @@ const SCRATCH_SIZE: usize = 0x400;
 /// Hardware registers are not emulated: reads return 0 and writes are dropped (counted so
 /// accidental hardware polling is detected), except for the SPU voices' current envelope
 /// volume, which the host keeps so the sound driver can tell when a voice has ended.
+/// Hardware registers (0x1F801000..0x1F803000) as the host models them: the original's
+/// sound driver programs the SPU and its DMA channel directly.
+pub trait IoBus {
+    /// Read `n` (1, 2 or 4) bytes at physical address `a`.
+    fn read(&mut self, a: u32, n: u32) -> u32;
+    /// Write `n` bytes; `ram` is main RAM (for DMA).
+    fn write(&mut self, a: u32, v: u32, n: u32, ram: &mut [u8]);
+    /// Interrupts raised since the last call: bits 0..10 = I_STAT lines (9 = SPU), bits
+    /// 16..22 = DMA channels' completion.
+    fn take_irqs(&mut self) -> u32;
+    fn as_any(&mut self) -> &mut dyn std::any::Any;
+}
+
 pub struct Mem {
     pub ram: Vec<u8>,
     pub scratch: [u8; SCRATCH_SIZE],
-    /// The SPU voices' current ADSR volume (0x1F801C0C + 16 * voice).
+    /// Without an [`IoBus`]: the SPU voices' ADSR volume as reads see it (0x1F801C0C + 16 * voice).
     pub spu_volume: [u16; 24],
     io: [u8; 4],
     pub io_accesses: u64,
     pub last_io: u32,
+    pub bus: Option<Box<dyn IoBus>>,
 }
 
 impl Default for Mem {
     fn default() -> Self {
-        Self { ram: vec![0; RAM_SIZE], scratch: [0; SCRATCH_SIZE], spu_volume: [0; 24], io: [0; 4], io_accesses: 0, last_io: 0 }
+        Self { ram: vec![0; RAM_SIZE], scratch: [0; SCRATCH_SIZE], spu_volume: [0; 24], io: [0; 4], io_accesses: 0, last_io: 0, bus: None }
     }
 }
 
 impl Mem {
+    /// A hardware register the [`IoBus`] handles.
+    #[inline]
+    fn on_bus(&self, a: u32) -> bool {
+        let p = a & 0x1FFF_FFFF;
+        (0x1F80_1000..0x1F80_3000).contains(&p) && self.bus.is_some()
+    }
+    #[cold]
+    fn bus_read(&mut self, a: u32, n: u32) -> u32 {
+        self.io_accesses += 1;
+        self.last_io = a & 0x1FFF_FFFF;
+        self.bus.as_mut().map_or(0, |b| b.read(a & 0x1FFF_FFFF, n))
+    }
+    #[cold]
+    fn bus_write(&mut self, a: u32, v: u32, n: u32) {
+        self.io_accesses += 1;
+        self.last_io = a & 0x1FFF_FFFF;
+        if let Some(b) = self.bus.as_mut() {
+            b.write(a & 0x1FFF_FFFF, v, n, &mut self.ram);
+        }
+    }
     #[inline]
     fn slot(&mut self, addr: u32, n: usize) -> &mut [u8] {
         let a = addr & 0x1FFF_FFFF;
@@ -57,28 +92,46 @@ impl Mem {
     }
     #[inline]
     pub fn r8(&mut self, a: u32) -> u8 {
+        if self.on_bus(a) {
+            return self.bus_read(a, 1) as u8;
+        }
         self.slot(a, 1)[0]
     }
     #[inline]
     pub fn r16(&mut self, a: u32) -> u16 {
+        if self.on_bus(a) {
+            return self.bus_read(a, 2) as u16;
+        }
         let s = self.slot(a, 2);
         u16::from_le_bytes([s[0], s[1]])
     }
     #[inline]
     pub fn r32(&mut self, a: u32) -> u32 {
+        if self.on_bus(a) {
+            return self.bus_read(a, 4);
+        }
         let s = self.slot(a, 4);
         u32::from_le_bytes([s[0], s[1], s[2], s[3]])
     }
     #[inline]
     pub fn w8(&mut self, a: u32, v: u8) {
+        if self.on_bus(a) {
+            return self.bus_write(a, v as u32, 1);
+        }
         self.slot(a, 1)[0] = v;
     }
     #[inline]
     pub fn w16(&mut self, a: u32, v: u16) {
+        if self.on_bus(a) {
+            return self.bus_write(a, v as u32, 2);
+        }
         self.slot(a, 2).copy_from_slice(&v.to_le_bytes());
     }
     #[inline]
     pub fn w32(&mut self, a: u32, v: u32) {
+        if self.on_bus(a) {
+            return self.bus_write(a, v, 4);
+        }
         self.slot(a, 4).copy_from_slice(&v.to_le_bytes());
     }
     pub fn read_bytes(&mut self, a: u32, out: &mut [u8]) {
@@ -135,6 +188,10 @@ pub struct Cpu {
     /// Timer interrupts waiting to be delivered.
     pub pending_ticks: u32,
     in_irq: bool,
+    /// Handlers registered with InterruptCallback (by I_STAT line) and DMACallback (by
+    /// channel), run when the [`IoBus`] raises their interrupt.
+    pub irq_callbacks: [u32; 11],
+    pub dma_callbacks: [u32; 7],
     /// Pending continuation address (a function ran past its end); see [`Cpu::run_cont`].
     pub cont: u32,
     /// Number of times execution fell back to the interpreter.
@@ -174,7 +231,7 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(m: Mem) -> Self {
-        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, since_host: 0, max_since_host: 0, spin_limit: 0, recent: [(0, 0); 16], recent_at: 0, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false, inner_hook: None, deferred: Vec::new(), capture: Vec::new(), rand_seed: 0 }
+        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, irq_callbacks: [0; 11], dma_callbacks: [0; 7], in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, since_host: 0, max_since_host: 0, spin_limit: 0, recent: [(0, 0); 16], recent_at: 0, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false, inner_hook: None, deferred: Vec::new(), capture: Vec::new(), rand_seed: 0 }
     }
     #[inline]
     pub fn mult(&mut self, a: u32, b: u32) {
@@ -304,6 +361,9 @@ impl Cpu {
     /// Deliver pending timer interrupts: run each registered handler with the CPU state saved
     /// and restored around it, as the PS1 interrupt dispatcher does.
     pub fn service_interrupts(&mut self) {
+        if !self.in_irq && self.m.bus.is_some() {
+            self.service_bus_interrupts();
+        }
         if self.in_irq || self.pending_ticks == 0 || self.timer_handlers.is_empty() {
             return;
         }
@@ -316,6 +376,40 @@ impl Cpu {
                 self.r[31] = 0;
                 self.call(h);
             }
+        }
+        self.r = saved.0;
+        self.hi = saved.1;
+        self.lo = saved.2;
+        self.stack.truncate(saved.3);
+        self.in_irq = false;
+    }
+
+    /// Deliver the hardware interrupts the [`IoBus`] raised (DMA completion, SPU IRQ) to the
+    /// callbacks the game registered, unless the game has interrupts disabled (COP0 SR IEc
+    /// or IM2 clear, as around its own critical sections).
+    fn service_bus_interrupts(&mut self) {
+        if self.cop0[12] & 0x401 != 0x401 {
+            return;
+        }
+        let Some(irqs) = self.m.bus.as_mut().map(|b| b.take_irqs()) else { return };
+        if irqs == 0 {
+            return;
+        }
+        let handlers: Vec<u32> = (0..11)
+            .filter(|i| irqs >> i & 1 != 0)
+            .map(|i| self.irq_callbacks[i])
+            .chain((0..7).filter(|ch| irqs >> (16 + ch) & 1 != 0).map(|ch| self.dma_callbacks[ch]))
+            .filter(|&h| h != 0)
+            .collect();
+        if handlers.is_empty() {
+            return;
+        }
+        self.in_irq = true;
+        let saved = (self.r, self.hi, self.lo, self.stack.len());
+        for h in handlers {
+            self.r[29] = saved.0[29].wrapping_sub(0x200) & !7;
+            self.r[31] = 0;
+            self.call(h);
         }
         self.r = saved.0;
         self.hi = saved.1;

@@ -1,6 +1,6 @@
 # Recompiled functions that are always called through Cpu::call so the host can observe them
 800e77f0 systemtask
-8009a5ac CopSpeak_Stop (pending requests are dropped first: speech is played by the host)
+8009a5ac CopSpeak_Stop (pending requests are dropped first)
 8002a7b0 Front_BuildStream (the host switches to front-end frames)
 800b7a20 Sim_MainGameLoop (the host switches to race frames)
 800eec70 SetDrawArea (the front end's clipping is recorded)
@@ -37,3 +37,9 @@
 800cebfc Flare_Halo (a light glow: its anchor is recorded)
 800ce290 Flare_Halo2 (a light glow: its anchor is recorded)
 800de39c Sfx_BuildSouffleFacet (a smoke puff: its position is recorded)
+8007a0ac AudioCmn_PlayFESFXVol (logged with PS1_CALLLOG; the original runs)
+800e861c SNDplay (logged with PS1_CALLLOG; the original runs)
+8007b9c4 AudioMus_PlaySong (logged with PS1_CALLLOG; the original runs)
+800ea594 SNDSTRM_queuefile (logged with PS1_CALLLOG; the original runs)
+80103018 iSNDdownloadbank (logged with PS1_CALLLOG; the original runs)
+800bcc74 AudioCmn_LoadBank (logged with PS1_CALLLOG; the original runs)

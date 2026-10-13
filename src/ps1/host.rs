@@ -79,8 +79,6 @@ pub struct GameHost {
     pub from_main: bool,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
-    /// When each SPU voice keyed on falls silent if not keyed off (virtual clock).
-    voice_end: [u64; 24],
     pub rcnt: u32,
     pub log: Vec<String>,
     /// 1024x512 16-bit VRAM, filled by the game's LoadImage/ClearImage/MoveImage.
@@ -98,6 +96,13 @@ pub struct GameHost {
     next_event: u32,
     /// Frame driver state while the original main loop runs (see race.rs).
     pub frame: FrameDriver,
+}
+
+/// PS1_FILELOG: print the files the game opens.
+pub fn file_log(s: String) {
+    if std::env::var_os("PS1_FILELOG").is_some() {
+        eprintln!("{s}");
+    }
 }
 
 /// Called at the top of every main-loop iteration (one game frame, locked to a 60 Hz field)
@@ -439,10 +444,21 @@ impl GameHost {
     /// Move the virtual clock forward, queueing the timer interrupts that fall in between.
     fn advance_to(&mut self, c: &mut Cpu, t: u64) {
         c.pending_ticks += (t / TICK - self.clock / TICK) as u32;
+        // the sound hardware runs along (44.1 kHz of the virtual clock)
+        let samples = t * super::spu::RATE / 1920 - self.clock * super::spu::RATE / 1920;
         self.clock = t;
-        for (v, &end) in c.m.spu_volume.iter_mut().zip(&self.voice_end) {
-            if t >= end {
-                *v = 0;
+        if let Some(spu) = c.m.bus.as_mut().and_then(|b| b.as_any().downcast_mut::<super::spu::Spu>()) {
+            spu.run(samples as usize);
+            crate::audio::push_spu(&spu.out);
+            spu.out.clear();
+            if std::env::var_os("PS1_VOICELOG").is_some() && t / 1920 != (t - samples * 1920 / super::spu::RATE) / 1920 {
+                eprintln!("[{t:>8}] {}", spu.describe());
+                if let Some(p) = std::env::var_os("PS1_SPURAM") {
+                    std::fs::write(p, &spu.ram).ok();
+                }
+            }
+            if std::env::var_os("PS1_SNDLOG").is_some() && spu.keyons != 0 {
+                eprintln!("[{t:>8}] keyon {:06x}", std::mem::take(&mut spu.keyons));
             }
         }
     }
@@ -462,7 +478,6 @@ impl GameHost {
             file_ops: HashMap::new(),
             next_op: 1,
             clock: 0,
-            voice_end: [0; 24],
             display: [0; 4],
             view_env: [0; 9],
             car_facets: Vec::new(),
@@ -1254,7 +1269,7 @@ impl Host for GameHost {
                     Some(data) => {
                         let h = self.next_handle;
                         self.next_handle += 1;
-                        self.log.push(format!("open {name} ({} bytes)", data.len()));
+                        crate::ps1::host::file_log(format!("open {name} ({} bytes)", data.len()));
                         if std::env::var_os("PS1_FILES").is_some() {
                             eprintln!("open {name}");
                         }
@@ -1263,7 +1278,7 @@ impl Host for GameHost {
                         1
                     }
                     None => {
-                        self.log.push(format!("open {name}: not found"));
+                        crate::ps1::host::file_log(format!("open {name}: not found"));
                         c.m.w32(a3, 0);
                         0
                     }
@@ -1277,12 +1292,12 @@ impl Host for GameHost {
                     Some(data) => {
                         let h = self.next_handle;
                         self.next_handle += 1;
-                        self.log.push(format!("open {name} ({} bytes, async)", data.len()));
+                        crate::ps1::host::file_log(format!("open {name} ({} bytes, async)", data.len()));
                         self.files.insert(h, data);
                         h
                     }
                     None => {
-                        self.log.push(format!("open {name}: not found"));
+                        crate::ps1::host::file_log(format!("open {name}: not found"));
                         0
                     }
                 };
@@ -1342,13 +1357,13 @@ impl Host for GameHost {
                     Some(v) => {
                         let h = self.next_handle;
                         self.next_handle += 1;
-                        self.log.push(format!("mount {name} ({} entries)", v.entries.len()));
+                        crate::ps1::host::file_log(format!("mount {name} ({} entries)", v.entries.len()));
                         self.mounts.push((h, v.entries));
                         c.m.w32(a3, h);
                         1
                     }
                     None => {
-                        self.log.push(format!("mount {name}: failed"));
+                        crate::ps1::host::file_log(format!("mount {name}: failed"));
                         c.m.w32(a3, 0);
                         0
                     }
@@ -1717,12 +1732,16 @@ impl Host for GameHost {
             }
             0x800F_31A8 => 0, // ResetCallback
             0x800F_31D8 => {
+                // InterruptCallback(line, handler): the previous handler
                 self.callbacks.insert("interrupt", a1);
-                0
+                let slot = c.irq_callbacks.get_mut(a0 as usize);
+                slot.map_or(0, |h| std::mem::replace(h, a1))
             }
             0x800F_3208 => {
+                // DMACallback(channel, handler): the previous handler
                 self.callbacks.insert("dma", a1);
-                0
+                let slot = c.dma_callbacks.get_mut(a0 as usize);
+                slot.map_or(0, |h| std::mem::replace(h, a1))
             }
             0x800F_3238 => {
                 let old = self.callbacks.insert("vsync", a0).unwrap_or(0);
@@ -1767,7 +1786,7 @@ impl Host for GameHost {
             }
             0x8009_A5AC => {
                 // CopSpeak_Stop waits for the cop speech queue (read gp+2932, write gp+2928)
-                // to be played out; speech is the host's, so the requests are dropped
+                // to be played out: the requests still waiting are dropped
                 let write = c.m.r32(0x8013_D83C + 2928);
                 c.m.w32(0x8013_D83C + 2932, write);
                 return false;
@@ -1805,38 +1824,6 @@ impl Host for GameHost {
             0x800F_80FC | 0x800F_8108 | 0x800F_8174 | 0x800F_8194 | 0x800F_85CC => 0,
             0x800F_81E8 | 0x800F_81FC | 0x800F_860C => 0, // Cd*Callback
 
-            // ---- EA sound driver: SPU DMA and voice registers (audio is produced by the host)
-            0x8010_BAC8 => 1,                             // iSNDdmcomplete: transfer done
-            0x8010_B8FC | 0x8010_B9F0 => 1,               // iSNDdmqueue / queuesplit: transfer id
-            0x8010_B4BC | 0x8010_B87C => 0,               // iSNDdmtransfer / iSNDdmservice
-            0x8010_4360 => 0,                             // iSNDpsxzerospu
-            0x800F_FAEC => {
-                // iSNDpsxkeyon(voices): the voices sound (as far as the driver can see) until
-                // keyed off, or for a second
-                if std::env::var_os("PS1_SNDLOG").is_some() {
-                    eprintln!("keyon {a0:06x} at {}", self.clock);
-                }
-                for v in (0..24).filter(|v| a0 >> v & 1 != 0) {
-                    c.m.spu_volume[v] = 0x4000;
-                    self.voice_end[v] = self.clock + 1920;
-                }
-                0
-            }
-            0x800F_FB14 => {
-                // iSNDpsxkeyoff(voices)
-                if std::env::var_os("PS1_SNDLOG").is_some() {
-                    eprintln!("keyoff {a0:06x} at {}", self.clock);
-                }
-                for v in (0..24).filter(|v| a0 >> v & 1 != 0) {
-                    c.m.spu_volume[v] = 0;
-                }
-                0
-            }
-            0x800F_FB3C | 0x800F_FB7C | 0x800F_FBBC => 0,
-            0x8010_CBDC | 0x8010_CC00 => 0,               // SPU IRQ enable/disable
-
-            0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
-            0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
             // the HUD's helpers: in races the original builds its primitives (recorded from
             // the HUD views' ordering tables)
             0x800C_C7F0 | 0x800D_4E9C | 0x800D_8690 | 0x800D_9ABC | 0x800D_3558 if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) => return false,

@@ -1,4 +1,4 @@
-"""dsref.py OUTDIR [--state FILE|none] [--wait SECONDS] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS,
+"""dsref.py OUTDIR [--state FILE|none] [--wait SECONDS] [--audio] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS,
 shot:NAME (screenshot while running), ram:NAME (paused screenshot + RAM dump),
 poke:ADDR:VALUE[:COUNT], save:NAME (save state into re/states/NAME.sav); --state NAME also
 finds re/states/NAME.sav)
@@ -9,6 +9,10 @@ pause it over GDB, capture the window (PrintWindow) and dump main RAM. The Rust 
 comparison. DuckStation is force-closed afterwards so it never writes a save state.
 
 Needs [Debug] EnableGDBServer = true, GDBServerPort = 2345 in DuckStation's settings.ini.
+
+--audio: DuckStation's sound is recorded too, into OUTDIR/audio.wav (44.1 kHz stereo, from
+just before it starts): for the run its output goes, unmuted at full volume, to the silent
+Steam Streaming Speakers device, whose loopback is recorded (settings.ini is restored after).
 """
 import os
 import struct, subprocess, sys, time
@@ -18,6 +22,39 @@ import ds, dsshot
 EXE = r'C:\Users\Branko\Desktop\Retro PS Games\PSX\duckstation-qt-x64-ReleaseLTCG.exe'
 CUE = r'C:\Users\Branko\Desktop\Retro PS Games\PSX\ISOS\Need for Speed - High Stakes\Need for Speed - High Stakes (USA).cue'
 STATE = os.path.expandvars(r'%USERPROFILE%\Documents\DuckStation\savestates\SLUS-00826_2.sav')
+SETTINGS = os.path.expandvars(r'%USERPROFILE%\Documents\DuckStation\settings.ini')
+# a playback device nobody listens to: DuckStation's sound goes there and is recorded back
+AUDIO_DEVICE = '{0.0.0.00000000}.{5ec107bf-1a31-4431-824c-01a2c7174cc0}'
+
+
+class Recorder:
+    """Loopback recording of AUDIO_DEVICE on a thread until stop()."""
+
+    def __init__(self):
+        import threading
+        self.chunks, self.done = [], threading.Event()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def run(self):
+        import soundcard as sc
+        mic = sc.get_microphone(AUDIO_DEVICE, include_loopback=True)
+        with mic.recorder(samplerate=44100, channels=2) as r:
+            while not self.done.is_set():
+                self.chunks.append(r.record(numframes=4410))
+
+    def stop(self, path):
+        import numpy as np, wave
+        self.done.set()
+        self.thread.join()
+        data = np.concatenate(self.chunks) if self.chunks else np.zeros((0, 2))
+        pcm = (np.clip(data, -1, 1) * 32767).astype('<i2')
+        with wave.open(path, 'wb') as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(44100)
+            w.writeframes(pcm.tobytes())
+        print(f'audio: {path} ({len(pcm) / 44100:.1f} s)')
 
 
 STATES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 're', 'states')
@@ -70,6 +107,16 @@ def main():
         state = os.path.join(STATES, state + '.sav')
     wait = float(arg('--wait', '3'))
     keys = [k for k in arg('--keys', '').split(',') if k]
+    audio = '--audio' in sys.argv
+    settings = open(SETTINGS, encoding='utf-8').read() if audio else None
+    recorder = None
+    if audio:
+        import re
+        s2 = re.sub(r'(?m)^OutputMuted = .*$', 'OutputMuted = false', settings)
+        s2 = re.sub(r'(?m)^OutputVolume = .*$', 'OutputVolume = 100', s2)
+        s2 = re.sub(r'(?m)^OutputDevice = .*$', 'OutputDevice = ' + AUDIO_DEVICE, s2)
+        open(SETTINGS, 'w', encoding='utf-8').write(s2)
+        recorder = Recorder()
     # --state none: boot the disc from the start (front end)
     proc = subprocess.Popen([EXE, '-nofullscreen'] + ([] if state == 'none' else ['-statefile', state]) + [CUE])
     try:
@@ -134,6 +181,9 @@ def main():
     finally:
         proc.kill()
         proc.wait()
+        if settings is not None:
+            open(SETTINGS, 'w', encoding='utf-8').write(settings)
+            recorder.stop(os.path.join(out, 'audio.wav'))
 
 
 if __name__ == '__main__':
