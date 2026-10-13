@@ -394,7 +394,7 @@ fn real_main() -> Result<()> {
             cpu.trace = std::env::var("PS1_TRACE").is_ok();
             cpu.tick_limit = std::env::var("TICKS").ok().and_then(|t| t.parse().ok()).unwrap_or(2_000_000_000);
             // busy-waits on the timer (a race frame stays far below this between host calls)
-            cpu.spin_limit = 1_000_000;
+            cpu.spin_limit = 20_000;
             // BOOT_SCRIPT="secs:buttons,...": pad input per stretch of frames (as boot-race; 'p'
             // Start); the run ends after the script
             let mut script: Vec<(u32, u16)> = Vec::new();
@@ -405,7 +405,7 @@ fn real_main() -> Result<()> {
                     use ps1::race::pad;
                     buttons |= match ch {
                         'x' => pad::CROSS, 's' => pad::SQUARE, 'c' => pad::CIRCLE, 't' => pad::TRIANGLE,
-                        'l' => pad::LEFT, 'r' => pad::RIGHT, 'u' => pad::UP, 'd' => pad::DOWN, 'p' => pad::START,
+                        'l' => pad::LEFT, 'r' => pad::RIGHT, 'u' => pad::UP, 'd' => pad::DOWN, 'p' => pad::START, 'e' => pad::SELECT,
                         _ => 0,
                     };
                 }
@@ -419,6 +419,7 @@ fn real_main() -> Result<()> {
             let shot_at: Vec<u32> = shot.as_ref().map(|s| s.0.clone()).unwrap_or_default();
             let grabbed = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
             let grab = grabbed.clone();
+            let started = std::time::Instant::now();
             let ram_at: Option<u32> = std::env::var("BOOT_RAM_FRAME").ok().and_then(|f| f.parse().ok());
             let on_frame: ps1::host::FrameFn = Box::new(move |c, info| {
                 frame += 1;
@@ -433,7 +434,7 @@ fn real_main() -> Result<()> {
                 for &(n, b) in &script {
                     if t <= n {
                         if std::env::var_os("BOOT_FRAMES").is_some() {
-                            println!("frame {frame} field {} {} overlay {}", info.field, if info.front_end { "fe" } else { "race" }, info.overlay.len());
+                            println!("frame {frame} t {:.2}s ticks {} calls {} field {} {} overlay {} display {:?}", started.elapsed().as_secs_f32(), c.ticks, c.calls, info.field, if info.front_end { "fe" } else { "race" }, info.overlay.len(), info.display);
                             if std::env::var("BOOT_DUMP_FRAME").ok().and_then(|f| f.parse::<u32>().ok()) == Some(frame) {
                                 for o in &info.overlay {
                                     println!("  {o:?}");
@@ -449,12 +450,24 @@ fn real_main() -> Result<()> {
             let host = cpu.host.as_mut().expect("host");
             let host = unsafe { &mut *(host.as_mut() as *mut dyn ps1::Host as *mut ps1::host::GameHost) };
             host.frame.on_frame = Some(on_frame);
+            let t0 = std::time::Instant::now();
             let r = ps1::race::call(&mut cpu, 0x800A_52A4, &[]);
             println!("main returned: {r:?}");
+            println!("{:?}: {} calls, {} interpreted, {} backward branches", t0.elapsed(), cpu.calls, cpu.interpreted, cpu.ticks);
             if let Some((_, dir)) = shot {
                 let mut r = None;
                 for (f, overlay, vram, screen) in grabbed.borrow_mut().drain(..) {
                     let Some(vram) = vram else { continue };
+                    // FE_VRAM=x,y,w,h: also that VRAM region (16-bit pixels) as dir/vram_<frame>.png
+                    if let Some(r) = std::env::var("FE_VRAM").ok().map(|v| v.split(',').filter_map(|n| n.parse::<usize>().ok()).collect::<Vec<_>>()).filter(|r| r.len() == 4) {
+                        let mut img = image::RgbaImage::new(r[2] as u32, r[3] as u32);
+                        for (x, y, p) in img.enumerate_pixels_mut() {
+                            let c = vram[(r[1] + y as usize) * 1024 + r[0] + x as usize];
+                            let rgba = crate::formats::psh::ps1_color(c);
+                            *p = image::Rgba([rgba[0], rgba[1], rgba[2], 255]);
+                        }
+                        img.save(std::path::Path::new(&dir).join(format!("vram_{f}.png")))?;
+                    }
                     let fe = game::fe::FeFrame::build(&overlay, &vram, screen, 960.0, 720.0);
                     let r = match &mut r {
                         Some(r) => r,
@@ -470,7 +483,8 @@ fn real_main() -> Result<()> {
         }
         Some("dump-movie") => {
             // dump-movie FILE.XA FRAME out.png [audio.wav]: one decoded frame (and the audio)
-            let m = formats::str::Movie::parse(&std::fs::read(&args[2])?);
+            let bytes = std::fs::read(&args[2])?;
+            let m = if bytes.starts_with(b"mTCD") { formats::str::Movie::parse_dct(&bytes) } else { formats::str::Movie::parse(&bytes) };
             println!("{}x{}, {} frames, {} audio samples at {} Hz{}", m.width, m.height, m.frames.len(), m.audio.len(), m.rate, if m.stereo { " stereo" } else { "" });
             let n: usize = args[3].parse()?;
             let rgba = formats::str::Decoder::default().frame(&m.frames[n], m.width, m.height);

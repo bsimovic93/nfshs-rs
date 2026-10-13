@@ -190,7 +190,8 @@ pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
     cpu.host = Some(Box::new(GameHost::new(data_root.to_path_buf())));
     cpu.trace = std::env::var("PS1_TRACE").is_ok();
     cpu.tick_limit = 300_000_000;
-    // busy-waits on the timer (a race frame stays far below this between host calls)
+    // busy-waits on the timer (a race and its loading stay far below this between host
+    // calls: the race runs exactly as it always has)
     cpu.spin_limit = 1_000_000;
     call(&mut cpu, addr::INIT_A, &[])?;
     call(&mut cpu, addr::INIT_B, &[])?;
@@ -229,8 +230,9 @@ pub fn power_on(data_root: &Path) -> Result<Cpu> {
     let mut cpu = new_cpu(mem);
     cpu.host = Some(Box::new(GameHost::new(data_root.to_path_buf())));
     cpu.trace = std::env::var("PS1_TRACE").is_ok();
-    // busy-waits on the timer (a race frame stays far below this between host calls)
-    cpu.spin_limit = 1_000_000;
+    // busy-waits on the timer (race frames stay below 3k backward branches between host
+    // calls, loading below 70k: a few ticks then pass early, as interrupts would)
+    cpu.spin_limit = 20_000;
     Ok(cpu)
 }
 

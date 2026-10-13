@@ -142,3 +142,10 @@
 8004f12c PSXDrawSquare
 8004f3b8 PSXDrawTransSquare
 8004d1c4 Movie_Play (movies are played by the host)
+800511b0 VIDEO_create (the front end's streamed videos: src/ps1/video.rs)
+80051328 VIDEO_destroy
+80051380 VIDEO_spoolfile
+800513dc VIDEO_startplayback
+8005143c VIDEO_abortplayback
+80051480 VIDEO_state
+80051528 VIDEO_updateframexy

@@ -40,6 +40,8 @@ fn texel(vram: &[u16], tpage: u16, clut: u16, u: u32, v: u32) -> [u8; 4] {
 impl FeFrame {
     pub fn build(cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {
         let mut atlas = Atlas::new(1024);
+        // untextured semi-transparent quads blend as a whole: a texel with the semi bit
+        let white_semi = atlas.add(1, 1, &[255, 255, 255, 128]);
         let mut cache: HashMap<(u16, u16, u8, u8, u8, u8), Rect> = HashMap::new();
         let (sw, sh) = (screen.0.max(1) as f32, screen.1.max(1) as f32);
         let (aw, ah) = if w * 3.0 > h * 4.0 { (h * 4.0 / 3.0, h) } else { (w, w * 0.75) };
@@ -83,7 +85,7 @@ impl FeFrame {
                     };
                     (r, Some((*uv, umin, vmin)), 256.0, alpha)
                 }
-                None => (atlas.white, None, 510.0, match (*semi, abr) {
+                None => (if *semi { white_semi } else { atlas.white }, None, 510.0, match (*semi, abr) {
                     (false, _) => 1.0,
                     (true, 1) | (true, 3) => 0.0,
                     _ => 0.5,

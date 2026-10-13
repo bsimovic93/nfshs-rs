@@ -3,6 +3,7 @@
 
 pub mod host;
 pub mod memcard;
+pub mod video;
 pub mod race;
 
 pub use ps1rt::*;

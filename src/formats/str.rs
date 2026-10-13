@@ -18,6 +18,24 @@ pub struct Movie {
 }
 
 impl Movie {
+    /// The front end's video files (.DCT): chunks "mTCD", size, 0, width, height, then one
+    /// frame's MDEC bitstream; no sound.
+    pub fn parse_dct(data: &[u8]) -> Self {
+        let mut m = Movie { width: 0, height: 0, frames: Vec::new(), audio: Vec::new(), stereo: false, rate: 37800 };
+        let mut o = 0;
+        while o + 16 <= data.len() && &data[o..o + 4] == b"mTCD" {
+            let size = u32::from_le_bytes(data[o + 4..o + 8].try_into().unwrap()) as usize;
+            if size < 16 || o + size > data.len() {
+                break;
+            }
+            m.width = u16::from_le_bytes([data[o + 12], data[o + 13]]) as u32;
+            m.height = u16::from_le_bytes([data[o + 14], data[o + 15]]) as u32;
+            m.frames.push(data[o + 16..o + size].to_vec());
+            o += size;
+        }
+        m
+    }
+
     pub fn parse(data: &[u8]) -> Self {
         let mut m = Movie { width: 0, height: 0, frames: Vec::new(), audio: Vec::new(), stereo: true, rate: 37800 };
         let mut current: Option<(u32, Vec<Option<Vec<u8>>>)> = None;

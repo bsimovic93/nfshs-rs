@@ -16,6 +16,8 @@ pub struct GameHost {
     mounts: Vec<(u32, Vec<(String, Vec<u8>)>)>,
     next_handle: u32,
     memcard: super::memcard::MemCard,
+    videos: super::video::Videos,
+    idles: u64,
     /// Which part of the game is running (switched by the hooks on their entry points).
     pub mode: Mode,
     /// PS1_CALLLOG=addr,addr,...: calls the host sees that are logged (diagnostics).
@@ -303,6 +305,8 @@ impl GameHost {
             mounts: Vec::new(),
             next_handle: 0x100,
             memcard: super::memcard::MemCard::new(),
+            videos: Default::default(),
+            idles: 0,
             mode: Mode::FrontEnd,
             call_log: std::env::var("PS1_CALLLOG").ok().map(|v| v.split(',').filter_map(|a| u32::from_str_radix(a.trim().trim_start_matches("0x"), 16).ok()).collect()),
             file_ops: HashMap::new(),
@@ -670,6 +674,10 @@ impl Host for GameHost {
     fn idle(&mut self, c: &mut Cpu) {
         // a busy-wait on the timer: let one tick pass
         self.advance_to(c, (self.clock / TICK + 1) * TICK);
+        self.idles += 1;
+        if self.idles % 500 == 0 && std::env::var_os("PS1_IDLELOG").is_some() {
+            eprintln!("idle {} at clock {}: stack {:x?} recent {:x?}", self.idles, self.clock, c.stack, &c.recent[..4]);
+        }
     }
 
     fn call(&mut self, c: &mut Cpu, addr: u32) -> bool {
@@ -682,6 +690,33 @@ impl Host for GameHost {
         if self.mode == Mode::FrontEnd && !self.capturing && CAPTURED_FE_DRAWING.contains(&addr) {
             c.r[2] = self.capture_prims(c, addr);
             return true;
+        }
+        if (0x8005_11B0..=0x8005_1528).contains(&addr) {
+            let clock = self.clock;
+            let file = if addr == 0x8005_1380 { c.m.cstr(a1) } else { String::new() };
+            let mut videos = std::mem::take(&mut self.videos);
+            let action = videos.call(addr, [a0, a1, a2, a3], |_| file.clone(), |f| self.lookup(f), clock);
+            self.videos = videos;
+            match action {
+                Some(super::video::VideoAction::Return(r)) => {
+                    c.r[2] = r;
+                    return true;
+                }
+                Some(super::video::VideoAction::Upload { x, y, w, h, pixels }) => {
+                    self.vram_dirty = true;
+                    for yy in 0..h as usize {
+                        for xx in 0..w as usize {
+                            let (vx, vy) = (x as usize + xx, y as usize + yy);
+                            if vx < VRAM_W && vy < VRAM_H {
+                                self.vram[vy * VRAM_W + vx] = pixels[yy * w as usize + xx];
+                            }
+                        }
+                    }
+                    c.r[2] = 1;
+                    return true;
+                }
+                None => {}
+            }
         }
         if let Some(ret) = self.memcard.call(c, addr) {
             c.r[2] = ret;
