@@ -28,6 +28,9 @@ pub struct Shape {
     /// Indexed pixels (for 4/8bpp shapes), kept for palette-swapping.
     pub indices: Vec<u8>,
     pub palette: Vec<u16>,
+    /// The semi-transparency mode its texture page gets (Texture_GetTranslucencyMode: a
+    /// chained 0x6B block, bits 5-6 of its +4 halfword; 0 half, 1 add, 2 subtract, 3 as 2).
+    pub translucency: u8,
 }
 
 pub struct Psh {
@@ -71,21 +74,26 @@ impl Psh {
         let px = off + 16;
         // Find palette block in the chain.
         let mut palette = Vec::new();
+        let mut translucency = 0;
         let mut b = off;
         let mut nx = next;
         while nx != 0 {
             b += nx;
-            if b + 16 > d.len() {
+            if b + 8 > d.len() {
                 break;
             }
             let t = d[b];
             nx = (u32le(d, b) >> 8) as usize;
-            if t == 0x23 || t == 0x24 || t == 0x22 {
+            if (t == 0x23 || t == 0x24 || t == 0x22) && palette.is_empty() && b + 16 <= d.len() {
                 let pw = u16le(d, b + 4) as usize;
                 let ph = u16le(d, b + 6) as usize;
                 let n = pw * ph;
                 palette = (0..n).map(|k| u16le(d, b + 16 + k * 2)).collect();
-                break;
+            } else if t == 0x6B {
+                translucency = match (u16le(d, b + 4) >> 5) & 3 {
+                    3 => 2,
+                    m => m as u8,
+                };
             }
         }
         let (wu, hu) = (w as usize, h as usize);
@@ -126,7 +134,7 @@ impl Psh {
                 rgba[i * 4..i * 4 + 4].copy_from_slice(&ps1_color(c));
             }
         }
-        Ok(Shape { name, kind, width: w, height: h, center, vram, rgba, indices, palette })
+        Ok(Shape { name, kind, width: w, height: h, center, vram, rgba, indices, palette, translucency })
     }
 
     /// Paint a car (`Texture_ColorCarPalette`): a 4bpp body shape followed by its 1x1 "P"

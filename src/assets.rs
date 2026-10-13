@@ -212,9 +212,19 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                 })
                 .collect();
             let base = verts.len() as u32;
+            // semi-transparent materials (flags bit 0) blend their STP texels by their shape's
+            // translucency mode: added (smoke, clouds) or halved
+            let te = track.textures.get(q.tex as usize);
+            let alpha = match te.filter(|t| t.flags & 1 != 0).and_then(|t| psh.shapes.get(t.shape as usize)).map(|s| s.translucency) {
+                Some(1) => 0.0,
+                Some(0) => 0.5,
+                _ => 1.0,
+            };
             for k in 0..4 {
                 let s = mesh.verts.get(q.v[k] as usize).map(|v| v[3]).unwrap_or(0);
-                verts.push(Vertex { pos: p[k].into(), uv: atlas.uv(rect, corners[k]), color: shade(s) });
+                let mut color = shade(s);
+                color[3] = alpha;
+                verts.push(Vertex { pos: p[k].into(), uv: atlas.uv(rect, corners[k]), color });
             }
             let front = [base, base + 1, base + 2, base, base + 2, base + 3];
             let back = [base, base + 2, base + 1, base, base + 3, base + 2];

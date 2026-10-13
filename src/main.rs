@@ -638,8 +638,8 @@ fn dump_psh(src: &Path, out: &Path) -> Result<()> {
         x += w + 2;
         row_h = row_h.max(h);
         println!(
-            "{:4} kind={:#x} {}x{} center={:?} vram={:?} pal={}",
-            s.name, s.kind, s.width, s.height, s.center, s.vram, s.palette.len()
+            "{:4} kind={:#x} {}x{} center={:?} vram={:?} pal={} abr={}",
+            s.name, s.kind, s.width, s.height, s.center, s.vram, s.palette.len(), s.translucency
         );
     }
     let mut img = image::RgbaImage::from_pixel(sheet_w, y + row_h + 2, image::Rgba([255, 0, 255, 255]));
