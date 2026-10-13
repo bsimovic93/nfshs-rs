@@ -123,10 +123,10 @@ pub enum OverlayCmd {
     /// position and rotation rows, 16.16 / 4096 scaled as in races) and the GTE projection
     /// (distance H, screen centre OFX/OFY 16.16); `mirrored` is its reflection in the floor.
     ShowroomCar { car: Box<super::race::CarState>, parts: Vec<u8>, cam_pos: [i32; 3], cam_rot: [i32; 9], h: u32, ofx: i32, ofy: i32, mirrored: bool, level: u32 },
-    /// The showroom's turntable (DrawC_ShowroomPrims): a ring of 32 quads on the floor
-    /// (64 vertices, inner/outer pairs, 1/256 m), textured (`tex`: the four uv words with clut
-    /// and texture page) and each drawn in `base` and, when lit, again in its light's colour.
-    ShowroomFloor { ring: Vec<[i16; 3]>, tex: [u32; 4], base: u32, lights: Vec<Option<u32>>, rim: Vec<[i16; 3]>, spot: u32 },
+    /// The showroom's turntable and spot (R3DCar_Showroom): primitives in the first slot of
+    /// the car cache's ordering table, drawn before the cars (in this list's order, as the
+    /// overlay: last first).
+    ShowroomFloor(Vec<OverlayCmd>),
     /// Draw_DrawDirectScreen: a picture put straight onto the screen at (x, y), opaque.
     Bitmap { x: i16, y: i16, w: u16, h: u16, rgba: std::sync::Arc<Vec<u8>> },
 }
@@ -407,6 +407,34 @@ impl GameHost {
         }
         self.loading.clear();
         self.loading_shown = self.clock;
+    }
+
+    /// The GTE as DrawC_ShowroomPrims / DrawC_SpotPrims set it for `view` (DRender_tView):
+    /// rotation the transpose of its matrix (+68, 16.16) with the second row negated,
+    /// translation its coordinates (+56) at 1/256 with y negated.
+    fn showroom_gte(c: &mut Cpu, view: u32) {
+        let m = |c: &mut Cpu, i: u32| (c.m.r32(view + 68 + 4 * i) as i32 >> 4) as i16;
+        let r: [[i16; 3]; 3] = [[m(c, 0), m(c, 3), m(c, 6)], [-m(c, 1), -m(c, 4), -m(c, 7)], [m(c, 2), m(c, 5), m(c, 8)]];
+        let pair = |a: i16, b: i16| a as u16 as u32 | (b as u16 as u32) << 16;
+        c.gte_write(32, pair(r[0][0], r[0][1]));
+        c.gte_write(33, pair(r[0][2], r[1][0]));
+        c.gte_write(34, pair(r[1][1], r[1][2]));
+        c.gte_write(35, pair(r[2][0], r[2][1]));
+        c.gte_write(36, r[2][2] as u16 as u32);
+        let t = |c: &mut Cpu, i: u32| c.m.r32(view + 56 + 4 * i) as i32 >> 8;
+        let (tx, ty, tz) = (t(c, 0), -t(c, 1), t(c, 2));
+        c.gte_write(37, tx as u32);
+        c.gte_write(38, ty as u32);
+        c.gte_write(39, tz as u32);
+    }
+
+    /// RTPS: a vertex to the screen with the GTE as set up.
+    fn gte_project(c: &mut Cpu, v: [i16; 3]) -> [i16; 2] {
+        c.gte_write(0, v[0] as u16 as u32 | (v[1] as u16 as u32) << 16);
+        c.gte_write(1, v[2] as u16 as u32);
+        c.gte_command(0x0018_0001);
+        let sxy = c.gte_read(14);
+        [sxy as i16, (sxy >> 16) as i16]
     }
 
     /// A shape (shapetbl) in RAM as RGBA, opaque.
@@ -1149,15 +1177,43 @@ impl Host for GameHost {
                         }
                     }
                 }
-                let ring = (0..64).map(|i| std::array::from_fn(|k| c.m.r16(SHOWROOM_RING + 6 * i + 2 * k as u32) as i16)).collect();
-                let tex_at = c.m.r32(SHOWROOM_TEX);
-                let tex = std::array::from_fn(|i| c.m.r32(tex_at + 4 * i as u32));
-                let lights = seg.iter().map(|&s| (s >= 0).then(|| c.m.r32(SHOWROOM_LIGHTS + 4 * s as u32) & 0xFF_FFFF)).collect();
-                // DrawC_SpotPrims: the light on the floor, a fan from the centre (the car
-                // cache's light level) to a black rim
-                let rim = (0..32).map(|i| std::array::from_fn(|k| c.m.r16(SHOWROOM_RIM + 6 * i + 2 * k as u32) as i16)).collect();
+                // both project with the view's camera (its matrix transposed, y flipped) on the
+                // GTE as the game sets it up, into the ordering table's first slot
+                Self::showroom_gte(c, a0);
+                let mut prims = Vec::new();
+                let vertex = |c: &mut Cpu, base: u32, i: u32| -> [i16; 3] { std::array::from_fn(|k| c.m.r16(base + 6 * i + 2 * k as u32) as i16) };
+                if c.m.r32(0x8005_199C) != 0 {
+                    // the ring: 32 textured quads, added (ChangeTPage(.., 1)), each in the base
+                    // colour and again in its light's
+                    let tex_at = c.m.r32(SHOWROOM_TEX);
+                    let tex: [u32; 4] = std::array::from_fn(|i| c.m.r32(tex_at + 4 * i as u32));
+                    let clut = (tex[0] >> 16) as u16;
+                    let tpage = ((tex[1] >> 16) as u16 & !0x60) | (1 << 5);
+                    let uv = tex.map(|w| [w as u8, (w >> 8) as u8]);
+                    for t in 0..32u32 {
+                        let (a, b) = (2 * t, (2 * t + 2) % 64);
+                        let pts = [a, b, a + 1, b + 1].map(|i| {
+                            let v = vertex(c, SHOWROOM_RING, i);
+                            Self::gte_project(c, v)
+                        });
+                        let light = seg[t as usize];
+                        for colour in std::iter::once(0x30_0A00).chain((light >= 0).then(|| c.m.r32(SHOWROOM_LIGHTS + 4 * light as u32) & 0xFF_FFFF)) {
+                            prims.push(OverlayCmd::Quad { pts, colours: [colour; 4], tex: Some(QuadTex { tpage, clut, uv }), semi: true, abr: 1 });
+                        }
+                    }
+                }
+                // DrawC_SpotPrims: the light on the floor, a fan of added gouraud triangles from
+                // the centre (the car cache's light level) to a black rim
                 let spot = c.m.r32(0x1F80_0000 + 140) & 0xFF_FFFF;
-                self.overlay.push(OverlayCmd::ShowroomFloor { ring, tex, base: 0x30_0A00, lights, rim, spot });
+                // the centre follows the rim's 32 vertices
+                let centre = vertex(c, SHOWROOM_RIM, 32);
+                let centre = Self::gte_project(c, centre);
+                for i in 0..32u32 {
+                    let (p, q) = (vertex(c, SHOWROOM_RIM, i), vertex(c, SHOWROOM_RIM, (i + 1) % 32));
+                    let (p, q) = (Self::gte_project(c, p), Self::gte_project(c, q));
+                    prims.push(OverlayCmd::Quad { pts: [centre, p, q, q], colours: [spot, 0, 0, 0], tex: None, semi: true, abr: 1 });
+                }
+                self.overlay.push(OverlayCmd::ShowroomFloor(prims));
                 0
             }
             0x800B_F1D4 => {

@@ -22,6 +22,8 @@ pub struct FeFrame {
     pub subtract: Vec<std::ops::Range<u32>>,
     /// Vertices before this index are drawn before the showroom car (the rest over it).
     pub under: usize,
+    /// The showroom floor's vertices (just before `under`) start here.
+    pub floor: usize,
 }
 
 /// Texel `(u, v)` of texture page `tpage` through CLUT `clut`, as RGBA (alpha 0 transparent,
@@ -60,8 +62,31 @@ impl FeFrame {
         let mut vertices = Vec::new();
         let mut subtract: Vec<std::ops::Range<u32>> = Vec::new();
         let mut clip = [0.0, 0.0, sw, sh];
-        // the game adds each primitive at the head of its ordering table: last asked, first drawn
+        // the game adds each primitive at the head of its ordering table: last asked, first
+        // drawn; the showroom's floor goes right before its cars (the car cache's first slot)
+        let floor: Vec<&OverlayCmd> = cmds.iter().filter_map(|c| if let OverlayCmd::ShowroomFloor(p) = c { Some(p.iter().rev()) } else { None }).flatten().collect();
+        let mut order: Vec<&OverlayCmd> = Vec::with_capacity(cmds.len() + floor.len());
+        let has_car = cmds.iter().any(|c| matches!(c, OverlayCmd::ShowroomCar { .. }));
+        let mut floor_placed = false;
+        let mut floor_at = usize::MAX;
         for cmd in cmds.iter().rev() {
+            match cmd {
+                OverlayCmd::ShowroomFloor(p) if !has_car => order.extend(p.iter().rev()),
+                OverlayCmd::ShowroomFloor(_) => {}
+                OverlayCmd::ShowroomCar { .. } if !floor_placed => {
+                    floor_placed = true;
+                    floor_at = order.len();
+                    order.extend(floor.iter().copied());
+                    order.push(cmd);
+                }
+                _ => order.push(cmd),
+            }
+        }
+        let mut floor_start = 0;
+        for (i, cmd) in order.into_iter().enumerate() {
+            if i == floor_at {
+                floor_start = vertices.len();
+            }
             if matches!(cmd, OverlayCmd::ShowroomCar { .. }) && !car_seen {
                 car_seen = true;
                 under = vertices.len();
@@ -151,8 +176,9 @@ impl FeFrame {
         }
         if !car_seen {
             under = 0;
+            floor_start = 0;
         }
-        Self { atlas, vertices, subtract, under }
+        Self { atlas, vertices, subtract, under, floor: floor_start.min(under) }
     }
 }
 
@@ -226,7 +252,7 @@ impl MoviePlayer {
             color: [0.5, 0.5, 0.5, 1.0],
         };
         let q = [corner(0.0, 0.0), corner(1.0, 0.0), corner(1.0, 1.0), corner(0.0, 1.0)];
-        FeFrame { atlas, vertices: vec![q[0], q[1], q[2], q[0], q[2], q[3]], subtract: Vec::new(), under: 0 }
+        FeFrame { atlas, vertices: vec![q[0], q[1], q[2], q[0], q[2], q[3]], subtract: Vec::new(), under: 0, floor: 0 }
     }
 }
 
@@ -248,12 +274,19 @@ impl Showroom {
     /// The cars the front end asked for (the car and its reflection in the floor) as world
     /// geometry, and the projection that puts them where the GTE would on the front end's
     /// `screen`, fitted at 4:3 into a `w` x `h` window.
-    pub fn geometry(&self, cmds: &[OverlayCmd], screen: (u16, u16), w: f32, h: f32) -> Option<(Vec<Vertex>, glam::Mat4)> {
+    /// The reflections come first: their vertices end at the returned split.
+    pub fn geometry(&self, cmds: &[OverlayCmd], screen: (u16, u16), w: f32, h: f32) -> Option<(Vec<Vertex>, u32, glam::Mat4)> {
         use crate::game::original::{pose, v3};
         use glam::{Mat4, Vec3, Vec4};
         let mut out = Vec::new();
         let mut proj = None;
-        for cmd in cmds {
+        let mut split = 0;
+        let reflections = cmds.iter().filter(|c| matches!(c, OverlayCmd::ShowroomCar { mirrored: true, .. }));
+        let cars = cmds.iter().filter(|c| matches!(c, OverlayCmd::ShowroomCar { mirrored: false, .. }));
+        for (k, cmd) in reflections.map(|c| (0, c)).chain(cars.map(|c| (1, c))) {
+            if k == 1 && split == 0 {
+                split = out.len() as u32;
+            }
             let OverlayCmd::ShowroomCar { car, parts, cam_pos, cam_rot, h: dist, ofx, ofy, mirrored, level } = cmd else { continue };
             if proj.is_none() {
                 let raw = |i: usize| v3([cam_rot[i * 3], cam_rot[i * 3 + 1], cam_rot[i * 3 + 2]]);
@@ -305,7 +338,10 @@ impl Showroom {
                 }
             }
         }
-        proj.map(|p| (out, p))
+        if split == 0 {
+            split = out.len() as u32;
+        }
+        proj.map(|p| (out, split, p))
     }
 }
 
@@ -318,6 +354,10 @@ pub struct FeScene {
     pub over: Vec<Vertex>,
     pub subtract: Vec<std::ops::Range<u32>>,
     pub car: Vec<Vertex>,
+    /// The car's vertices from here on are the car itself, before them its reflection; the
+    /// floor (`mid`, 2D) is drawn in between.
+    pub car_split: u32,
+    pub mid: Vec<Vertex>,
     pub view_proj: Option<glam::Mat4>,
 }
 
@@ -325,25 +365,22 @@ impl FeScene {
     pub fn build(cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32, showroom: Option<&Showroom>) -> Self {
         let base = showroom.map(|s| s.atlas.clone()).unwrap_or_else(|| Atlas::new(1024));
         let f = FeFrame::build_in(base, cmds, vram, screen, w, h);
-        let (car, view_proj) = match showroom.and_then(|s| s.geometry(cmds, screen, w, h)) {
-            Some((v, p)) => (v, Some(p)),
-            None => (Vec::new(), None),
+        let (car, car_split, view_proj) = match showroom.and_then(|s| s.geometry(cmds, screen, w, h)) {
+            Some((v, k, p)) => (v, k, Some(p)),
+            None => (Vec::new(), 0, None),
         };
         let split = if view_proj.is_some() { f.under } else { 0 };
-        let mut atlas = f.atlas;
-        let mut car = car;
-        if view_proj.is_some() {
-            car.extend(floor(cmds, vram, &mut atlas));
-        }
+        let atlas = f.atlas;
         let mut vertices = f.vertices;
         let over = vertices.split_off(split);
+        let mid = if view_proj.is_some() { vertices.split_off(f.floor.min(vertices.len())) } else { Vec::new() };
         let subtract = f
             .subtract
             .iter()
             .filter(|r| r.start as usize >= split)
             .map(|r| (r.start - split as u32)..(r.end - split as u32))
             .collect();
-        Self { atlas, under: vertices, over, subtract, car, view_proj }
+        Self { atlas, under: vertices, over, subtract, car, car_split, mid, view_proj }
     }
 
     /// The showroom car's code and paint, when the front end shows one.
@@ -353,55 +390,5 @@ impl FeScene {
             _ => None,
         })
     }
-}
-
-/// The showroom's turntable ring as world geometry (after the cars: drawn additively over
-/// them), its texture decoded from VRAM into `atlas`.
-fn floor(cmds: &[OverlayCmd], vram: &[u16], atlas: &mut Atlas) -> Vec<Vertex> {
-    let mut out = Vec::new();
-    for cmd in cmds {
-        let OverlayCmd::ShowroomFloor { ring, tex, base, lights, rim, spot } = cmd else { continue };
-        let clut = (tex[0] >> 16) as u16;
-        let tpage = (tex[1] >> 16) as u16;
-        let uv: [[u8; 2]; 4] = std::array::from_fn(|i| [tex[i] as u8, (tex[i] >> 8) as u8]);
-        let (umin, umax) = (uv.iter().map(|t| t[0]).min().unwrap(), uv.iter().map(|t| t[0]).max().unwrap());
-        let (vmin, vmax) = (uv.iter().map(|t| t[1]).min().unwrap(), uv.iter().map(|t| t[1]).max().unwrap());
-        let (tw, th) = ((umax - umin) as u32 + 1, (vmax - vmin) as u32 + 1);
-        let mut rgba = Vec::with_capacity((tw * th * 4) as usize);
-        for v in 0..th {
-            for u in 0..tw {
-                rgba.extend(texel(vram, tpage, clut, umin as u32 + u, vmin as u32 + v));
-            }
-        }
-        let r = atlas.add(tw, th, &rgba);
-        let size = atlas.size as f32;
-        let tc = |k: usize| [(r.x as f32 + (uv[k][0] - umin) as f32) / size, (r.y as f32 + (uv[k][1] - vmin) as f32) / size];
-        // engine space: PS1 x mirrored, 1/256 m
-        let p = |v: [i16; 3]| [-(v[0] as f32) / 256.0, v[1] as f32 / 256.0, v[2] as f32 / 256.0];
-        let additive = (tpage >> 5) & 3 == 1;
-        for t in 0..32usize {
-            let (a, b) = (2 * t, (2 * t + 2) % 64);
-            let corners = [p(ring[a]), p(ring[b]), p(ring[a + 1]), p(ring[b + 1])];
-            for colour in std::iter::once(*base).chain(lights[t]) {
-                let c = [(colour & 0xFF) as f32 / 256.0, ((colour >> 8) & 0xFF) as f32 / 256.0, ((colour >> 16) & 0xFF) as f32 / 256.0, if additive { 0.0 } else { 0.5 }];
-                for k in [0, 1, 3, 0, 3, 2] {
-                    out.push(Vertex { pos: corners[k], uv: tc(k), color: c });
-                }
-            }
-        }
-        // the spot's fan (POLY_G3, added; untextured, through a white semi-transparent texel),
-        // after the ring, where its rim is black: both lie on the floor and the later one fails
-        // the depth test
-        let white = atlas.add(1, 1, &[255, 255, 255, 128]);
-        let wuv = [(white.x as f32 + 0.5) / size, (white.y as f32 + 0.5) / size];
-        let centre = [(*spot & 0xFF) as f32 / 510.0, ((*spot >> 8) & 0xFF) as f32 / 510.0, ((*spot >> 16) & 0xFF) as f32 / 510.0, 0.0];
-        for t in 0..32usize {
-            let (a, b) = (rim[t], rim[(t + 1) % 32]);
-            out.push(Vertex { pos: [0.0; 3], uv: wuv, color: centre });
-            out.push(Vertex { pos: p(a), uv: wuv, color: [0.0; 4] });
-            out.push(Vertex { pos: p(b), uv: wuv, color: [0.0; 4] });
-        }
-    }
-    out
 }
 

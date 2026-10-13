@@ -109,6 +109,11 @@ pub struct Renderer {
     /// 2D drawn first, under the 3D geometry (the front end's background behind its car).
     pub hud_under: Vec<Vertex>,
     under_vb: DynBuf,
+    /// 2D drawn between the dynamic geometry's first `dyn_mid` vertices and the rest (the
+    /// showroom's floor between the car's reflection and the car).
+    pub hud_mid: Vec<Vertex>,
+    pub dyn_mid: u32,
+    mid_vb: DynBuf,
     sky_pipeline: wgpu::RenderPipeline,
     world_globals: wgpu::Buffer,
     hud_globals: wgpu::Buffer,
@@ -289,13 +294,14 @@ impl Renderer {
             None,
         );
         let hud_sub_pipeline = mk_pipeline("vs_main", "fs_sub", &[Some(vbl.clone())], None, Some(wgpu::BlendState { color: subtract, alpha: subtract }), None);
-        let hud_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl)], None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
+        let hud_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
         let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");
         let shadow_vb = DynBuf::new(&device, "shadows");
         let late_vb = DynBuf::new(&device, "subtract late");
         let hud_vb = DynBuf::new(&device, "hud");
         let under_vb = DynBuf::new(&device, "hud under");
+        let mid_vb = DynBuf::new(&device, "hud mid");
         let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
             device,
@@ -309,6 +315,9 @@ impl Renderer {
             hud_subtract: Vec::new(),
             hud_under: Vec::new(),
             under_vb,
+            hud_mid: Vec::new(),
+            dyn_mid: 0,
+            mid_vb,
             sky_pipeline,
             world_globals,
             hud_globals,
@@ -457,6 +466,7 @@ impl Renderer {
         self.late_vb.upload(&self.device, &self.queue, &p.subtract_late);
         self.hud_vb.upload(&self.device, &self.queue, hud);
         self.under_vb.upload(&self.device, &self.queue, &self.hud_under);
+        self.mid_vb.upload(&self.device, &self.queue, &self.hud_mid);
         let depth = self.depth_view();
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -513,9 +523,20 @@ impl Renderer {
                 rp.draw(0..p.shadows.len() as u32, 0..1);
             }
             rp.set_pipeline(&self.world_pipeline);
-            if !dynamic.is_empty() {
+            if !dynamic.is_empty() || !self.hud_mid.is_empty() {
+                let (n, mid) = (dynamic.len() as u32, self.dyn_mid.min(dynamic.len() as u32));
                 rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
-                rp.draw(0..dynamic.len() as u32, 0..1);
+                rp.draw(0..mid, 0..1);
+                if !self.hud_mid.is_empty() {
+                    rp.set_pipeline(&self.hud_pipeline);
+                    rp.set_bind_group(0, &self.hud_bg, &[]);
+                    rp.set_vertex_buffer(0, self.mid_vb.buf.slice(..));
+                    rp.draw(0..self.hud_mid.len() as u32, 0..1);
+                    rp.set_pipeline(&self.world_pipeline);
+                    rp.set_bind_group(0, &self.world_bg, &[]);
+                    rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
+                }
+                rp.draw(mid..n, 0..1);
             }
             if !p.subtract_late.is_empty() {
                 rp.set_pipeline(&self.sub_pipeline);
