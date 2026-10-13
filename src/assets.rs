@@ -389,16 +389,25 @@ fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], 
             }
         }
     }
-    // horizon band
-    let names = if std::env::var_os("NFSHS_NO_HORIZON").is_some() { [""; 4] } else { ["HZ01", "HZ02", "HZ03", "HZ04"] };
-    let shapes: Vec<Option<usize>> = names.iter().map(|n| psh.shapes.iter().position(|sh| sh.name == *n)).collect();
+    // horizon band: each segment textured with HZ01..HZ08 (`index & 7`) and as tall as its
+    // texture against the tallest one (Hrz_Init2DRing's ratios, which
+    // Horizon_InterpolateLineSCoords applies between the band's bottom and top), so the 1x1
+    // placeholders some tracks use draw nothing
+    let names: Vec<String> = (1..=8).map(|i| format!("HZ{i:02}")).collect();
+    let shapes: Vec<Option<usize>> = names.iter().map(|n| if !s.band || std::env::var_os("NFSHS_NO_HORIZON").is_some() { None } else { psh.shapes.iter().position(|sh| sh.name == *n) }).collect();
+    let extent = |t: usize| shapes[t & 7].map_or(0, |i| psh.shapes[i].height.saturating_sub(1) as i32);
+    let tallest = (0..16).map(|seg| extent(s.segment_tex[seg] as usize)).fold(1, i32::max);
     let k = 100.0 / 32000.0;
-    let (y0, y1) = (s.bottom as f32 * k, (s.bottom as f32 + s.height as f32) * k);
     let modulate = |c: [u8; 3]| [c[0] as f32 / 256.0, c[1] as f32 / 256.0, c[2] as f32 / 256.0, 1.0];
     for seg in 0..16 {
         let t = s.segment_tex[seg] as usize;
-        let Some(Some(shape)) = shapes.get(t) else { continue };
-        let rect = rects[*shape];
+        let Some(shape) = shapes[t & 7] else { continue };
+        let ratio = extent(t) as f32 / tallest as f32;
+        if ratio <= 0.0 {
+            continue;
+        }
+        let (y0, y1) = (s.bottom as f32 * k, (s.bottom as f32 + s.height as f32 * ratio) * k);
+        let rect = rects[shape];
         let (w, h) = (rect.w as f32, rect.h as f32);
         let p = |i: usize, y: f32| [-(s.ring[i][0] as f32) * k, y, s.ring[i][1] as f32 * k];
         let quad = [

@@ -200,6 +200,7 @@ impl Game {
                 cars.iter().take(1).chain(cars.iter().skip(1).filter(|c| crate::ps1::race::car_type(&c.code).is_some())).map(|c| c.colour).collect()
             })
             .unwrap_or_default();
+        log::info!("car colours {colours:?}");
         for (k, code) in codes.iter().enumerate() {
             let night = matches!(cfg.variant, "N" | "S");
             // the number plate shows the player's name (GameSetup carInfo + 0x68)

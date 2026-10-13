@@ -537,6 +537,19 @@ fn real_main() -> Result<()> {
             let shots: Vec<u32> = args[3].split(',').filter_map(|s| s.parse().ok()).collect();
             app::front_end_play(&data, &script, &shots, Path::new(&args[4]))?;
         }
+        Some("contact") => {
+            // contact OUT COLS IMG...: the images at half size in a grid (for reviewing shots)
+            let cols: u32 = args[3].parse()?;
+            let imgs: Vec<image::RgbaImage> = args[4..].iter().map(|p| image::open(p).map(|i| i.to_rgba8())).collect::<Result<_, _>>()?;
+            let (w, h) = imgs.iter().fold((0, 0), |(w, h), i| (w.max(i.width() / 2), h.max(i.height() / 2)));
+            let rows = (imgs.len() as u32).div_ceil(cols);
+            let mut out = image::RgbaImage::new(w * cols, h * rows);
+            for (k, i) in imgs.iter().enumerate() {
+                let s = image::imageops::resize(i, i.width() / 2, i.height() / 2, image::imageops::FilterType::Triangle);
+                image::imageops::overlay(&mut out, &s, ((k as u32 % cols) * w) as i64, ((k as u32 / cols) * h) as i64);
+            }
+            out.save(&args[2])?;
+        }
         Some("heap-free") => {
             // heap-free <ram.bin>: the game's largest free heap block in a RAM image
             let mut mem = ps1::Mem::default();

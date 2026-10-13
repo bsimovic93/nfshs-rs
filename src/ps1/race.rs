@@ -302,8 +302,11 @@ pub struct SkyData {
     /// Vertex colours of the band's top and bottom edge, per ring point.
     pub top_colors: Vec<[u8; 3]>,
     pub bottom_colors: Vec<[u8; 3]>,
-    /// Horizon texture (0..3 = HZ01..HZ04, 16 = none) per segment.
+    /// Horizon texture (`& 7`: HZ01..HZ08) per segment.
     pub segment_tex: Vec<u8>,
+    /// The horizon band is drawn at all (the halfword Hrz's draw checks first; off on the
+    /// raceways).
+    pub band: bool,
 }
 
 impl SkyData {
@@ -323,6 +326,7 @@ impl SkyData {
             top_colors: (0..17).map(|i| rgb(m, 0x8012_1B28 + 4 * i)).collect(),
             bottom_colors: (0..17).map(|i| rgb(m, 0x8012_1AE8 + 4 * i)).collect(),
             segment_tex: (0..16).map(|i| m.r8(hrec + 32 + i)).collect(),
+            band: m.r16(0x8012_4570) != 0,
         })
     }
 }

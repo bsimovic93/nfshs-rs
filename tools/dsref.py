@@ -1,4 +1,5 @@
-"""dsref.py OUTDIR [--state FILE|none] [--wait SECONDS] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS)
+"""dsref.py OUTDIR [--state FILE|none] [--wait SECONDS] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS,
+shot:NAME (screenshot while running), ram:NAME (paused screenshot + RAM dump))
 
 Capture a reference frame from DuckStation: start the emulator on a save state, let it run,
 pause it over GDB, capture the window (PrintWindow) and dump main RAM. The Rust side
@@ -7,7 +8,8 @@ comparison. DuckStation is force-closed afterwards so it never writes a save sta
 
 Needs [Debug] EnableGDBServer = true, GDBServerPort = 2345 in DuckStation's settings.ini.
 """
-import os, subprocess, sys, time
+import os
+import struct, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 import ds, dsshot
 
@@ -44,6 +46,30 @@ def main():
             for k in keys:
                 if k.startswith('sleep:'):
                     time.sleep(float(k.split(':')[1]))
+                elif k.startswith('shot:'):
+                    # a screenshot while running (OUTDIR/NAME.png)
+                    game = [w for w in ds.windows_of(proc.pid) if 'need for speed' in w[1].lower()]
+                    dsshot.capture_to(game[0][0], os.path.join(out, k.split(':')[1] + '.png'))
+                elif k.startswith('ram:'):
+                    # paused: a screenshot and the RAM (OUTDIR/NAME.png, NAME.bin), then on
+                    g.interrupt()
+                    time.sleep(0.3)
+                    game = [w for w in ds.windows_of(proc.pid) if 'need for speed' in w[1].lower()]
+                    name = k.split(':')[1]
+                    dsshot.capture_to(game[0][0], os.path.join(out, name + '.png'))
+                    open(os.path.join(out, name + '.bin'), 'wb').write(g.read(0x80000000, 0x200000))
+                    g.cont()
+                    ds.focus_pid(proc.pid)
+                elif k.startswith('poke:'):
+                    # poke:ADDR:VALUE[:COUNT]: 32-bit words into RAM (hex address)
+                    parts = k.split(':')
+                    addr, val = int(parts[1], 16), int(parts[2], 0)
+                    n = int(parts[3]) if len(parts) > 3 else 1
+                    g.interrupt()
+                    time.sleep(0.2)
+                    g.write(addr, struct.pack('<I', val) * n)
+                    g.cont()
+                    ds.focus_pid(proc.pid)
                 elif k.startswith('hold:'):
                     _, key, secs = k.split(':')
                     ds.down(key)
