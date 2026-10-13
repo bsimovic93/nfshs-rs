@@ -541,6 +541,13 @@ pub const CAR_PART_BIAS: [i8; 57] = [
     -44, -40, -12, -12, -44, 48, 40, 38, 38, 36, 36, 0, 0, -16, -16, -24, -24, 31, 31, 32, 32, 32, 32, 32, 32, 32, 32,
 ];
 
+/// The number plate's two halves: the car textures (indices into [`CAR_TEXTURES`]) they
+/// replace, per car type (CarIO_UpdateCarTextureData's table at 0x8011FDD0).
+const PLATE_TEXTURES: [(u8, u8); 21] = [
+    (27, 33), (33, 26), (27, 33), (33, 18), (27, 33), (27, 33), (18, 33), (27, 33), (27, 33), (26, 33), (27, 33),
+    (27, 33), (33, 17), (33, 18), (27, 33), (33, 26), (27, 33), (27, 33), (26, 33), (27, 33), (33, 26),
+];
+
 /// The car's texture names by a GEO polygon's texture number (CarIO's table): each is a
 /// shape of the car's PSH files, placed at its own VRAM position.
 const CAR_TEXTURES: [&str; 51] = [
@@ -638,7 +645,14 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
     // "blnk", split into the two halves the plate polygons show ("sFOf" and "sFOn" slots)
     if let (Some(name), Ok(lic)) = (plate, data.read("ZLICENSE.PSH").and_then(|d| Psh::parse(&d))) {
         let shape_pos = |n: &str| files.iter().flat_map(|(_, p)| p.shapes.iter()).find(|s| s.name == n).map(|s| ((s.vram.0 as usize % 64) * 4, s.vram.1 as usize % 256));
-        if let (Some(blnk), Some(left), Some(right)) = (lic.shapes.iter().find(|s| s.name == "blnk"), shape_pos("sFOf"), shape_pos("sFOn")) {
+        // which textures the plate's halves replace, per car type (the game's table at
+        // 0x8011FDD0: texture index for the left half, then the right half)
+        let (lt, rt) = match crate::ps1::race::car_type(code).and_then(|t| PLATE_TEXTURES.get(t as usize)) {
+            Some(&(l, r)) if l != 0 || r != 0 => (l, r),
+            _ => (27, 33),
+        };
+        let (lname, rname) = (CAR_TEXTURES[lt as usize], CAR_TEXTURES[rt as usize]);
+        if let (Some(blnk), Some(left), Some(right)) = (lic.shapes.iter().find(|s| s.name == "blnk"), shape_pos(lname), shape_pos(rname)) {
             let (w, h) = (blnk.width as usize, blnk.height as usize);
             let mut idx = blnk.indices.clone();
             let name: Vec<char> = name.chars().map(|c| c.to_ascii_lowercase()).collect();
