@@ -113,6 +113,9 @@ pub struct Renderer {
     /// showroom's floor between the car's reflection and the car).
     pub hud_mid: Vec<Vertex>,
     pub dyn_mid: u32,
+    /// 2D drawn over the sky and under the world (a race's sun), with the 2D pass's atlas.
+    pub sky_layer: Vec<Vertex>,
+    sky_layer_vb: DynBuf,
     /// The 2D pass's own atlas (a race's HUD recorded from the original, textured from its
     /// VRAM), when set.
     overlay_atlas: Option<(wgpu::Texture, wgpu::BindGroup)>,
@@ -306,6 +309,7 @@ impl Renderer {
         let hud_vb = DynBuf::new(&device, "hud");
         let under_vb = DynBuf::new(&device, "hud under");
         let mid_vb = DynBuf::new(&device, "hud mid");
+        let sky_layer_vb = DynBuf::new(&device, "sky layer");
         let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
             device,
@@ -321,6 +325,8 @@ impl Renderer {
             under_vb,
             hud_mid: Vec::new(),
             dyn_mid: 0,
+            sky_layer: Vec::new(),
+            sky_layer_vb,
             overlay_atlas: None,
             use_overlay_atlas: false,
             mid_vb,
@@ -490,6 +496,7 @@ impl Renderer {
         self.hud_vb.upload(&self.device, &self.queue, hud);
         self.under_vb.upload(&self.device, &self.queue, &self.hud_under);
         self.mid_vb.upload(&self.device, &self.queue, &self.hud_mid);
+        self.sky_layer_vb.upload(&self.device, &self.queue, &self.sky_layer);
         let depth = self.depth_view();
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -529,6 +536,17 @@ impl Renderer {
                 rp.set_bind_group(0, &self.sky_bg, &[]);
                 rp.set_vertex_buffer(0, self.sky_vb.buf.slice(..));
                 rp.draw(0..sky.len() as u32, 0..1);
+                rp.set_bind_group(0, &self.world_bg, &[]);
+            }
+            if !self.sky_layer.is_empty() {
+                rp.set_pipeline(&self.hud_pipeline);
+                let bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
+                    (Some((_, bg)), true) => bg,
+                    _ => &self.hud_bg,
+                };
+                rp.set_bind_group(0, bg, &[]);
+                rp.set_vertex_buffer(0, self.sky_layer_vb.buf.slice(..));
+                rp.draw(0..self.sky_layer.len() as u32, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);
             }
             rp.set_pipeline(&self.track_pipeline);

@@ -744,13 +744,13 @@ pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::ass
             r.write_overlay_atlas(&f.atlas);
             r.use_overlay_atlas = true;
             r.hud_subtract = f.subtract;
-            r.hud_under = sky;
+            r.sky_layer = sky;
             f.vertices
         }
         None => {
             r.use_overlay_atlas = false;
             r.hud_subtract = Vec::new();
-            r.hud_under = Vec::new();
+            r.sky_layer = Vec::new();
             game.hud(w, h)
         }
     }
@@ -760,6 +760,7 @@ pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::ass
 pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: bool) -> Option<image::RgbaImage> {
     r.write_atlas(&scene.atlas);
     r.use_overlay_atlas = false;
+    r.sky_layer = Vec::new();
     let mut params = flat_params();
     if let Some(vp) = scene.view_proj {
         params.view_proj = vp;

@@ -1780,6 +1780,11 @@ impl Host for GameHost {
                     self.prim_offset = [0, 0];
                     self.capture_prims(c, FLARE_SUN);
                     let sun = std::mem::replace(&mut self.overlay, saved);
+                    if std::env::var_os("NFSHS_SUNLOG").is_some() {
+                        for q in &sun {
+                            eprintln!("sun {}", format!("{q:?}").chars().take(220).collect::<String>());
+                        }
+                    }
                     self.sky_overlay.extend(sun);
                     for (i, v) in rot.into_iter().enumerate() {
                         c.gte_write(32 + i, v);
