@@ -8,7 +8,7 @@ use glam::Vec2;
 
 use crate::assets::{Atlas, Rect, Vertex};
 use crate::formats::psh::ps1_color;
-use crate::ps1::host::{OverlayCmd, QuadTex};
+use crate::ps1::host::{CarEnv, OverlayCmd, QuadTex};
 
 const VRAM_W: usize = 1024;
 
@@ -275,7 +275,8 @@ impl Showroom {
     /// geometry, and the projection that puts them where the GTE would on the front end's
     /// `screen`, fitted at 4:3 into a `w` x `h` window.
     /// The reflections come first: their vertices end at the returned split.
-    pub fn geometry(&self, cmds: &[OverlayCmd], screen: (u16, u16), w: f32, h: f32) -> Option<(Vec<Vertex>, u32, glam::Mat4)> {
+    /// `env_map`: where reflection map A (DrawC_PrimStart's, from VRAM) is in the atlas.
+    pub fn geometry(&self, cmds: &[OverlayCmd], screen: (u16, u16), w: f32, h: f32, env_map: Option<(Rect, f32)>) -> Option<(Vec<Vertex>, u32, glam::Mat4)> {
         use crate::game::original::{pose, v3};
         use glam::{Mat4, Vec3, Vec4};
         let mut out = Vec::new();
@@ -287,7 +288,7 @@ impl Showroom {
             if k == 1 && split == 0 {
                 split = out.len() as u32;
             }
-            let OverlayCmd::ShowroomCar { car, parts, cam_pos, cam_rot, h: dist, ofx, ofy, mirrored, level } = cmd else { continue };
+            let OverlayCmd::ShowroomCar { car, parts, cam_pos, cam_rot, h: dist, ofx, ofy, mirrored, level, env } = cmd else { continue };
             if proj.is_none() {
                 let raw = |i: usize| v3([cam_rot[i * 3], cam_rot[i * 3 + 1], cam_rot[i * 3 + 2]]);
                 let (up, fwd) = (raw(1).normalize_or_zero(), raw(2).normalize_or_zero());
@@ -337,6 +338,36 @@ impl Showroom {
                     out.push(Vertex { pos: p.into(), color: [col[0] * tint, col[1] * tint, col[2] * tint, col[3]], ..*v });
                 }
             }
+            // the reflection map over the reflection-mapped parts (DrawC_Prim's environment
+            // path, as in races): map coordinates from the vertex normals turned by the
+            // camera's yaw around the car, u = 64 + x, v = |z| into the map, added
+            let (Some(env), Some((rect, size))) = (env, env_map) else { continue };
+            if env.a.is_none() {
+                continue;
+            }
+            let a = env.yaw as f32 / 4096.0 * std::f32::consts::TAU;
+            let (sn, cs) = a.sin_cos();
+            let rgb = [(env.colour & 0xFF) as f32 / 256.0, ((env.colour >> 8) & 0xFF) as f32 / 256.0, ((env.colour >> 16) & 0xFF) as f32 / 256.0];
+            let towards = |p: Vec3| (v3(*cam_pos) - p).normalize_or_zero() * 0.01;
+            for (part, &on) in self.model.parts.iter().zip(parts.iter()) {
+                let (Some((normals, flags)), true) = (&part.env, on != 0) else { continue };
+                let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
+                for t in 0..flags.len() {
+                    for k in 0..3 {
+                        let n = normals[t * 3 + k];
+                        let (nx, nz) = (n[0] as f32, n[2] as f32);
+                        let x = (cs * nx + sn * nz) as i32;
+                        let z = (-sn * nx + cs * nz) as i32;
+                        let (u, v) = ((64 + x).clamp(0, rect.w as i32 - 1) as f32, z.unsigned_abs().min(rect.h - 1) as f32);
+                        let p = tm.transform_point3(Vec3::from(part.verts[t * 3 + k].pos));
+                        out.push(Vertex {
+                            pos: (p + towards(p)).into(),
+                            uv: [(rect.x as f32 + u + 0.5) / size, (rect.y as f32 + v + 0.5) / size],
+                            color: [rgb[0], rgb[1], rgb[2], 0.0],
+                        });
+                    }
+                }
+            }
         }
         if split == 0 {
             split = out.len() as u32;
@@ -365,12 +396,29 @@ impl FeScene {
     pub fn build(cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32, showroom: Option<&Showroom>) -> Self {
         let base = showroom.map(|s| s.atlas.clone()).unwrap_or_else(|| Atlas::new(1024));
         let f = FeFrame::build_in(base, cmds, vram, screen, w, h);
-        let (car, car_split, view_proj) = match showroom.and_then(|s| s.geometry(cmds, screen, w, h)) {
+        let mut atlas = f.atlas;
+        // the showroom car's reflection map, from VRAM (128 x 65 texels from its corner)
+        let env_map = cmds.iter().find_map(|c| match c {
+            OverlayCmd::ShowroomCar { env: Some(CarEnv { a: Some(m), .. }), .. } => Some(*m),
+            _ => None,
+        });
+        let env_map = env_map.map(|m| {
+            let (clut, tpage) = ((m[0] >> 16) as u16, (m[1] >> 16) as u16);
+            let (u0, v0) = (m[0] as u8 as u32, (m[0] >> 8) as u8 as u32);
+            let (tw, th) = (128u32, 65u32);
+            let mut rgba = Vec::with_capacity((tw * th * 4) as usize);
+            for v in 0..th {
+                for u in 0..tw {
+                    rgba.extend(texel(vram, tpage, clut, (u0 + u) & 0xFF, (v0 + v) & 0xFF));
+                }
+            }
+            (atlas.add(tw, th, &rgba), atlas.size as f32)
+        });
+        let (car, car_split, view_proj) = match showroom.and_then(|s| s.geometry(cmds, screen, w, h, env_map)) {
             Some((v, k, p)) => (v, k, Some(p)),
             None => (Vec::new(), 0, None),
         };
         let split = if view_proj.is_some() { f.under } else { 0 };
-        let atlas = f.atlas;
         let mut vertices = f.vertices;
         let over = vertices.split_off(split);
         let mid = if view_proj.is_some() { vertices.split_off(f.floor.min(vertices.len())) } else { Vec::new() };

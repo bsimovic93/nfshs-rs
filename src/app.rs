@@ -52,6 +52,7 @@ pub struct App {
     autopilot: bool,
     gilrs: Option<gilrs::Gilrs>,
     last: Instant,
+    fps: (u32, Instant),
     /// Start straight into a race (command-line `play` with explicit options).
     direct: Option<RaceConfigOwned>,
     /// The front end's movie being shown, and its soundtrack's voice.
@@ -316,6 +317,15 @@ impl App {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
+        // NFSHS_FPS=1: the window's frame rate every few seconds
+        if std::env::var_os("NFSHS_FPS").is_some() {
+            self.fps.0 += 1;
+            let secs = (now - self.fps.1).as_secs_f32();
+            if secs >= 3.0 {
+                log::info!("{:.1} fps", self.fps.0 as f32 / secs);
+                self.fps = (0, now);
+            }
+        }
         if let Screen::FrontEnd(_) = &self.screen {
             let input = self.front_end_input();
             if let Screen::FrontEnd(sim) = &mut self.screen {
@@ -556,6 +566,7 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
         autopilot: false,
         gilrs: gilrs::Gilrs::new().map_err(|e| log::warn!("gamepad support disabled: {e}")).ok(),
         last: Instant::now(),
+        fps: (0, Instant::now()),
         direct,
         movie: None,
         movie_voice: None,

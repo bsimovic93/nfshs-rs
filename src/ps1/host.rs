@@ -42,6 +42,10 @@ pub struct GameHost {
     /// clock of the last frame shown of it. Shown until the next frame the game draws.
     loading: Vec<OverlayCmd>,
     loading_shown: u64,
+    /// The ordering-table entry (`*(0x1F800000)`, where the front end adds its primitives)
+    /// each overlay command went into, and the entry current for the running host call.
+    overlay_ot: Vec<u32>,
+    current_ot: u32,
     /// The game started from main (its title and front end), not straight into a race.
     pub from_main: bool,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
@@ -122,7 +126,7 @@ pub enum OverlayCmd {
     /// The showroom's car (R3DCar_InsertCarFacetMenuII): the car, the camera (the view's
     /// position and rotation rows, 16.16 / 4096 scaled as in races) and the GTE projection
     /// (distance H, screen centre OFX/OFY 16.16); `mirrored` is its reflection in the floor.
-    ShowroomCar { car: Box<super::race::CarState>, parts: Vec<u8>, cam_pos: [i32; 3], cam_rot: [i32; 9], h: u32, ofx: i32, ofy: i32, mirrored: bool, level: u32 },
+    ShowroomCar { car: Box<super::race::CarState>, parts: Vec<u8>, cam_pos: [i32; 3], cam_rot: [i32; 9], h: u32, ofx: i32, ofy: i32, mirrored: bool, level: u32, env: Option<CarEnv> },
     /// The showroom's turntable and spot (R3DCar_Showroom): primitives in the first slot of
     /// the car cache's ordering table, drawn before the cars (in this list's order, as the
     /// overlay: last first).
@@ -352,6 +356,8 @@ impl GameHost {
             overlay: Vec::new(),
             loading: Vec::new(),
             loading_shown: 0,
+            overlay_ot: Vec::new(),
+            current_ot: 0,
             from_main: false,
             rcnt: 0,
             log: Vec::new(),
@@ -477,7 +483,24 @@ impl GameHost {
             view_env: self.view_env,
             font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
             car_facets: self.car_facets.clone(),
-            overlay: std::mem::take(&mut self.overlay),
+            overlay: {
+                while self.overlay_ot.len() < self.overlay.len() {
+                    self.overlay_ot.push(self.current_ot);
+                }
+                if std::env::var_os("PS1_OTLOG").is_some() && self.mode == Mode::FrontEnd {
+                    let mut runs: Vec<(u32, usize, String)> = Vec::new();
+                    for (cmd, &ot) in self.overlay.iter().zip(&self.overlay_ot) {
+                        let kind = format!("{cmd:?}").chars().take_while(|c| c.is_alphanumeric()).collect::<String>();
+                        match runs.last_mut() {
+                            Some(r) if r.0 == ot && r.2 == kind => r.1 += 1,
+                            _ => runs.push((ot, 1, kind)),
+                        }
+                    }
+                    eprintln!("ot runs: {}", runs.iter().map(|(o, n, k)| format!("{o:x}:{k}x{n}")).collect::<Vec<_>>().join(" "));
+                }
+                self.overlay_ot.clear();
+                std::mem::take(&mut self.overlay)
+            },
             front_end: self.mode == Mode::FrontEnd,
             vram: (self.mode == Mode::FrontEnd).then(|| {
                 if self.vram_dirty || self.vram_shared.is_none() {
@@ -839,6 +862,12 @@ impl Host for GameHost {
 
     fn call(&mut self, c: &mut Cpu, addr: u32) -> bool {
         let (a0, a1, a2, a3) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+        // the commands recorded since the last host call went into the entry current then
+        while self.overlay_ot.len() < self.overlay.len() {
+            self.overlay_ot.push(self.current_ot);
+        }
+        self.overlay_ot.truncate(self.overlay.len());
+        self.current_ot = c.m.r32(0x1F80_0000);
         if let Some(log) = &self.call_log {
             if log.contains(&addr) {
                 eprintln!("[{:>8}] call {addr:#x}({a0:#x}, {a1:#x}, {a2:#x}, {a3:#x}) from {:#x}", self.clock, c.r[31]);
@@ -1147,6 +1176,13 @@ impl Host for GameHost {
                 if let Some(code) = self.showroom_car.and_then(|(t, _)| u32::try_from(t).ok()).and_then(super::race::car_code) {
                     car.code = code.to_string();
                 }
+                // DrawC_PrimStart as the original calls it here: the reflection maps (as in
+                // races, see record_car_facet)
+                let ok = c.call_nested(DRAWC_PRIM_START, &[R3DCAR_CENTER, a0, level, CAR_CACHE]) as i32 >= 0;
+                let env = ok.then(|| {
+                    let map = |c: &mut Cpu, o: u32| (c.m.r32(CAR_CACHE + o) != 0).then(|| std::array::from_fn(|i| c.m.r32(CAR_CACHE + o + 4 * i as u32)));
+                    CarEnv { a: map(c, 100), b: map(c, 116), scroll: c.m.r32(CAR_CACHE + 132), colour: c.m.r32(CAR_CACHE + 144) & 0xFF_FFFF, yaw: c.m.r16(R3DCAR_CENTER + 0x14) as i16 }
+                });
                 let view = RENDER_VIEW;
                 self.overlay.push(OverlayCmd::ShowroomCar {
                     car,
@@ -1158,6 +1194,7 @@ impl Host for GameHost {
                     ofy: c.gte_regs[32 + 25] as i32,
                     mirrored: c.m.r32(0x8013_E608) & 0x80 != 0,
                     level,
+                    env,
                 });
                 0
             }
