@@ -584,6 +584,7 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
     r.set_world(&game.track.verts, &game.track.indices);
     let mut t = 0.0;
     let mut next_log = 10.0;
+    let mut flipped = false;
     let trace = std::env::var_os("SHOT_TRACE").is_some();
     while t < seconds {
         let before = game.player().car.pos;
@@ -601,6 +602,15 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         }
         game.update(1.0 / 60.0, input);
         t += 1.0 / 60.0;
+        // NFSHS_FLIPLOG=1: when the car tips over (up vector far from vertical), where and how
+        if std::env::var_os("NFSHS_FLIPLOG").is_some() {
+            let c = &game.player().car;
+            let up = c.up.y;
+            if up < 0.7 && !flipped {
+                println!("  t={t:6.2} TIPPED up={up:.2} pos={:.1?} speed={:.0} km/h", c.pos, c.speed() * 3.6);
+            }
+            flipped = up < 0.7;
+        }
         if trace && seconds - t < 0.5 {
             println!("  t={t:6.3} moved {:.3} m", game.player().car.pos.distance(before));
         }
@@ -703,6 +713,12 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                 }
             } else if let Some(g) = &mut game {
                 g.update(1.0 / 60.0, input);
+                if std::env::var_os("NFSHS_FLIPLOG").is_some() {
+                    let c = &g.player().car;
+                    if c.up.y < 0.7 {
+                        println!("frame {frame}: TIPPED up={:.2} pos={:.1?} speed={:.0} km/h", c.up.y, c.pos, c.speed() * 3.6);
+                    }
+                }
                 if g.sim.as_ref().is_some_and(|s| s.in_front_end()) {
                     println!("frame {frame}: back in the front end");
                     sim = g.sim.take().map(Box::new);
