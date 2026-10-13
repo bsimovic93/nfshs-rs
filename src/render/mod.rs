@@ -540,9 +540,10 @@ impl Renderer {
             }
             if !self.sky_layer.is_empty() {
                 rp.set_pipeline(&self.hud_pipeline);
-                let bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
-                    (Some((_, bg)), true) => bg,
-                    _ => &self.hud_bg,
+                // the sky layer is always textured from the 2D pass's own atlas
+                let bg = match &self.overlay_atlas {
+                    Some((_, bg)) => bg,
+                    None => &self.hud_bg,
                 };
                 rp.set_bind_group(0, bg, &[]);
                 rp.set_vertex_buffer(0, self.sky_layer_vb.buf.slice(..));

@@ -951,15 +951,18 @@ impl Game {
     /// was recorded: 2D for a `w` x `h` window with its own atlas.
     pub fn hud_frame(&self, w: f32, h: f32) -> Option<(fe::FeFrame, Vec<Vertex>)> {
         let s = self.sim.as_ref()?.snapshot();
-        if s.paused {
-            return None;
-        }
         let vram = s.vram.as_ref()?;
         let screen = (s.display[2].max(1), s.display[3].max(1));
-        // the sky layer first (its own vertices), then the HUD, in one atlas
+        // the sky layer first (its own vertices), then the HUD, in one atlas; paused, the
+        // HUD is the host's (empty here)
         let sky = fe::FeFrame::build_in(crate::assets::Atlas::new(1024), &s.sky_overlay, vram, screen, w, h);
-        let hud = fe::FeFrame::build_in(sky.atlas, &s.overlay, vram, screen, w, h);
+        let hud = fe::FeFrame::build_in(sky.atlas, if s.paused { &[] } else { &s.overlay }, vram, screen, w, h);
         Some((hud, sky.vertices))
+    }
+
+    /// The original's race is paused (its menu up).
+    pub fn paused(&self) -> bool {
+        self.sim.as_ref().is_some_and(|s| s.snapshot().paused)
     }
 
     pub fn hud(&self, w: f32, h: f32) -> Vec<Vertex> {

@@ -56,8 +56,9 @@ pub struct GameHost {
     /// HUD (a paused game draws only its menu's view over the picture it keeps).
     frame_lists: Vec<Vec<OverlayCmd>>,
     last_hud: Vec<OverlayCmd>,
-    /// This frame's sky layer (Flare_Sun's primitives).
+    /// This frame's sky layer (Flare_Sun's primitives), and the last one (kept while paused).
     sky_overlay: Vec<OverlayCmd>,
+    last_sky: Vec<OverlayCmd>,
     /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
     /// menu views drawn into it since (the game redraws only what changes), and the lists
     /// already in it.
@@ -389,6 +390,7 @@ impl GameHost {
             frame_lists: Vec::new(),
             last_hud: Vec::new(),
             sky_overlay: Vec::new(),
+            last_sky: Vec::new(),
             paused_buffers: HashMap::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],
@@ -643,7 +645,14 @@ impl GameHost {
             view_env: self.view_env,
             font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
             car_facets: self.car_facets.clone(),
-            sky_overlay: std::mem::take(&mut self.sky_overlay),
+            sky_overlay: {
+                if self.mode == Mode::Race && Self::paused(c) && self.sky_overlay.is_empty() {
+                    self.last_sky.clone()
+                } else {
+                    self.last_sky = self.sky_overlay.clone();
+                    std::mem::take(&mut self.sky_overlay)
+                }
+            },
             overlay: {
                 while self.overlay_ot.len() < self.overlay.len() {
                     self.overlay_ot.push(self.current_ot);

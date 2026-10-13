@@ -740,12 +740,20 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
 /// A race's 2D: the HUD the original drew (recorded, with its own atlas), or the host's port.
 pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::assets::Vertex> {
     match game.hud_frame(w, h) {
-        Some((f, sky)) => {
+        Some((f, sky)) if !game.paused() => {
             r.write_overlay_atlas(&f.atlas);
             r.use_overlay_atlas = true;
             r.hud_subtract = f.subtract;
             r.sky_layer = sky;
             f.vertices
+        }
+        Some((f, sky)) => {
+            // paused: the host's pause menu over the kept picture, the sky layer as recorded
+            r.write_overlay_atlas(&f.atlas);
+            r.use_overlay_atlas = false;
+            r.hud_subtract = Vec::new();
+            r.sky_layer = sky;
+            game.hud(w, h)
         }
         None => {
             r.use_overlay_atlas = false;
