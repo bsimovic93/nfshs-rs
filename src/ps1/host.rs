@@ -660,7 +660,7 @@ impl GameHost {
                 if std::env::var_os("PS1_CMDLOG").is_some() && self.mode == Mode::FrontEnd {
                     for (i, cmd) in self.overlay.iter().enumerate() {
                         let d = match cmd {
-                            OverlayCmd::Quad { pts, tex, semi, abr, .. } => format!("quad {:?} tex {} semi {semi} abr {abr}", pts[0], tex.is_some()),
+                            OverlayCmd::Quad { pts, tex, semi, abr, colours } => format!("quad {:?} tex {} semi {semi} abr {abr} pts {pts:?} col {colours:x?}", pts[0], tex.is_some()),
                             other => format!("{}", format!("{other:?}").chars().take(60).collect::<String>()),
                         };
                         eprintln!("cmd {i} {d}");
@@ -853,6 +853,7 @@ impl GameHost {
         let ret = c.call_nested(addr, &args);
         self.capturing = false;
         let end = c.m.r32(0x1F80_0004);
+        let mut packets = Vec::new();
         let mut p = start;
         while p < end && end - p < 0x10_0000 {
             let len = c.m.r32(p) >> 24;
@@ -860,9 +861,29 @@ impl GameHost {
                 p += 4;
                 continue;
             }
-            self.parse_prim(c, p + 4, len);
+            packets.push((p, len));
             p += 4 + 4 * len;
         }
+        // the packets go into the ordering table head first, so they are drawn in reverse:
+        // a draw mode (DR_MODE, E1) applies to the packets added before it. Resolve each
+        // packet's mode in drawing order, then record in the order added.
+        let entry_mode = self.draw_mode;
+        let mut modes = vec![entry_mode; packets.len()];
+        let mut mode = entry_mode;
+        for (i, &(p, _)) in packets.iter().enumerate().rev() {
+            let w0 = c.m.r32(p + 4);
+            if w0 >> 24 == 0xE1 {
+                mode = w0 as u16 & 0x1FF;
+            }
+            modes[i] = mode;
+        }
+        for (i, &(p, len)) in packets.iter().enumerate() {
+            self.draw_mode = modes[i];
+            if c.m.r32(p + 4) >> 24 != 0xE1 {
+                self.parse_prim(c, p + 4, len);
+            }
+        }
+        self.draw_mode = entry_mode;
         ret
     }
 

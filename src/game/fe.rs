@@ -384,6 +384,8 @@ impl Showroom {
 pub struct FeScene {
     pub atlas: Atlas,
     pub under: Vec<Vertex>,
+    /// Vertex ranges of `under` drawn subtracting.
+    pub under_subtract: Vec<std::ops::Range<u32>>,
     pub over: Vec<Vertex>,
     pub subtract: Vec<std::ops::Range<u32>>,
     pub car: Vec<Vertex>,
@@ -430,7 +432,8 @@ impl FeScene {
             .filter(|r| r.start as usize >= split)
             .map(|r| (r.start - split as u32)..(r.end - split as u32))
             .collect();
-        Self { atlas, under: vertices, over, subtract, car, car_split, mid, view_proj }
+        let under_subtract = f.subtract.iter().filter(|r| (r.end as usize) <= vertices.len()).cloned().collect();
+        Self { atlas, under: vertices, under_subtract, over, subtract, car, car_split, mid, view_proj }
     }
 
     /// The showroom car's code and paint, when the front end shows one.

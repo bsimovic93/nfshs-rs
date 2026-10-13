@@ -108,6 +108,8 @@ pub struct Renderer {
     pub hud_subtract: Vec<std::ops::Range<u32>>,
     /// 2D drawn first, under the 3D geometry (the front end's background behind its car).
     pub hud_under: Vec<Vertex>,
+    /// Ranges of `hud_under` drawn subtracting.
+    pub hud_under_subtract: Vec<std::ops::Range<u32>>,
     under_vb: DynBuf,
     /// 2D drawn between the dynamic geometry's first `dyn_mid` vertices and the rest (the
     /// showroom's floor between the car's reflection and the car).
@@ -322,6 +324,7 @@ impl Renderer {
             hud_sub_pipeline,
             hud_subtract: Vec::new(),
             hud_under: Vec::new(),
+            hud_under_subtract: Vec::new(),
             under_vb,
             hud_mid: Vec::new(),
             dyn_mid: 0,
@@ -528,7 +531,21 @@ impl Renderer {
                 };
                 rp.set_bind_group(0, under_bg, &[]);
                 rp.set_vertex_buffer(0, self.under_vb.buf.slice(..));
-                rp.draw(0..self.hud_under.len() as u32, 0..1);
+                let n = self.hud_under.len() as u32;
+                let mut at = 0;
+                for r in self.hud_under_subtract.iter().filter(|r| r.end <= n) {
+                    if r.start > at {
+                        rp.set_pipeline(&self.hud_pipeline);
+                        rp.draw(at..r.start, 0..1);
+                    }
+                    rp.set_pipeline(&self.hud_sub_pipeline);
+                    rp.draw(r.clone(), 0..1);
+                    at = r.end;
+                }
+                if at < n {
+                    rp.set_pipeline(&self.hud_pipeline);
+                    rp.draw(at..n, 0..1);
+                }
                 rp.set_bind_group(0, &self.world_bg, &[]);
             }
             if !sky.is_empty() {

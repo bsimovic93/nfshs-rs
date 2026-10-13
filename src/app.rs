@@ -778,6 +778,7 @@ pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: b
     params.fog_end = 2.0e9;
     r.hud_subtract = scene.subtract;
     r.hud_under = scene.under;
+    r.hud_under_subtract = scene.under_subtract;
     r.hud_mid = scene.mid;
     r.dyn_mid = scene.car_split;
     let img = if shot {
@@ -788,6 +789,7 @@ pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: b
     };
     r.hud_subtract = Vec::new();
     r.hud_under = Vec::new();
+    r.hud_under_subtract = Vec::new();
     r.hud_mid = Vec::new();
     r.dyn_mid = 0;
     img
