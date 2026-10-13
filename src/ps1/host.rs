@@ -56,6 +56,8 @@ pub struct GameHost {
     /// HUD (a paused game draws only its menu's view over the picture it keeps).
     frame_lists: Vec<Vec<OverlayCmd>>,
     last_hud: Vec<OverlayCmd>,
+    /// This frame's sky layer (Flare_Sun's primitives).
+    sky_overlay: Vec<OverlayCmd>,
     /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
     /// menu views drawn into it since (the game redraws only what changes), and the lists
     /// already in it.
@@ -111,6 +113,8 @@ pub struct FrameInfo {
     pub car_facets: Vec<CarFacet>,
     /// See [`GameHost::overlay`].
     pub overlay: Vec<OverlayCmd>,
+    /// 2D drawn over the sky and under the world (the sun's flare), as recorded.
+    pub sky_overlay: Vec<OverlayCmd>,
     /// The font's 16 colour palettes (Font_TextColor 0..15).
     pub font_palettes: Vec<[u16; 16]>,
     /// A front-end frame (else a race frame).
@@ -300,6 +304,8 @@ const CAR_CACHE: u32 = 0x1F80_0000;
 /// DrawW_WorldSetUpMatrix(gWorldMat, dcache + 0x14), then SetupChunkBuildList(view) fills
 /// BWorld_gChunkBuildList (count kept at gp + 608): the chunks drawn this frame.
 const SETUP_BUILD_MATRICES: u32 = 0x8007_E2E8;
+const HRZ_SET_PSX_MATRIX: u32 = 0x800D_159C;
+const FLARE_SUN: u32 = 0x800C_FF30;
 const DRAWW_WORLD_SETUP_MATRIX: u32 = 0x800C_829C;
 const G_WORLD_MAT: u32 = 0x8011_0104;
 const SETUP_CHUNK_BUILD_LIST: u32 = 0x8007_E71C;
@@ -382,6 +388,7 @@ impl GameHost {
             otags: 0,
             frame_lists: Vec::new(),
             last_hud: Vec::new(),
+            sky_overlay: Vec::new(),
             paused_buffers: HashMap::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],
@@ -428,6 +435,7 @@ impl GameHost {
                     self.vram_shared.clone().unwrap()
                 }),
                 font_palettes: Vec::new(),
+                sky_overlay: Vec::new(),
             };
             if self.frame.on_frame.as_mut().and_then(|f| f(c, info)).is_none() {
                 c.tick_limit = 0;
@@ -519,17 +527,27 @@ impl GameHost {
         let before = self.overlay.len();
         let mut a = start;
         self.prim_offset = [0, 0];
+        // each list starts unclipped (its own drawing environment, if any, clips it)
+        self.overlay.push(OverlayCmd::Clip { x: 0, y: 0, w: 1024, h: 512 });
         for _ in 0..20_000 {
             let tag = c.m.r32(a);
             let (len, next) = (tag >> 24, tag & 0xFF_FFFF);
             if len > 0 {
                 let code = c.m.r8(a + 7);
-                if let Some(&(clip, ofs)) = self.draw_envs.get(&(a & 0x1F_FFFF | 0x8000_0000)) {
-                    // a view's drawing environment (SetDrawEnv): its clip and offset, relative
-                    // to the drawing buffer
+                // a view's drawing environment (SetDrawEnv's packet): the offset from its E5
+                // word, the clip SetDrawEnv was given for that offset (the packet's own area
+                // words are not used by the game)
+                let e5 = (code >= 0xE0).then(|| (0..len).map(|k| c.m.r32(a + 4 + 4 * k)).find(|w| w >> 24 == 0xE5)).flatten();
+                if let Some(e5) = e5 {
+                    let sx = |v: u32| ((v as i32) << 21) >> 21;
+                    let ofs = [sx(e5 & 0x7FF), sx((e5 >> 11) & 0x7FF)];
                     let [ox, oy] = self.draw_origin;
-                    self.overlay.push(OverlayCmd::Clip { x: (clip[0] as i32 - ox) as i16, y: (clip[1] as i32 - oy) as i16, w: clip[2], h: clip[3] });
-                    self.prim_offset = [(ofs[0] as i32 - ox) as i16, (ofs[1] as i32 - oy) as i16];
+                    let clip = self.draw_envs.values().find(|(_, o)| o[0] as i32 == ofs[0] && o[1] as i32 == ofs[1]).map(|e| e.0);
+                    match clip {
+                        Some(cl) => self.overlay.push(OverlayCmd::Clip { x: (cl[0] as i32 - ox) as i16, y: (cl[1] as i32 - oy) as i16, w: cl[2], h: cl[3] }),
+                        None => self.overlay.push(OverlayCmd::Clip { x: 0, y: 0, w: 1024, h: 512 }),
+                    }
+                    self.prim_offset = [(ofs[0] - ox) as i16, (ofs[1] - oy) as i16];
                     for k in 0..len {
                         let w = c.m.r32(a + 4 + 4 * k);
                         if w >> 24 == 0xE1 {
@@ -559,9 +577,6 @@ impl GameHost {
     /// GP0 E1..E6 in a recorded view: draw mode, drawing area (a clip), drawing offset.
     fn environment(&mut self, w: u32) {
         let [ox, oy] = self.draw_origin;
-        if std::env::var_os("NFSHS_HUDLOG").is_some() {
-            eprintln!("  env {w:08x} origin {:?}", self.draw_origin);
-        }
         match w >> 24 {
             0xE1 => self.draw_mode = w as u16 & 0x1FF,
             0xE3 => self.area_tl = [(w & 0x3FF) as i32 - ox, ((w >> 10) & 0x3FF) as i32 - oy],
@@ -628,6 +643,7 @@ impl GameHost {
             view_env: self.view_env,
             font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
             car_facets: self.car_facets.clone(),
+            sky_overlay: std::mem::take(&mut self.sky_overlay),
             overlay: {
                 while self.overlay_ot.len() < self.overlay.len() {
                     self.overlay_ot.push(self.current_ot);
@@ -1302,9 +1318,6 @@ impl Host for GameHost {
                 // views' clip and offset, for recording them)
                 let clip = std::array::from_fn(|i| c.m.r16(a1 + 2 * i as u32) as i16);
                 let ofs = [c.m.r16(a1 + 8) as i16, c.m.r16(a1 + 10) as i16];
-                if std::env::var_os("NFSHS_HUDLOG").is_some() {
-                    eprintln!("SetDrawEnv {a0:#x}: clip {clip:?} ofs {ofs:?}");
-                }
                 self.draw_envs.insert(a0, (clip, ofs));
                 // a full-screen one is the drawing buffer the views are in
                 if clip[2] >= 256 {
@@ -1750,6 +1763,31 @@ impl Host for GameHost {
                 c.call_nested(DRAWW_WORLD_SETUP_MATRIX, &[G_WORLD_MAT, 0x1F80_0014]);
                 let n = c.call_nested(SETUP_CHUNK_BUILD_LIST, &[RENDER_VIEW]);
                 c.m.w32(CHUNK_BUILD_COUNT, n);
+                // the sun's flare (Hrz_BuildSky: Flare_Sun when the sky record's flags have
+                // 4): the horizon's rotation (the view's matrix, no translation) on the GTE,
+                // its primitives recorded as the sky layer
+                let sky = c.m.r32(GP + 4920);
+                if self.hud_prims && sky != 0 && c.m.r32(0x8012_45C8) & 4 != 0 {
+                    let (rot, tr) = (std::array::from_fn::<u32, 8, _>(|i| c.gte_read(32 + i)), [c.gte_read(37), c.gte_read(38), c.gte_read(39)]);
+                    c.call_nested(HRZ_SET_PSX_MATRIX, &[RENDER_VIEW + 68]);
+                    for (i, v) in [37, 38, 39].into_iter().enumerate() {
+                        let _ = i;
+                        c.gte_write(v, 0);
+                    }
+                    c.r[4] = 0x8013_F0F8;
+                    c.r[5] = 0x1F80_0000;
+                    let saved = std::mem::take(&mut self.overlay);
+                    self.prim_offset = [0, 0];
+                    self.capture_prims(c, FLARE_SUN);
+                    let sun = std::mem::replace(&mut self.overlay, saved);
+                    self.sky_overlay.extend(sun);
+                    for (i, v) in rot.into_iter().enumerate() {
+                        c.gte_write(32 + i, v);
+                    }
+                    for (i, v) in tr.into_iter().enumerate() {
+                        c.gte_write(37 + i, v);
+                    }
+                }
                 c.call_nested(DASHHUD_CHECK_WRONG_WAY, &[a1]);
                 c.call_nested(DASHHUD_HUD_CALC, &[a1]);
                 // the cars: the original decides what is drawn of each (the host draws them).

@@ -515,7 +515,11 @@ impl Renderer {
             rp.draw(0..3, 0..1);
             if !self.hud_under.is_empty() {
                 rp.set_pipeline(&self.hud_pipeline);
-                rp.set_bind_group(0, &self.hud_bg, &[]);
+                let under_bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
+                    (Some((_, bg)), true) => bg,
+                    _ => &self.hud_bg,
+                };
+                rp.set_bind_group(0, under_bg, &[]);
                 rp.set_vertex_buffer(0, self.under_vb.buf.slice(..));
                 rp.draw(0..self.hud_under.len() as u32, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);

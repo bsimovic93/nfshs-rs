@@ -541,6 +541,8 @@ pub struct Snapshot {
     pub car_facets: Vec<Option<super::host::CarFacet>>,
     /// The 2D drawing (pause menu and the like) the game recorded this frame.
     pub overlay: Vec<super::host::OverlayCmd>,
+    /// The race's sky layer (the sun's flare) as recorded.
+    pub sky_overlay: Vec<super::host::OverlayCmd>,
     /// The race is paused (`gSimQueue_BlockSelf`).
     pub paused: bool,
     /// The HUD as Hud_Init built it (read once, see [`HudSetup`]).
@@ -614,6 +616,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         map: MapView::read(&mut |a| c.m.r32(a)),
         car_facets,
         overlay: info.overlay.clone(),
+        sky_overlay: info.sky_overlay.clone(),
         paused: c.m.r32(addr::SIM_PAUSED) != 0,
         dash: (0..0x80).map(|i| c.m.r8(addr::DASHHUD + i)).collect(),
         hud_layout: {
