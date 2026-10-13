@@ -236,6 +236,11 @@ impl OriginalSim {
         b
     }
 
+    /// The camera of the newest simulated frame (the one the original's 2D was built for).
+    pub fn sim_camera(&self) -> Option<Camera> {
+        self.history.back().map(|h| h.1.camera)
+    }
+
     /// The 2D the original draws over the race (HUD, glares) is recorded (see
     /// `GameHost::hud_prims`).
     pub fn hud_recorded(&self) -> bool {

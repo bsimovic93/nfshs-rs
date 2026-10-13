@@ -60,9 +60,9 @@ pub struct GameHost {
     sky_overlay: Vec<OverlayCmd>,
     last_sky: Vec<OverlayCmd>,
     /// The race cars' light halos (DrawC_PrimHalo's primitives), drawn over the 3D.
-    car_glows: Vec<OverlayCmd>,
+    car_glows: Vec<Glow>,
     /// The track lights' glares (BWorld_BuildGlareEffects' primitives), over the 3D.
-    track_glows: Vec<OverlayCmd>,
+    track_glows: Vec<Glow>,
     /// The showroom car's shadow (DrawC_ShadowPrimClip's primitives), for the floor.
     showroom_shadow: Vec<OverlayCmd>,
     /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
@@ -122,6 +122,8 @@ pub struct FrameInfo {
     pub overlay: Vec<OverlayCmd>,
     /// 2D drawn over the sky and under the world (the sun's flare), as recorded.
     pub sky_overlay: Vec<OverlayCmd>,
+    /// Light glows (track lights, car lights) with the world point each belongs to.
+    pub glows: Vec<Glow>,
     /// The font's 16 colour palettes (Font_TextColor 0..15).
     pub font_palettes: Vec<[u16; 16]>,
     /// A front-end frame (else a race frame).
@@ -189,13 +191,40 @@ thread_local! {
     /// While the original's R3DCar_InsertCarFacetII runs for its halos (see
     /// `record_car_facet`); and the primitive buffer ranges they were built in.
     static HALO_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static HALO_RANGES: std::cell::RefCell<Vec<(u32, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static HALO_RANGES: std::cell::RefCell<Vec<(u32, u32, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The car body's drawing in R3DCar_InsertCarFacetII / InsertCarFacetMenuII (the host
 /// draws the body): the part drawing, the shadow, the environment, and the menu's
 /// DrawC_PrimMenu / DrawC_PrimStop.
 const CAR_BODY_DRAWING: [u32; 6] = [0x800C_22E0, 0x800C_0AC8, 0x800C_5054, 0x800C_4C68, 0x800C_4034, 0x800C_0A08];
+
+/// A light's glow as the original built it this frame (screen-space primitives) and the
+/// world point it belongs to (PS1 16.16), or the car (Car_tObj) it is on.
+#[derive(Clone, Debug)]
+pub struct Glow {
+    pub anchor: [i32; 3],
+    pub car: Option<u32>,
+    pub cmds: Vec<OverlayCmd>,
+}
+
+thread_local! {
+    /// While the track's glares are built: where each light's primitives start, and its
+    /// position (Flare_Halo / Flare_Halo2's coorddef).
+    static GLARE_MARKS: std::cell::RefCell<Vec<(u32, [i32; 3])>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+const FLARE_HALO: u32 = 0x800C_EBFC;
+const FLARE_HALO2: u32 = 0x800C_E290;
+
+fn glare_marker(c: &mut Cpu, addr: u32) -> bool {
+    if addr == FLARE_HALO || addr == FLARE_HALO2 {
+        let p = c.r[7];
+        let anchor = [c.m.r32(p) as i32, c.m.r32(p + 4) as i32, c.m.r32(p + 8) as i32];
+        let at = c.m.r32(0x1F80_0004);
+        GLARE_MARKS.with_borrow_mut(|m| m.push((at, anchor)));
+    }
+    false
+}
 
 fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     if HALO_PASS.get() {
@@ -236,7 +265,7 @@ fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     HALO_PASS.set(false);
     let end = c.m.r32(0x1F80_0004);
     if end > start && end - start < 0x1_0000 {
-        HALO_RANGES.with_borrow_mut(|r| r.push((start, end)));
+        HALO_RANGES.with_borrow_mut(|r| r.push((start, end, car)));
     }
     c.r[2] = 0;
     true
@@ -480,6 +509,7 @@ impl GameHost {
                 }),
                 font_palettes: Vec::new(),
                 sky_overlay: Vec::new(),
+                glows: Vec::new(),
             };
             if self.frame.on_frame.as_mut().and_then(|f| f(c, info)).is_none() {
                 c.tick_limit = 0;
@@ -667,11 +697,6 @@ impl GameHost {
                     hud
                 }
             };
-            // the halos first (over the 3D, under the HUD)
-            let glows = std::mem::take(&mut self.track_glows);
-            self.overlay.extend(glows);
-            let glows = std::mem::take(&mut self.car_glows);
-            self.overlay.extend(glows);
             self.overlay.extend(hud);
             self.overlay.reverse();
         }
@@ -692,6 +717,11 @@ impl GameHost {
             view_env: self.view_env,
             font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
             car_facets: self.car_facets.clone(),
+            glows: {
+                let mut g = std::mem::take(&mut self.track_glows);
+                g.append(&mut self.car_glows);
+                g
+            },
             sky_overlay: {
                 if self.mode == Mode::Race && Self::paused(c) && self.sky_overlay.is_empty() {
                     self.last_sky.clone()
@@ -1903,6 +1933,8 @@ impl Host for GameHost {
                 // (BWorld_BuildGlareEffects, as BWorld_OnyxBuildFacets calls it), recorded
                 if self.hud_prims {
                     let start = c.m.r32(0x1F80_0004);
+                    GLARE_MARKS.with_borrow_mut(Vec::clear);
+                    c.inner_hook = Some(glare_marker);
                     for i in 0..n.min(64) {
                         let chunk = c.m.r16(0x8011_02B0 + 4 * i) as i16;
                         if chunk < 0 {
@@ -1914,14 +1946,24 @@ impl Host for GameHost {
                             c.call_nested(BWORLD_BUILD_GLARE_EFFECTS, &[RENDER_VIEW, 0x1F80_0000, group]);
                         }
                     }
+                    c.inner_hook = None;
                     let end = c.m.r32(0x1F80_0004);
+                    self.track_glows.clear();
                     if end > start && end - start < 0x4_0000 {
+                        let marks = GLARE_MARKS.with_borrow(Clone::clone);
                         let saved = std::mem::take(&mut self.overlay);
                         self.prim_offset = [0, 0];
-                        self.record_packets(c, start, end);
-                        self.track_glows = std::mem::replace(&mut self.overlay, saved);
-                    } else {
-                        self.track_glows.clear();
+                        for (k, &(from, anchor)) in marks.iter().enumerate() {
+                            let to = marks.get(k + 1).map_or(end, |m| m.0);
+                            if to > from {
+                                self.record_packets(c, from, to);
+                                let cmds = std::mem::take(&mut self.overlay);
+                                if !cmds.is_empty() {
+                                    self.track_glows.push(Glow { anchor, car: None, cmds });
+                                }
+                            }
+                        }
+                        self.overlay = saved;
                     }
                 }
                 // the sun's flare (Hrz_BuildSky: Flare_Sun when the sky record's flags have
@@ -1970,13 +2012,14 @@ impl Host for GameHost {
                     let ranges = HALO_RANGES.with_borrow(Clone::clone);
                     let saved = std::mem::take(&mut self.overlay);
                     self.prim_offset = [0, 0];
-                    for (start, end) in ranges {
+                    self.car_glows.clear();
+                    for (start, end, car) in ranges {
                         self.record_packets(c, start, end);
+                        let cmds = std::mem::take(&mut self.overlay);
+                        let anchor = [c.m.r32(car + 0xA0) as i32, c.m.r32(car + 0xA4) as i32, c.m.r32(car + 0xA8) as i32];
+                        self.car_glows.push(Glow { anchor, car: Some(car), cmds });
                     }
-                    self.car_glows = std::mem::replace(&mut self.overlay, saved);
-                    if std::env::var_os("NFSHS_HALOLOG").is_some() {
-                        eprintln!("halos: {} prims {:?}", self.car_glows.len(), self.car_glows.first().map(|q| format!("{q:?}").chars().take(200).collect::<String>()));
-                    }
+                    self.overlay = saved;
                 }
                 0
             }

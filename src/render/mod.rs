@@ -120,6 +120,11 @@ pub struct Renderer {
     /// 2D drawn over the sky and under the world (a race's sun), with the 2D pass's atlas.
     pub sky_layer: Vec<Vertex>,
     sky_layer_vb: DynBuf,
+    /// Light glows: 2D in window pixels with a depth (z, the HUD projection's), tested
+    /// against the 3D but not written, with the 2D pass's atlas.
+    pub glows: Vec<Vertex>,
+    glow_vb: DynBuf,
+    glow_pipeline: wgpu::RenderPipeline,
     /// The 2D pass's own atlas (a race's HUD recorded from the original, textured from its
     /// VRAM), when set.
     overlay_atlas: Option<(wgpu::Texture, wgpu::BindGroup)>,
@@ -314,6 +319,8 @@ impl Renderer {
         let under_vb = DynBuf::new(&device, "hud under");
         let mid_vb = DynBuf::new(&device, "hud mid");
         let sky_layer_vb = DynBuf::new(&device, "sky layer");
+        let glow_vb = DynBuf::new(&device, "glows");
+        let glow_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], Some((false, wgpu::CompareFunction::GreaterEqual)), Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
         let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
             device,
@@ -333,6 +340,9 @@ impl Renderer {
             dyn_mid: 0,
             sky_layer: Vec::new(),
             sky_layer_vb,
+            glows: Vec::new(),
+            glow_vb,
+            glow_pipeline,
             overlay_atlas: None,
             use_overlay_atlas: false,
             mid_vb,
@@ -503,6 +513,7 @@ impl Renderer {
         self.under_vb.upload(&self.device, &self.queue, &self.hud_under);
         self.mid_vb.upload(&self.device, &self.queue, &self.hud_mid);
         self.sky_layer_vb.upload(&self.device, &self.queue, &self.sky_layer);
+        self.glow_vb.upload(&self.device, &self.queue, &self.glows);
         let depth = self.depth_view();
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -622,6 +633,14 @@ impl Renderer {
                 rp.set_pipeline(&self.sub_pipeline);
                 rp.set_vertex_buffer(0, self.late_vb.buf.slice(..));
                 rp.draw(0..p.subtract_late.len() as u32, 0..1);
+            }
+            if !self.glows.is_empty() {
+                if let Some((_, bg)) = &self.overlay_atlas {
+                    rp.set_pipeline(&self.glow_pipeline);
+                    rp.set_bind_group(0, bg, &[]);
+                    rp.set_vertex_buffer(0, self.glow_vb.buf.slice(..));
+                    rp.draw(0..self.glows.len() as u32, 0..1);
+                }
             }
             if !hud.is_empty() {
                 let hud_bg = match (&self.overlay_atlas, self.use_overlay_atlas) {

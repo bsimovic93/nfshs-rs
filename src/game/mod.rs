@@ -14,7 +14,7 @@ use crate::render::FrameParams;
 use anyhow::Result;
 use car::{Car, CarSpec, Controls};
 use collision::CollisionWorld;
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3};
 
 #[derive(Default, Clone, Copy)]
 pub struct Input {
@@ -1088,15 +1088,52 @@ impl Game {
 
     /// The HUD as the original drew it this frame (its views' primitives, recorded), when it
     /// was recorded: 2D for a `w` x `h` window with its own atlas.
-    pub fn hud_frame(&self, w: f32, h: f32) -> Option<(fe::FeFrame, Vec<Vertex>)> {
-        let s = self.sim.as_ref()?.snapshot();
+    pub fn hud_frame(&self, w: f32, h: f32) -> Option<(fe::FeFrame, Vec<Vertex>, Vec<Vertex>)> {
+        let sim = self.sim.as_ref()?;
+        let s = sim.snapshot();
         let vram = s.vram.as_ref()?;
         let screen = (s.display[2].max(1), s.display[3].max(1));
-        // the sky layer first (its own vertices), then the HUD, in one atlas; paused, the
-        // HUD is the host's (empty here)
+        // the sky layer first (its own vertices), the light glows, then the HUD, in one
+        // atlas; paused, the HUD is the host's (empty here)
         let sky = fe::FeFrame::build_in(crate::assets::Atlas::new(1024), &s.sky_overlay, vram, screen, w, h);
-        let hud = fe::FeFrame::build_in(sky.atlas, if s.paused { &[] } else { &s.overlay }, vram, screen, w, h);
-        Some((hud, sky.vertices))
+        let mut atlas = sky.atlas;
+        let mut glows = Vec::new();
+        // each glow moved from where the original's camera saw its light to where this
+        // frame's (interpolated) camera sees it, and set at the depth the original sorts it
+        // at (half way to the light: drawn over what is further, behind what is nearer)
+        let now = self.frame_params(w / h).view_proj;
+        let orig = sim.sim_camera().map(|c| self.view_proj_of(&c, w / h));
+        let to_px = |vp: Mat4, p: Vec3| -> Option<(Vec2, f32)> {
+            let c = vp * p.extend(1.0);
+            (c.w > 0.05).then(|| (Vec2::new((c.x / c.w + 1.0) * 0.5 * w, (1.0 - c.y / c.w) * 0.5 * h), c.z / c.w))
+        };
+        for g in &s.glows {
+            let raw = Vec3::new(-(g.anchor[0] as f32), g.anchor[1] as f32, g.anchor[2] as f32) / 65536.0;
+            // a car's light follows the drawn (interpolated) car
+            let now_p = match g.car.and_then(|a| s.cars.iter().position(|c| c.addr == a)) {
+                Some(k) if k < self.racers.len() => raw + (self.racers[k].car.pos - original::pose(&s.cars[k]).pos),
+                _ => raw,
+            };
+            let (Some(orig_vp), Some((p_now, _))) = (orig, to_px(now, now_p)) else { continue };
+            let Some((p_orig, _)) = to_px(orig_vp, raw) else { continue };
+            let half = self.cam_pos + (now_p - self.cam_pos) * 0.5;
+            let Some((_, depth)) = to_px(now, half) else { continue };
+            let f = fe::FeFrame::build_in(atlas, &g.cmds, vram, screen, w, h);
+            atlas = f.atlas;
+            let d = p_now - p_orig;
+            glows.extend(f.vertices.into_iter().map(|v| Vertex { pos: [v.pos[0] + d.x, v.pos[1] + d.y, 1.0 - 2.0 * depth], ..v }));
+        }
+        let hud = fe::FeFrame::build_in(atlas, if s.paused { &[] } else { &s.overlay }, vram, screen, w, h);
+        Some((hud, sky.vertices, glows))
+    }
+
+    /// The view-projection of a camera the original computed (as `frame_params` builds it).
+    fn view_proj_of(&self, c: &original::Camera, aspect: f32) -> Mat4 {
+        let tan_half_v = c.tan_half_h * 0.75;
+        let fov = 2.0 * tan_half_v.atan();
+        let squash = Mat4::from_scale(Vec3::new(1.0, c.y_scale, 1.0));
+        let proj = squash * Mat4::perspective_infinite_reverse_rh(fov, aspect, 0.1);
+        proj * Mat4::look_at_rh(c.pos, c.pos + c.forward, c.up)
     }
 
     /// The original's race is paused (its menu up).
