@@ -32,3 +32,5 @@
 800c0ac8 DrawC_Prim part drawing (skipped while the halos are recorded)
 800c5054 DrawC_ShadowPrimClip (skipped while the halos are recorded)
 800c4c68 car environment drawing (skipped while the halos are recorded)
+800c4034 DrawC_PrimMenu (skipped while the showroom halos are recorded)
+800c0a08 DrawC_PrimStop (skipped while the halos are recorded)

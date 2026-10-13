@@ -192,8 +192,10 @@ thread_local! {
     static HALO_RANGES: std::cell::RefCell<Vec<(u32, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// The car body's drawing in R3DCar_InsertCarFacetII (the host draws the body).
-const CAR_BODY_DRAWING: [u32; 4] = [0x800C_22E0, 0x800C_0AC8, 0x800C_5054, 0x800C_4C68];
+/// The car body's drawing in R3DCar_InsertCarFacetII / InsertCarFacetMenuII (the host
+/// draws the body): the part drawing, the shadow, the environment, and the menu's
+/// DrawC_PrimMenu / DrawC_PrimStop.
+const CAR_BODY_DRAWING: [u32; 6] = [0x800C_22E0, 0x800C_0AC8, 0x800C_5054, 0x800C_4C68, 0x800C_4034, 0x800C_0A08];
 
 fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     if HALO_PASS.get() {
@@ -1472,7 +1474,7 @@ impl Host for GameHost {
                 self.showroom_car = Some((c.m.r8(a0) as i8, c.m.r8(a0 + 1)));
                 return false;
             }
-            0x800B_3428 if self.mode == Mode::FrontEnd => {
+            0x800B_3428 if self.mode == Mode::FrontEnd && !self.capturing => {
                 // R3DCar_InsertCarFacetMenuII(car, ..): the showroom car, drawn by the host
                 let mut car = Box::new(super::race::CarState::read(&mut c.m, a0));
                 // its light level (halved for the reflection), left in the car cache as the
@@ -1499,6 +1501,26 @@ impl Host for GameHost {
                     let map = |c: &mut Cpu, o: u32| (c.m.r32(CAR_CACHE + o) != 0).then(|| std::array::from_fn(|i| c.m.r32(CAR_CACHE + o + 4 * i as u32)));
                     CarEnv { a: map(c, 100), b: map(c, 116), scroll: c.m.r32(CAR_CACHE + 132), colour: c.m.r32(CAR_CACHE + 144) & 0xFF_FFFF, yaw: c.m.r16(R3DCAR_CENTER + 0x14) as i16 }
                 });
+                // the lights' halos: the original itself, its body drawing skipped
+                let mut halos = Vec::new();
+                if ok {
+                    let start = c.m.r32(0x1F80_0004);
+                    let args = [a0, a1, a2, a3];
+                    HALO_PASS.set(true);
+                    c.inner_hook = Some(record_car_facet);
+                    let saved_host = self.capturing;
+                    self.capturing = true;
+                    c.call_nested(0x800B_3428, &args);
+                    self.capturing = saved_host;
+                    c.inner_hook = None;
+                    HALO_PASS.set(false);
+                    let end = c.m.r32(0x1F80_0004);
+                    if end > start && end - start < 0x1_0000 {
+                        let saved = std::mem::take(&mut self.overlay);
+                        self.record_packets(c, start, end);
+                        halos = std::mem::replace(&mut self.overlay, saved);
+                    }
+                }
                 let view = RENDER_VIEW;
                 self.overlay.push(OverlayCmd::ShowroomCar {
                     car,
@@ -1512,6 +1534,8 @@ impl Host for GameHost {
                     level,
                     env,
                 });
+                // after the car (drawn over it)
+                self.overlay.extend(halos);
                 0
             }
             0x800B_3850 if self.mode == Mode::FrontEnd => {
