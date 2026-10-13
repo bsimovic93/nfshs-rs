@@ -389,7 +389,9 @@ impl App {
                 if let Some(vram) = &snap.vram {
                     let fe = crate::game::fe::FeFrame::build(&snap.overlay, vram, w as f32, h as f32);
                     r.write_atlas(&fe.atlas);
+                    r.hud_subtract = fe.subtract;
                     r.render(&flat_params(), &[], &[], &fe.vertices);
+                    r.hud_subtract = Vec::new();
                 }
             }
             Screen::Menu => {

@@ -101,8 +101,9 @@ pub enum OverlayCmd {
     ThinBox { x: i16, y: i16, w: i16, h: i16 },
     /// A screen-space quad (front end): corners in order top-left, top-right, bottom-left,
     /// bottom-right with their colours (0xBBGGRR, 0x80 = 1 on textured quads), optionally
-    /// textured from VRAM.
-    Quad { pts: [[i16; 2]; 4], colours: [u32; 4], tex: Option<QuadTex>, semi: bool },
+    /// textured from VRAM; `abr` is the semi-transparency mode (0 half, 1 add, 2 subtract,
+    /// 3 add a quarter).
+    Quad { pts: [[i16; 2]; 4], colours: [u32; 4], tex: Option<QuadTex>, semi: bool, abr: u8 },
     /// SetDrawArea in the front end: drawing is clipped to this screen rectangle.
     Clip { x: i16, y: i16, w: i16, h: i16 },
 }
@@ -263,7 +264,15 @@ pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
 /// Front-end routines that build GPU primitives themselves (the video wall's DrawTV and
 /// DrawTVLines): run as they are and their primitives recorded (`capture_prims`).
-const CAPTURED_FE_DRAWING: [u32; 2] = [0x8002_24AC, 0x8002_2158];
+const CAPTURED_FE_DRAWING: [u32; 7] = [
+    0x8002_24AC, // DrawTV
+    0x8002_2158, // DrawTVLines
+    0x8001_C25C, // SubtractiveBox
+    0x8003_79FC, // tScreenMain::DrawDropShadow
+    0x8004_C2E0, // DrawShape_SubtractNFS4RectEdges
+    0x8004_F1C4, // PSXDrawGouraudSquare
+    0x8004_F2B4, // PSXDrawTransGouraudSquare
+];
 /// Return address of the engine flip's PutDispEnv call.
 const FLIP_PUT_DISP_ENV_RA: u32 = 0x800B_F164;
 
@@ -413,6 +422,7 @@ impl GameHost {
                 colours,
                 tex: Some(QuadTex { tpage, clut, uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]] }),
                 semi: flags & 1 != 0,
+                abr: ((tpage >> 5) & 3) as u8,
             });
             s1 += width;
         }
@@ -459,6 +469,7 @@ impl GameHost {
                     colours: [colour; 4],
                     tex: Some(QuadTex { tpage, clut, uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]] }),
                     semi: true,
+                    abr: 0,
                 });
             }
             x += adv;
@@ -538,8 +549,9 @@ impl GameHost {
                 if textured && raw {
                     colours = [0x80_8080; 4];
                 }
+                let abr = (if textured { tpage } else { self.draw_mode } >> 5) as u8 & 3;
                 let tex = textured.then_some(QuadTex { tpage, clut, uv });
-                self.overlay.push(OverlayCmd::Quad { pts, colours, tex, semi });
+                self.overlay.push(OverlayCmd::Quad { pts, colours, tex, semi, abr });
             }
             0x60..=0x7F => {
                 // TILE / SPRT (variable or 1, 8, 16 pixels): the draw mode's texture page
@@ -570,7 +582,8 @@ impl GameHost {
                     let (u1, v1) = (u0.wrapping_add(tw as u8), v0.wrapping_add(th as u8));
                     QuadTex { tpage: self.draw_mode, clut, uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]] }
                 });
-                self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, tw, th), colours, tex, semi });
+                let abr = (self.draw_mode >> 5) as u8 & 3;
+                self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, tw, th), colours, tex, semi, abr });
             }
             _ => {}
         }
@@ -863,7 +876,7 @@ impl Host for GameHost {
                 let semi = addr == 0x8004_F3B8;
                 let n = if semi { c.m.r16(sp + 20) as i16 as i32 } else { 1 };
                 for _ in 0..n {
-                    self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, w, h), colours: [a0 & 0xFF_FFFF; 4], tex: None, semi });
+                    self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, w, h), colours: [a0 & 0xFF_FFFF; 4], tex: None, semi, abr: 0 });
                 }
                 0
             }

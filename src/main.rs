@@ -438,6 +438,7 @@ fn real_main() -> Result<()> {
                 let fe = game::fe::FeFrame::build(&overlay, &vram, 960.0, 720.0);
                 let mut r = pollster::block_on(render::Renderer::new(None, (960, 720), &fe.atlas))?;
                 let params = app::flat_params();
+                r.hud_subtract = fe.subtract.clone();
                 r.screenshot(&params, &[], &[], &fe.vertices).save(&out)?;
                 println!("front-end frame written to {out} ({} quads)", fe.vertices.len() / 6);
             }

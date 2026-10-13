@@ -17,6 +17,8 @@ const VRAM_W: usize = 1024;
 pub struct FeFrame {
     pub atlas: Atlas,
     pub vertices: Vec<Vertex>,
+    /// Vertex ranges drawn subtracting (semi-transparency mode 2).
+    pub subtract: Vec<std::ops::Range<u32>>,
 }
 
 /// Texel `(u, v)` of texture page `tpage` through CLUT `clut`, as RGBA (alpha 0 transparent,
@@ -42,6 +44,7 @@ impl FeFrame {
         let (ox, oy) = ((w - 320.0 * scale) / 2.0, (h - 240.0 * scale) / 2.0);
         let size = atlas.size as f32;
         let mut vertices = Vec::new();
+        let mut subtract: Vec<std::ops::Range<u32>> = Vec::new();
         let mut clip = [0.0, 0.0, 320.0, 240.0];
         // the game adds each primitive at the head of its ordering table: last asked, first drawn
         for cmd in cmds.iter().rev() {
@@ -49,7 +52,10 @@ impl FeFrame {
                 clip = [x as f32, y as f32, (x + w) as f32, (y + h) as f32];
                 continue;
             }
-            let OverlayCmd::Quad { pts, colours, tex, semi } = cmd else { continue };
+            let &OverlayCmd::Quad { ref pts, ref colours, ref tex, semi, abr } = cmd else { continue };
+            let semi = &semi;
+            let sub = *semi && abr == 2;
+            let start = vertices.len() as u32;
             let pts: [Vec2; 4] = pts.map(|[x, y]| Vec2::new(x as f32, y as f32));
             let (rect, uv0, div, alpha) = match tex {
                 Some(QuadTex { tpage, clut, uv }) => {
@@ -66,15 +72,19 @@ impl FeFrame {
                         }
                         atlas.add(tw, th, &rgba)
                     });
-                    // blend mode of semi-transparent texels: the page's (as the HUD: half or add)
-                    let alpha = match (*semi, (tpage >> 5) & 3) {
+                    // semi-transparent texels: half or added (subtracted in its own pass)
+                    let alpha = match (*semi, abr) {
                         (false, _) => 1.0,
-                        (true, 1) => 0.0,
+                        (true, 1) | (true, 3) => 0.0,
                         _ => 0.5,
                     };
                     (r, Some((*uv, umin, vmin)), 256.0, alpha)
                 }
-                None => (atlas.white, None, 510.0, if *semi { 0.5 } else { 1.0 }),
+                None => (atlas.white, None, 510.0, match (*semi, abr) {
+                    (false, _) => 1.0,
+                    (true, 1) | (true, 3) => 0.0,
+                    _ => 0.5,
+                }),
             };
             // the PS1 fills pixels whose top-left corner is inside, the GPU those whose centre
             // is: shift untextured quads by half a pixel
@@ -98,8 +108,15 @@ impl FeFrame {
             for k in 1..poly.len().saturating_sub(1) {
                 vertices.extend([place(poly[0]), place(poly[k]), place(poly[k + 1])]);
             }
+            if sub {
+                let end = vertices.len() as u32;
+                match subtract.last_mut() {
+                    Some(r) if r.end == start => r.end = end,
+                    _ => subtract.push(start..end),
+                }
+            }
         }
-        Self { atlas, vertices }
+        Self { atlas, vertices, subtract }
     }
 }
 

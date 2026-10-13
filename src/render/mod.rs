@@ -103,6 +103,9 @@ pub struct Renderer {
     world_pipeline: wgpu::RenderPipeline,
     track_pipeline: wgpu::RenderPipeline,
     hud_pipeline: wgpu::RenderPipeline,
+    /// 2D drawn subtracting, and which ranges of the next frame's 2D vertices use it.
+    hud_sub_pipeline: wgpu::RenderPipeline,
+    pub hud_subtract: Vec<std::ops::Range<u32>>,
     sky_pipeline: wgpu::RenderPipeline,
     world_globals: wgpu::Buffer,
     hud_globals: wgpu::Buffer,
@@ -282,6 +285,7 @@ impl Renderer {
             Some(wgpu::BlendState { color: subtract, alpha: subtract }),
             None,
         );
+        let hud_sub_pipeline = mk_pipeline("vs_main", "fs_sub", &[Some(vbl.clone())], None, Some(wgpu::BlendState { color: subtract, alpha: subtract }), None);
         let hud_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl)], None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
         let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");
@@ -297,6 +301,8 @@ impl Renderer {
             world_pipeline,
             track_pipeline,
             hud_pipeline,
+            hud_sub_pipeline,
+            hud_subtract: Vec::new(),
             sky_pipeline,
             world_globals,
             hud_globals,
@@ -503,10 +509,23 @@ impl Renderer {
                 rp.draw(0..p.subtract_late.len() as u32, 0..1);
             }
             if !hud.is_empty() {
-                rp.set_pipeline(&self.hud_pipeline);
                 rp.set_bind_group(0, &self.hud_bg, &[]);
                 rp.set_vertex_buffer(0, self.hud_vb.buf.slice(..));
-                rp.draw(0..hud.len() as u32, 0..1);
+                // in order: runs of normal blending between the subtracting ranges
+                let mut at = 0;
+                for r in self.hud_subtract.iter().filter(|r| r.end <= hud.len() as u32) {
+                    if r.start > at {
+                        rp.set_pipeline(&self.hud_pipeline);
+                        rp.draw(at..r.start, 0..1);
+                    }
+                    rp.set_pipeline(&self.hud_sub_pipeline);
+                    rp.draw(r.clone(), 0..1);
+                    at = r.end;
+                }
+                if at < hud.len() as u32 {
+                    rp.set_pipeline(&self.hud_pipeline);
+                    rp.draw(at..hud.len() as u32, 0..1);
+                }
             }
         }
         enc.finish()
