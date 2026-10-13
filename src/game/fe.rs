@@ -332,9 +332,11 @@ impl Showroom {
                 }
                 let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
                 let _ = pi;
+                // the wheel arches' subtracted shadow: dark (no subtract pass here)
+                let dark = if part.subtract { 0.0 } else { 1.0 };
                 for v in &part.verts {
                     let p = tm.transform_point3(Vec3::from(v.pos));
-                    let col = v.color;
+                    let col = [v.color[0] * dark, v.color[1] * dark, v.color[2] * dark, if part.subtract { 1.0 } else { v.color[3] }];
                     out.push(Vertex { pos: p.into(), color: [col[0] * tint, col[1] * tint, col[2] * tint, col[3]], ..*v });
                 }
             }

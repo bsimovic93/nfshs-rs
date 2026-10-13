@@ -505,6 +505,8 @@ pub struct CarPart {
     /// Wheel parts turn around their hub: which wheel (FL, FR, RL, RR) and where.
     pub wheel: Option<usize>,
     pub hub: Vec3,
+    /// The part darkens what is behind it (the wheel arches' "shdw" texture, subtracted).
+    pub subtract: bool,
 }
 
 /// A car model in local space (metres, origin at ground contact centre, +Z forward).
@@ -693,7 +695,8 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
                 verts.push(Vertex { pos: p.into(), uv: atlas.uv(rect, t), color: [0.5, 0.5, 0.5, a] });
             }
         }
-        parts.push(CarPart { verts, env, wheel, hub });
+        let subtract = part.polys.iter().all(|p| CAR_TEXTURES.get(p.texture as usize) == Some(&"shdw")) && !part.polys.is_empty();
+        parts.push(CarPart { verts, env, wheel, hub, subtract });
     }
     let wheel_radius = parts.get(53).map(|p| p.hub.y).filter(|&r| r > 0.0).unwrap_or(0.33).max(0.2);
     let mut max = Vec3::ZERO;

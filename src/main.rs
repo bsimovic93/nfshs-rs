@@ -688,6 +688,10 @@ fn dump_car(src: &Path, out: &Path, parts: Option<&str>) -> Result<()> {
     let mut tris = Vec::new();
     for &pi in &sel {
         let part = &geo.parts[pi];
+        if parts.is_some() {
+            let tex: std::collections::BTreeSet<u16> = part.polys.iter().map(|p| p.texture as u16).collect();
+            println!("part {pi}: {} polys, textures {tex:?}, flags {:x?}", part.polys.len(), part.polys.iter().map(|p| (p.flags, p.flags2)).collect::<std::collections::BTreeSet<_>>());
+        }
         let off = Vec3::new(part.position[0] as f32, part.position[1] as f32, part.position[2] as f32) / 256.0;
         for poly in &part.polys {
             let p = poly.v.map(|i| {

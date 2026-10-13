@@ -686,7 +686,11 @@ impl Game {
                 r
             }),
             shadows: self.shadows(),
-            subtract_late: self.car_reflections().1,
+            subtract_late: {
+                let mut v = self.car_reflections().1;
+                v.extend(self.car_arch_shadows());
+                v
+            },
             ambient: self.ambient,
             headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
             sky_view_proj: squash * Mat4::perspective_rh(fov, aspect, 1.0, 1000.0) * sky_view,
@@ -745,8 +749,9 @@ impl Game {
                 },
                 None => (&assets::CAR_PARTS_VISIBLE, 1.0),
             };
+            let hide: Vec<usize> = std::env::var("NFSHS_HIDE_PART").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
             for (pi, (part, &on)) in m.parts.iter().zip(visible).enumerate() {
-                if on == 0 {
+                if on == 0 || hide.contains(&pi) {
                     continue;
                 }
                 let tm = match part.wheel {
@@ -760,6 +765,10 @@ impl Game {
                 // parts sorted in front of their surroundings (negative bias) are drawn a little
                 // towards the camera: the original orders by depth, not a depth buffer
                 let pull = (-(assets::CAR_PART_BIAS.get(pi).copied().unwrap_or(0) as f32)).max(0.0) * 0.003;
+                // the wheel arches' shadow is subtracted (drawn in the late subtract pass)
+                if part.subtract {
+                    continue;
+                }
                 for v in &part.verts {
                     let c = v.color;
                     let p = tm.transform_point3(Vec3::from(v.pos));
@@ -868,6 +877,32 @@ impl Game {
             }
         }
         (add, sub)
+    }
+
+    /// The cars' wheel-arch shadows (parts textured "shdw"), subtracted like the PS1 does.
+    fn car_arch_shadows(&self) -> Vec<Vertex> {
+        let mut out = Vec::new();
+        let facets = self.car_facets();
+        for (i, r) in self.racers.iter().enumerate() {
+            if i == 0 && self.cam_mode == CameraMode::Bumper {
+                continue;
+            }
+            let m = &self.models[r.model];
+            let visible: &[u8] = match facets {
+                Some(f) => f.get(i).and_then(Option::as_ref).map(|f| f.parts.as_slice()).unwrap_or(&[]),
+                None => &assets::CAR_PARTS_VISIBLE,
+            };
+            let model = Mat4::from_rotation_translation(r.car.orientation(), r.car.pos);
+            for (part, &on) in m.parts.iter().zip(visible) {
+                if on == 0 || !part.subtract {
+                    continue;
+                }
+                for v in &part.verts {
+                    out.push(Vertex { pos: model.transform_point3(Vec3::from(v.pos)).into(), ..*v });
+                }
+            }
+        }
+        out
     }
 
     /// The cars' ground shadows (DrawC_ShadowPrim): the "shdw" texture on the quad
