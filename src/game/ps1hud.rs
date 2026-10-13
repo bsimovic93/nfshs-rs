@@ -746,10 +746,8 @@ impl Ps1Hud {
                 (true, false) => 0.5,
                 (true, true) => 0.0,
             };
-            // the PS1 fills the pixels whose top-left corner is inside a polygon, the GPU those
-            // whose centre is: shift untextured polygons by half a pixel (for textured
-            // rectangles both give the same pixels)
-            let shift = if q.textured { 0.0 } else { 0.5 };
+            // the PS1 fills a rectangle's pixels [x0, x1): no offset at any scale
+            let shift = 0.0;
             let mut vert = |p: Vec2, c: [f32; 3], t: Vec2| {
                 let p = p + Vec2::splat(shift);
                 v.push(Vertex {

@@ -144,9 +144,10 @@ impl FeFrame {
                     _ => 0.5,
                 }),
             };
-            // the PS1 fills pixels whose top-left corner is inside, the GPU those whose centre
-            // is: shift untextured quads by half a pixel
-            let shift = if uv0.is_some() { 0.0 } else { 0.5 };
+            // the PS1 fills a rectangle's pixels [x0, x1): at any scale that is the polygon
+            // itself, with no offset (textured and untextured alike, so frames and their
+            // corner sprites meet)
+            let shift = 0.0;
             let corner = |k: usize| {
                 let p = pts[k];
                 let t = match uv0 {
