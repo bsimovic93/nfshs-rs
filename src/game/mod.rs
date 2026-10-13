@@ -666,7 +666,7 @@ impl Game {
         let p = &self.racers[0].car;
         FrameParams {
             world_ranges: self.chunk_list().map(|list| {
-                let mut r = Vec::new();
+                let mut r = vec![self.track.global_range.clone()];
                 for (chunk, flags, rez) in list {
                     let Some(b) = self.track.block_ranges.get(chunk) else { continue };
                     // flags: 1 ground (DrawW_DoTrough: full or low detail by the chunk's

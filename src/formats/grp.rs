@@ -136,6 +136,9 @@ pub struct Track {
     pub models: Vec<Mesh>,
     /// Header flags of each prop model.
     pub model_flags: Vec<u16>,
+    /// Scenery placed for the whole track (0x21/0x24, 20-byte records like a block's plain
+    /// placements, absolute positions): distant islands, headlands.
+    pub globals: Vec<Placement>,
 }
 
 pub fn fx(v: i32) -> f32 {
@@ -184,6 +187,7 @@ impl Track {
         let mut vroad = Vec::new();
         let mut models = Vec::new();
         let mut model_flags = Vec::new();
+        let mut globals = Vec::new();
         for c in chunks(root.body) {
             match c.kind {
                 0x20 => {
@@ -299,6 +303,26 @@ impl Track {
                                     o = (po + np * 6 + 3) & !3;
                                 }
                             }
+                            0x24 => {
+                                let mut o = 0;
+                                let d = s.body;
+                                for _ in 0..s.count {
+                                    let len = u16le(d, o).max(20) as usize;
+                                    if o + 20 > d.len() {
+                                        break;
+                                    }
+                                    let r = &d[o..(o + len).min(d.len())];
+                                    globals.push(Placement {
+                                        kind: r[2],
+                                        model: u16le(r, 6),
+                                        pos: Vec3::new(fx(i32le(r, 8)), fx(i32le(r, 12)), fx(i32le(r, 16))),
+                                        rot: (1.0, 0.0),
+                                        scale: Vec3::ONE,
+                                        raw: std::array::from_fn(|i| r.get(i).copied().unwrap_or(0)),
+                                    });
+                                    o += len;
+                                }
+                            }
                             0x0f => {
                                 let b = s.body;
                                 let v = |o: usize| {
@@ -329,6 +353,6 @@ impl Track {
                 _ => {}
             }
         }
-        Ok(Self { nodes, blocks, textures, vroad, models, model_flags })
+        Ok(Self { nodes, blocks, textures, vroad, models, model_flags, globals })
     }
 }

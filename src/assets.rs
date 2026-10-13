@@ -104,6 +104,8 @@ pub struct TrackAssets {
     /// Per block (track chunk): index ranges of its ground (full detail, low detail), the
     /// detail surfaces drawn at both, its objects and its road lines.
     pub block_ranges: Vec<[std::ops::Range<u32>; 5]>,
+    /// The track-wide scenery (0x21/0x24: islands, headlands), drawn whatever the chunks.
+    pub global_range: std::ops::Range<u32>,
     pub verts: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub tris: Vec<CollTri>,
@@ -345,13 +347,25 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         }
         block_ranges[bi][3] = objects_start..indices.len() as u32;
     }
+    // the track-wide scenery, placed in absolute coordinates
+    let global_start = indices.len() as u32;
+    for pl in &track.globals {
+        let Some(model) = track.models.get(pl.model as usize) else { continue };
+        if let Placement::Fixed(m) = placement_transform(pl) {
+            let pos = pl.pos;
+            let place = move |v: Vec3| ps1_to_world(pos + m * v);
+            emit(model, &place, false, &mut verts, &mut indices, &mut tris);
+        }
+    }
+    let global_range = global_start..indices.len() as u32;
+    log::info!("{} track-wide scenery objects", track.globals.len());
     let nodes = track.nodes.iter().map(|&n| ps1_to_world(n)).collect();
     log::info!("{} sprites", sprites.len());
     let (sky, sky_colors) = match sky {
         Some(s) => build_original_sky(s, &psh, &rects, atlas),
         None => build_sky(&psh, &rects, atlas),
     };
-    Ok(TrackAssets { verts, indices, tris, track, nodes, sprites, sky, sky_colors, block_ranges })
+    Ok(TrackAssets { verts, indices, tris, track, nodes, sprites, sky, sky_colors, block_ranges, global_range })
 }
 
 fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
