@@ -153,3 +153,47 @@ fn clip_polygon(mut poly: Vec<Vertex>, r: [f32; 4]) -> Vec<Vertex> {
     poly
 }
 
+/// The movie the front end is playing: decoded frame by frame as they are shown.
+pub struct MoviePlayer {
+    pub file: String,
+    movie: crate::formats::str::Movie,
+    decoder: crate::formats::str::Decoder,
+    shown: Option<(u32, Vec<u8>)>,
+}
+
+impl MoviePlayer {
+    pub fn load(data: &crate::assets::GameData, file: &str) -> Option<Self> {
+        let bytes = data.read(&format!("MOVIES/{file}")).ok()?;
+        let movie = crate::formats::str::Movie::parse(&bytes);
+        Some(Self { file: file.to_string(), movie, decoder: Default::default(), shown: None })
+    }
+
+    /// The soundtrack from `frame` on (frames at `fps`).
+    pub fn audio_from(&self, frame: u32, fps: f32) -> crate::formats::audio::Sample {
+        let ch = if self.movie.stereo { 2 } else { 1 };
+        let start = ((frame as f32 / fps.max(1.0) * self.movie.rate as f32) as usize * ch).min(self.movie.audio.len());
+        crate::formats::audio::Sample { rate: self.movie.rate, channels: ch as u32, pcm: self.movie.audio[start..].to_vec(), loop_start: None, loop_end: None }
+    }
+
+    /// Frame `frame` filling a `w` x `h` window at 4:3.
+    pub fn frame(&mut self, frame: u32, w: f32, h: f32) -> FeFrame {
+        let (mw, mh) = (self.movie.width, self.movie.height);
+        if self.shown.as_ref().is_none_or(|s| s.0 != frame) {
+            let rgba = self.movie.frames.get(frame as usize).map(|bs| self.decoder.frame(bs, mw, mh)).unwrap_or_else(|| vec![0; (mw * mh * 4) as usize]);
+            self.shown = Some((frame, rgba));
+        }
+        let mut atlas = Atlas::new(512);
+        let r = atlas.add(mw, mh, &self.shown.as_ref().unwrap().1);
+        let size = atlas.size as f32;
+        let (aw, ah) = if w * 3.0 > h * 4.0 { (h * 4.0 / 3.0, h) } else { (w, w * 0.75) };
+        let (ox, oy) = ((w - aw) / 2.0, (h - ah) / 2.0);
+        let corner = |cx: f32, cy: f32| Vertex {
+            pos: [ox + cx * aw, oy + cy * ah, 0.0],
+            uv: [(r.x as f32 + cx * r.w as f32) / size, (r.y as f32 + cy * r.h as f32) / size],
+            color: [0.5, 0.5, 0.5, 1.0],
+        };
+        let q = [corner(0.0, 0.0), corner(1.0, 0.0), corner(1.0, 1.0), corner(0.0, 1.0)];
+        FeFrame { atlas, vertices: vec![q[0], q[1], q[2], q[0], q[2], q[3]], subtract: Vec::new() }
+    }
+}
+

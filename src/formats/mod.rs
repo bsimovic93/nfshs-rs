@@ -22,3 +22,4 @@ pub(crate) fn i32le(d: &[u8], o: usize) -> i32 {
 pub(crate) fn u32be(d: &[u8], o: usize) -> u32 {
     u32::from_be_bytes(d[o..o + 4].try_into().unwrap())
 }
+pub mod str;

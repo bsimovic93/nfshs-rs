@@ -141,3 +141,4 @@
 8004e74c front end shape emitter (quads drawn by the host)
 8004f12c PSXDrawSquare
 8004f3b8 PSXDrawTransSquare
+8004d1c4 Movie_Play (movies are played by the host)

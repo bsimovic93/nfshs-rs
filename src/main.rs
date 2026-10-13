@@ -114,7 +114,12 @@ fn real_main() -> Result<()> {
             let bin = PathBuf::from(&args[2]);
             let out = PathBuf::from(args.get(3).map(String::as_str).unwrap_or("gamedata"));
             let mut cd = iso::CdImage::open(&bin)?;
+            // EXTRACT_ONLY=suffix: only files ending in it (e.g. .XA)
+            let only = std::env::var("EXTRACT_ONLY").ok().map(|s| s.to_ascii_uppercase());
             for e in cd.list_files()? {
+                if only.as_ref().is_some_and(|o| !e.is_dir && !e.path.to_ascii_uppercase().ends_with(o.as_str())) {
+                    continue;
+                }
                 let dst = out.join(&e.path);
                 if e.is_dir {
                     std::fs::create_dir_all(&dst)?;
@@ -122,6 +127,16 @@ fn real_main() -> Result<()> {
                 }
                 std::fs::create_dir_all(dst.parent().unwrap())?;
                 println!("{:8} {:10} {}", e.lba, e.size, e.path);
+                if e.path.to_ascii_uppercase().ends_with(".XA") {
+                    // XA streams (video and audio sectors, Mode 2 Form 2): whole sectors after the
+                    // sync and header (8-byte subheader + 2328 bytes), as the movie player reads them
+                    let mut d = Vec::new();
+                    for i in 0..(e.size as usize).div_ceil(iso::USER_DATA) {
+                        d.extend_from_slice(&cd.read_raw_sector(e.lba + i as u32)?[16..]);
+                    }
+                    std::fs::write(&dst, d)?;
+                    continue;
+                }
                 std::fs::write(&dst, cd.read_file(&e)?)?;
             }
         }
@@ -451,6 +466,35 @@ fn real_main() -> Result<()> {
                     r.screenshot(&app::flat_params(), &[], &[], &fe.vertices).save(&out)?;
                     println!("front-end frame {f} written ({} quads)", fe.vertices.len() / 6);
                 }
+            }
+        }
+        Some("dump-movie") => {
+            // dump-movie FILE.XA FRAME out.png [audio.wav]: one decoded frame (and the audio)
+            let m = formats::str::Movie::parse(&std::fs::read(&args[2])?);
+            println!("{}x{}, {} frames, {} audio samples at {} Hz{}", m.width, m.height, m.frames.len(), m.audio.len(), m.rate, if m.stereo { " stereo" } else { "" });
+            let n: usize = args[3].parse()?;
+            let rgba = formats::str::Decoder::default().frame(&m.frames[n], m.width, m.height);
+            image::RgbaImage::from_raw(m.width, m.height, rgba).context("image")?.save(&args[4])?;
+            if let Some(wav) = args.get(5) {
+                let mut out = Vec::new();
+                let ch = if m.stereo { 2u16 } else { 1 };
+                let bytes = (m.audio.len() * 2) as u32;
+                out.extend_from_slice(b"RIFF");
+                out.extend_from_slice(&(36 + bytes).to_le_bytes());
+                out.extend_from_slice(b"WAVEfmt ");
+                out.extend_from_slice(&16u32.to_le_bytes());
+                out.extend_from_slice(&1u16.to_le_bytes());
+                out.extend_from_slice(&ch.to_le_bytes());
+                out.extend_from_slice(&m.rate.to_le_bytes());
+                out.extend_from_slice(&(m.rate * 2 * ch as u32).to_le_bytes());
+                out.extend_from_slice(&(2 * ch).to_le_bytes());
+                out.extend_from_slice(&16u16.to_le_bytes());
+                out.extend_from_slice(b"data");
+                out.extend_from_slice(&bytes.to_le_bytes());
+                for s in &m.audio {
+                    out.extend_from_slice(&s.to_le_bytes());
+                }
+                std::fs::write(wav, out)?;
             }
         }
         Some("heap-free") => {

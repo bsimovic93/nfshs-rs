@@ -106,6 +106,8 @@ pub enum OverlayCmd {
     Quad { pts: [[i16; 2]; 4], colours: [u32; 4], tex: Option<QuadTex>, semi: bool, abr: u8 },
     /// SetDrawArea in the front end: drawing is clipped to this screen rectangle.
     Clip { x: i16, y: i16, w: i16, h: i16 },
+    /// Movie_Play: frame `frame` of the movie file `file` (under MOVIES) fills the screen.
+    Movie { file: String, frame: u32, fps: f32 },
 }
 
 /// A quad's texture in VRAM terms: texture page and CLUT ids, texel coordinates per corner.
@@ -327,7 +329,7 @@ impl GameHost {
 
     /// A game frame is done (race loop top or the front end's flip): hand this frame's state
     /// to the frame callback and take the pad input for the next.
-    fn frame_top(&mut self, c: &mut Cpu) {
+    fn frame_top(&mut self, c: &mut Cpu) -> Option<u16> {
         // top of the original main loop: game frames are locked to 60 Hz fields
         if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
             self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
@@ -360,7 +362,8 @@ impl GameHost {
             eprintln!("frame: longest stretch without host calls {} backward branches", c.max_since_host);
             c.max_since_host = 0;
         }
-        match self.frame.on_frame.as_mut().and_then(|f| f(c, info)) {
+        let input = self.frame.on_frame.as_mut().and_then(|f| f(c, info));
+        match input {
             None if self.mode == Mode::FrontEnd => c.tick_limit = 0, // end the front end (watchdog)
             None => c.m.w32(MAIN_LOOP_EXIT_FLAG, 1),
             Some(buttons) => {
@@ -377,6 +380,7 @@ impl GameHost {
         if c.trace || std::env::var("PS1_FRAMES").is_ok() {
             eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
         }
+        input
     }
 
     /// The front end's shape emitter (0x8004E74C) as quads: the shape is cut into strips that
@@ -587,6 +591,41 @@ impl GameHost {
             }
             _ => {}
         }
+    }
+
+    /// Movie_Play: show the movie's frames (at the stream's rate: the CD gives 150 sectors a
+    /// second) through the frame callback. Any button stops it; Start (or the game's flag
+    /// 0x80052EBE) marks it skipped (0x80052EBC), as the original's loop does.
+    fn play_movie(&mut self, c: &mut Cpu, index: u32) {
+        let name_at = c.m.r32(0x8005_2E68 + 4 * index);
+        if name_at == 0 || self.frame.on_frame.is_none() {
+            return;
+        }
+        let file = c.m.cstr(name_at);
+        let Some(data) = self.lookup(&format!("MOVIES\\{file}")) else {
+            self.log.push(format!("movie {file}: not found"));
+            return;
+        };
+        let movie = crate::formats::str::Movie::parse(&data);
+        if movie.frames.is_empty() {
+            return;
+        }
+        let fps = 150.0 * movie.frames.len() as f32 / (data.len() / 2336) as f32;
+        let fields_per_frame = (60.0 / fps).round().max(1.0) as u32;
+        'play: for k in 0..movie.frames.len() as u32 {
+            for _ in 0..fields_per_frame {
+                self.overlay.clear();
+                self.overlay.push(OverlayCmd::Movie { file: file.clone(), frame: k, fps });
+                let Some(buttons) = self.frame_top(c) else { break 'play };
+                if buttons != 0 {
+                    if buttons == 1 << 3 || c.m.r8(0x8005_2EBE) != 0 {
+                        c.m.w16(0x8005_2EBC, 1);
+                    }
+                    break 'play;
+                }
+            }
+        }
+        self.overlay.clear();
     }
 
     fn new_op(&mut self, result: u32, user: u32) -> u32 {
@@ -853,7 +892,7 @@ impl Host for GameHost {
                 // the front end's frames end in the engine's flip (Draw_ flip: VSync, PutDispEnv,
                 // DrawOTag per view)
                 if self.mode == Mode::FrontEnd && self.frame.on_frame.is_some() && c.r[31] == FLIP_PUT_DISP_ENV_RA {
-                    self.frame_top(c);
+                    let _ = self.frame_top(c);
                 }
                 a0
             }
@@ -879,6 +918,12 @@ impl Host for GameHost {
                     self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, w, h), colours: [a0 & 0xFF_FFFF; 4], tex: None, semi, abr: 0 });
                 }
                 0
+            }
+            0x8004_D1C4 => {
+                // Movie_Play(movie): the host plays it (see `play_movie`); returns whether it
+                // was skipped
+                self.play_movie(c, a0 & 0xFF);
+                c.m.r16(0x8005_2EBC) as i16 as i32 as u32
             }
             0x8002_A7B0 => {
                 // Front_BuildStream: the front end runs
@@ -961,7 +1006,7 @@ impl Host for GameHost {
             0x800E_77F0 => {
                 if self.frame.on_frame.is_some() && c.r[31] == MAIN_LOOP_YIELD_RA {
                     // top of the original race loop
-                    self.frame_top(c);
+                    let _ = self.frame_top(c);
                 } else {
                     // yield inside a wait loop: let time pass until the next timer tick
                     self.advance_to(c, (self.clock / TICK + 1) * TICK);

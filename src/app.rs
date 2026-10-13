@@ -54,6 +54,9 @@ pub struct App {
     last: Instant,
     /// Start straight into a race (command-line `play` with explicit options).
     direct: Option<RaceConfigOwned>,
+    /// The front end's movie being shown, and its soundtrack's voice.
+    movie: Option<crate::game::fe::MoviePlayer>,
+    movie_voice: Option<crate::audio::VoiceId>,
 }
 
 #[derive(Clone)]
@@ -381,11 +384,49 @@ impl App {
             }
         }
         self.update_audio(dt);
+        // a front-end movie has ended: its soundtrack stops and the menu music comes back
+        let playing = match &self.screen {
+            Screen::FrontEnd(sim) => sim.snapshot().overlay.iter().any(|o| matches!(o, crate::ps1::host::OverlayCmd::Movie { .. })),
+            _ => false,
+        };
+        if !playing && self.movie.take().is_some() {
+            if let (Some(audio), Some(v)) = (&self.audio, self.movie_voice.take()) {
+                audio.stop(v);
+            }
+            if self.music.is_none() && self.music_rx.is_none() {
+                self.queue_music("zmenu");
+            }
+        }
         let Some(r) = &mut self.renderer else { return };
         let (w, h) = r.size;
         match &self.screen {
             Screen::FrontEnd(sim) => {
                 let snap = sim.snapshot();
+                let movie = snap.overlay.iter().find_map(|o| match o {
+                    crate::ps1::host::OverlayCmd::Movie { file, frame, fps } => Some((file.clone(), *frame, *fps)),
+                    _ => None,
+                });
+                if let Some((file, frame, fps)) = movie {
+                    // a movie: decode the frame shown; its soundtrack starts with it
+                    if self.movie.as_ref().is_none_or(|m| m.file != file) {
+                        self.movie = crate::game::fe::MoviePlayer::load(&self.data, &file);
+                        if let (Some(audio), Some(m)) = (&self.audio, &self.movie) {
+                            if let Some(v) = self.movie_voice.take() {
+                                audio.stop(v);
+                            }
+                            if let Some(v) = self.music.take() {
+                                audio.stop(v);
+                            }
+                            self.movie_voice = Some(audio.play(Arc::new(m.audio_from(frame, fps)), 1.0, 1.0, false));
+                        }
+                    }
+                    if let Some(m) = &mut self.movie {
+                        let fe = m.frame(frame, w as f32, h as f32);
+                        r.write_atlas(&fe.atlas);
+                        r.render(&flat_params(), &[], &[], &fe.vertices);
+                    }
+                    return;
+                }
                 if let Some(vram) = &snap.vram {
                     let fe = crate::game::fe::FeFrame::build(&snap.overlay, vram, (snap.display[2], snap.display[3]), w as f32, h as f32);
                     r.write_atlas(&fe.atlas);
@@ -512,6 +553,8 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
         gilrs: gilrs::Gilrs::new().map_err(|e| log::warn!("gamepad support disabled: {e}")).ok(),
         last: Instant::now(),
         direct,
+        movie: None,
+        movie_voice: None,
     };
     el.run_app(&mut app)?;
     Ok(())
