@@ -1132,15 +1132,24 @@ impl Game {
             _ => return out,
         };
         let world = |p: [i32; 3]| Vec3::new(-(p[0] as f32), p[1] as f32, p[2] as f32) / 65536.0;
-        let in_view = |slice: i16| chunks.is_none_or(|c| c.is_empty() || c.iter().any(|c| c.0 == slice));
+        // BWorld_IsSliceInBuildList: a slice is a track node, its chunk the node / 8
+        let in_view = |slice: i16| chunks.is_none_or(|c| c.is_empty() || c.iter().any(|c| c.0 == slice / 8));
+        if std::env::var_os("NFSHS_SKIDLOG").is_some() {
+            let near = skids.iter().filter(|q| { let d = world(q.corners[0]) - self.cam_pos; d.x * d.x + d.z * d.z < 3600.0 }).count();
+            let listed = skids.iter().filter(|q| in_view(q.slice)).count();
+            let slices: std::collections::BTreeSet<i16> = skids.iter().map(|q| q.slice).collect();
+            eprintln!("skids: {} quads, {near} near, {listed} in listed chunks; slices {slices:?}; chunks {:?}", skids.len(), chunks.map(|c| c.iter().map(|c| c.0).collect::<Vec<_>>()));
+        }
         for q in skids {
             let Some(uv) = self.skid_tex[q.tex as usize & 1] else { continue };
             if !in_view(q.slice) {
                 continue;
             }
             let p = q.corners.map(world);
-            let d = p[0] - self.cam_pos;
-            if d.x * d.x + d.z * d.z > 60.0 * 60.0 {
+            // Draw_CircleClip: within 50 m (its estimate: the larger of |dx|, |dz| plus a
+            // quarter of the smaller)
+            let d = (p[0] - self.cam_pos).abs();
+            if d.x.max(d.z) + d.x.min(d.z) / 4.0 >= 50.0 {
                 continue;
             }
             let p = p.map(|v| self.over_road(v + Vec3::Y * 0.02));
@@ -1204,7 +1213,8 @@ impl Game {
             let Some((p_orig, _)) = to_px(orig_vp, raw) else { continue };
             let half = self.cam_pos + (now_p - self.cam_pos) * 0.5;
             let Some((_, depth)) = to_px(now, half) else { continue };
-            let f = fe::FeFrame::build_in(atlas, &g.cmds, vram, screen, w, h);
+            // (a puff is reprojected afterwards: not cut at the original's screen edges)
+            let f = fe::FeFrame::build_clipped(atlas, &g.cmds, vram, screen, w, h, !g.smoke);
             atlas = f.atlas;
             let d = p_now - p_orig;
             if g.smoke && std::env::var_os("NFSHS_NOSMOKE").is_some() {

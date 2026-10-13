@@ -48,7 +48,14 @@ impl FeFrame {
 
     /// As [`build`](Self::build), adding the textures to `atlas` (which may hold others, such
     /// as the showroom car's).
-    pub fn build_in(mut atlas: Atlas, cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {
+    pub fn build_in(atlas: Atlas, cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {
+        Self::build_clipped(atlas, cmds, vram, screen, w, h, true)
+    }
+
+    /// As [`build_in`](Self::build_in); `clip` false keeps what lies off the PS1 screen
+    /// (primitives that are moved afterwards, such as smoke puffs seen by another camera).
+    pub fn build_clipped(mut atlas: Atlas, cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32, clip: bool) -> Self {
+        let clip_screen = clip;
         let mut under = 0;
         let mut car_seen = false;
         // untextured semi-transparent quads blend as a whole: a texel with the semi bit
@@ -61,7 +68,7 @@ impl FeFrame {
         let size = atlas.size as f32;
         let mut vertices = Vec::new();
         let mut subtract: Vec<std::ops::Range<u32>> = Vec::new();
-        let mut clip = [0.0, 0.0, sw, sh];
+        let mut clip = if clip_screen { [0.0, 0.0, sw, sh] } else { [-1.0e5, -1.0e5, 1.0e5, 1.0e5] };
         // the game adds each primitive at the head of its ordering table: last asked, first
         // drawn; the showroom's floor goes right before its cars (the car cache's first slot)
         let floor: Vec<&OverlayCmd> = cmds.iter().filter_map(|c| if let OverlayCmd::ShowroomFloor(p) = c { Some(p.iter().rev()) } else { None }).flatten().collect();
