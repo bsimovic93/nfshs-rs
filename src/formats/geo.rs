@@ -44,6 +44,9 @@ impl Geo {
             bail!("geo too small");
         }
         let ptrs: Vec<u32> = (0..PART_COUNT).map(|i| u32le(d, i * 4)).collect();
+        if ptrs.iter().all(|&p| p == 0) {
+            return Ok(Self::parse_packed(d));
+        }
         // Locate the first non-empty part and derive the base address from its vertex pointer.
         let mut base = None;
         let lo = ptrs.iter().copied().min().unwrap();
@@ -103,5 +106,34 @@ impl Geo {
             parts.push(part);
         }
         Ok(Self { parts })
+    }
+
+    /// The traffic cars' layout: no pointers, the parts one after another from 0x24C, each a
+    /// part header, its vertices and its polygons (no normals); parts 0..47 (the last one
+    /// the wheel disc).
+    fn parse_packed(d: &[u8]) -> Self {
+        let mut parts = Vec::with_capacity(PART_COUNT);
+        let mut o = 0x24C;
+        while parts.len() < PART_COUNT && o + PART_HEADER <= d.len() {
+            let (nv, np) = (u16le(d, o) as usize, u16le(d, o + 2) as usize);
+            let end = o + PART_HEADER + nv * 6 + np * 12;
+            if nv > 1000 || end > d.len() {
+                break;
+            }
+            let position = [i32le(d, o + 4), i32le(d, o + 8), i32le(d, o + 12)];
+            let vo = o + PART_HEADER;
+            let po = vo + nv * 6;
+            let verts = (0..nv).map(|i| [i16le(d, vo + i * 6), i16le(d, vo + i * 6 + 2), i16le(d, vo + i * 6 + 4)]).collect();
+            let polys = (0..np)
+                .map(|i| {
+                    let q = &d[po + i * 12..po + i * 12 + 12];
+                    GeoPoly { flags: q[0], flags2: q[1], texture: q[2], v: [q[3], q[4], q[5]], uv: [[q[6], q[7]], [q[8], q[9]], [q[10], q[11]]] }
+                })
+                .collect();
+            parts.push(GeoPart { position, verts, normals: Vec::new(), polys });
+            o = end;
+        }
+        parts.resize(PART_COUNT, GeoPart::default());
+        Self { parts }
     }
 }

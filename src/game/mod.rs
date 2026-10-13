@@ -87,6 +87,8 @@ pub struct RaceConfig<'a> {
     /// Run the recompiled original simulation (false: the engine's own physics, e.g. when
     /// poses come from elsewhere).
     pub original_sim: bool,
+    /// Traffic models to load when the simulation does not list them (reference renders).
+    pub traffic: Vec<String>,
 }
 
 pub struct Game {
@@ -94,6 +96,11 @@ pub struct Game {
     pub models: Vec<CarModel>,
     pub world: CollisionWorld,
     pub racers: Vec<Racer>,
+    /// The original's traffic (cars after the racers in its car list): snapshot index and
+    /// model (index into `models`).
+    pub traffic: Vec<(usize, usize)>,
+    /// Traffic poses and what is drawn of each (reference renders), instead of the sim's.
+    pub traffic_override: Option<Vec<(original::Pose, crate::ps1::host::CarFacet)>>,
     /// Virtual-road centre line (world space) used for progress, resets and start grid.
     pub path: Vec<Vec3>,
     /// (left, right) wall distance per path sample.
@@ -233,6 +240,43 @@ impl Game {
             });
             models.push(model);
         }
+        // the traffic the original drives (test drives and most races): its cars come after
+        // the racers in the car list, their models loaded here (one per code)
+        let mut traffic = Vec::new();
+        if !cfg.traffic.is_empty() {
+            let night = matches!(cfg.variant, "N" | "S");
+            for (i, code) in cfg.traffic.iter().enumerate() {
+                if let Ok(m) = assets::load_car(data, atlas, code, false, night, None, 0) {
+                    models.push(m);
+                    traffic.push((racers.len() + i, models.len() - 1));
+                }
+            }
+        } else if let Some(s) = &sim {
+            let night = matches!(cfg.variant, "N" | "S");
+            let mut loaded: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for (k, c) in s.snapshot().cars.iter().enumerate().skip(racers.len()) {
+                if crate::ps1::race::car_type(&c.code).is_some() {
+                    log::warn!("race car {} after the traffic in the car list", c.code);
+                    continue;
+                }
+                let mi = match loaded.get(&c.code) {
+                    Some(&mi) => mi,
+                    None => match assets::load_car(data, atlas, &c.code, false, night, None, c.colour) {
+                        Ok(m) => {
+                            models.push(m);
+                            loaded.insert(c.code.clone(), models.len() - 1);
+                            models.len() - 1
+                        }
+                        Err(e) => {
+                            log::warn!("traffic car {}: {e:#}", c.code);
+                            continue;
+                        }
+                    },
+                };
+                traffic.push((k, mi));
+            }
+            log::info!("{} traffic cars ({} models)", traffic.len(), loaded.len());
+        }
         let fog = match cfg.variant {
             "N" => (Vec3::new(0.03, 0.04, 0.09), 50.0, 240.0),
             "S" => (Vec3::new(0.75, 0.78, 0.82), 40.0, 220.0),
@@ -263,6 +307,8 @@ impl Game {
             models,
             world,
             racers,
+            traffic,
+            traffic_override: None,
             path,
             walls,
             laps: cfg.laps,
@@ -777,6 +823,7 @@ impl Game {
                 }
             }
         }
+        out.extend(self.traffic_geometry());
         out.extend(self.car_reflections().0);
         // the lights' glows last (additive)
         if let Some(sim) = &self.sim {
@@ -879,6 +926,62 @@ impl Game {
         (add, sub)
     }
 
+    /// The traffic cars as the original places them (its poses), the parts it draws.
+    fn traffic_geometry(&self) -> Vec<Vertex> {
+        let mut out = Vec::new();
+        let (poses, facets): (Vec<original::Pose>, Vec<Option<crate::ps1::host::CarFacet>>) = match (&self.traffic_override, &self.sim) {
+            (Some(o), _) => {
+                let n = self.racers.len();
+                let mut p = vec![original::Pose::default(); n];
+                let mut f = vec![None; n];
+                for (pose, facet) in o {
+                    p.push(*pose);
+                    f.push(Some(facet.clone()));
+                }
+                (p, f)
+            }
+            (None, Some(sim)) => (sim.poses().0, sim.snapshot().car_facets.clone()),
+            _ => return out,
+        };
+        for &(k, mi) in &self.traffic {
+            let (Some(pose), Some(m)) = (poses.get(k), self.models.get(mi)) else { continue };
+            if pose.pos.distance_squared(self.cam_pos) > self.fog.2 * self.fog.2 {
+                continue;
+            }
+            if std::env::var_os("NFSHS_TRAFLOG").is_some() && pose.pos.distance(self.cam_pos) < 30.0 {
+                let g = self.world.ground(pose.pos + Vec3::Y * 3.0, 6.0).map(|h| h.height);
+                eprintln!("traffic {k}: origin y {:.2} ground {g:?} up {:.2?}", pose.pos.y, pose.up);
+            }
+            let facet = facets.get(k).and_then(Option::as_ref);
+            // not put into the view by the original this frame: not drawn
+            let Some(facet) = facet else { continue };
+            let tint = car_light(facet.light) as f32 / 128.0;
+            let model = Mat4::from_rotation_translation(pose.rot, pose.pos);
+            for (pi, (part, &on)) in m.parts.iter().zip(&facet.parts).enumerate() {
+                if on == 0 || part.subtract {
+                    continue;
+                }
+                // traffic models have one wheel (part 47, front left): drawn at all four
+                // corners, mirrored for the other side
+                let placements: Vec<Mat4> = match (pi, part.wheel.is_some()) {
+                    (47, true) => [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)]
+                        .iter()
+                        .map(|&(sx, sz)| model * Mat4::from_translation(part.hub * Vec3::new(sx, 1.0, sz)) * Mat4::from_scale(Vec3::new(sx, 1.0, 1.0)))
+                        .collect(),
+                    (_, true) => vec![model * Mat4::from_translation(part.hub)],
+                    _ => vec![model],
+                };
+                for tm in placements {
+                for v in &part.verts {
+                    let c = v.color;
+                    out.push(Vertex { pos: tm.transform_point3(Vec3::from(v.pos)).into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
+                }
+                }
+            }
+        }
+        out
+    }
+
     /// The cars' wheel-arch shadows (parts textured "shdw"), subtracted like the PS1 does.
     fn car_arch_shadows(&self) -> Vec<Vertex> {
         let mut out = Vec::new();
@@ -926,6 +1029,29 @@ impl Game {
             });
             for k in [0, 1, 3, 0, 3, 2] {
                 out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
+            }
+        }
+        // the traffic's shadows (their corners are relative to the car's simulated position)
+        if let (Some(sim), Some(uv)) = (&self.sim, self.shadow_tex) {
+            let snap = sim.snapshot();
+            for &(k, _) in &self.traffic {
+                let Some(f) = snap.car_facets.get(k).and_then(Option::as_ref) else { continue };
+                let Some((corners, rgb)) = f.shadow else { continue };
+                let Some(car) = snap.cars.get(k) else { continue };
+                if corners.iter().all(|c| *c == [0; 3]) {
+                    continue;
+                }
+                let s = car_light(f.light);
+                let c = rgb.map(|k| ((s * k as u32) >> 8) as f32 / 256.0);
+                let (cx, cz) = (-(car.position[0] as f32) / 65536.0, car.position[2] as f32 / 65536.0);
+                let ground = car.position[1] as f32 / 65536.0 - car.dimension[1] as f32 / 65536.0;
+                let p = corners.map(|v| {
+                    let q = Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) / 65536.0;
+                    Vec3::new(cx + q.x, q.y.max(ground) + 0.03, cz + q.z)
+                });
+                for k in [0, 1, 3, 0, 3, 2] {
+                    out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
+                }
             }
         }
         out

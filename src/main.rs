@@ -69,7 +69,7 @@ fn real_main() -> Result<()> {
         .map(|s| s.to_ascii_uppercase())
         .collect();
     let laps: i32 = opt(&args, "--laps").unwrap_or("2").parse()?;
-    let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps, original_sim: true };
+    let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps, original_sim: true, traffic: Vec::new() };
     match args.get(1).map(String::as_str) {
         None | Some("menu") => app::run(&data, None)?,
         Some("play") => app::run(
@@ -530,6 +530,7 @@ fn real_main() -> Result<()> {
                     square: keys.contains('s'),
                     start: keys.contains('p'),
                     select: keys.contains('e'),
+                    autopilot: keys.contains('a'),
                     ..Default::default()
                 };
                 script.push((secs.parse::<f32>()?, i));

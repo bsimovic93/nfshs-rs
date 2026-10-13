@@ -52,7 +52,7 @@ struct State {
 }
 
 /// Pose of a simulated car in engine world space.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Pose {
     pub pos: Vec3,
     pub rot: Quat,

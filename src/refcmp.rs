@@ -113,7 +113,9 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     let opponents: Vec<String> = cars[1..].iter().map(|&c| ram.code(c)).filter(|c| car_type(c).is_some()).collect();
     println!("track {track}{variant}, player {player}, opponents {opponents:?}");
     let mut atlas = Atlas::new(2048);
-    let cfg = RaceConfig { track, variant, player_car: &player, opponents: opponents.clone(), laps: 1, original_sim: true };
+    let cfg = RaceConfig { track, variant, player_car: &player, opponents: opponents.clone(), laps: 1, original_sim: true, traffic: Vec::new() };
+    let traffic_cars: Vec<u32> = cars.iter().copied().skip(1).filter(|&c| car_type(&ram.code(c)).is_none()).collect();
+    let cfg = RaceConfig { traffic: traffic_cars.iter().map(|&c| ram.code(c)).collect(), ..cfg };
     let mut game = Game::load(data, &mut atlas, &cfg)?;
     // let the original run a few frames so its view set-up (fog, colours) has happened
     if let Some(sim) = &mut game.sim {
@@ -130,6 +132,20 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         r.car.up = up;
         r.car.yaw = forward.x.atan2(forward.z);
     }
+    // the traffic where the game has it, all parts drawn
+    game.traffic_override = Some(
+        traffic_cars
+            .iter()
+            .map(|&c| {
+                let row = |i: u32| ram.v3(c + 0xF0 + 12 * i).normalize_or_zero();
+                let (right, up, forward) = (row(0), row(1), row(2));
+                let rot = Quat::from_mat3(&Mat3::from_cols(-right, up, forward)).normalize();
+                let pos = ram.v3(c + 0xA0) - up * (ram.i32(c + 0x138) as f32 / 65536.0);
+                let pose = crate::game::original::Pose { pos, rot, forward, up, vel: Vec3::ZERO };
+                (pose, crate::ps1::host::CarFacet { car: c, parts: vec![1; 57], light: 0x80_8080, shadow: None, env: None })
+            })
+            .collect(),
+    );
     // the camera exactly as the game computed it for that frame
     let v = at::VIEW + 8;
     let rot = |i: u32| ram.v3(v + 12 + 12 * i).normalize_or_zero();

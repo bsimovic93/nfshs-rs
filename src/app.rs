@@ -74,7 +74,7 @@ pub struct RaceConfigOwned {
 impl App {
     fn start_race(&mut self, cfg: RaceConfigOwned) {
         let mut atlas = Atlas::new(2048);
-        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true };
+        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true, traffic: Vec::new() };
         let game = match Game::load(&self.data, &mut atlas, &rc) {
             Ok(g) => g,
             Err(e) => {
@@ -124,7 +124,7 @@ impl App {
     /// The original left its front end for a race: load what it races and show it.
     fn front_end_race(&mut self, sim: Box<crate::game::original::OriginalSim>) {
         let cfg = race_of(sim.snapshot());
-        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true };
+        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true, traffic: Vec::new() };
         log::info!("the original starts a race: track {}{} with {}", cfg.track, cfg.variant, cfg.player_car);
         let mut atlas = Atlas::new(2048);
         match Game::load_with(&self.data, &mut atlas, &rc, Some(*sim)) {
@@ -703,8 +703,8 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                     let mut s = sim.take().unwrap();
                     s.reset_race();
                     let cfg = race_of(s.snapshot());
-                    println!("frame {frame}: race {}{} with {} vs {:?}, {} laps", cfg.track, cfg.variant, cfg.player_car, cfg.opponents, cfg.laps);
-                    let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true };
+                    println!("frame {frame}: race {}{} with {} vs {:?}, {} laps (cars {:?})", cfg.track, cfg.variant, cfg.player_car, cfg.opponents, cfg.laps, s.snapshot().cars.iter().map(|c| c.code.clone()).collect::<Vec<_>>());
+                    let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true, traffic: Vec::new() };
                     let mut atlas = Atlas::new(2048);
                     let g = Game::load_with(data, &mut atlas, &rc, Some(*s))?;
                     r.set_atlas(&atlas);
@@ -713,6 +713,14 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                 }
             } else if let Some(g) = &mut game {
                 g.update(1.0 / 60.0, input);
+                if std::env::var_os("NFSHS_CARSLOG").is_some() && frame % 60 == 0 {
+                    if let Some(sim) = &g.sim {
+                        let s = sim.snapshot();
+                        let p = s.cars[0].position;
+                        let d = |c: &crate::ps1::race::CarState| (((c.position[0] - p[0]) as f64).hypot((c.position[2] - p[2]) as f64) / 65536.0) as i32;
+                        println!("frame {frame}: speed {:.0} km/h, cars {:?}", s.cars[0].speed as f32 / 65536.0 * 3.6, s.cars.iter().skip(1).map(|c| format!("{} {}m", c.code, d(c))).collect::<Vec<_>>());
+                    }
+                }
                 if std::env::var_os("NFSHS_FLIPLOG").is_some() {
                     let c = &g.player().car;
                     if c.up.y < 0.7 {
