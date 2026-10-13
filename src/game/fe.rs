@@ -393,6 +393,7 @@ pub struct FeScene {
     /// floor (`mid`, 2D) is drawn in between.
     pub car_split: u32,
     pub mid: Vec<Vertex>,
+    pub mid_subtract: Vec<std::ops::Range<u32>>,
     pub view_proj: Option<glam::Mat4>,
 }
 
@@ -425,7 +426,13 @@ impl FeScene {
         let split = if view_proj.is_some() { f.under } else { 0 };
         let mut vertices = f.vertices;
         let over = vertices.split_off(split);
-        let mid = if view_proj.is_some() { vertices.split_off(f.floor.min(vertices.len())) } else { Vec::new() };
+        let mid_at = f.floor.min(vertices.len());
+        let mid = if view_proj.is_some() { vertices.split_off(mid_at) } else { Vec::new() };
+        let mid_subtract = if view_proj.is_some() {
+            f.subtract.iter().filter(|r| r.start as usize >= mid_at && (r.end as usize) <= split).map(|r| (r.start - mid_at as u32)..(r.end - mid_at as u32)).collect()
+        } else {
+            Vec::new()
+        };
         let subtract = f
             .subtract
             .iter()
@@ -433,7 +440,7 @@ impl FeScene {
             .map(|r| (r.start - split as u32)..(r.end - split as u32))
             .collect();
         let under_subtract = f.subtract.iter().filter(|r| (r.end as usize) <= vertices.len()).cloned().collect();
-        Self { atlas, under: vertices, under_subtract, over, subtract, car, car_split, mid, view_proj }
+        Self { atlas, under: vertices, under_subtract, over, subtract, car, car_split, mid, mid_subtract, view_proj }
     }
 
     /// The showroom car's code and paint, when the front end shows one.

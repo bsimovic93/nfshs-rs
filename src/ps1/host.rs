@@ -59,6 +59,8 @@ pub struct GameHost {
     /// This frame's sky layer (Flare_Sun's primitives), and the last one (kept while paused).
     sky_overlay: Vec<OverlayCmd>,
     last_sky: Vec<OverlayCmd>,
+    /// The showroom car's shadow (DrawC_ShadowPrimClip's primitives), for the floor.
+    showroom_shadow: Vec<OverlayCmd>,
     /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
     /// menu views drawn into it since (the game redraws only what changes), and the lists
     /// already in it.
@@ -306,6 +308,7 @@ const CAR_CACHE: u32 = 0x1F80_0000;
 /// BWorld_gChunkBuildList (count kept at gp + 608): the chunks drawn this frame.
 const SETUP_BUILD_MATRICES: u32 = 0x8007_E2E8;
 const HRZ_SET_PSX_MATRIX: u32 = 0x800D_159C;
+const DRAWC_SHADOW_PRIM_CLIP: u32 = 0x800C_5054;
 const FLARE_SUN: u32 = 0x800C_FF30;
 const DRAWW_WORLD_SETUP_MATRIX: u32 = 0x800C_829C;
 const G_WORLD_MAT: u32 = 0x8011_0104;
@@ -391,6 +394,7 @@ impl GameHost {
             last_hud: Vec::new(),
             sky_overlay: Vec::new(),
             last_sky: Vec::new(),
+            showroom_shadow: Vec::new(),
             paused_buffers: HashMap::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],
@@ -1433,6 +1437,15 @@ impl Host for GameHost {
                 // DrawC_PrimStart as the original calls it here: the reflection maps (as in
                 // races, see record_car_facet)
                 let ok = c.call_nested(DRAWC_PRIM_START, &[R3DCAR_CENTER, a0, level, CAR_CACHE]) as i32 >= 0;
+                // its shadow on the floor (DrawC_ShadowPrimClip, not for the reflection): the
+                // original's primitives, drawn with the floor before the car
+                if ok && c.m.r32(GP + 3532) & 0x80 == 0 {
+                    c.r[4] = 0x8011_7BA0;
+                    c.r[5] = CAR_CACHE;
+                    let saved = std::mem::take(&mut self.overlay);
+                    self.capture_prims(c, DRAWC_SHADOW_PRIM_CLIP);
+                    self.showroom_shadow = std::mem::replace(&mut self.overlay, saved);
+                }
                 let env = ok.then(|| {
                     let map = |c: &mut Cpu, o: u32| (c.m.r32(CAR_CACHE + o) != 0).then(|| std::array::from_fn(|i| c.m.r32(CAR_CACHE + o + 4 * i as u32)));
                     CarEnv { a: map(c, 100), b: map(c, 116), scroll: c.m.r32(CAR_CACHE + 132), colour: c.m.r32(CAR_CACHE + 144) & 0xFF_FFFF, yaw: c.m.r16(R3DCAR_CENTER + 0x14) as i16 }
@@ -1504,7 +1517,11 @@ impl Host for GameHost {
                     let (p, q) = (Self::gte_project(c, p), Self::gte_project(c, q));
                     prims.push(OverlayCmd::Quad { pts: [centre, p, q, q], colours: [spot, 0, 0, 0], tex: None, semi: true, abr: 1 });
                 }
-                self.overlay.push(OverlayCmd::ShowroomFloor(prims));
+                // the car's shadow last (drawn over the ring and spot; the list is reversed)
+                let mut all = std::mem::take(&mut self.showroom_shadow);
+                all.reverse();
+                all.extend(prims);
+                self.overlay.push(OverlayCmd::ShowroomFloor(all));
                 0
             }
             0x800B_F1D4 => {

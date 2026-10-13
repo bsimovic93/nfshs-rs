@@ -780,6 +780,7 @@ pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: b
     r.hud_under = scene.under;
     r.hud_under_subtract = scene.under_subtract;
     r.hud_mid = scene.mid;
+    r.hud_mid_subtract = scene.mid_subtract;
     r.dyn_mid = scene.car_split;
     let img = if shot {
         Some(r.screenshot(&params, &[], &scene.car, &scene.over))
@@ -791,6 +792,7 @@ pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: b
     r.hud_under = Vec::new();
     r.hud_under_subtract = Vec::new();
     r.hud_mid = Vec::new();
+    r.hud_mid_subtract = Vec::new();
     r.dyn_mid = 0;
     img
 }
