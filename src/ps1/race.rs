@@ -262,6 +262,8 @@ pub struct CarState {
     /// The paint: the row of the body textures' colour palettes (`Texture_ColorCarPalette`,
     /// as `R3DCar_Instantiate3DCar` sets it from the car's colour and flags).
     pub colour: u8,
+    /// Car_tObj+0x570 bit 4: a traffic car parked out of the race (waiting to enter).
+    pub parked: bool,
 }
 
 impl CarState {
@@ -282,6 +284,7 @@ impl CarState {
             steering: m.r32(car + 0x450) as i32,
             lap: m.r32(car + 0x264) as i32,
             colour: (m.r16(car + 0x840) & 7) as u8 + ((m.r8(car + 0x8B3) & 1) << 3),
+            parked: m.r32(car + 0x570) & 4 != 0,
         }
     }
 }

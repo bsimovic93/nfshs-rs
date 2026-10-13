@@ -846,7 +846,10 @@ impl Game {
                 Some(l) => self.glares.iter().filter(|g| l.iter().any(|&(c, _, _)| c == g.chunk as usize)).copied().collect(),
                 None => self.glares.clone(),
             };
-            flare::build(&listed, &view, self.white_semi, &mut out);
+            // with the HUD recorded the original's own glares come with it
+            if !sim.hud_recorded() {
+                flare::build(&listed, &view, self.white_semi, &mut out);
+            }
         }
         out
     }
@@ -958,7 +961,8 @@ impl Game {
             // not put into the view by the original this frame, or its drawing set-up
             // (DrawC_PrimStart) refused the car (parked traffic waiting to enter): not drawn
             let Some(facet) = facet else { continue };
-            if self.traffic_override.is_none() && facet.env.is_none() {
+            let parked = self.sim.as_ref().and_then(|s| s.snapshot().cars.get(k).map(|c| c.parked)).unwrap_or(false);
+            if self.traffic_override.is_none() && (facet.env.is_none() || parked) {
                 continue;
             }
             let tint = car_light(facet.light) as f32 / 128.0;
@@ -1042,7 +1046,7 @@ impl Game {
             let snap = sim.snapshot();
             for &(k, _) in &self.traffic {
                 let Some(f) = snap.car_facets.get(k).and_then(Option::as_ref) else { continue };
-                if f.env.is_none() {
+                if f.env.is_none() || snap.cars.get(k).is_some_and(|c| c.parked) {
                     continue;
                 }
                 let Some((corners, rgb)) = f.shadow else { continue };

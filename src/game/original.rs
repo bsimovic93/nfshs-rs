@@ -236,6 +236,12 @@ impl OriginalSim {
         b
     }
 
+    /// The 2D the original draws over the race (HUD, glares) is recorded (see
+    /// `GameHost::hud_prims`).
+    pub fn hud_recorded(&self) -> bool {
+        self.thread.last.vram.is_some()
+    }
+
     /// The original's main loop has ended (the race was quit from its menu).
     pub fn stopped(&self) -> bool {
         self.stopped

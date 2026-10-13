@@ -61,6 +61,8 @@ pub struct GameHost {
     last_sky: Vec<OverlayCmd>,
     /// The race cars' light halos (DrawC_PrimHalo's primitives), drawn over the 3D.
     car_glows: Vec<OverlayCmd>,
+    /// The track lights' glares (BWorld_BuildGlareEffects' primitives), over the 3D.
+    track_glows: Vec<OverlayCmd>,
     /// The showroom car's shadow (DrawC_ShadowPrimClip's primitives), for the floor.
     showroom_shadow: Vec<OverlayCmd>,
     /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
@@ -338,6 +340,8 @@ const CAR_CACHE: u32 = 0x1F80_0000;
 /// BWorld_gChunkBuildList (count kept at gp + 608): the chunks drawn this frame.
 const SETUP_BUILD_MATRICES: u32 = 0x8007_E2E8;
 const HRZ_SET_PSX_MATRIX: u32 = 0x800D_159C;
+const BWORLD_BUILD_GLARE_EFFECTS: u32 = 0x8007_E068;
+const TRACK_CHUNK_LIST: u32 = 0x8013_E79C;
 const DRAWC_SHADOW_PRIM_CLIP: u32 = 0x800C_5054;
 const FLARE_SUN: u32 = 0x800C_FF30;
 const DRAWW_WORLD_SETUP_MATRIX: u32 = 0x800C_829C;
@@ -426,6 +430,7 @@ impl GameHost {
             last_sky: Vec::new(),
             showroom_shadow: Vec::new(),
             car_glows: Vec::new(),
+            track_glows: Vec::new(),
             paused_buffers: HashMap::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],
@@ -661,6 +666,8 @@ impl GameHost {
                 }
             };
             // the halos first (over the 3D, under the HUD)
+            let glows = std::mem::take(&mut self.track_glows);
+            self.overlay.extend(glows);
             let glows = std::mem::take(&mut self.car_glows);
             self.overlay.extend(glows);
             self.overlay.extend(hud);
@@ -1868,6 +1875,31 @@ impl Host for GameHost {
                 c.call_nested(DRAWW_WORLD_SETUP_MATRIX, &[G_WORLD_MAT, 0x1F80_0014]);
                 let n = c.call_nested(SETUP_CHUNK_BUILD_LIST, &[RENDER_VIEW]);
                 c.m.w32(CHUNK_BUILD_COUNT, n);
+                // the track lights' glares as the original builds them for the listed chunks
+                // (BWorld_BuildGlareEffects, as BWorld_OnyxBuildFacets calls it), recorded
+                if self.hud_prims {
+                    let start = c.m.r32(0x1F80_0004);
+                    for i in 0..n.min(64) {
+                        let chunk = c.m.r16(0x8011_02B0 + 4 * i) as i16;
+                        if chunk < 0 {
+                            continue;
+                        }
+                        let list = c.m.r32(TRACK_CHUNK_LIST);
+                        let group = c.m.r32(list + 112 * chunk as u32 + 84);
+                        if group != 0 {
+                            c.call_nested(BWORLD_BUILD_GLARE_EFFECTS, &[RENDER_VIEW, 0x1F80_0000, group]);
+                        }
+                    }
+                    let end = c.m.r32(0x1F80_0004);
+                    if end > start && end - start < 0x4_0000 {
+                        let saved = std::mem::take(&mut self.overlay);
+                        self.prim_offset = [0, 0];
+                        self.record_packets(c, start, end);
+                        self.track_glows = std::mem::replace(&mut self.overlay, saved);
+                    } else {
+                        self.track_glows.clear();
+                    }
+                }
                 // the sun's flare (Hrz_BuildSky: Flare_Sun when the sky record's flags have
                 // 4): the horizon's rotation (the view's matrix, no translation) on the GTE,
                 // its primitives recorded as the sky layer
