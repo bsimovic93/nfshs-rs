@@ -264,6 +264,12 @@ pub struct CarState {
     pub colour: u8,
     /// Car_tObj+0x570 bit 4: a traffic car parked out of the race (waiting to enter).
     pub parked: bool,
+    /// `wheelRot` (front, rear): the wheels' turn as R3DCar_InsertCarFacet keeps it (65536 =
+    /// a full turn; it adds at most 6144 a frame), drawn with fixedxformx.
+    pub wheel_rot: [u16; 2],
+    /// The front wheels' steering as drawn (fixedxformy angle, 65536 = a full turn):
+    /// `control.steering` * 32, reduced in proportion above 30 (Car_tObj+0x420).
+    pub wheel_steer: i32,
 }
 
 impl CarState {
@@ -285,6 +291,18 @@ impl CarState {
             lap: m.r32(car + 0x264) as i32,
             colour: (m.r16(car + 0x840) & 7) as u8 + ((m.r8(car + 0x8B3) & 1) << 3),
             parked: m.r32(car + 0x570) & 4 != 0,
+            wheel_rot: [m.r32(car + 0xD0) as u16, m.r32(car + 0xD4) as u16],
+            wheel_steer: {
+                let (mut s, speed) = (m.r32(car + 0x450) as i32 as i64, m.r32(car + 0x420) as i32 as i64);
+                if speed > 0x1E_0000 {
+                    // fixeddiv(s << 16, fixedmult(speed, 2184)) >> 16
+                    let d = (speed * 2184) >> 16;
+                    if d != 0 {
+                        s = (s << 32) / d >> 16;
+                    }
+                }
+                (s * 32) as i32
+            },
         }
     }
 }
@@ -511,6 +529,68 @@ pub fn read_glares(m: &mut Mem) -> Vec<Glare> {
     out
 }
 
+/// One quad of a tyre mark (Draw_kCtrlSkidmark's POLY_GT4): this entry's edge and the
+/// previous entry's, PS1 world coordinates (16.16).
+#[derive(Clone, Debug)]
+pub struct SkidQuad {
+    /// This entry's p0, p1, then the previous entry's p0, p1.
+    pub corners: [[i32; 3]; 4],
+    /// Colour (0xBBGGRR) of this entry and of the previous one.
+    pub colour: [u32; 2],
+    /// Texture: 0 = SKD0, 1 = SKD1 (Skidmark pixmaps, flags bit 0).
+    pub tex: u8,
+    /// Track slice the segment belongs to.
+    pub slice: i16,
+}
+
+/// The tyre marks (Skidmark segments at gp+5484, count at gp+5488): segments of 688
+/// bytes, origin (16.16) and up to 23 entries of two edge points (relative, 1/1024 m),
+/// colour, flags and the previous entry the quad joins.
+pub fn read_skids(r32: &mut dyn FnMut(u32) -> u32) -> Vec<SkidQuad> {
+    fn r16(r32: &mut dyn FnMut(u32) -> u32, a: u32) -> i16 {
+        (r32(a & !3) >> ((a & 2) * 8)) as u16 as i16
+    }
+    // an entry's edge point, relative to the segment's origin
+    fn pt(r32: &mut dyn FnMut(u32) -> u32, origin: [i32; 3], a: u32) -> [i32; 3] {
+        let mut p = origin;
+        for (i, v) in p.iter_mut().enumerate() {
+            *v += (r16(r32, a + 2 * i as u32) as i32) << 6;
+        }
+        p
+    }
+    let mut out = Vec::new();
+    let n = r32(addr::GP + 5488).min(64);
+    let base = r32(addr::GP + 5484);
+    if base == 0 {
+        return out;
+    }
+    for s in 0..n {
+        let seg = base + 688 * s;
+        let origin = [r32(seg) as i32, r32(seg + 4) as i32, r32(seg + 8) as i32];
+        let count = r16(r32, seg + 12).clamp(0, 23) as u32;
+        let slice = r16(r32, seg + 14);
+        for e in 0..count {
+            let ent = seg + 16 + 28 * e;
+            let prev = r32(ent + 24);
+            if prev == 0 {
+                continue;
+            }
+            let flags = r32(ent + 20);
+            let colour = if flags != 0 { [0x40_4040; 2] } else { [r32(ent + 16) & 0xFF_FFFF, r32(prev + 16) & 0xFF_FFFF] };
+            if colour == [0, 0] {
+                continue;
+            }
+            out.push(SkidQuad {
+                corners: [pt(r32, origin, ent), pt(r32, origin, ent + 8), pt(r32, origin, prev), pt(r32, origin, prev + 8)],
+                colour,
+                tex: (flags & 1) as u8,
+                slice,
+            });
+        }
+    }
+    out
+}
+
 /// Simulation state at the top of a frame.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
@@ -559,6 +639,8 @@ pub struct Snapshot {
     /// BWorld_gChunkBuildList: the track chunks the original draws this frame and how
     /// (detail flags).
     pub chunks: Vec<(i16, u16)>,
+    /// The tyre marks on the road.
+    pub skids: Vec<SkidQuad>,
     /// The view's GTE environment (far colour, depth cue, H, back colour); see
     /// `GameHost::view_env`.
     pub view_env: [i32; 9],
@@ -634,6 +716,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             let n = c.m.r32(addr::GP + 608).min(64);
             (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()
         },
+        skids: read_skids(&mut |a| c.m.r32(a)),
         light_table: {
             let t = c.m.r32(addr::LIGHT_TABLE);
             if t == 0 { Vec::new() } else { (0..256).map(|i| c.m.r32(t + 4 * i)).collect() }

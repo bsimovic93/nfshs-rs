@@ -138,8 +138,13 @@ pub struct Game {
     /// The cars' ground shadow texture (ZSFX.PSH "SHAD", gShadowPixmap), corners in
     /// POLY_FT4 order.
     shadow_tex: Option<[[f32; 2]; 4]>,
+    /// The tyre mark textures (ZSFX.PSH "SKD0", "SKD1"; Skidmark pixmaps), corners as
+    /// `shadow_tex`.
+    skid_tex: [Option<[[f32; 2]; 4]>; 2],
     /// The chunk build list, instead of the simulation's (for comparisons with captures).
     pub chunks_override: Option<Vec<(i16, u16)>>,
+    /// Tyre marks (reference renders), instead of the sim's.
+    pub skids_override: Option<Vec<crate::ps1::race::SkidQuad>>,
     /// What is drawn of each car, instead of the simulation's (for comparisons with
     /// captures).
     pub car_facets_override: Option<Vec<Option<crate::ps1::host::CarFacet>>>,
@@ -293,13 +298,16 @@ impl Game {
         };
         let reflections = assets::load_reflection_maps(data, atlas, cfg.track);
         // the ground shadow texture (gShadowPixmap: ZSFX.PSH "SHAD", 32x64)
-        let shadow_tex = data.read("ZSFX.PSH").ok().and_then(|d| crate::formats::psh::Psh::parse(&d).ok()).and_then(|p| {
-            let s = p.shapes.into_iter().find(|s| s.name == "SHAD")?;
+        let zsfx = data.read("ZSFX.PSH").ok().and_then(|d| crate::formats::psh::Psh::parse(&d).ok());
+        let mut zsfx_tex = |name: &str| {
+            let s = zsfx.as_ref()?.shapes.iter().find(|s| s.name == name)?;
             let r = atlas.add(s.width as u32, s.height as u32, &s.rgba);
             let (w, h) = (s.width as f32 - 0.5, s.height as f32 - 0.5);
             let uv = |x: f32, y: f32| atlas.uv(r, glam::Vec2::new(x, y));
             Some([uv(0.5, 0.5), uv(w, 0.5), uv(0.5, h), uv(w, h)])
-        });
+        };
+        let shadow_tex = zsfx_tex("SHAD");
+        let skid_tex = [zsfx_tex("SKD0"), zsfx_tex("SKD1")];
         let mut game = Self {
             cam_pos: player.pos - player.forward() * 7.0 + Vec3::Y * 2.5,
             cam_target: player.pos,
@@ -317,7 +325,9 @@ impl Game {
             cam_mode: CameraMode::Chase,
             car_facets_override: None,
             chunks_override: None,
+            skids_override: None,
             shadow_tex,
+            skid_tex,
             glares,
             white_semi,
             reflections,
@@ -391,6 +401,7 @@ impl Game {
             car.gear = (c.gear as i32 - 2).max(0) as usize;
             car.steer = (c.steering as f32 / 128.0).clamp(-1.0, 1.0) * 0.5;
             car.wheel_spin += car.vel.dot(pose.forward) / car.spec.wheel_radius.max(0.2) * frame_dt;
+            car.wheel_pose = Some((pose.wheel_rot, pose.wheel_steer));
         }
         self.phase = match (snap.countdown, self.phase) {
             (_, Phase::Finished) => Phase::Finished,
@@ -731,7 +742,11 @@ impl Game {
                 }
                 r
             }),
-            shadows: self.shadows(),
+            shadows: {
+                let mut v = self.skids();
+                v.extend(self.shadows());
+                v
+            },
             subtract_late: {
                 let mut v = self.car_reflections().1;
                 v.extend(self.car_arch_shadows());
@@ -802,8 +817,14 @@ impl Game {
                 }
                 let tm = match part.wheel {
                     Some(w) => {
-                        let steer = if w < 2 { -r.car.steer } else { 0.0 };
-                        let spin = Quat::from_rotation_x(r.car.wheel_spin);
+                        // the original: front wheels turned by wheelRot[0] and steered, rear by
+                        // wheelRot[1] (R3DCar_InsertCarFacet)
+                        let (turn, steer) = match r.car.wheel_pose {
+                            Some((rot, steer)) => (rot[(w >= 2) as usize], -steer),
+                            None => (r.car.wheel_spin, -r.car.steer),
+                        };
+                        let steer = if w < 2 { steer } else { 0.0 };
+                        let spin = Quat::from_rotation_x(turn);
                         model * Mat4::from_rotation_translation(Quat::from_rotation_y(steer) * spin, part.hub)
                     }
                     None => model,
@@ -1011,11 +1032,13 @@ impl Game {
     }
 
     /// A point on the road moved towards the camera along its view ray: the same place on
-    /// screen, in front of the road (the PS1 draws the shadow over the road it lies on).
+    /// screen, in front of the road (the PS1 draws the shadow over the road it lies on, sorted
+    /// by depth, without a depth buffer). Far enough for the road's camber and slopes under a
+    /// flat quad, not so far that kerbs and walls in front stop hiding it.
     fn over_road(&self, p: Vec3) -> Vec3 {
         let to_cam = self.cam_pos - p;
         let d = to_cam.length();
-        p + to_cam / d.max(1e-3) * (0.35f32).min(d * 0.5)
+        p + to_cam / d.max(1e-3) * (0.25 + d * 0.06).min(1.2).min(d * 0.5)
     }
 
     /// The cars' ground shadows (DrawC_ShadowPrim): the "shdw" texture on the quad
@@ -1065,6 +1088,40 @@ impl Game {
                 for k in [0, 1, 3, 0, 3, 2] {
                     out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
                 }
+            }
+        }
+        out
+    }
+
+    /// The tyre marks (Draw_kCtrlSkidmark): each entry's quad to the previous one, textured
+    /// SKD0/SKD1 and subtracted, gouraud between the two entries' colours. Drawn for the
+    /// track slices in view within 50 m (BWorld_IsSliceInBuildList, Draw_CircleClip).
+    fn skids(&self) -> Vec<Vertex> {
+        let mut out = Vec::new();
+        let snap = self.sim.as_ref().map(|s| s.snapshot());
+        let (skids, chunks) = match (&self.skids_override, &snap) {
+            (Some(o), _) => (o, self.chunks_override.as_ref()),
+            (None, Some(s)) => (&s.skids, Some(&s.chunks)),
+            _ => return out,
+        };
+        let world = |p: [i32; 3]| Vec3::new(-(p[0] as f32), p[1] as f32, p[2] as f32) / 65536.0;
+        let in_view = |slice: i16| chunks.is_none_or(|c| c.is_empty() || c.iter().any(|c| c.0 == slice));
+        for q in skids {
+            let Some(uv) = self.skid_tex[q.tex as usize & 1] else { continue };
+            if !in_view(q.slice) {
+                continue;
+            }
+            let p = q.corners.map(world);
+            let d = p[0] - self.cam_pos;
+            if d.x * d.x + d.z * d.z > 60.0 * 60.0 {
+                continue;
+            }
+            let p = p.map(|v| self.over_road(v + Vec3::Y * 0.02));
+            let col = |c: u32| [(c & 0xFF) as f32 / 256.0, ((c >> 8) & 0xFF) as f32 / 256.0, ((c >> 16) & 0xFF) as f32 / 256.0, 1.0];
+            // this entry's edge on the texture's top row, the previous entry's on its bottom
+            let c = [col(q.colour[0]), col(q.colour[0]), col(q.colour[1]), col(q.colour[1])];
+            for k in [0, 1, 3, 0, 3, 2] {
+                out.push(Vertex { pos: p[k].into(), uv: uv[k], color: c[k] });
             }
         }
         out

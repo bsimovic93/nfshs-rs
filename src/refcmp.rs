@@ -141,7 +141,7 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
                 let (right, up, forward) = (row(0), row(1), row(2));
                 let rot = Quat::from_mat3(&Mat3::from_cols(-right, up, forward)).normalize();
                 let pos = ram.v3(c + 0xA0) - up * (ram.i32(c + 0x138) as f32 / 65536.0);
-                let pose = crate::game::original::Pose { pos, rot, forward, up, vel: Vec3::ZERO };
+                let pose = crate::game::original::Pose { pos, rot, forward, up, vel: Vec3::ZERO, wheel_rot: [0.0; 2], wheel_steer: 0.0 };
                 (pose, crate::ps1::host::CarFacet { car: c, parts: vec![1; 57], light: 0x80_8080, shadow: None, env: None })
             })
             .collect(),
@@ -158,16 +158,40 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     // the chunks the original drew (BWorld_gChunkBuildList)
     let n = ram.i32(0x8013_D83C + 608).clamp(0, 64) as u32;
     game.chunks_override = Some((0..n).map(|i| (ram.i32(0x8011_02B0 + 4 * i) as i16, (ram.i32(0x8011_02B0 + 4 * i) >> 16) as u16)).collect());
+    game.skids_override = Some(crate::ps1::race::read_skids(&mut |a| ram.i32(a) as u32));
     // what is drawn of the player's car: the parts table as the game left it (after its last
     // car, usually the player's), its light and shadow
     let pc = race_cars[0];
     let gp = 0x8013_D83Cu32;
+    // with traffic about, the table may be the last traffic car's: then the parts our own run
+    // of the original draws for the player close up
+    let mut own_parts = None;
+    if !traffic_cars.is_empty() {
+        if let Some(sim) = &mut game.sim {
+            // (the start's camera may not show the car: run until it does)
+            for _ in 0..100 {
+                own_parts = sim.snapshot().car_facets.first().cloned().flatten().map(|f| f.parts).filter(|p| p.iter().any(|&v| v != 0));
+                if own_parts.is_some() {
+                    break;
+                }
+                sim.advance(0.1, &crate::game::Input::default());
+            }
+        }
+    }
+    let table: Vec<u8> = (0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect();
+    let table = match own_parts {
+        Some(p) if !traffic_cars.is_empty() => p,
+        _ => table,
+    };
     game.car_facets_override = Some(vec![Some(crate::ps1::host::CarFacet {
         car: pc,
-        parts: (0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect(),
+        // (NFSHS_REF_NOCAR: none, to see what is under it)
+        parts: if std::env::var_os("NFSHS_REF_NOCAR").is_some() { vec![0; 57] } else { table },
         light: ram.i32(pc + 2176) as u32 & 0xFF_FFFF,
         env: Some(ref_env(&ram, pc)),
-        shadow: (ram.i32(gp + 3648) != 0).then(|| {
+        // (the shadow switch at gp+3648 is only set while the cars are drawn: the corners
+        // Newton_CalcRealShadowCoordinates left decide)
+        shadow: (ram.i32(pc + 488) != 0 || ram.i32(pc + 496) != 0).then(|| {
             let pos = [ram.i32(pc + 0xA0), 0, ram.i32(pc + 0xA8)];
             let corners = std::array::from_fn(|k| std::array::from_fn(|i| ram.i32(pc + 488 + 12 * k as u32 + 4 * i as u32).wrapping_sub(pos[i])));
             (corners, std::array::from_fn(|i| ram.0[((gp + 3652 + i as u32) & 0x1F_FFFF) as usize]))

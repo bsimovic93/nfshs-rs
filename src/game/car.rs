@@ -97,6 +97,9 @@ pub struct Car {
     pub rpm: f32,
     pub steer: f32,
     pub wheel_spin: f32,
+    /// The wheels' turn as the original draws them (front, rear) and the front wheels'
+    /// steering, radians; `None`: this engine's own `wheel_spin` and `steer`.
+    pub wheel_pose: Option<([f32; 2], f32)>,
     pub reversing: bool,
     /// Full orientation when driven by the original simulation (overrides yaw/up).
     pub rot: Option<Quat>,
@@ -118,6 +121,7 @@ impl Car {
             rpm: 900.0,
             steer: 0.0,
             wheel_spin: 0.0,
+            wheel_pose: None,
             reversing: false,
             rot: None,
         }

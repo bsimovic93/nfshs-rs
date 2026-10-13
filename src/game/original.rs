@@ -59,6 +59,9 @@ pub struct Pose {
     pub forward: Vec3,
     pub up: Vec3,
     pub vel: Vec3,
+    /// The wheels' turn (front, rear) and the front wheels' steering, radians.
+    pub wheel_rot: [f32; 2],
+    pub wheel_steer: f32,
 }
 
 impl OriginalSim {
@@ -176,6 +179,12 @@ impl OriginalSim {
                 forward: p.forward.lerp(q.forward, f).normalize_or(q.forward),
                 up: p.up.lerp(q.up, f).normalize_or(q.up),
                 vel: p.vel.lerp(q.vel, f),
+                // (the turn wraps: the short way round, it moves less than half a turn a frame)
+                wheel_rot: std::array::from_fn(|i| {
+                    let d = (q.wheel_rot[i] - p.wheel_rot[i] + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+                    p.wheel_rot[i] + d * f
+                }),
+                wheel_steer: p.wheel_steer + (q.wheel_steer - p.wheel_steer) * f,
             })
             .collect();
         let (p, q) = (&a.camera, &b.camera);
@@ -330,7 +339,16 @@ pub fn pose(c: &CarState) -> Pose {
     // the body box (dimension.y above the wheels' contact points)
     let lift = c.dimension[1] as f32 / 65536.0;
     let up_n = up.normalize_or(Vec3::Y);
-    Pose { pos: v3(c.position) - up_n * lift, rot, forward: forward.normalize_or(Vec3::Z), up: up.normalize_or(Vec3::Y), vel: v3(c.velocity) }
+    let angle = |a: i32| a as f32 * (std::f32::consts::TAU / 65536.0);
+    Pose {
+        pos: v3(c.position) - up_n * lift,
+        rot,
+        forward: forward.normalize_or(Vec3::Z),
+        up: up.normalize_or(Vec3::Y),
+        vel: v3(c.velocity),
+        wheel_rot: c.wheel_rot.map(|r| angle(r as i32)),
+        wheel_steer: angle(c.wheel_steer),
+    }
 }
 
 /// Gram-Schmidt on the fixed-point matrix so it is a proper rotation.

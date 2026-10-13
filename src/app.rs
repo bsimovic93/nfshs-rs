@@ -289,6 +289,11 @@ impl App {
                 i.handbrake |= pad.is_pressed(Button::East);
                 i.camera |= pad.is_pressed(Button::North);
                 i.reset |= pad.is_pressed(Button::Select);
+                // Start pauses; the pause menu takes the d-pad and Cross
+                i.start |= pad.is_pressed(Button::Start);
+                i.up |= pad.is_pressed(Button::DPadUp);
+                i.down |= pad.is_pressed(Button::DPadDown);
+                i.accept |= pad.is_pressed(Button::South);
             }
         }
         i
