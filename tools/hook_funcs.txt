@@ -17,3 +17,6 @@
 800bf1d4 Draw_DrawDirectScreen (pictures on the loading screen are recorded)
 800dbca4 Loading_DrawLoadingScreen (the host shows the loading screen)
 800dbdec Loading_UpdateLoadingScreen (the host shows the loading screen)
+8004e01c DoTitleScreen (the host shows the title while the front end loads)
+800a512c NFS4_LoadingIcon (the host shows the loading icon screen)
+800f146c movfxya (pictures blitted to the screen are recorded)

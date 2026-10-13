@@ -37,12 +37,13 @@ pub struct GameHost {
     pub car_facets: Vec<CarFacet>,
     /// 2D drawing recorded this frame (see [`OverlayCmd`]).
     pub overlay: Vec<OverlayCmd>,
-    /// The race's loading screen as drawn so far (Draw_DrawDirectScreen's pictures, in the
-    /// order drawn) and the clock of the last frame shown of it.
+    /// A screen the game puts straight into the display buffer while it loads (the title,
+    /// the race's loading screen, the loading icon): its pictures in the order drawn, and the
+    /// clock of the last frame shown of it. Shown until the next frame the game draws.
     loading: Vec<OverlayCmd>,
     loading_shown: u64,
-    /// The front end has run (the game started from main, not straight into a race).
-    front_end_ran: bool,
+    /// The game started from main (its title and front end), not straight into a race.
+    pub from_main: bool,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     /// When each SPU voice keyed on falls silent if not keyed off (virtual clock).
@@ -351,7 +352,7 @@ impl GameHost {
             overlay: Vec::new(),
             loading: Vec::new(),
             loading_shown: 0,
-            front_end_ran: false,
+            from_main: false,
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -371,7 +372,7 @@ impl GameHost {
     /// Frames of the race's loading screen for the fields the loading has taken since the
     /// last one (the original shows it while it reads the track from the CD).
     fn loading_frames(&mut self, c: &mut Cpu) {
-        while self.front_end_ran && self.loading_shown + FIELD <= self.clock && self.frame.on_frame.is_some() && c.tick_limit != 0 {
+        while self.from_main && self.loading_shown + FIELD <= self.clock && self.frame.on_frame.is_some() && c.tick_limit != 0 {
             self.loading_shown += FIELD;
             let mut overlay = self.loading.clone();
             // drawn last asked first (as an ordering table)
@@ -399,6 +400,15 @@ impl GameHost {
         }
     }
 
+    /// A new screen put straight into the display buffer: the last one is shown until now.
+    fn new_direct_screen(&mut self, c: &mut Cpu) {
+        if !self.loading.is_empty() {
+            self.loading_frames(c);
+        }
+        self.loading.clear();
+        self.loading_shown = self.clock;
+    }
+
     /// A shape (shapetbl) in RAM as RGBA, opaque.
     fn shape_rgba(c: &mut Cpu, shape: u32) -> Option<(u16, u16, Vec<u8>)> {
         let (w, h) = (c.m.r16(shape + 4), c.m.r16(shape + 6));
@@ -422,6 +432,11 @@ impl GameHost {
     }
 
     fn frame_top(&mut self, c: &mut Cpu) -> Option<u16> {
+        // the screen shown while loading, until this frame
+        if !self.loading.is_empty() {
+            self.loading_frames(c);
+            self.loading.clear();
+        }
         // top of the original main loop: game frames are locked to 60 Hz fields
         if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
             self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
@@ -1153,10 +1168,27 @@ impl Host for GameHost {
                 }
                 return false;
             }
+            0x8004_E01C => {
+                // DoTitleScreen: the title picture while the front end loads
+                self.from_main = true;
+                self.new_direct_screen(c);
+                return false;
+            }
+            0x800A_512C => {
+                // NFS4_LoadingIcon: a cleared screen with the loading icon
+                self.new_direct_screen(c);
+                return false;
+            }
+            0x800F_146C => {
+                // movfxya(shape, x, y): a picture blitted into the display buffer
+                if let Some((w, h, rgba)) = Self::shape_rgba(c, a0) {
+                    self.loading.push(OverlayCmd::Bitmap { x: a1 as i16, y: a2 as i16, w, h, rgba: std::sync::Arc::new(rgba) });
+                }
+                return false;
+            }
             0x800D_BCA4 => {
                 // Loading_DrawLoadingScreen: a new loading screen (background and track map)
-                self.loading.clear();
-                self.loading_shown = self.clock;
+                self.new_direct_screen(c);
                 return false;
             }
             0x800D_BDEC => {
@@ -1168,7 +1200,7 @@ impl Host for GameHost {
             0x8002_A7B0 => {
                 // Front_BuildStream: the front end runs
                 self.mode = Mode::FrontEnd;
-                self.front_end_ran = true;
+                self.from_main = true;
                 return false;
             }
             0x800B_7A20 => {

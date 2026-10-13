@@ -708,6 +708,7 @@ impl RaceThread {
             // the host is always our GameHost
             let host = unsafe { &mut *(host.as_mut() as *mut dyn super::Host as *mut GameHost) };
             host.frame.on_frame = Some(on_frame);
+            host.from_main = gamesetup.is_none();
             cpu.m.w32(super::host::MAIN_LOOP_EXIT_FLAG, 0);
             cpu.tick_limit = u64::MAX;
             if gamesetup.is_none() {
