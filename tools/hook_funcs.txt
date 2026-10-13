@@ -11,3 +11,5 @@
 800f146c movfxya (observed)
 800bf1d4 Draw_DrawDirectScreen (observed)
 800eec70 SetDrawArea (the front end's clipping is recorded)
+800224ac DrawTV (its primitives are captured)
+80022158 DrawTVLines (its primitives are captured)

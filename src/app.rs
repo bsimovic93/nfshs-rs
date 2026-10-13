@@ -15,6 +15,8 @@ use winit::window::{Window, WindowId};
 
 enum Screen {
     Menu,
+    /// The original game's own front end, running in the recompiled original.
+    FrontEnd(Box<crate::game::original::OriginalSim>),
     Race(Box<Game>),
 }
 
@@ -29,6 +31,9 @@ struct Keys {
     escape: bool,
     reset: bool,
     camera: bool,
+    backspace: bool,
+    tab: bool,
+    start: bool,
 }
 
 pub struct App {
@@ -90,6 +95,97 @@ impl App {
         }
         self.queue_music("game");
         self.screen = Screen::Race(Box::new(game));
+    }
+
+    /// Power on the original game: its front end, from which it starts its own races.
+    fn enter_front_end(&mut self) {
+        match crate::game::original::OriginalSim::start_main(&self.data) {
+            Ok(sim) => {
+                if let Some(r) = &mut self.renderer {
+                    r.clear_world();
+                }
+                self.stop_sounds();
+                self.queue_music("zmenu");
+                self.screen = Screen::FrontEnd(Box::new(sim));
+            }
+            Err(e) => {
+                log::error!("the original front end did not start ({e:#}); using the engine's menu");
+                self.enter_menu();
+            }
+        }
+    }
+
+    /// The original left its front end for a race: load what it races and show it.
+    fn front_end_race(&mut self, sim: Box<crate::game::original::OriginalSim>) {
+        let snap = sim.snapshot();
+        let player = snap.cars.first().map(|c| c.code.clone()).unwrap_or_default();
+        let opponents: Vec<String> = snap.cars.iter().skip(1).map(|c| c.code.clone()).filter(|c| crate::ps1::race::car_type(c).is_some()).collect();
+        let variant = snap.variant.clone();
+        let rc = RaceConfig { track: snap.track, variant: &variant, player_car: &player, opponents, laps: snap.laps.max(1) as i32, original_sim: true };
+        log::info!("the original starts a race: track {}{} with {player}", snap.track, variant);
+        let mut atlas = Atlas::new(2048);
+        match Game::load_with(&self.data, &mut atlas, &rc, Some(*sim)) {
+            Ok(game) => self.begin_race(game, atlas),
+            Err(e) => {
+                log::error!("could not load the race: {e:#}");
+                self.enter_menu();
+            }
+        }
+    }
+
+    /// Show a loaded race (assets, sounds).
+    fn begin_race(&mut self, game: Game, atlas: Atlas) {
+        if let Some(r) = &mut self.renderer {
+            r.set_atlas(&atlas);
+            r.set_world(&game.track.verts, &game.track.indices);
+        }
+        self.stop_sounds();
+        if let Some(audio) = &self.audio {
+            let code = &game.player().name;
+            let bank = self
+                .data
+                .read(&format!("Z{code}ENG.VIV"))
+                .ok()
+                .and_then(|d| crate::formats::viv::Viv::parse(&d).ok())
+                .and_then(|v| v.find_suffix(".bnk").and_then(|(_, b)| crate::formats::audio::Bank::parse(b).ok()));
+            self.engine = bank.and_then(|b| crate::audio::EngineSound::new(audio, &b));
+        }
+        self.queue_music("game");
+        self.screen = Screen::Race(Box::new(game));
+    }
+
+    /// The front end's pad from keyboard and gamepad.
+    fn front_end_input(&mut self) -> Input {
+        let k = self.keys;
+        let mut i = Input {
+            up: k.up,
+            down: k.down,
+            left: k.left,
+            right: k.right,
+            accept: k.enter || k.space,
+            back: k.escape,
+            circle: k.backspace,
+            square: k.tab,
+            start: k.start,
+            ..Default::default()
+        };
+        if let Some(g) = &mut self.gilrs {
+            while g.next_event().is_some() {}
+            if let Some((_, pad)) = g.gamepads().next() {
+                use gilrs::{Axis, Button};
+                let (x, y) = (pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY));
+                i.up |= pad.is_pressed(Button::DPadUp) || y > 0.6;
+                i.down |= pad.is_pressed(Button::DPadDown) || y < -0.6;
+                i.left |= pad.is_pressed(Button::DPadLeft) || x < -0.6;
+                i.right |= pad.is_pressed(Button::DPadRight) || x > 0.6;
+                i.accept |= pad.is_pressed(Button::South);
+                i.back |= pad.is_pressed(Button::North);
+                i.circle |= pad.is_pressed(Button::East);
+                i.square |= pad.is_pressed(Button::West);
+                i.start |= pad.is_pressed(Button::Start);
+            }
+        }
+        i
     }
 
     fn enter_menu(&mut self) {
@@ -217,7 +313,23 @@ impl App {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
+        if let Screen::FrontEnd(_) = &self.screen {
+            let input = self.front_end_input();
+            if let Screen::FrontEnd(sim) = &mut self.screen {
+                sim.advance(dt, &input);
+                if sim.stopped() {
+                    el.exit();
+                    return;
+                }
+                if !sim.in_front_end() {
+                    let Screen::FrontEnd(mut sim) = std::mem::replace(&mut self.screen, Screen::Menu) else { unreachable!() };
+                    sim.reset_race();
+                    self.front_end_race(sim);
+                }
+            }
+        }
         match &self.screen {
+            Screen::FrontEnd(_) => {}
             Screen::Menu => {
                 let mi = self.menu_input();
                 match self.menu.update(mi) {
@@ -241,6 +353,18 @@ impl App {
                 let keys = self.keys;
                 if let Screen::Race(game) = &mut self.screen {
                     game.update(dt, input);
+                    // a race the original started from its front end: back to it when it is
+                    if game.sim.as_ref().is_some_and(|s| s.in_front_end()) {
+                        self.keys = Keys::default();
+                        let sim = game.sim.take().map(Box::new);
+                        if let (Some(sim), Some(r)) = (sim, &mut self.renderer) {
+                            r.clear_world();
+                            self.stop_sounds();
+                            self.queue_music("zmenu");
+                            self.screen = Screen::FrontEnd(sim);
+                        }
+                        return;
+                    }
                     let finished = game.phase == Phase::Finished;
                     // with the original running, Escape is its Start button (pause menu) and
                     // the race ends when the original leaves it
@@ -260,6 +384,14 @@ impl App {
         let Some(r) = &mut self.renderer else { return };
         let (w, h) = r.size;
         match &self.screen {
+            Screen::FrontEnd(sim) => {
+                let snap = sim.snapshot();
+                if let Some(vram) = &snap.vram {
+                    let fe = crate::game::fe::FeFrame::build(&snap.overlay, vram, w as f32, h as f32);
+                    r.write_atlas(&fe.atlas);
+                    r.render(&flat_params(), &[], &[], &fe.vertices);
+                }
+            }
             Screen::Menu => {
                 let hud = self.menu_font.as_ref().map(|f| self.menu.draw(f, &self.menu_art, w as f32, h as f32)).unwrap_or_default();
                 let params = FrameParams {
@@ -314,7 +446,8 @@ impl ApplicationHandler for App {
         }
         match self.direct.take() {
             Some(cfg) => self.start_race(cfg),
-            None => self.enter_menu(),
+            None if std::env::var_os("NFSHS_ENGINE_MENU").is_some() => self.enter_menu(),
+            None => self.enter_front_end(),
         }
         self.last = Instant::now();
     }
@@ -340,6 +473,9 @@ impl ApplicationHandler for App {
                     KeyCode::Escape => k.escape = down,
                     KeyCode::KeyR => k.reset = down,
                     KeyCode::KeyC => k.camera = down,
+                    KeyCode::Backspace => k.backspace = down,
+                    KeyCode::Tab => k.tab = down,
+                    KeyCode::F1 => k.start = down,
                     KeyCode::KeyP if down && !repeat => self.autopilot = !self.autopilot,
                     _ => {}
                 }

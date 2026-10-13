@@ -62,6 +62,54 @@ pub struct Pose {
 }
 
 impl OriginalSim {
+    /// Power the original on: its front end first.
+    pub fn start_main(data: &GameData) -> Result<Self> {
+        let thread = RaceThread::start_main(data.root.clone())?;
+        Ok(Self {
+            thread,
+            accum: 0.0,
+            stopped: false,
+            history: VecDeque::new(),
+            render_t: 0.0,
+            camera_target: Some(PREFERRED_CAMERA.load(Ordering::Relaxed)),
+            camera_wait: 0,
+        })
+    }
+
+    /// The original is in its front end.
+    pub fn in_front_end(&self) -> bool {
+        self.thread.last.front_end
+    }
+
+    /// Forget the last race (its poses and camera set-up) before the next one starts.
+    pub fn reset_race(&mut self) {
+        self.history.clear();
+        self.render_t = 0.0;
+        self.camera_target = Some(PREFERRED_CAMERA.load(Ordering::Relaxed));
+        self.camera_wait = 0;
+    }
+
+    /// The front end's pad: d-pad, Cross accept, Triangle back, Circle, Square, Start.
+    fn front_end_buttons(input: &Input) -> u16 {
+        let mut b = 0;
+        for (on, bit) in [
+            (input.up, pad::UP),
+            (input.down, pad::DOWN),
+            (input.left, pad::LEFT),
+            (input.right, pad::RIGHT),
+            (input.accept, pad::CROSS),
+            (input.back, pad::TRIANGLE),
+            (input.circle, pad::CIRCLE),
+            (input.square, pad::SQUARE),
+            (input.start, pad::START),
+        ] {
+            if on {
+                b |= bit;
+            }
+        }
+        b
+    }
+
     pub fn start(data: &GameData, cfg: &RaceConfig) -> Result<Self> {
         let mut cars = vec![cfg.player_car.to_string()];
         cars.extend(cfg.opponents.iter().cloned());
@@ -201,6 +249,16 @@ impl OriginalSim {
         let paused = self.thread.last.paused;
         let user_buttons = Self::buttons(input, paused);
         while self.accum >= FRAME {
+            if self.thread.last.front_end {
+                // the front end: its own buttons, no race bookkeeping
+                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), want_ram: false }) {
+                    log::warn!("original game ended: {e:#}");
+                    self.stopped = true;
+                    return;
+                }
+                self.accum -= FRAME;
+                continue;
+            }
             let mut buttons = user_buttons;
             let snap = &self.thread.last;
             let mode = snap.camera_mode;

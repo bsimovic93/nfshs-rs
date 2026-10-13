@@ -402,8 +402,13 @@ fn real_main() -> Result<()> {
             let shot_at = shot.as_ref().map(|s| s.0);
             let grabbed = std::rc::Rc::new(std::cell::RefCell::new(None));
             let grab = grabbed.clone();
-            let on_frame: ps1::host::FrameFn = Box::new(move |_c, info| {
+            let ram_at: Option<u32> = std::env::var("BOOT_RAM_FRAME").ok().and_then(|f| f.parse().ok());
+            let on_frame: ps1::host::FrameFn = Box::new(move |c, info| {
                 frame += 1;
+                if Some(frame) == ram_at {
+                    let _ = std::fs::create_dir_all("re/boot");
+                    let _ = std::fs::write("re/boot/fe_ram.bin", &c.m.ram);
+                }
                 if Some(frame) == shot_at {
                     *grab.borrow_mut() = Some((info.overlay.clone(), info.vram.clone()));
                 }

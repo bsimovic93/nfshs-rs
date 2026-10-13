@@ -42,6 +42,10 @@ pub struct GameHost {
     /// 1024x512 16-bit VRAM, filled by the game's LoadImage/ClearImage/MoveImage.
     pub vram: Vec<u16>,
     vram_dirty: bool,
+    /// Inside a captured front-end drawing routine (see `capture_prims`).
+    capturing: bool,
+    /// The GPU draw mode (texture page) as the captured primitives left it.
+    draw_mode: u16,
     vram_shared: Option<std::sync::Arc<Vec<u16>>>,
     /// Controller receive buffers registered with PadInitDirect (port 1, port 2).
     pub pad_buffers: [u32; 2],
@@ -257,6 +261,9 @@ const SHADOW_COLOUR: u32 = 0x8013_D83C + 3652;
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
+/// Front-end routines that build GPU primitives themselves (the video wall's DrawTV and
+/// DrawTVLines): run as they are and their primitives recorded (`capture_prims`).
+const CAPTURED_FE_DRAWING: [u32; 2] = [0x8002_24AC, 0x8002_2158];
 /// Return address of the engine flip's PutDispEnv call.
 const FLIP_PUT_DISP_ENV_RA: u32 = 0x800B_F164;
 
@@ -299,6 +306,8 @@ impl GameHost {
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
             vram_dirty: true,
+            capturing: false,
+            draw_mode: 0,
             vram_shared: None,
             pad_buffers: [0; 2],
             callbacks: HashMap::new(),
@@ -456,6 +465,117 @@ impl GameHost {
         }
     }
 
+    /// Run a front-end drawing routine that builds its own primitives (DrawTV and friends) and
+    /// record what it appended to the primitive buffer (scratchpad 0x1F800004) as quads, in the
+    /// order it built them.
+    fn capture_prims(&mut self, c: &mut Cpu, addr: u32) -> u32 {
+        let start = c.m.r32(0x1F80_0004);
+        let args = [c.r[4], c.r[5], c.r[6], c.r[7]];
+        self.capturing = true;
+        let ret = c.call_nested(addr, &args);
+        self.capturing = false;
+        let end = c.m.r32(0x1F80_0004);
+        let mut p = start;
+        while p < end && end - p < 0x10_0000 {
+            let len = c.m.r32(p) >> 24;
+            if len == 0 {
+                p += 4;
+                continue;
+            }
+            self.parse_prim(c, p + 4, len);
+            p += 4 + 4 * len;
+        }
+        ret
+    }
+
+    /// One GPU primitive (its command words at `a`) as a quad, as far as the front end uses them.
+    fn parse_prim(&mut self, c: &mut Cpu, a: u32, len: u32) {
+        let w = |c: &mut Cpu, k: u32| c.m.r32(a + 4 * k);
+        let w0 = w(c, 0);
+        let code = (w0 >> 24) as u8;
+        let semi = code & 2 != 0;
+        let raw = code & 1 != 0;
+        let xy = |v: u32| [v as u16 as i16, (v >> 16) as u16 as i16];
+        match code {
+            0xE1 => self.draw_mode = w0 as u16 & 0x1FF,
+            0x20..=0x3F => {
+                let textured = code & 4 != 0;
+                let gouraud = code & 0x10 != 0;
+                let n = if code & 8 != 0 { 4 } else { 3 };
+                // words per vertex: colour (gouraud, after the first), xy, uv (textured)
+                let per = 1 + u32::from(textured) + u32::from(gouraud);
+                let mut pts = [[0i16; 2]; 4];
+                let mut colours = [w0 & 0xFF_FFFF; 4];
+                let mut uv = [[0u8; 2]; 4];
+                let (mut clut, mut tpage) = (0u16, self.draw_mode);
+                for k in 0..n {
+                    let base = 1 + per * k as u32;
+                    if gouraud && k > 0 {
+                        colours[k] = w(c, base - 1) & 0xFF_FFFF;
+                    }
+                    pts[k] = xy(w(c, base));
+                    if textured {
+                        let t = w(c, base + 1);
+                        uv[k] = [t as u8, (t >> 8) as u8];
+                        match k {
+                            0 => clut = (t >> 16) as u16,
+                            1 => tpage = (t >> 16) as u16,
+                            _ => {}
+                        }
+                    }
+                }
+                if len < per * n as u32 {
+                    return;
+                }
+                if n == 3 {
+                    pts[3] = pts[2];
+                    colours[3] = colours[2];
+                    uv[3] = uv[2];
+                }
+                if textured {
+                    self.draw_mode = tpage & 0x1FF;
+                }
+                if textured && raw {
+                    colours = [0x80_8080; 4];
+                }
+                let tex = textured.then_some(QuadTex { tpage, clut, uv });
+                self.overlay.push(OverlayCmd::Quad { pts, colours, tex, semi });
+            }
+            0x60..=0x7F => {
+                // TILE / SPRT (variable or 1, 8, 16 pixels): the draw mode's texture page
+                let textured = code & 4 != 0;
+                let [x, y] = xy(w(c, 1));
+                let (mut tw, mut th, mut uv0, mut clut) = (0i32, 0i32, [0u8; 2], 0u16);
+                let mut k = 2;
+                if textured {
+                    let t = w(c, 2);
+                    uv0 = [t as u8, (t >> 8) as u8];
+                    clut = (t >> 16) as u16;
+                    k = 3;
+                }
+                match (code >> 3) & 3 {
+                    0 => {
+                        let s = w(c, k);
+                        tw = (s & 0xFFFF) as i32;
+                        th = (s >> 16) as i32;
+                    }
+                    1 => (tw, th) = (1, 1),
+                    2 => (tw, th) = (8, 8),
+                    _ => (tw, th) = (16, 16),
+                }
+                let (x, y) = (x as i32, y as i32);
+                let colours = if textured && raw { [0x80_8080; 4] } else { [w0 & 0xFF_FFFF; 4] };
+                let tex = textured.then(|| {
+                    let (u0, v0) = (uv0[0], uv0[1]);
+                    let (u1, v1) = (u0.wrapping_add(tw as u8), v0.wrapping_add(th as u8));
+                    QuadTex { tpage: self.draw_mode, clut, uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]] }
+                });
+                self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, tw, th), colours, tex, semi });
+            }
+            _ => {}
+        }
+    }
+
     fn new_op(&mut self, result: u32, user: u32) -> u32 {
         let op = self.next_op;
         self.next_op += 1;
@@ -506,6 +626,10 @@ impl Host for GameHost {
             if log.contains(&addr) {
                 eprintln!("[{:>8}] call {addr:#x}({a0:#x}, {a1:#x}, {a2:#x}, {a3:#x}) from {:#x}", self.clock, c.r[31]);
             }
+        }
+        if self.mode == Mode::FrontEnd && !self.capturing && CAPTURED_FE_DRAWING.contains(&addr) {
+            c.r[2] = self.capture_prims(c, addr);
+            return true;
         }
         if let Some(ret) = self.memcard.call(c, addr) {
             c.r[2] = ret;

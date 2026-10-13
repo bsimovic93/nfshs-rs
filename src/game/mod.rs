@@ -29,6 +29,10 @@ pub struct Input {
     /// Start (pause) and the menus' accept button.
     pub start: bool,
     pub accept: bool,
+    /// The front end's other buttons: back (Triangle), Circle and Square.
+    pub back: bool,
+    pub circle: bool,
+    pub square: bool,
     /// Analog controls (gamepad); override the digital ones when non-zero.
     pub steer_axis: f32,
     pub throttle_axis: f32,
@@ -147,9 +151,17 @@ fn load_spec(data: &GameData, code: &str, model: &CarModel) -> CarSpec {
 
 impl Game {
     pub fn load(data: &GameData, atlas: &mut Atlas, cfg: &RaceConfig) -> Result<Self> {
+        Self::load_with(data, atlas, cfg, None)
+    }
+
+    /// Load the race `cfg` describes; `running` is the original already in this race (started
+    /// from its own front end), else one is started for it.
+    pub fn load_with(data: &GameData, atlas: &mut Atlas, cfg: &RaceConfig, running: Option<original::OriginalSim>) -> Result<Self> {
         // the original game's simulation drives the race unless disabled (NFSHS_OWN_PHYSICS=1)
         // or it cannot run this setup
-        let sim = if !cfg.original_sim || std::env::var_os("NFSHS_OWN_PHYSICS").is_some() {
+        let sim = if running.is_some() {
+            running
+        } else if !cfg.original_sim || std::env::var_os("NFSHS_OWN_PHYSICS").is_some() {
             None
         } else {
             match original::OriginalSim::start(data, cfg) {

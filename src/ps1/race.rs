@@ -30,6 +30,8 @@ pub mod addr {
     pub const SOME_NAME: u32 = 0x8001_1550;
     /// `Sim_MainGameLoop`.
     pub const GAME_LOOP: u32 = 0x800B_7A20;
+    /// `main`: start-up, then front end and races for ever.
+    pub const MAIN: u32 = 0x800A_52A4;
     /// `simVar`: set when the race is to be restarted (pause menu "Restart"); main then
     /// resets the game and runs the loop again.
     pub const SIM_VAR: u32 = 0x8011_F37C;
@@ -213,6 +215,22 @@ pub fn boot(data_root: &Path, gamesetup: &[u8]) -> Result<Cpu> {
     call(&mut cpu, addr::RACE_RESTART, &[])?;
     // main clears the restart request before entering the game loop (it blocks pausing)
     cpu.m.w32(addr::SIM_VAR, 0);
+    Ok(cpu)
+}
+
+/// Power on: NFS4.EXE in a fresh 2 MB RAM image, ready to run `main`.
+pub fn power_on(data_root: &Path) -> Result<Cpu> {
+    let exe = std::fs::read(data_root.join("NFS4.EXE"))?;
+    let mut mem = Mem::default();
+    mem.load_exe(&exe);
+    for a in (addr::BSS_START..addr::BSS_END).step_by(4) {
+        mem.w32(a, 0);
+    }
+    let mut cpu = new_cpu(mem);
+    cpu.host = Some(Box::new(GameHost::new(data_root.to_path_buf())));
+    cpu.trace = std::env::var("PS1_TRACE").is_ok();
+    // busy-waits on the timer (a race frame stays far below this between host calls)
+    cpu.spin_limit = 1_000_000;
     Ok(cpu)
 }
 
@@ -521,6 +539,14 @@ pub struct Snapshot {
     pub display: [u16; 4],
     /// Full RAM copy, when requested.
     pub ram: Option<Vec<u8>>,
+    /// A front-end frame (only `frame`, `field`, `overlay`, `vram` and `display` are set).
+    pub front_end: bool,
+    /// VRAM, for front-end frames.
+    pub vram: Option<std::sync::Arc<Vec<u16>>>,
+    /// The race GameSetup describes: track number and variant ("", "N", "W", "S").
+    pub track: u32,
+    pub variant: String,
+    pub laps: u32,
 }
 
 /// Input for one frame.
@@ -531,7 +557,11 @@ pub struct FrameInput {
     pub want_ram: bool,
 }
 
-fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: bool) -> Snapshot {
+/// `first`: the first frame of a race (one-off reads such as the track's lights).
+fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: bool, first: bool) -> Snapshot {
+    if info.front_end {
+        return Snapshot { frame, field: info.field, overlay: info.overlay, vram: info.vram, display: info.display, front_end: true, ..Default::default() };
+    }
     let mut cars = Vec::new();
     for k in 0..9 {
         let car = c.m.r32(addr::CAR_LIST + 4 * k);
@@ -568,7 +598,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             let l = c.m.r32(addr::GP + 6352);
             if l == 0 { Vec::new() } else { (0..0x60).map(|i| c.m.r8(l + i)).collect() }
         },
-        glares: if frame == 0 { read_glares(&mut c.m) } else { Vec::new() },
+        glares: if first { read_glares(&mut c.m) } else { Vec::new() },
         chunks: {
             let n = c.m.r32(addr::GP + 608).min(64);
             (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()
@@ -581,6 +611,17 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         display: info.display,
         camera_rot: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 0x14 + 4 * i as u32) as i32),
         ram: want_ram.then(|| c.m.ram.to_vec()),
+        front_end: false,
+        vram: None,
+        track: c.m.r32(addr::GAMESETUP + 0x3C),
+        laps: c.m.r32(addr::GAMESETUP + gs::NUM_LAPS as u32),
+        variant: match (c.m.r32(addr::GAMESETUP + 0x48), c.m.r32(addr::GAMESETUP + 0x54)) {
+            (1, 1) => "S",
+            (1, _) => "W",
+            (_, 1) => "N",
+            _ => "",
+        }
+        .to_string(),
     }
 }
 
@@ -595,12 +636,26 @@ pub struct RaceThread {
 }
 
 impl RaceThread {
+    /// Power on: run the original's main (front end, races, back to the front end) and wait
+    /// for its first frame.
+    pub fn start_main(data_root: PathBuf) -> Result<Self> {
+        Self::spawn(data_root, None)
+    }
+
     /// Boot the race described by `gamesetup` and wait until it is ready for its first frame.
     pub fn start(data_root: PathBuf, gamesetup: Vec<u8>) -> Result<Self> {
+        Self::spawn(data_root, Some(gamesetup))
+    }
+
+    fn spawn(data_root: PathBuf, gamesetup: Option<Vec<u8>>) -> Result<Self> {
         let (in_tx, in_rx) = mpsc::sync_channel::<Option<FrameInput>>(1);
         let (out_tx, out_rx) = mpsc::sync_channel::<Result<Snapshot, String>>(1);
         let thread = std::thread::Builder::new().name("nfs4-sim".into()).stack_size(256 << 20).spawn(move || {
-            let mut cpu = match boot(&data_root, &gamesetup) {
+            let booted = match &gamesetup {
+                Some(gs) => boot(&data_root, gs),
+                None => power_on(&data_root),
+            };
+            let mut cpu = match booted {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = out_tx.send(Err(format!("{e:#}")));
@@ -614,9 +669,12 @@ impl RaceThread {
             // the pause menu as last drawn: the game only redraws it when it changes and
             // shows the copied picture in between
             let mut menu: Vec<super::host::OverlayCmd> = Vec::new();
+            let mut in_race = false;
             let on_frame: super::host::FrameFn = Box::new(move |c: &mut Cpu, info: super::host::FrameInfo| {
                 // report the state after the previous frame (or boot), then wait for input
-                let mut s = snapshot(c, frame, info, want_ram);
+                let first = !info.front_end && !in_race;
+                in_race = !info.front_end;
+                let mut s = snapshot(c, frame, info, want_ram, first);
                 if !s.paused {
                     menu.clear();
                 } else if s.overlay.iter().any(|o| !matches!(o, super::host::OverlayCmd::Rect { .. })) {
@@ -641,6 +699,12 @@ impl RaceThread {
             host.frame.on_frame = Some(on_frame);
             cpu.m.w32(super::host::MAIN_LOOP_EXIT_FLAG, 0);
             cpu.tick_limit = u64::MAX;
+            if gamesetup.is_none() {
+                if let Err(e) = call(&mut cpu, addr::MAIN, &[]) {
+                    let _ = out_tx.send(Err(format!("{e:#}")));
+                }
+                return;
+            }
             // main's loop: run the race, and again after a reset while a restart is requested
             loop {
                 if let Err(e) = call(&mut cpu, addr::GAME_LOOP, &[]) {
