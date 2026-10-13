@@ -468,16 +468,16 @@ fn real_main() -> Result<()> {
                         }
                         img.save(std::path::Path::new(&dir).join(format!("vram_{f}.png")))?;
                     }
-                    let fe = game::fe::FeFrame::build(&overlay, &vram, screen, 960.0, 720.0);
+                    let showroom = game::fe::FeScene::car_code(&overlay).and_then(|code| game::fe::Showroom::load(&data, &code));
+                    let scene = game::fe::FeScene::build(&overlay, &vram, screen, 960.0, 720.0, showroom.as_ref());
+                    let n = (scene.under.len() + scene.over.len()) / 6;
                     let r = match &mut r {
                         Some(r) => r,
-                        None => r.insert(pollster::block_on(render::Renderer::new(None, (960, 720), &fe.atlas))?),
+                        None => r.insert(pollster::block_on(render::Renderer::new(None, (960, 720), &scene.atlas))?),
                     };
-                    r.write_atlas(&fe.atlas);
-                    r.hud_subtract = fe.subtract.clone();
                     let out = std::path::Path::new(&dir).join(format!("fe_{f}.png"));
-                    r.screenshot(&app::flat_params(), &[], &[], &fe.vertices).save(&out)?;
-                    println!("front-end frame {f} written ({} quads)", fe.vertices.len() / 6);
+                    app::draw_front_end(r, scene, true).context("shot")?.save(&out)?;
+                    println!("front-end frame {f} written ({n} quads)");
                 }
             }
         }

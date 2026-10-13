@@ -90,6 +90,11 @@ pub fn player_plate() -> String {
     GAMESETUP_TEMPLATE[o..o + 12].iter().take_while(|&&b| b != 0).map(|&b| b as char).collect()
 }
 
+/// The car file code of a car type (the inverse of [`car_type`]).
+pub fn car_code(car_type: u32) -> Option<&'static str> {
+    CAR_TYPES.get(car_type as usize).copied().filter(|c| !c.is_empty())
+}
+
 pub fn car_type(code: &str) -> Option<u32> {
     CAR_TYPES.iter().position(|c| !c.is_empty() && c.eq_ignore_ascii_case(code)).map(|i| i as u32)
 }
@@ -257,7 +262,7 @@ pub struct CarState {
 }
 
 impl CarState {
-    fn read(m: &mut Mem, car: u32) -> Self {
+    pub fn read(m: &mut Mem, car: u32) -> Self {
         let mut v3 = |o: u32| [0, 1, 2].map(|i| m.r32(car + o + 4 * i) as i32);
         let (position, velocity, dimension) = (v3(0xA0), v3(0xAC), v3(0x134));
         let code: String = (0..4).map(|i| m.r8(car + 0x240 + i)).take_while(|&b| b != 0).map(char::from).collect();

@@ -11,3 +11,5 @@
 8004c2e0 DrawShape_SubtractNFS4RectEdges (its primitives are captured)
 8004f1c4 PSXDrawGouraudSquare (its primitives are captured)
 8004f2b4 PSXDrawTransGouraudSquare (its primitives are captured)
+800b3428 R3DCar_InsertCarFacetMenuII (the front end's showroom car is drawn by the host)
+8003ac64 DrawCar (the showroom's car type is noted)

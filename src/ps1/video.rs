@@ -22,7 +22,6 @@ struct Stream {
 #[derive(Default)]
 pub struct Videos {
     streams: HashMap<u32, Stream>,
-    next: u32,
     cache: HashMap<String, (Arc<Movie>, f32)>,
     decoder: Option<Decoder>,
 }
@@ -30,21 +29,23 @@ pub struct Videos {
 /// What the host must do after a VIDEO_* call.
 pub enum VideoAction {
     Return(u32),
+    /// VIDEO_create: the handle is a block of the game's heap (its callers free it after
+    /// VIDEO_destroy); allocate one and pass it to [`Videos::created`].
+    Create,
     /// Write a frame of 16-bit pixels at (x, y), w x h, then return 1.
     Upload { x: u32, y: u32, w: u32, h: u32, pixels: Vec<u16> },
 }
 
 impl Videos {
+    pub fn created(&mut self, handle: u32) {
+        self.streams.insert(handle, Stream { file: None, movie: None, state: 0, start: 0, fps: 15.0, shown: -1 });
+    }
+
     /// `load` reads a file by the game's name; `clock` is the virtual clock.
     pub fn call(&mut self, addr: u32, args: [u32; 4], name: impl Fn(u32) -> String, load: impl Fn(&str) -> Option<Vec<u8>>, clock: u64) -> Option<VideoAction> {
         let [a0, a1, a2, _] = args;
         Some(VideoAction::Return(match addr {
-            0x8005_11B0 => {
-                // VIDEO_create(...): a handle
-                self.next += 1;
-                self.streams.insert(self.next, Stream { file: None, movie: None, state: 0, start: 0, fps: 15.0, shown: -1 });
-                self.next
-            }
+            0x8005_11B0 => return Some(VideoAction::Create),
             0x8005_1328 => {
                 self.streams.remove(&a0);
                 0

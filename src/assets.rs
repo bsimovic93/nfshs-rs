@@ -30,6 +30,7 @@ pub struct Rect {
 }
 
 /// Shelf-packed RGBA atlas shared by the whole scene.
+#[derive(Clone)]
 pub struct Atlas {
     pub size: u32,
     pub rgba: Vec<u8>,

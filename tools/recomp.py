@@ -91,9 +91,11 @@ def looks_like_function(a):
         return False
     if a in ALL_CALLS:
         return True
-    w = e.word(a)
-    prev2 = e.word(a - 8) if e.valid(a - 8) else 0
-    return is_prologue(w) or prev2 == 0x03E00008
+    # a stack frame set up within the first instructions (the compiler schedules loads
+    # before it), or the previous function's return just before (with alignment padding)
+    if any(e.valid(a + 4 * k) and is_prologue(e.word(a + 4 * k)) for k in range(4)):
+        return True
+    return any(e.valid(a - 4 * k) and e.word(a - 4 * k) == 0x03E00008 for k in (2, 3))
 
 
 def calls_of(start):

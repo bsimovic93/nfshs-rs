@@ -304,7 +304,7 @@ impl OriginalSim {
 }
 
 /// PS1 world space is the engine's with X mirrored; fixed point is 16.16.
-fn v3(v: [i32; 3]) -> Vec3 {
+pub fn v3(v: [i32; 3]) -> Vec3 {
     Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) / 65536.0
 }
 

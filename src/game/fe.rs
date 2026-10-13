@@ -20,6 +20,8 @@ pub struct FeFrame {
     pub vertices: Vec<Vertex>,
     /// Vertex ranges drawn subtracting (semi-transparency mode 2).
     pub subtract: Vec<std::ops::Range<u32>>,
+    /// Vertices before this index are drawn before the showroom car (the rest over it).
+    pub under: usize,
 }
 
 /// Texel `(u, v)` of texture page `tpage` through CLUT `clut`, as RGBA (alpha 0 transparent,
@@ -39,7 +41,14 @@ fn texel(vram: &[u16], tpage: u16, clut: u16, u: u32, v: u32) -> [u8; 4] {
 
 impl FeFrame {
     pub fn build(cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {
-        let mut atlas = Atlas::new(1024);
+        Self::build_in(Atlas::new(1024), cmds, vram, screen, w, h)
+    }
+
+    /// As [`build`](Self::build), adding the textures to `atlas` (which may hold others, such
+    /// as the showroom car's).
+    pub fn build_in(mut atlas: Atlas, cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {
+        let mut under = 0;
+        let mut car_seen = false;
         // untextured semi-transparent quads blend as a whole: a texel with the semi bit
         let white_semi = atlas.add(1, 1, &[255, 255, 255, 128]);
         let mut cache: HashMap<(u16, u16, u8, u8, u8, u8), Rect> = HashMap::new();
@@ -53,6 +62,11 @@ impl FeFrame {
         let mut clip = [0.0, 0.0, sw, sh];
         // the game adds each primitive at the head of its ordering table: last asked, first drawn
         for cmd in cmds.iter().rev() {
+            if matches!(cmd, OverlayCmd::ShowroomCar { .. }) && !car_seen {
+                car_seen = true;
+                under = vertices.len();
+                continue;
+            }
             if let &OverlayCmd::Clip { x, y, w, h } = cmd {
                 clip = [x as f32, y as f32, (x + w) as f32, (y + h) as f32];
                 continue;
@@ -121,7 +135,10 @@ impl FeFrame {
                 }
             }
         }
-        Self { atlas, vertices, subtract }
+        if !car_seen {
+            under = 0;
+        }
+        Self { atlas, vertices, subtract, under }
     }
 }
 
@@ -195,7 +212,127 @@ impl MoviePlayer {
             color: [0.5, 0.5, 0.5, 1.0],
         };
         let q = [corner(0.0, 0.0), corner(1.0, 0.0), corner(1.0, 1.0), corner(0.0, 1.0)];
-        FeFrame { atlas, vertices: vec![q[0], q[1], q[2], q[0], q[2], q[3]], subtract: Vec::new() }
+        FeFrame { atlas, vertices: vec![q[0], q[1], q[2], q[0], q[2], q[3]], subtract: Vec::new(), under: 0 }
+    }
+}
+
+/// The showroom's car model (with its textures in an atlas the front end's are added to).
+pub struct Showroom {
+    pub code: String,
+    model: crate::assets::CarModel,
+    pub atlas: Atlas,
+}
+
+impl Showroom {
+    pub fn load(data: &crate::assets::GameData, code: &str) -> Option<Self> {
+        let mut atlas = Atlas::new(1024);
+        let model = crate::assets::load_car(data, &mut atlas, code, true, false, None).ok()?;
+        Some(Self { code: code.to_string(), model, atlas })
+    }
+
+    /// The cars the front end asked for (the car and its reflection in the floor) as world
+    /// geometry, and the projection that puts them where the GTE would on the front end's
+    /// `screen`, fitted at 4:3 into a `w` x `h` window.
+    pub fn geometry(&self, cmds: &[OverlayCmd], screen: (u16, u16), w: f32, h: f32) -> Option<(Vec<Vertex>, glam::Mat4)> {
+        use crate::game::original::{pose, v3};
+        use glam::{Mat4, Vec3, Vec4};
+        let mut out = Vec::new();
+        let mut proj = None;
+        for cmd in cmds {
+            let OverlayCmd::ShowroomCar { car, parts, cam_pos, cam_rot, h: dist, ofx, ofy, mirrored } = cmd else { continue };
+            if proj.is_none() {
+                let raw = |i: usize| v3([cam_rot[i * 3], cam_rot[i * 3 + 1], cam_rot[i * 3 + 2]]);
+                let (up, fwd) = (raw(1).normalize_or_zero(), raw(2).normalize_or_zero());
+                let ys = (raw(1).length() / raw(2).length().max(1e-6)).clamp(0.2, 2.0);
+                let pos = v3(*cam_pos);
+                let view = Mat4::look_at_rh(pos, pos + fwd, up);
+                let (sw, sh) = (screen.0.max(1) as f32, screen.1.max(1) as f32);
+                let (aw, ah) = if w * 3.0 > h * 4.0 { (h * 4.0 / 3.0, h) } else { (w, w * 0.75) };
+                let (ox, oy) = ((w - aw) / 2.0, (h - ah) / 2.0);
+                let (kx, ky) = (aw / sw, ah / sh);
+                let hd = *dist as f32;
+                // screen x = OFX + H x / z, y = OFY - H ys y / z (camera space, z forward),
+                // then into window NDC; depth reversed (near / distance)
+                let (fx, fy) = (*ofx as f32 / 65536.0, *ofy as f32 / 65536.0);
+                let cx = (ox + kx * fx) * 2.0 / w - 1.0;
+                let cy = 1.0 - (oy + ky * fy) * 2.0 / h;
+                let p = Mat4::from_cols(
+                    Vec4::new(2.0 * kx * hd / w, 0.0, 0.0, 0.0),
+                    Vec4::new(0.0, 2.0 * ky * hd * ys / h, 0.0, 0.0),
+                    Vec4::new(-cx, -cy, 0.0, -1.0),
+                    Vec4::new(0.0, 0.0, 0.1, 0.0),
+                );
+                proj = Some(p * view);
+            }
+            // the car as in a race (model origin on the ground); its reflection mirrored in
+            // the floor (y = 0) and darker
+            let mut c = (**car).clone();
+            if *mirrored {
+                c.position[1] = -c.position[1];
+            }
+            let ps = pose(&c);
+            let mut model = Mat4::from_rotation_translation(ps.rot, ps.pos);
+            let tint = if *mirrored {
+                model = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * model;
+                0.45
+            } else {
+                1.0
+            };
+            for (pi, (part, &on)) in self.model.parts.iter().zip(parts.iter()).enumerate() {
+                if on == 0 {
+                    continue;
+                }
+                let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
+                let _ = pi;
+                for v in &part.verts {
+                    let p = tm.transform_point3(Vec3::from(v.pos));
+                    let col = v.color;
+                    out.push(Vertex { pos: p.into(), color: [col[0] * tint, col[1] * tint, col[2] * tint, col[3]], ..*v });
+                }
+            }
+        }
+        proj.map(|p| (out, p))
+    }
+}
+
+/// A front-end frame ready for the renderer: its atlas, the 2D under and over the showroom
+/// car (with the subtracting ranges of the part over it), and the car's geometry and
+/// projection when there is one.
+pub struct FeScene {
+    pub atlas: Atlas,
+    pub under: Vec<Vertex>,
+    pub over: Vec<Vertex>,
+    pub subtract: Vec<std::ops::Range<u32>>,
+    pub car: Vec<Vertex>,
+    pub view_proj: Option<glam::Mat4>,
+}
+
+impl FeScene {
+    pub fn build(cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32, showroom: Option<&Showroom>) -> Self {
+        let base = showroom.map(|s| s.atlas.clone()).unwrap_or_else(|| Atlas::new(1024));
+        let f = FeFrame::build_in(base, cmds, vram, screen, w, h);
+        let (car, view_proj) = match showroom.and_then(|s| s.geometry(cmds, screen, w, h)) {
+            Some((v, p)) => (v, Some(p)),
+            None => (Vec::new(), None),
+        };
+        let split = if view_proj.is_some() { f.under } else { 0 };
+        let mut vertices = f.vertices;
+        let over = vertices.split_off(split);
+        let subtract = f
+            .subtract
+            .iter()
+            .filter(|r| r.start as usize >= split)
+            .map(|r| (r.start - split as u32)..(r.end - split as u32))
+            .collect();
+        Self { atlas: f.atlas, under: vertices, over, subtract, car, view_proj }
+    }
+
+    /// The showroom car's code, when the front end shows one.
+    pub fn car_code(cmds: &[OverlayCmd]) -> Option<String> {
+        cmds.iter().find_map(|c| match c {
+            OverlayCmd::ShowroomCar { car, .. } => Some(car.code.clone()),
+            _ => None,
+        })
     }
 }
 

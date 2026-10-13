@@ -16,6 +16,8 @@ pub struct GameHost {
     mounts: Vec<(u32, Vec<(String, Vec<u8>)>)>,
     next_handle: u32,
     memcard: super::memcard::MemCard,
+    /// The car DrawCar last showed (type, colour).
+    showroom_car: Option<(i8, u8)>,
     videos: super::video::Videos,
     idles: u64,
     /// Which part of the game is running (switched by the hooks on their entry points).
@@ -110,6 +112,10 @@ pub enum OverlayCmd {
     Clip { x: i16, y: i16, w: i16, h: i16 },
     /// Movie_Play: frame `frame` of the movie file `file` (under MOVIES) fills the screen.
     Movie { file: String, frame: u32, fps: f32 },
+    /// The showroom's car (R3DCar_InsertCarFacetMenuII): the car, the camera (the view's
+    /// position and rotation rows, 16.16 / 4096 scaled as in races) and the GTE projection
+    /// (distance H, screen centre OFX/OFY 16.16); `mirrored` is its reflection in the floor.
+    ShowroomCar { car: Box<super::race::CarState>, parts: Vec<u8>, cam_pos: [i32; 3], cam_rot: [i32; 9], h: u32, ofx: i32, ofy: i32, mirrored: bool },
 }
 
 /// A quad's texture in VRAM terms: texture page and CLUT ids, texel coordinates per corner.
@@ -266,6 +272,8 @@ const SHADOW_COLOUR: u32 = 0x8013_D83C + 3652;
 pub const TICK: u64 = 15;
 pub const FIELD: u64 = 32;
 const MAIN_LOOP_YIELD_RA: u32 = 0x800B_7AA4;
+/// A string in NFS4.EXE's data to name the video handles' heap blocks ("audio heap").
+const VIDEO_BLOCK_NAME: u32 = 0x8005_6F08;
 /// Front-end routines that build GPU primitives themselves (the video wall's DrawTV and
 /// DrawTVLines): run as they are and their primitives recorded (`capture_prims`).
 const CAPTURED_FE_DRAWING: [u32; 7] = [
@@ -305,6 +313,7 @@ impl GameHost {
             mounts: Vec::new(),
             next_handle: 0x100,
             memcard: super::memcard::MemCard::new(),
+            showroom_car: None,
             videos: Default::default(),
             idles: 0,
             mode: Mode::FrontEnd,
@@ -698,6 +707,16 @@ impl Host for GameHost {
             let action = videos.call(addr, [a0, a1, a2, a3], |_| file.clone(), |f| self.lookup(f), clock);
             self.videos = videos;
             match action {
+                Some(super::video::VideoAction::Create) => {
+                    // a heap block for the handle, as VIDEO_create's VIDEOSTRUCT ("VIDW")
+                    let block = c.call_nested(super::race::addr::RESERVE_MEM, &[VIDEO_BLOCK_NAME, 64, 0]);
+                    if block != 0 {
+                        c.m.w32(block, 0x5744_4956);
+                        self.videos.created(block);
+                    }
+                    c.r[2] = block;
+                    return true;
+                }
                 Some(super::video::VideoAction::Return(r)) => {
                     c.r[2] = r;
                     return true;
@@ -959,6 +978,31 @@ impl Host for GameHost {
                 // was skipped
                 self.play_movie(c, a0 & 0xFF);
                 c.m.r16(0x8005_2EBC) as i16 as i32 as u32
+            }
+            0x8003_AC64 => {
+                // DrawCar(carInfo, ...): the car the showroom shows (type, colour)
+                self.showroom_car = Some((c.m.r8(a0) as i8, c.m.r8(a0 + 1)));
+                return false;
+            }
+            0x800B_3428 if self.mode == Mode::FrontEnd => {
+                // R3DCar_InsertCarFacetMenuII(car, ..): the showroom car, drawn by the host
+                let mut car = Box::new(super::race::CarState::read(&mut c.m, a0));
+                // the model is the selected one (DrawCar's); the object keeps an older code
+                if let Some(code) = self.showroom_car.and_then(|(t, _)| u32::try_from(t).ok()).and_then(super::race::car_code) {
+                    car.code = code.to_string();
+                }
+                let view = RENDER_VIEW;
+                self.overlay.push(OverlayCmd::ShowroomCar {
+                    car,
+                    parts: (0..57).map(|i| c.m.r8(R3DCAR_OBJECT_VISIBLE + i)).collect(),
+                    cam_pos: std::array::from_fn(|i| c.m.r32(view + 8 + 4 * i as u32) as i32),
+                    cam_rot: std::array::from_fn(|i| c.m.r32(view + 0x14 + 4 * i as u32) as i32),
+                    h: c.gte_regs[32 + 26] & 0xFFFF,
+                    ofx: c.gte_regs[32 + 24] as i32,
+                    ofy: c.gte_regs[32 + 25] as i32,
+                    mirrored: c.m.r32(0x8013_E608) & 0x80 != 0,
+                });
+                0
             }
             0x8002_A7B0 => {
                 // Front_BuildStream: the front end runs

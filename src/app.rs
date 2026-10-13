@@ -57,6 +57,8 @@ pub struct App {
     /// The front end's movie being shown, and its soundtrack's voice.
     movie: Option<crate::game::fe::MoviePlayer>,
     movie_voice: Option<crate::audio::VoiceId>,
+    /// The front end's showroom car model.
+    showroom: Option<crate::game::fe::Showroom>,
 }
 
 #[derive(Clone)]
@@ -428,11 +430,15 @@ impl App {
                     return;
                 }
                 if let Some(vram) = &snap.vram {
-                    let fe = crate::game::fe::FeFrame::build(&snap.overlay, vram, (snap.display[2], snap.display[3]), w as f32, h as f32);
-                    r.write_atlas(&fe.atlas);
-                    r.hud_subtract = fe.subtract;
-                    r.render(&flat_params(), &[], &[], &fe.vertices);
-                    r.hud_subtract = Vec::new();
+                    // the showroom car, loaded when the front end shows a different one
+                    match crate::game::fe::FeScene::car_code(&snap.overlay) {
+                        Some(code) if self.showroom.as_ref().is_none_or(|s| s.code != code) => {
+                            self.showroom = crate::game::fe::Showroom::load(&self.data, &code);
+                        }
+                        _ => {}
+                    }
+                    let scene = crate::game::fe::FeScene::build(&snap.overlay, vram, (snap.display[2], snap.display[3]), w as f32, h as f32, self.showroom.as_ref());
+                    draw_front_end(r, scene, false);
                 }
             }
             Screen::Menu => {
@@ -555,6 +561,7 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
         direct,
         movie: None,
         movie_voice: None,
+        showroom: None,
     };
     el.run_app(&mut app)?;
     Ok(())
@@ -638,6 +645,29 @@ pub fn flat_params() -> FrameParams {
         cam_fwd: Vec3::Z,
         depth_cue: None,
     }
+}
+
+/// Draw a front-end scene (2D, and the showroom car in 3D between its layers).
+pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: bool) -> Option<image::RgbaImage> {
+    r.write_atlas(&scene.atlas);
+    let mut params = flat_params();
+    if let Some(vp) = scene.view_proj {
+        params.view_proj = vp;
+    }
+    // no fog in the showroom
+    params.fog_start = 1.0e9;
+    params.fog_end = 2.0e9;
+    r.hud_subtract = scene.subtract;
+    r.hud_under = scene.under;
+    let img = if shot {
+        Some(r.screenshot(&params, &[], &scene.car, &scene.over))
+    } else {
+        r.render(&params, &[], &scene.car, &scene.over);
+        None
+    };
+    r.hud_subtract = Vec::new();
+    r.hud_under = Vec::new();
+    img
 }
 
 /// Headless render of the front-end menu.

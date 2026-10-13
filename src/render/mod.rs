@@ -106,6 +106,9 @@ pub struct Renderer {
     /// 2D drawn subtracting, and which ranges of the next frame's 2D vertices use it.
     hud_sub_pipeline: wgpu::RenderPipeline,
     pub hud_subtract: Vec<std::ops::Range<u32>>,
+    /// 2D drawn first, under the 3D geometry (the front end's background behind its car).
+    pub hud_under: Vec<Vertex>,
+    under_vb: DynBuf,
     sky_pipeline: wgpu::RenderPipeline,
     world_globals: wgpu::Buffer,
     hud_globals: wgpu::Buffer,
@@ -292,6 +295,7 @@ impl Renderer {
         let shadow_vb = DynBuf::new(&device, "shadows");
         let late_vb = DynBuf::new(&device, "subtract late");
         let hud_vb = DynBuf::new(&device, "hud");
+        let under_vb = DynBuf::new(&device, "hud under");
         let sky_vb = DynBuf::new(&device, "sky");
         Ok(Self {
             device,
@@ -303,6 +307,8 @@ impl Renderer {
             hud_pipeline,
             hud_sub_pipeline,
             hud_subtract: Vec::new(),
+            hud_under: Vec::new(),
+            under_vb,
             sky_pipeline,
             world_globals,
             hud_globals,
@@ -450,6 +456,7 @@ impl Renderer {
         self.shadow_vb.upload(&self.device, &self.queue, &p.shadows);
         self.late_vb.upload(&self.device, &self.queue, &p.subtract_late);
         self.hud_vb.upload(&self.device, &self.queue, hud);
+        self.under_vb.upload(&self.device, &self.queue, &self.hud_under);
         let depth = self.depth_view();
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -473,6 +480,13 @@ impl Renderer {
             rp.set_bind_group(0, &self.world_bg, &[]);
             rp.set_pipeline(&self.sky_pipeline);
             rp.draw(0..3, 0..1);
+            if !self.hud_under.is_empty() {
+                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_bind_group(0, &self.hud_bg, &[]);
+                rp.set_vertex_buffer(0, self.under_vb.buf.slice(..));
+                rp.draw(0..self.hud_under.len() as u32, 0..1);
+                rp.set_bind_group(0, &self.world_bg, &[]);
+            }
             if !sky.is_empty() {
                 rp.set_pipeline(&self.hud_pipeline);
                 rp.set_bind_group(0, &self.sky_bg, &[]);
