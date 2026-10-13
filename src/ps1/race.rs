@@ -634,7 +634,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         camera_rot: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 0x14 + 4 * i as u32) as i32),
         ram: want_ram.then(|| c.m.ram.to_vec()),
         front_end: false,
-        vram: None,
+        vram: info.vram.clone(),
         track: c.m.r32(addr::GAMESETUP + 0x3C),
         laps: c.m.r32(addr::GAMESETUP + gs::NUM_LAPS as u32),
         variant: match (c.m.r32(addr::GAMESETUP + 0x48), c.m.r32(addr::GAMESETUP + 0x54)) {

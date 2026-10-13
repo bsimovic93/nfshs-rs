@@ -46,6 +46,26 @@ pub struct GameHost {
     /// each overlay command went into, and the entry current for the running host call.
     overlay_ot: Vec<u32>,
     current_ot: u32,
+    /// Races: the HUD is what the original puts into its views' ordering tables (every
+    /// DrawOTag after the frame's first, the world's), recorded as overlay commands; off
+    /// with NFSHS_OWN_HUD=1 (the host's own port of the HUD).
+    pub hud_prims: bool,
+    /// DrawOTag calls since the last frame.
+    otags: u32,
+    /// This frame's recorded views (each list in drawing order) and the last full frame's
+    /// HUD (a paused game draws only its menu's view over the picture it keeps).
+    frame_lists: Vec<Vec<OverlayCmd>>,
+    last_hud: Vec<OverlayCmd>,
+    /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
+    /// menu views drawn into it since (the game redraws only what changes), and the lists
+    /// already in it.
+    paused_buffers: HashMap<i32, (Vec<OverlayCmd>, std::collections::HashSet<u64>)>,
+    /// The drawing offset of the view being recorded (DR_OFFSET, display-relative).
+    prim_offset: [i16; 2],
+    area_tl: [i32; 2],
+    draw_origin: [i32; 2],
+    /// SetDrawEnv's packets: their drawing environment's clip (x, y, w, h) and offset, in VRAM.
+    draw_envs: HashMap<u32, ([i16; 4], [i16; 2])>,
     /// The game started from main (its title and front end), not straight into a race.
     pub from_main: bool,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
@@ -358,6 +378,15 @@ impl GameHost {
             loading_shown: 0,
             overlay_ot: Vec::new(),
             current_ot: 0,
+            hud_prims: std::env::var_os("NFSHS_OWN_HUD").is_none(),
+            otags: 0,
+            frame_lists: Vec::new(),
+            last_hud: Vec::new(),
+            paused_buffers: HashMap::new(),
+            prim_offset: [0, 0],
+            area_tl: [0, 0],
+            draw_origin: [0, 0],
+            draw_envs: HashMap::new(),
             from_main: false,
             rcnt: 0,
             log: Vec::new(),
@@ -465,7 +494,123 @@ impl GameHost {
         Some((w, h, rgba))
     }
 
+    /// The race is paused: its menu is drawn by the host (the paused game redraws only what
+    /// changes over the picture it keeps).
+    fn paused(c: &mut Cpu) -> bool {
+        c.m.r32(super::race::addr::SIM_PAUSED) != 0
+    }
+
+    /// Packets in an ordering table.
+    fn ot_len(c: &mut Cpu, start: u32) -> u32 {
+        let (mut a, mut n) = (start, 0);
+        while n < 20_000 {
+            let next = c.m.r32(a) & 0xFF_FFFF;
+            n += 1;
+            if next == 0xFF_FFFF {
+                break;
+            }
+            a = 0x8000_0000 | next;
+        }
+        n
+    }
+
+    /// Walk an ordering table from `start` and record its primitives (a race's HUD view).
+    fn record_ot(&mut self, c: &mut Cpu, start: u32) {
+        let before = self.overlay.len();
+        let mut a = start;
+        self.prim_offset = [0, 0];
+        for _ in 0..20_000 {
+            let tag = c.m.r32(a);
+            let (len, next) = (tag >> 24, tag & 0xFF_FFFF);
+            if len > 0 {
+                let code = c.m.r8(a + 7);
+                if let Some(&(clip, ofs)) = self.draw_envs.get(&(a & 0x1F_FFFF | 0x8000_0000)) {
+                    // a view's drawing environment (SetDrawEnv): its clip and offset, relative
+                    // to the drawing buffer
+                    let [ox, oy] = self.draw_origin;
+                    self.overlay.push(OverlayCmd::Clip { x: (clip[0] as i32 - ox) as i16, y: (clip[1] as i32 - oy) as i16, w: clip[2], h: clip[3] });
+                    self.prim_offset = [(ofs[0] as i32 - ox) as i16, (ofs[1] as i32 - oy) as i16];
+                    for k in 0..len {
+                        let w = c.m.r32(a + 4 + 4 * k);
+                        if w >> 24 == 0xE1 {
+                            self.draw_mode = w as u16 & 0x1FF;
+                        }
+                    }
+                } else if code >= 0xE0 {
+                    // environment commands, several to a packet
+                    for k in 0..len {
+                        let w = c.m.r32(a + 4 + 4 * k);
+                        self.environment(w);
+                    }
+                } else {
+                    self.parse_prim(c, a + 4, len);
+                }
+            }
+            if next == 0xFF_FFFF {
+                break;
+            }
+            a = 0x8000_0000 | next;
+        }
+        if std::env::var_os("NFSHS_HUDLOG").is_some() {
+            eprintln!("hud view {start:#x}: {} commands, display {:?}", self.overlay.len() - before, self.display);
+        }
+    }
+
+    /// GP0 E1..E6 in a recorded view: draw mode, drawing area (a clip), drawing offset.
+    fn environment(&mut self, w: u32) {
+        let [ox, oy] = self.draw_origin;
+        if std::env::var_os("NFSHS_HUDLOG").is_some() {
+            eprintln!("  env {w:08x} origin {:?}", self.draw_origin);
+        }
+        match w >> 24 {
+            0xE1 => self.draw_mode = w as u16 & 0x1FF,
+            0xE3 => self.area_tl = [(w & 0x3FF) as i32 - ox, ((w >> 10) & 0x3FF) as i32 - oy],
+            0xE4 => {
+                let (x1, y1) = ((w & 0x3FF) as i32 - ox, ((w >> 10) & 0x3FF) as i32 - oy);
+                let [x0, y0] = self.area_tl;
+                self.overlay.push(OverlayCmd::Clip { x: x0 as i16, y: y0 as i16, w: (x1 - x0 + 1) as i16, h: (y1 - y0 + 1) as i16 });
+            }
+            0xE5 => {
+                let sx = |v: u32| ((v as i32) << 21) >> 21;
+                self.prim_offset = [(sx(w & 0x7FF) - ox) as i16, (sx((w >> 11) & 0x7FF) - oy) as i16];
+            }
+            _ => {}
+        }
+    }
+
     fn frame_top(&mut self, c: &mut Cpu) -> Option<u16> {
+        self.otags = 0;
+        // the recorded HUD views (in drawing order; overlays are kept last-drawn first): all
+        // but the world's, or a paused game's menu view over the last full frame's HUD
+        if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) {
+            let mut lists = std::mem::take(&mut self.frame_lists);
+            let hud: Vec<OverlayCmd> = match lists.len() {
+                0 => Vec::new(),
+                1 => {
+                    let list = lists.remove(0);
+                    let key = {
+                        use std::hash::{Hash, Hasher};
+                        let mut h = std::collections::hash_map::DefaultHasher::new();
+                        format!("{list:?}").hash(&mut h);
+                        h.finish()
+                    };
+                    let base = &self.last_hud;
+                    let (acc, seen) = self.paused_buffers.entry(self.draw_origin[0]).or_insert_with(|| (base.clone(), Default::default()));
+                    if seen.insert(key) && acc.len() < 50_000 {
+                        acc.extend(list);
+                    }
+                    acc.clone()
+                }
+                _ => {
+                    let hud: Vec<OverlayCmd> = lists.drain(1..).flatten().collect();
+                    self.last_hud = hud.clone();
+                    self.paused_buffers.clear();
+                    hud
+                }
+            };
+            self.overlay.extend(hud);
+            self.overlay.reverse();
+        }
         // the screen shown while loading, until this frame
         if !self.loading.is_empty() {
             self.loading_frames(c);
@@ -502,7 +647,7 @@ impl GameHost {
                 std::mem::take(&mut self.overlay)
             },
             front_end: self.mode == Mode::FrontEnd,
-            vram: (self.mode == Mode::FrontEnd).then(|| {
+            vram: (self.mode == Mode::FrontEnd || self.hud_prims).then(|| {
                 if self.vram_dirty || self.vram_shared.is_none() {
                     self.vram_shared = Some(std::sync::Arc::new(self.vram.clone()));
                     self.vram_dirty = false;
@@ -687,6 +832,11 @@ impl GameHost {
         ret
     }
 
+    /// Points moved by the recorded view's drawing offset.
+    fn offset_pts(&self, pts: [[i16; 2]; 4]) -> [[i16; 2]; 4] {
+        pts.map(|[x, y]| [x + self.prim_offset[0], y + self.prim_offset[1]])
+    }
+
     /// One GPU primitive (its command words at `a`) as a quad, as far as the front end uses them.
     fn parse_prim(&mut self, c: &mut Cpu, a: u32, len: u32) {
         let w = |c: &mut Cpu, k: u32| c.m.r32(a + 4 * k);
@@ -739,6 +889,7 @@ impl GameHost {
                 }
                 let abr = (if textured { tpage } else { self.draw_mode } >> 5) as u8 & 3;
                 let tex = textured.then_some(QuadTex { tpage, clut, uv });
+                let pts = self.offset_pts(pts);
                 self.overlay.push(OverlayCmd::Quad { pts, colours, tex, semi, abr });
             }
             0x60..=0x7F => {
@@ -771,7 +922,22 @@ impl GameHost {
                     QuadTex { tpage: self.draw_mode, clut, uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]] }
                 });
                 let abr = (self.draw_mode >> 5) as u8 & 3;
-                self.overlay.push(OverlayCmd::Quad { pts: rect_pts(x, y, tw, th), colours, tex, semi, abr });
+                let pts = self.offset_pts(rect_pts(x, y, tw, th));
+                self.overlay.push(OverlayCmd::Quad { pts, colours, tex, semi, abr });
+            }
+            0x40..=0x5F if code & 8 == 0 => {
+                // a line (one segment): a pixel-wide quad
+                let gouraud = code & 0x10 != 0;
+                let (c0, p0) = (w0 & 0xFF_FFFF, xy(w(c, 1)));
+                let (c1, p1) = if gouraud { (w(c, 2) & 0xFF_FFFF, xy(w(c, 3))) } else { (c0, xy(w(c, 2))) };
+                let (dx, dy) = ((p1[0] - p0[0]) as f32, (p1[1] - p0[1]) as f32);
+                let n = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = ((-dy / n * 0.5).round() as i16, (dx / n * 0.5).round() as i16);
+                let (nx, ny) = if nx == 0 && ny == 0 { (0, 1) } else { (nx, ny) };
+                let pts = [[p0[0], p0[1]], [p1[0], p1[1]], [p0[0] + nx, p0[1] + ny], [p1[0] + nx, p1[1] + ny]];
+                let abr = (self.draw_mode >> 5) as u8 & 3;
+                let pts = self.offset_pts(pts);
+                self.overlay.push(OverlayCmd::Quad { pts, colours: [c0, c1, c0, c1], tex: None, semi, abr });
             }
             _ => {}
         }
@@ -1108,8 +1274,44 @@ impl Host for GameHost {
                 }
                 a0
             }
-            0x800E_E610 => 0,                  // DrawOTag: rendering is done by the host engine
-            0x800E_E680 => a0, // PutDrawEnv
+            0x800E_E610 => {
+                // DrawOTag: rendering is done by the host engine. In races the views after
+                // the world's (HUD, tachometer, map) are recorded as 2D
+                if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) {
+                    // (the world's list, thousands of primitives, is only counted)
+                    let saved = std::mem::take(&mut self.overlay);
+                    if self.otags > 0 || Self::ot_len(c, a0) < 1500 {
+                        self.record_ot(c, a0);
+                    }
+                    let list = std::mem::replace(&mut self.overlay, saved);
+                    self.frame_lists.push(list);
+                    self.otags += 1;
+                }
+                0
+            }
+            0x800E_E680 => {
+                // PutDrawEnv(env): a full-screen one is the frame's drawing buffer (where the
+                // recorded HUD views' areas and offsets are)
+                if c.m.r16(a0 + 4) >= 256 {
+                    self.draw_origin = [c.m.r16(a0) as i32, c.m.r16(a0 + 2) as i32];
+                }
+                a0
+            }
+            0x800E_ED6C => {
+                // SetDrawEnv(packet, env): remember the environment the packet sets (the HUD
+                // views' clip and offset, for recording them)
+                let clip = std::array::from_fn(|i| c.m.r16(a1 + 2 * i as u32) as i16);
+                let ofs = [c.m.r16(a1 + 8) as i16, c.m.r16(a1 + 10) as i16];
+                if std::env::var_os("NFSHS_HUDLOG").is_some() {
+                    eprintln!("SetDrawEnv {a0:#x}: clip {clip:?} ofs {ofs:?}");
+                }
+                self.draw_envs.insert(a0, (clip, ofs));
+                // a full-screen one is the drawing buffer the views are in
+                if clip[2] >= 256 {
+                    self.draw_origin = [clip[0] as i32, clip[1] as i32];
+                }
+                return false;
+            }
             0x800E_EC70 => {
                 // SetDrawArea(DR_AREA, rect): the front end clips some drawing (scrolling text)
                 if self.mode == Mode::FrontEnd {
@@ -1438,6 +1640,9 @@ impl Host for GameHost {
 
             0x8009_68E8 => 0, // Speech_Server: commentator streaming (audio is host-side)
             0x8007_6B90 => 0, // AudioClc_SoundCars: positional engine/track audio (host-side)
+            // the HUD's helpers: in races the original builds its primitives (recorded from
+            // the HUD views' ordering tables)
+            0x800C_C7F0 | 0x800D_4E9C | 0x800D_8690 | 0x800D_9ABC | 0x800D_3558 if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) => return false,
             0x800C_C7F0 if self.mode == Mode::FrontEnd => {
                 self.font_quads(c, a0, a1 as i32, a2 as i32);
                 0

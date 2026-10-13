@@ -912,6 +912,24 @@ impl Game {
         order
     }
 
+    /// The HUD as the original drew it this frame (its views' primitives, recorded), when it
+    /// was recorded: 2D for a `w` x `h` window with its own atlas.
+    pub fn hud_frame(&self, w: f32, h: f32) -> Option<fe::FeFrame> {
+        let s = self.sim.as_ref()?.snapshot();
+        if std::env::var_os("NFSHS_HUDLOG").is_some() {
+            eprintln!("hud frame: vram {} overlay {} display {:?}", s.vram.is_some(), s.overlay.len(), s.display);
+            for c in s.overlay.iter().take(12) {
+                eprintln!("  {}", format!("{c:?}").chars().take(160).collect::<String>());
+            }
+        }
+        if s.paused {
+            return None;
+        }
+        let vram = s.vram.as_ref()?;
+        let screen = (s.display[2].max(1), s.display[3].max(1));
+        Some(fe::FeFrame::build(&s.overlay, vram, screen, w, h))
+    }
+
     pub fn hud(&self, w: f32, h: f32) -> Vec<Vertex> {
         if let (Some(hud), Some(sim)) = (&self.ps1hud, &self.sim) {
             let s = sim.snapshot();

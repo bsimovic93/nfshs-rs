@@ -472,7 +472,7 @@ impl App {
             Screen::Race(game) => {
                 let params = game.frame_params(w as f32 / h.max(1) as f32);
                 let dynamic = game.dynamic_geometry();
-                let mut hud = game.hud(w as f32, h as f32);
+                let mut hud = race_hud(r, game, w as f32, h as f32);
                 if game.phase == Phase::Finished {
                     let s = (h as f32 / 240.0).max(1.0).floor();
                     game.font().text(&mut hud, "PRESS ENTER", w as f32 * 0.5 - 33.0 * s * 1.5, h as f32 * 0.85, s * 1.5, [1.0, 1.0, 1.0, 1.0]);
@@ -631,7 +631,8 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         }
     }
     let params = game.frame_params(960.0 / 720.0);
-    let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &game.hud(960.0, 720.0));
+    let hud = race_hud(&mut r, &game, 960.0, 720.0);
+    let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
     img.save(out)?;
     Ok(())
 }
@@ -727,7 +728,8 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                 }
             } else if let Some(g) = &game {
                 let params = g.frame_params(w as f32 / h as f32);
-                r.screenshot(&params, &g.track.sky, &g.dynamic_geometry(), &g.hud(w as f32, h as f32)).save(&out)?;
+                let hud = race_hud(&mut r, g, w as f32, h as f32);
+                r.screenshot(&params, &g.track.sky, &g.dynamic_geometry(), &hud).save(&out)?;
             }
             println!("frame {frame}: {} written", out.display());
         }
@@ -735,9 +737,27 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
     Ok(())
 }
 
+/// A race's 2D: the HUD the original drew (recorded, with its own atlas), or the host's port.
+pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::assets::Vertex> {
+    match game.hud_frame(w, h) {
+        Some(f) => {
+            r.write_overlay_atlas(&f.atlas);
+            r.use_overlay_atlas = true;
+            r.hud_subtract = f.subtract;
+            f.vertices
+        }
+        None => {
+            r.use_overlay_atlas = false;
+            r.hud_subtract = Vec::new();
+            game.hud(w, h)
+        }
+    }
+}
+
 /// Draw a front-end scene (2D, and the showroom car in 3D between its layers).
 pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: bool) -> Option<image::RgbaImage> {
     r.write_atlas(&scene.atlas);
+    r.use_overlay_atlas = false;
     let mut params = flat_params();
     if let Some(vp) = scene.view_proj {
         params.view_proj = vp;

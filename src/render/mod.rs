@@ -113,6 +113,10 @@ pub struct Renderer {
     /// showroom's floor between the car's reflection and the car).
     pub hud_mid: Vec<Vertex>,
     pub dyn_mid: u32,
+    /// The 2D pass's own atlas (a race's HUD recorded from the original, textured from its
+    /// VRAM), when set.
+    overlay_atlas: Option<(wgpu::Texture, wgpu::BindGroup)>,
+    pub use_overlay_atlas: bool,
     mid_vb: DynBuf,
     sky_pipeline: wgpu::RenderPipeline,
     world_globals: wgpu::Buffer,
@@ -317,6 +321,8 @@ impl Renderer {
             under_vb,
             hud_mid: Vec::new(),
             dyn_mid: 0,
+            overlay_atlas: None,
+            use_overlay_atlas: false,
             mid_vb,
             sky_pipeline,
             world_globals,
@@ -358,6 +364,23 @@ impl Renderer {
         }
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &self.atlas_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &atlas.rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(atlas.size * 4), rows_per_image: Some(atlas.size) },
+            wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
+        );
+    }
+
+    /// Upload the 2D pass's own atlas (see [`Self::use_overlay_atlas`]).
+    pub fn write_overlay_atlas(&mut self, atlas: &crate::assets::Atlas) {
+        let fits = self.overlay_atlas.as_ref().is_some_and(|(t, _)| t.width() == atlas.size);
+        if !fits {
+            let (tex, [_, h, _]) = make_bind_groups(&self.device, &self.queue, &self.bgl, &self.sampler, atlas, [&self.world_globals, &self.hud_globals, &self.sky_globals]);
+            self.overlay_atlas = Some((tex, h));
+            return;
+        }
+        let (tex, _) = self.overlay_atlas.as_ref().unwrap();
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             &atlas.rgba,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(atlas.size * 4), rows_per_image: Some(atlas.size) },
             wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
@@ -544,7 +567,11 @@ impl Renderer {
                 rp.draw(0..p.subtract_late.len() as u32, 0..1);
             }
             if !hud.is_empty() {
-                rp.set_bind_group(0, &self.hud_bg, &[]);
+                let hud_bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
+                    (Some((_, bg)), true) => bg,
+                    _ => &self.hud_bg,
+                };
+                rp.set_bind_group(0, hud_bg, &[]);
                 rp.set_vertex_buffer(0, self.hud_vb.buf.slice(..));
                 // in order: runs of normal blending between the subtracting ranges
                 let mut at = 0;

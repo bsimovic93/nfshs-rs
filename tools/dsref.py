@@ -1,5 +1,7 @@
 """dsref.py OUTDIR [--state FILE|none] [--wait SECONDS] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS,
-shot:NAME (screenshot while running), ram:NAME (paused screenshot + RAM dump))
+shot:NAME (screenshot while running), ram:NAME (paused screenshot + RAM dump),
+poke:ADDR:VALUE[:COUNT], save:NAME (save state into re/states/NAME.sav); --state NAME also
+finds re/states/NAME.sav)
 
 Capture a reference frame from DuckStation: start the emulator on a save state, let it run,
 pause it over GDB, capture the window (PrintWindow) and dump main RAM. The Rust side
@@ -18,6 +20,44 @@ CUE = r'C:\Users\Branko\Desktop\Retro PS Games\PSX\ISOS\Need for Speed - High St
 STATE = os.path.expandvars(r'%USERPROFILE%\Documents\DuckStation\savestates\SLUS-00826_2.sav')
 
 
+STATES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 're', 'states')
+SLOT_FILE = os.path.join(os.path.dirname(STATE), 'SLUS-00826_9.sav')
+SLOT_SELECTED = False
+
+
+def save_state(pid, name):
+    if os.path.exists(SLOT_FILE):
+        raise RuntimeError(f'{SLOT_FILE} exists: not overwriting slot 9 (the user may use it)')
+    global SLOT_SELECTED
+    for attempt in range(3):
+        ds.focus_pid(pid)
+        time.sleep(0.5)
+        # the selected slot is 1 when DuckStation starts: F4 eight times selects slot 9
+        if not SLOT_SELECTED:
+            for _ in range(8):
+                ds.tap('F4', hold=0.08, gap=0.15)
+            SLOT_SELECTED = True
+        ds.tap('F2', hold=0.1, gap=0.2)
+        for _ in range(30):
+            if os.path.exists(SLOT_FILE) and os.path.getsize(SLOT_FILE) > 100000:
+                break
+            time.sleep(0.2)
+        if os.path.exists(SLOT_FILE):
+            break
+    time.sleep(1.0)
+    if not os.path.exists(SLOT_FILE):
+        raise RuntimeError(f'save state {name} was not written')
+    os.makedirs(STATES, exist_ok=True)
+    dst = os.path.join(STATES, name + '.sav')
+    if os.path.exists(dst):
+        os.remove(dst)
+    os.replace(SLOT_FILE, dst)
+    backup = SLOT_FILE + '.backup'
+    if os.path.exists(backup):
+        os.remove(backup)
+    print(f'saved state {dst}')
+
+
 def arg(name, default):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 
@@ -26,6 +66,8 @@ def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
     state = arg('--state', STATE)
+    if state != 'none' and not os.path.exists(state) and os.path.exists(os.path.join(STATES, state + '.sav')):
+        state = os.path.join(STATES, state + '.sav')
     wait = float(arg('--wait', '3'))
     keys = [k for k in arg('--keys', '').split(',') if k]
     # --state none: boot the disc from the start (front end)
@@ -60,6 +102,11 @@ def main():
                     open(os.path.join(out, name + '.bin'), 'wb').write(g.read(0x80000000, 0x200000))
                     g.cont()
                     ds.focus_pid(proc.pid)
+                elif k.startswith('save:'):
+                    # save:NAME: a DuckStation save state of this moment as re/states/NAME.sav
+                    # (made in slot 9, which is then cleared, so the user's slots stay as
+                    # they are)
+                    save_state(proc.pid, k.split(':', 1)[1])
                 elif k.startswith('poke:'):
                     # poke:ADDR:VALUE[:COUNT]: 32-bit words into RAM (hex address)
                     parts = k.split(':')
