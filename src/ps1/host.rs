@@ -648,6 +648,15 @@ impl GameHost {
                 while self.overlay_ot.len() < self.overlay.len() {
                     self.overlay_ot.push(self.current_ot);
                 }
+                if std::env::var_os("PS1_CMDLOG").is_some() && self.mode == Mode::FrontEnd {
+                    for (i, cmd) in self.overlay.iter().enumerate() {
+                        let d = match cmd {
+                            OverlayCmd::Quad { pts, tex, semi, abr, .. } => format!("quad {:?} tex {} semi {semi} abr {abr}", pts[0], tex.is_some()),
+                            other => format!("{}", format!("{other:?}").chars().take(60).collect::<String>()),
+                        };
+                        eprintln!("cmd {i} {d}");
+                    }
+                }
                 if std::env::var_os("PS1_OTLOG").is_some() && self.mode == Mode::FrontEnd {
                     let mut runs: Vec<(u32, usize, String)> = Vec::new();
                     for (cmd, &ot) in self.overlay.iter().zip(&self.overlay_ot) {
@@ -1049,7 +1058,7 @@ impl Host for GameHost {
             self.overlay_ot.push(self.current_ot);
         }
         self.overlay_ot.truncate(self.overlay.len());
-        self.current_ot = c.m.r32(0x1F80_0000);
+        self.current_ot = if std::env::var_os("PS1_OTLOG_PRIM").is_some() { c.m.r32(0x1F80_0004) & 0xFFF_0000 } else { c.m.r32(0x1F80_0000) };
         if let Some(log) = &self.call_log {
             if log.contains(&addr) {
                 eprintln!("[{:>8}] call {addr:#x}({a0:#x}, {a1:#x}, {a2:#x}, {a3:#x}) from {:#x}", self.clock, c.r[31]);
