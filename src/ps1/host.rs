@@ -94,6 +94,9 @@ pub struct GameHost {
     /// The primitive packets recorded this frame (front end, PS1_MISSLOG: packets the original
     /// put in its ordering table that were not recorded are reported at DrawOTag).
     recorded_packets: std::collections::HashSet<u32>,
+    /// PS1_MISSLOG: the primitive buffer's position at each host call this frame and the
+    /// functions running then (to name what built an unrecorded packet).
+    prim_marks: Vec<(u32, Vec<u32>)>,
     /// The GPU draw mode (texture page) as the captured primitives left it.
     draw_mode: u16,
     vram_shared: Option<std::sync::Arc<Vec<u16>>>,
@@ -521,8 +524,9 @@ const GP: u32 = 0x8013_D83C;
 const VIDEO_BLOCK_NAME: u32 = 0x8005_6F08;
 /// Front-end routines that build GPU primitives themselves (the video wall's DrawTV and
 /// DrawTVLines): run as they are and their primitives recorded (`capture_prims`).
-const CAPTURED_FE_DRAWING: [u32; 9] = [
+const CAPTURED_FE_DRAWING: [u32; 10] = [
     0x8002_24AC, // DrawTV
+    0x8004_EC64, // a scaled shape's POLY_GT4 (ScaleShapeExtended: the trophy room's trophies)
     0x800C_ECD0, // Flare_2DHalo (the glow beside a menu's selected row, DrawLeftFlare)
     0x8002_4C4C, // DrawSlider (car statistics, options sliders)
     0x8002_2158, // DrawTVLines
@@ -610,6 +614,7 @@ impl GameHost {
             vram_dirty: true,
             capturing: false,
             recorded_packets: Default::default(),
+            prim_marks: Vec::new(),
             draw_mode: 0,
             vram_shared: None,
             pad_buffers: [0; 2],
@@ -725,6 +730,7 @@ impl GameHost {
     /// recording took, by code and first vertex (drawing the original made that is not shown).
     fn report_unrecorded(&mut self, c: &mut Cpu, start: u32) {
         let mut missed = std::collections::BTreeMap::<(u8, i16, i16), u32>::new();
+        let mut builders = std::collections::BTreeSet::<String>::new();
         let (mut a, mut n) = (start, 0);
         while n < 20_000 {
             let w = c.m.r32(a);
@@ -735,6 +741,9 @@ impl GameHost {
                     // (the first vertex: after the colour word)
                     let v = c.m.r32(a + 8);
                     *missed.entry((code, v as i16, (v >> 16) as i16)).or_default() += 1;
+                    if let Some(m) = self.prim_marks.iter().find(|m| m.0 > a) {
+                        builders.insert(m.1.iter().map(|f| format!("{f:#x}")).collect::<Vec<_>>().join("<"));
+                    }
                 }
             }
             n += 1;
@@ -749,8 +758,10 @@ impl GameHost {
         if !missed.is_empty() {
             let list: Vec<String> = missed.iter().take(24).map(|((code, x, y), k)| format!("{code:#04x}@{x},{y}x{k}")).collect();
             eprintln!("[{:>8}] unrecorded front-end primitives: {} kinds: {}", self.clock, missed.len(), list.join(" "));
+            eprintln!("[{:>8}]   built in (innermost first): {}", self.clock, builders.into_iter().collect::<Vec<_>>().join(" | "));
         }
         self.recorded_packets.clear();
+        self.prim_marks.clear();
     }
 
     /// Packets in an ordering table.
@@ -1381,6 +1392,12 @@ impl Host for GameHost {
             }
             if log.contains(&addr) {
                 eprintln!("[{:>8}] call {addr:#x}({a0:#x}, {a1:#x}, {a2:#x}, {a3:#x}) from {:#x}", self.clock, c.r[31]);
+            }
+        }
+        if self.mode == Mode::FrontEnd && std::env::var_os("PS1_MISSLOG").is_some() && self.prim_marks.len() < 100_000 {
+            let ptr = c.m.r32(0x1F80_0004);
+            if self.prim_marks.last().is_none_or(|m| m.0 != ptr) {
+                self.prim_marks.push((ptr, c.stack.iter().rev().take(4).copied().collect()));
             }
         }
         // drawing recorded without a frame to take it (should not happen): don't let it grow
