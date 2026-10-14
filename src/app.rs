@@ -604,6 +604,19 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         }
         game.update(1.0 / 60.0, input);
         t += 1.0 / 60.0;
+        // NFSHS_VRAMDUMP=FILE: the original's VRAM (1024 x 512 16-bit) at the end
+        if t + 1.0 / 60.0 >= seconds {
+            if let (Some(path), Some(v)) = (std::env::var_os("NFSHS_VRAMDUMP"), game.sim.as_ref().and_then(|s| s.snapshot().vram.clone())) {
+                std::fs::write(path, v.iter().flat_map(|p| p.to_le_bytes()).collect::<Vec<u8>>())?;
+            }
+        }
+        // NFSHS_SKYLOG=1: the original's sky dome colours (zenith .. horizon) every 2 s
+        if std::env::var_os("NFSHS_SKYLOG").is_some() && (t * 60.0) as u32 % 120 == 0 {
+            if let Some(sky) = game.sim.as_ref().and_then(|s| s.snapshot().sky.clone()) {
+                let e = game.sim.as_ref().map(|s| s.snapshot().view_env).unwrap_or_default();
+                println!("  t={t:5.1} sky {:?} band top {:?} far colour {:?} dqa {} dqb {} h {}", (0..5).map(|r| sky.dome_colors[r * 17 + 8]).collect::<Vec<_>>(), sky.top_colors.get(8), [e[0] / 16, e[1] / 16, e[2] / 16], e[3], e[4], e[5]);
+            }
+        }
         // NFSHS_FLIPLOG=1: when the car tips over (up vector far from vertical), where and how
         if std::env::var_os("NFSHS_FLIPLOG").is_some() {
             let c = &game.player().car;
