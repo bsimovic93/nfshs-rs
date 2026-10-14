@@ -537,6 +537,11 @@ fn real_main() -> Result<()> {
             }
             let shots: Vec<u32> = args[3].split(',').filter_map(|s| s.parse().ok()).collect();
             app::front_end_play(&data, &script, &shots, Path::new(&args[4]))?;
+            // the script is done: don't wait for the original to wind down (it would run on,
+            // unpaced, through its results and front end)
+            use std::io::Write;
+            std::io::stdout().flush().ok();
+            std::process::exit(0);
         }
         Some("contact") => {
             // contact OUT COLS IMG...: the images at half size in a grid (for reviewing shots)

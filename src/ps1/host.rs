@@ -105,6 +105,29 @@ pub fn file_log(s: String) {
     }
 }
 
+/// The car model files (`zzz....viv`) the game has opened, lower case: which police car
+/// livery it chose for a track, say (`zzzgbmws.viv` for the cop BMW in Germany).
+static CAR_FILES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn note_open(name: &str) {
+    let n = name.rsplit(['\\', '/', ':']).next().unwrap_or(name).to_ascii_lowercase();
+    if n.starts_with("zzz") && n.ends_with(".viv") {
+        if let Ok(mut v) = CAR_FILES.lock() {
+            if !v.contains(&n) {
+                v.push(n);
+            }
+        }
+    }
+}
+
+/// The model file the game opened for car `code` whose first letter it replaced (police cars:
+/// "CBMW" -> "zzzgbmws.viv"), as the name to read.
+pub fn opened_variant(code: &str) -> Option<String> {
+    let tail = code.get(1..)?.to_ascii_lowercase();
+    let v = CAR_FILES.lock().ok()?;
+    v.iter().rev().find(|n| n.len() == 3 + 1 + tail.len() + 5 && n[4..4 + tail.len()] == tail).map(|n| n.to_ascii_uppercase())
+}
+
 /// Called at the top of every main-loop iteration (one game frame, locked to a 60 Hz field)
 /// with the current field number; returns the PS1 digital buttons to hold during the frame
 /// (active-high: bit 14 = Cross, 15 = Square, 4 = Up, ...) or `None` to leave the loop.
@@ -1191,6 +1214,15 @@ impl Host for GameHost {
         // a busy-wait on the timer: let one tick pass
         self.advance_to(c, (self.clock / TICK + 1) * TICK);
         self.idles += 1;
+        // PS1_IDLE_DUMP=file: after this many idles the RAM is written there (and the CPU's
+        // registers printed) and the program ends: for finding what a hang spins on
+        if self.idles == 5000 {
+            if let Some(p) = std::env::var_os("PS1_IDLE_DUMP") {
+                std::fs::write(&p, &c.m.ram).ok();
+                eprintln!("idle dump: regs {:x?} stack {:x?}", c.r, c.stack);
+                std::process::exit(4);
+            }
+        }
         if self.idles % 500 == 0 && std::env::var_os("PS1_IDLELOG").is_some() {
             eprintln!("idle {} at clock {}: stack {:x?} recent {:x?}", self.idles, self.clock, c.stack, &c.recent[..4]);
         }
@@ -1270,6 +1302,7 @@ impl Host for GameHost {
                         let h = self.next_handle;
                         self.next_handle += 1;
                         crate::ps1::host::file_log(format!("open {name} ({} bytes)", data.len()));
+                        note_open(&name);
                         if std::env::var_os("PS1_FILES").is_some() {
                             eprintln!("open {name}");
                         }
@@ -1293,6 +1326,7 @@ impl Host for GameHost {
                         let h = self.next_handle;
                         self.next_handle += 1;
                         crate::ps1::host::file_log(format!("open {name} ({} bytes, async)", data.len()));
+                        note_open(&name);
                         self.files.insert(h, data);
                         h
                     }

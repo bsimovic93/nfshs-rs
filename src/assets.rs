@@ -629,7 +629,13 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
 /// a day ("l") and a night ("d", wheels "g") version.
 pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool, plate: Option<&str>, colour: u8) -> Result<CarModel> {
     let name = format!("ZZZ{code}{}.VIV", if player { "H" } else { "S" });
-    let viv = Viv::parse(&data.read(&name).or_else(|_| data.read(&format!("ZZZ{code}.VIV")))?)?;
+    // (police cars: the livery the game loaded for this track, e.g. CBMW -> ZZZGBMWS.VIV)
+    let viv = Viv::parse(
+        &data
+            .read(&name)
+            .or_else(|_| data.read(&format!("ZZZ{code}.VIV")))
+            .or_else(|e| crate::ps1::host::opened_variant(code).map_or(Err(e), |f| data.read(&f)))?,
+    )?;
     let (_, geo) = viv.find_suffix(".geo").context("car viv has no .geo")?;
     let geo = Geo::parse(geo)?;
     // two 256x256 pages; which page and shape each texture name is on

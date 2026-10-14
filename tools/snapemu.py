@@ -60,6 +60,8 @@ def s32(v):
 COP0 = [0] * 32
 HLE = {}  # addr -> fn(r, mem) ; executed instead of the function, then returns to r[31]
 BIOS = None  # fn(r, mem, fn_number) for A0 calls
+PC_HIST = None  # set to a Counter to count executed instructions by address
+LAST_STACK = []  # the call stack when run() stopped
 
 
 def run(mem, regs, entry, ret, max_steps=5_000_000):
@@ -85,7 +87,10 @@ def run(mem, regs, entry, ret, max_steps=5_000_000):
             pc, npc = r[31], r[31] + 4
             continue
         steps += 1
+        if PC_HIST is not None:
+            PC_HIST[pc] += 1
         if steps > max_steps:
+            LAST_STACK[:] = stack
             raise RuntimeError('step limit')
         w = mem.load(pc, 4) if False else int.from_bytes(mem.ram[(pc & 0x1FFFFF):(pc & 0x1FFFFF) + 4], 'little')
         op = w >> 26
