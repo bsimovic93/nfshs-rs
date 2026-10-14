@@ -259,7 +259,8 @@ pub struct NightBeam {
 }
 
 impl NightBeam {
-    fn read(c: &mut Cpu) -> Option<Self> {
+    /// The beam for `player`'s view.
+    pub(crate) fn read(c: &mut Cpu, player: u32) -> Option<Self> {
         let (map, table) = (c.m.r32(0x8013_ED20), c.m.r32(0x8013_ED28));
         if map == 0 || table == 0 || c.m.r32(0x8011_44F8) == 0 {
             return None;
@@ -267,7 +268,7 @@ impl NightBeam {
         let bytes = |c: &mut Cpu, a: u32, n: u32| (0..n).map(|i| c.m.r8(a + i)).collect::<Vec<u8>>();
         // (DrawW sets the draw cache's copies per chunk: headlights on when the player's car
         // has them on, Car_tObj+1095 bits 1..2; the shape from Night_SetEnviroment)
-        let player = c.m.r32(addr::CAR_LIST);
+        let player = c.m.r32(addr::CAR_LIST + 4 * player);
         Some(Self {
             flags: u8::from(player != 0 && c.m.r8(player + 1095) & 6 != 0),
             z0: c.m.r16(0x8013_ED10) as i16 as i32,
@@ -700,12 +701,59 @@ pub struct Snapshot {
     pub track: u32,
     pub variant: String,
     pub laps: u32,
+    /// The player views drawn this frame: two split screen (each with its own camera, chunks,
+    /// cars and 2D; the fields above are the first's), else one or none.
+    pub views: Vec<ViewSnap>,
+}
+
+/// One player's view of a frame (see [`super::host::ViewCapture`]), the cars' facets by car.
+#[derive(Clone, Debug, Default)]
+pub struct ViewSnap {
+    pub player: u32,
+    /// Screen rectangle (x, y, w, h) on the PS1's display.
+    pub rect: [i16; 4],
+    pub camera_pos: [i32; 3],
+    pub camera_rot: [i32; 9],
+    pub projection: u32,
+    pub view_env: [i32; 9],
+    pub chunks: Vec<(i16, u16)>,
+    pub car_facets: Vec<Option<super::host::CarFacet>>,
+    pub glows: Vec<super::host::Glow>,
+    pub weather: Vec<super::host::OverlayCmd>,
+    pub sky_overlay: Vec<super::host::OverlayCmd>,
+    pub night_beam: Option<NightBeam>,
+}
+
+impl Snapshot {
+    fn with_views(self, views: Vec<ViewSnap>) -> Self {
+        Self { views, ..self }
+    }
+
+    /// The frame as view `k` sees it: its per-view fields in place of the first view's.
+    pub fn for_view(&self, k: usize) -> Snapshot {
+        let mut s = Snapshot { views: Vec::new(), ..self.clone() };
+        if let Some(v) = self.views.get(k) {
+            s.camera_pos = v.camera_pos;
+            s.camera_rot = v.camera_rot;
+            s.projection = v.projection;
+            s.view_env = v.view_env;
+            s.chunks = v.chunks.clone();
+            s.car_facets = v.car_facets.clone();
+            s.glows = v.glows.clone();
+            s.weather = v.weather.clone();
+            s.sky_overlay = v.sky_overlay.clone();
+            s.night_beam = v.night_beam.clone();
+        }
+        s
+    }
 }
 
 /// Input for one frame.
 #[derive(Clone, Copy, Default)]
 pub struct FrameInput {
     pub buttons: u16,
+    /// The second controller (player 2).
+    pub buttons2: u16,
     /// Include a RAM copy in the resulting snapshot.
     pub want_ram: bool,
 }
@@ -723,13 +771,35 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         }
         cars.push(CarState::read(&mut c.m, car));
     }
-    let mut car_facets = vec![None; cars.len()];
-    for f in &info.car_facets {
-        if let Some(k) = cars.iter().position(|c| c.addr == f.car) {
-            car_facets[k] = Some(f.clone());
+    let by_car = |facets: &[super::host::CarFacet]| {
+        let mut out = vec![None; cars.len()];
+        for f in facets {
+            if let Some(k) = cars.iter().position(|c| c.addr == f.car) {
+                out[k] = Some(f.clone());
+            }
         }
-    }
-    Snapshot {
+        out
+    };
+    let car_facets = by_car(&info.car_facets);
+    let views: Vec<ViewSnap> = info
+        .views
+        .iter()
+        .map(|v| ViewSnap {
+            player: v.player,
+            rect: v.rect,
+            camera_pos: v.camera_pos,
+            camera_rot: v.camera_rot,
+            projection: v.projection,
+            view_env: v.view_env,
+            chunks: v.chunks.clone(),
+            car_facets: by_car(&v.car_facets),
+            glows: v.glows.clone(),
+            weather: v.weather.clone(),
+            sky_overlay: v.sky_overlay.clone(),
+            night_beam: v.night_beam.clone(),
+        })
+        .collect();
+    let snap = Snapshot {
         frame,
         field: info.field,
         cars,
@@ -760,7 +830,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()
         },
         skids: read_skids(&mut |a| c.m.r32(a)),
-        night_beam: NightBeam::read(c),
+        night_beam: NightBeam::read(c, 0),
         light_table: {
             let t = c.m.r32(addr::LIGHT_TABLE);
             if t == 0 { Vec::new() } else { (0..256).map(|i| c.m.r32(t + 4 * i)).collect() }
@@ -780,7 +850,10 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             _ => "",
         }
         .to_string(),
-    }
+        views,
+    };
+    // split screen: the fields that are per view are the first view's
+    if snap.views.len() > 1 { snap.for_view(0).with_views(snap.views) } else { snap }
 }
 
 /// The original game running on its own thread in lockstep with the caller: each
@@ -849,7 +922,7 @@ impl RaceThread {
                 };
                 frame += 1;
                 want_ram = input.want_ram;
-                Some(input.buttons)
+                Some([input.buttons, input.buttons2])
             });
             let host = cpu.host.as_mut().expect("host");
             // the host is always our GameHost

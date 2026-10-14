@@ -136,6 +136,30 @@ impl DynBuf {
 /// Winding of the front side of track polygons (with the PS1 X axis mirrored).
 const TRACK_FRONT_FACE: wgpu::FrontFace = wgpu::FrontFace::Ccw;
 
+/// How one render pass of a frame draws (split screen: a pass per view, then the HUD).
+#[derive(Clone, Copy, Default)]
+pub struct Pass {
+    /// The view's rectangle in the window (x, y, w, h); None: the whole window.
+    pub viewport: Option<[f32; 4]>,
+    /// Draw over what earlier passes drew (else clear first).
+    pub keep: bool,
+    /// Only the 2D (`hud`), no world.
+    pub no_world: bool,
+}
+
+/// One view of a split-screen frame: its frame parameters, geometry and 2D layers.
+pub struct ViewDraw {
+    pub viewport: [f32; 4],
+    pub params: FrameParams,
+    pub dynamic: Vec<Vertex>,
+    pub sky_layer: Vec<Vertex>,
+    pub glows: Vec<Vertex>,
+    pub glows_sub: Vec<Vertex>,
+    /// The view's own 2D drawn last (the weather), with its subtracting ranges.
+    pub over: Vec<Vertex>,
+    pub over_subtract: Vec<std::ops::Range<u32>>,
+}
+
 pub struct Renderer {
     atlas_tex: wgpu::Texture,
     pub device: wgpu::Device,
@@ -513,6 +537,10 @@ impl Renderer {
     }
 
     fn encode(&mut self, view: &wgpu::TextureView, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) -> wgpu::CommandBuffer {
+        self.encode_pass(view, p, sky, dynamic, hud, Pass::default())
+    }
+
+    fn encode_pass(&mut self, view: &wgpu::TextureView, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex], pass: Pass) -> wgpu::CommandBuffer {
         let g = Globals {
             view_proj: p.view_proj.to_cols_array_2d(),
             cam_pos: p.cam_pos.extend(1.0).into(),
@@ -592,7 +620,7 @@ impl Renderer {
                     view,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations { load: if pass.keep { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::BLACK) }, store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth,
@@ -603,10 +631,31 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            // a view of a split screen: the 3D in its rectangle, the 2D (window coordinates)
+            // clipped to it
+            let full = [0.0, 0.0, w, h];
+            let set_vp = |rp: &mut wgpu::RenderPass, r: [f32; 4]| rp.set_viewport(r[0], r[1], r[2], r[3], 0.0, 1.0);
+            let (vp3d, vp2d) = match pass.viewport {
+                Some(v) => {
+                    let (x0, y0) = (v[0].max(0.0).floor(), v[1].max(0.0).floor());
+                    let (x1, y1) = ((v[0] + v[2]).min(w).ceil(), (v[1] + v[3]).min(h).ceil());
+                    rp.set_scissor_rect(x0 as u32, y0 as u32, (x1 - x0).max(1.0) as u32, (y1 - y0).max(1.0) as u32);
+                    (v, full)
+                }
+                None => (full, full),
+            };
             rp.set_bind_group(0, &self.world_bg, &[]);
+            set_vp(&mut rp, vp3d);
+            if pass.no_world {
+                // (only the 2D over the views drawn before)
+                self.draw_hud(&mut rp, hud);
+                drop(rp);
+                return enc.finish();
+            }
             rp.set_pipeline(&self.sky_pipeline);
             rp.draw(0..3, 0..1);
             if !self.hud_under.is_empty() {
+                set_vp(&mut rp, vp2d);
                 rp.set_pipeline(&self.hud_pipeline);
                 let under_bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
                     (Some((_, bg)), true) => bg,
@@ -630,6 +679,7 @@ impl Renderer {
                     rp.draw(at..n, 0..1);
                 }
                 rp.set_bind_group(0, &self.world_bg, &[]);
+                set_vp(&mut rp, vp3d);
             }
             if !sky.is_empty() {
                 rp.set_pipeline(&self.hud_pipeline);
@@ -639,6 +689,7 @@ impl Renderer {
                 rp.set_bind_group(0, &self.world_bg, &[]);
             }
             if !self.sky_layer.is_empty() {
+                set_vp(&mut rp, vp2d);
                 rp.set_pipeline(&self.hud_pipeline);
                 // the sky layer is always textured from the 2D pass's own atlas
                 let bg = match &self.overlay_atlas {
@@ -649,6 +700,7 @@ impl Renderer {
                 rp.set_vertex_buffer(0, self.sky_layer_vb.buf.slice(..));
                 rp.draw(0..self.sky_layer.len() as u32, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);
+                set_vp(&mut rp, vp3d);
             }
             rp.set_pipeline(&self.track_pipeline);
             if let Some((vb, ib, n)) = &self.static_vb {
@@ -674,6 +726,7 @@ impl Renderer {
                 rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
                 rp.draw(0..mid, 0..1);
                 if !self.hud_mid.is_empty() {
+                    set_vp(&mut rp, vp2d);
                     rp.set_pipeline(&self.hud_pipeline);
                     rp.set_bind_group(0, &self.hud_bg, &[]);
                     rp.set_vertex_buffer(0, self.mid_vb.buf.slice(..));
@@ -695,6 +748,7 @@ impl Renderer {
                     rp.set_pipeline(&self.world_pipeline);
                     rp.set_bind_group(0, &self.world_bg, &[]);
                     rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
+                    set_vp(&mut rp, vp3d);
                 }
                 rp.draw(mid..n, 0..1);
             }
@@ -703,6 +757,7 @@ impl Renderer {
                 rp.set_vertex_buffer(0, self.late_vb.buf.slice(..));
                 rp.draw(0..p.subtract_late.len() as u32, 0..1);
             }
+            set_vp(&mut rp, vp2d);
             if !self.glows.is_empty() {
                 if let Some((_, bg)) = &self.overlay_atlas {
                     rp.set_pipeline(&self.glow_pipeline);
@@ -719,31 +774,36 @@ impl Renderer {
                     rp.draw(0..self.glows_sub.len() as u32, 0..1);
                 }
             }
-            if !hud.is_empty() {
-                let hud_bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
-                    (Some((_, bg)), true) => bg,
-                    _ => &self.hud_bg,
-                };
-                rp.set_bind_group(0, hud_bg, &[]);
-                rp.set_vertex_buffer(0, self.hud_vb.buf.slice(..));
-                // in order: runs of normal blending between the subtracting ranges
-                let mut at = 0;
-                for r in self.hud_subtract.iter().filter(|r| r.end <= hud.len() as u32) {
-                    if r.start > at {
-                        rp.set_pipeline(&self.hud_pipeline);
-                        rp.draw(at..r.start, 0..1);
-                    }
-                    rp.set_pipeline(&self.hud_sub_pipeline);
-                    rp.draw(r.clone(), 0..1);
-                    at = r.end;
-                }
-                if at < hud.len() as u32 {
-                    rp.set_pipeline(&self.hud_pipeline);
-                    rp.draw(at..hud.len() as u32, 0..1);
-                }
-            }
+            self.draw_hud(&mut rp, hud);
         }
         enc.finish()
+    }
+
+    /// The 2D over everything: runs of normal blending between the subtracting ranges.
+    fn draw_hud(&self, rp: &mut wgpu::RenderPass, hud: &[Vertex]) {
+        if hud.is_empty() {
+            return;
+        }
+        let hud_bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
+            (Some((_, bg)), true) => bg,
+            _ => &self.hud_bg,
+        };
+        rp.set_bind_group(0, hud_bg, &[]);
+        rp.set_vertex_buffer(0, self.hud_vb.buf.slice(..));
+        let mut at = 0;
+        for r in self.hud_subtract.iter().filter(|r| r.end <= hud.len() as u32) {
+            if r.start > at {
+                rp.set_pipeline(&self.hud_pipeline);
+                rp.draw(at..r.start, 0..1);
+            }
+            rp.set_pipeline(&self.hud_sub_pipeline);
+            rp.draw(r.clone(), 0..1);
+            at = r.end;
+        }
+        if at < hud.len() as u32 {
+            rp.set_pipeline(&self.hud_pipeline);
+            rp.draw(at..hud.len() as u32, 0..1);
+        }
     }
 
     pub fn render(&mut self, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) {
@@ -762,8 +822,50 @@ impl Renderer {
         self.queue.present(frame);
     }
 
-    /// Render one frame offscreen and return RGBA8 pixels.
-    pub fn screenshot(&mut self, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) -> image::RgbaImage {
+    /// A split-screen frame: each view in its rectangle, then the HUD over the window
+    /// (`hud` with `self.hud_subtract`). The 2D layers all use the overlay atlas.
+    fn encode_views(&mut self, target: &wgpu::TextureView, views: &[ViewDraw], sky: &[Vertex], hud: &[Vertex]) -> Vec<wgpu::CommandBuffer> {
+        let hud_subtract = std::mem::take(&mut self.hud_subtract);
+        let mut cmds = Vec::new();
+        for (k, v) in views.iter().enumerate() {
+            self.sky_layer = v.sky_layer.clone();
+            self.glows = v.glows.clone();
+            self.glows_sub = v.glows_sub.clone();
+            self.hud_subtract = v.over_subtract.clone();
+            let cmd = self.encode_pass(target, &v.params, sky, &v.dynamic, &v.over, Pass { viewport: Some(v.viewport), keep: k > 0, no_world: false });
+            // (each pass's buffers and uniforms are written before it is submitted)
+            self.queue.submit([cmd]);
+        }
+        self.hud_subtract = hud_subtract;
+        if let Some(v) = views.first() {
+            cmds.push(self.encode_pass(target, &v.params, sky, &[], hud, Pass { viewport: None, keep: true, no_world: true }));
+        }
+        cmds
+    }
+
+    pub fn render_views(&mut self, views: &[ViewDraw], sky: &[Vertex], hud: &[Vertex]) {
+        let Some((surface, config)) = &self.surface else { return };
+        let frame = match surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                surface.configure(&self.device, config);
+                return;
+            }
+            _ => return,
+        };
+        let view = frame.texture.create_view(&Default::default());
+        let cmds = self.encode_views(&view, views, sky, hud);
+        self.queue.submit(cmds);
+        self.queue.present(frame);
+    }
+
+    pub fn screenshot_views(&mut self, views: &[ViewDraw], sky: &[Vertex], hud: &[Vertex]) -> image::RgbaImage {
+        let (tex, view) = self.shot_target();
+        let cmds = self.encode_views(&view, views, sky, hud);
+        self.read_back(&tex, cmds)
+    }
+
+    fn shot_target(&self) -> (wgpu::Texture, wgpu::TextureView) {
         let (w, h) = self.size;
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("shot"),
@@ -776,7 +878,18 @@ impl Renderer {
             view_formats: &[],
         });
         let view = tex.create_view(&Default::default());
+        (tex, view)
+    }
+
+    /// Render one frame offscreen and return RGBA8 pixels.
+    pub fn screenshot(&mut self, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) -> image::RgbaImage {
+        let (tex, view) = self.shot_target();
         let cmd = self.encode(&view, p, sky, dynamic, hud);
+        self.read_back(&tex, vec![cmd])
+    }
+
+    fn read_back(&mut self, tex: &wgpu::Texture, cmds: Vec<wgpu::CommandBuffer>) -> image::RgbaImage {
+        let (w, h) = self.size;
         let row = (w * 4).div_ceil(256) * 256;
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -786,14 +899,14 @@ impl Renderer {
         });
         let mut enc = self.device.create_command_encoder(&Default::default());
         enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyBufferInfo {
                 buffer: &buf,
                 layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) },
             },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
-        self.queue.submit([cmd, enc.finish()]);
+        self.queue.submit(cmds.into_iter().chain([enc.finish()]));
         let slice = buf.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());

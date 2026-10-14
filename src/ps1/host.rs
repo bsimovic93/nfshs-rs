@@ -66,6 +66,8 @@ pub struct GameHost {
     car_glows: Vec<Glow>,
     /// The track lights' glares (BWorld_BuildGlareEffects' primitives), over the 3D.
     track_glows: Vec<Glow>,
+    /// This frame's player views (one, or two split screen), as each was set up.
+    views: Vec<ViewCapture>,
     /// The showroom car's shadow (DrawC_ShadowPrimClip's primitives), for the floor.
     showroom_shadow: Vec<OverlayCmd>,
     /// What each drawing buffer (by its x) shows of the 2D while paused: the last HUD and the
@@ -134,7 +136,7 @@ pub fn opened_variant(code: &str) -> Option<String> {
 /// Called at the top of every main-loop iteration (one game frame, locked to a 60 Hz field)
 /// with the current field number; returns the PS1 digital buttons to hold during the frame
 /// (active-high: bit 14 = Cross, 15 = Square, 4 = Up, ...) or `None` to leave the loop.
-pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<u16>>;
+pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<[u16; 2]>>;
 
 /// Host-side state handed to the frame callback.
 #[derive(Clone)]
@@ -163,6 +165,8 @@ pub struct FrameInfo {
     pub front_end: bool,
     /// VRAM (1024x512) as of this front-end frame: the textures its quads use.
     pub vram: Option<std::sync::Arc<Vec<u16>>>,
+    /// The player views drawn this frame (none in the front end or paused).
+    pub views: Vec<ViewCapture>,
 }
 
 /// 2D drawing the game asked for this frame outside the HUD (pause menu and the like):
@@ -242,6 +246,64 @@ pub struct Glow {
     /// A smoke or dust puff (Sfx_BuildSouffleFacet), sorted at its own depth; otherwise a
     /// light's glow.
     pub smoke: bool,
+}
+
+/// One player's view as the original set it up this frame (Render_RenderPlayerView): two
+/// split screen, each with its own camera, chunks, cars and 2D.
+#[derive(Clone, Debug, Default)]
+pub struct ViewCapture {
+    /// The player it shows (0 or 1).
+    pub player: u32,
+    /// Where it is on the screen (x, y, w, h; its drawing environment, Draw_gViews).
+    pub rect: [i16; 4],
+    /// The camera (`DRender_tCalcView` translation and rotation) and its projection distance.
+    pub camera_pos: [i32; 3],
+    pub camera_rot: [i32; 9],
+    pub projection: u32,
+    /// See [`GameHost::view_env`].
+    pub view_env: [i32; 9],
+    /// BWorld_gChunkBuildList for this view: (chunk, detail flags).
+    pub chunks: Vec<(i16, u16)>,
+    pub car_facets: Vec<CarFacet>,
+    pub glows: Vec<Glow>,
+    pub weather: Vec<OverlayCmd>,
+    pub sky_overlay: Vec<OverlayCmd>,
+    pub night_beam: Option<super::race::NightBeam>,
+}
+
+impl OverlayCmd {
+    /// The command moved by (dx, dy) on the screen.
+    pub fn offset(&self, dx: i16, dy: i16) -> OverlayCmd {
+        let mut c = self.clone();
+        if dx == 0 && dy == 0 {
+            return c;
+        }
+        match &mut c {
+            OverlayCmd::Text { x, y, .. }
+            | OverlayCmd::PauseBox { x, y, .. }
+            | OverlayCmd::Rect { x, y, .. }
+            | OverlayCmd::Shape { x, y, .. }
+            | OverlayCmd::ThinBox { x, y, .. }
+            | OverlayCmd::Clip { x, y, .. }
+            | OverlayCmd::Bitmap { x, y, .. } => {
+                *x += dx;
+                *y += dy;
+            }
+            OverlayCmd::Quad { pts, .. } => {
+                for p in pts {
+                    p[0] += dx;
+                    p[1] += dy;
+                }
+            }
+            OverlayCmd::ShowroomFloor(v) => {
+                for c in v {
+                    *c = c.offset(dx, dy);
+                }
+            }
+            OverlayCmd::Movie { .. } | OverlayCmd::ShowroomCar { .. } => {}
+        }
+        c
+    }
 }
 
 thread_local! {
@@ -396,6 +458,9 @@ pub struct FrameDriver {
 pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
 /// `DRender_tView` the game renders the player view with (id, player, DRender_tCalcView).
 pub const RENDER_VIEW: u32 = 0x8011_8234;
+/// Draw_gViews: per player view (200 bytes) its OT, size (+12, +14) and a drawing
+/// environment per buffer (+8, 92 bytes each).
+const DRAW_VIEWS: u32 = 0x8011_FF44;
 const RENDER_START_WORLD_VIEW: u32 = 0x800B_3EE4;
 const DASHHUD_CHECK_WRONG_WAY: u32 = 0x8009_BAC4;
 const DASHHUD_HUD_CALC: u32 = 0x8009_BB34;
@@ -528,6 +593,7 @@ impl GameHost {
             car_glows: Vec::new(),
             track_glows: Vec::new(),
             paused_buffers: HashMap::new(),
+            views: Vec::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],
             draw_origin: [0, 0],
@@ -576,6 +642,7 @@ impl GameHost {
                 sky_overlay: Vec::new(),
                 weather: Vec::new(),
                 glows: Vec::new(),
+                views: Vec::new(),
             };
             if self.frame.on_frame.as_mut().and_then(|f| f(c, info)).is_none() {
                 c.tick_limit = 0;
@@ -711,6 +778,11 @@ impl GameHost {
         }
         if std::env::var_os("NFSHS_HUDLOG").is_some() {
             eprintln!("hud view {start:#x}: {} commands, display {:?}", self.overlay.len() - before, self.display);
+            if std::env::var("NFSHS_HUDLOG").as_deref() == Ok("2") {
+                for o in &self.overlay[before..] {
+                    eprintln!("    {}", format!("{o:?}").chars().take(160).collect::<String>());
+                }
+            }
         }
     }
 
@@ -733,7 +805,7 @@ impl GameHost {
         }
     }
 
-    fn frame_top(&mut self, c: &mut Cpu) -> Option<u16> {
+    fn frame_top(&mut self, c: &mut Cpu) -> Option<[u16; 2]> {
         self.otags = 0;
         // the recorded HUD views (in drawing order; overlays are kept last-drawn first): all
         // but the world's, or a paused game's menu view over the last full frame's HUD
@@ -757,7 +829,9 @@ impl GameHost {
                     acc.clone()
                 }
                 _ => {
-                    let hud: Vec<OverlayCmd> = lists.drain(1..).flatten().collect();
+                    // (each player view's own list first: the world's)
+                    let views = self.views.len().clamp(1, lists.len() - 1);
+                    let hud: Vec<OverlayCmd> = lists.drain(views..).flatten().collect();
                     self.last_hud = hud.clone();
                     self.paused_buffers.clear();
                     hud
@@ -789,6 +863,7 @@ impl GameHost {
                 g
             },
             weather: std::mem::take(&mut self.weather),
+            views: std::mem::take(&mut self.views),
             sky_overlay: {
                 if self.mode == Mode::Race && Self::paused(c) && self.sky_overlay.is_empty() {
                     self.last_sky.clone()
@@ -849,7 +924,8 @@ impl GameHost {
             None => c.tick_limit = 0,
             Some(buttons) => {
                 self.frame.frames_run += 1;
-                for b in self.pad_buffers {
+                // each port its own controller (the front end takes either player's)
+                for (b, buttons) in self.pad_buffers.into_iter().zip(buttons) {
                     if b != 0 {
                         c.m.w8(b, 0x00); // status: ok
                         c.m.w8(b + 1, 0x41); // digital pad
@@ -1170,7 +1246,8 @@ impl GameHost {
             for _ in 0..fields_per_frame {
                 self.overlay.clear();
                 self.overlay.push(OverlayCmd::Movie { file: file.clone(), frame: k, fps });
-                let Some(buttons) = self.frame_top(c) else { break 'play };
+                let Some(pads) = self.frame_top(c) else { break 'play };
+                let buttons = pads[0] | pads[1];
                 if buttons != 0 {
                     if buttons == 1 << 3 || c.m.r8(0x8005_2EBE) != 0 {
                         c.m.w16(0x8005_2EBC, 1);
@@ -1493,6 +1570,9 @@ impl Host for GameHost {
                 a0
             }
             0x800E_E610 => {
+                if std::env::var_os("NFSHS_ENVDBG").is_some() {
+                    eprintln!("DrawOTag {a0:#x} ra {:#x} gp4704 {}", c.r[31], c.m.r32(GP + 4704));
+                }
                 // DrawOTag: rendering is done by the host engine. In races the views after
                 // the world's (HUD, tachometer, map) are recorded as 2D
                 if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) {
@@ -1510,7 +1590,11 @@ impl Host for GameHost {
             0x800E_E680 => {
                 // PutDrawEnv(env): a full-screen one is the frame's drawing buffer (where the
                 // recorded HUD views' areas and offsets are)
-                if c.m.r16(a0 + 4) >= 256 {
+                if std::env::var_os("NFSHS_ENVDBG").is_some() {
+                    eprintln!("PutDrawEnv {:?} ofs {:?} ra {:#x}", (0..4).map(|i| c.m.r16(a0 + 2 * i)).collect::<Vec<_>>(), (c.m.r16(a0 + 8), c.m.r16(a0 + 10)), c.r[31]);
+                }
+                // (a split screen's views are full width, half height)
+                if c.m.r16(a0 + 4) >= 256 && c.m.r16(a0 + 6) >= 200 {
                     self.draw_origin = [c.m.r16(a0) as i32, c.m.r16(a0 + 2) as i32];
                 }
                 a0
@@ -1521,8 +1605,14 @@ impl Host for GameHost {
                 let clip = std::array::from_fn(|i| c.m.r16(a1 + 2 * i as u32) as i16);
                 let ofs = [c.m.r16(a1 + 8) as i16, c.m.r16(a1 + 10) as i16];
                 self.draw_envs.insert(a0, (clip, ofs));
+                if std::env::var_os("NFSHS_ENVDBG").is_some() {
+                    eprintln!("SetDrawEnv {a0:#x} {clip:?} ofs {ofs:?} ra {:#x}", c.r[31]);
+                }
                 // a full-screen one is the drawing buffer the views are in
-                if clip[2] >= 256 {
+                // (or the first view's: a split screen has no full-screen one)
+                let view0 = |c: &mut Cpu, buf: u32| [0, 1].map(|k| c.m.r16(DRAW_VIEWS + 8 + 92 * buf + 2 * k) as i16);
+                let first_view = [view0(c, 0), view0(c, 1)].contains(&[clip[0], clip[1]]) && clip[2] >= 256;
+                if (clip[2] >= 256 && clip[3] >= 200) || first_view {
                     self.draw_origin = [clip[0] as i32, clip[1] as i32];
                 }
                 return false;
@@ -1975,7 +2065,7 @@ impl Host for GameHost {
                 let g = |r: usize| c.gte_read(32 + r) as i32;
                 self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
                 if std::env::var_os("NFSHS_ENVLOG").is_some() && self.frame.frames_run % 120 == 0 {
-                    eprintln!("view env (far rgb, dqa, dqb, h, back rgb) {:?}", self.view_env);
+                    eprintln!("view {a0} env (far rgb, dqa, dqb, h, back rgb) {:?}, ofx {} ofy {}", self.view_env, c.gte_read(32 + 24) as i32 as f32 / 65536.0, c.gte_read(32 + 25) as i32 as f32 / 65536.0);
                 }
                 // which track chunks to draw, and how (detail level)
                 c.call_nested(SETUP_BUILD_MATRICES, &[RENDER_VIEW, 0x1F80_0000]);
@@ -2073,6 +2163,7 @@ impl Host for GameHost {
                 // the sun's flare (Hrz_BuildSky: Flare_Sun when the sky record's flags have
                 // 4): the horizon's rotation (the view's matrix, no translation) on the GTE,
                 // its primitives recorded as the sky layer
+                let mut view_sky = Vec::new();
                 let sky = c.m.r32(GP + 4920);
                 if self.hud_prims && sky != 0 && c.m.r32(0x8012_45C8) & 4 != 0 {
                     let (rot, tr) = (std::array::from_fn::<u32, 8, _>(|i| c.gte_read(32 + i)), [c.gte_read(37), c.gte_read(38), c.gte_read(39)]);
@@ -2092,6 +2183,7 @@ impl Host for GameHost {
                             eprintln!("sun {}", format!("{q:?}").chars().take(220).collect::<String>());
                         }
                     }
+                    view_sky = sun.clone();
                     self.sky_overlay.extend(sun);
                     for (i, v) in rot.into_iter().enumerate() {
                         c.gte_write(32 + i, v);
@@ -2125,6 +2217,24 @@ impl Host for GameHost {
                     }
                     self.overlay = saved;
                 }
+                // this view as set up (Draw_gViews[view]: its drawing environment's clip,
+                // relative to the first view's, and size)
+                let env = |c: &mut Cpu, v: u32, k: u32| c.m.r16(DRAW_VIEWS + 200 * v + 8 + 2 * k) as i16;
+                let rect = [env(c, a0, 0) - env(c, 0, 0), env(c, a0, 1) - env(c, 0, 1), c.m.r16(DRAW_VIEWS + 200 * a0 + 12) as i16, c.m.r16(DRAW_VIEWS + 200 * a0 + 14) as i16];
+                self.views.push(ViewCapture {
+                    player: a1,
+                    rect,
+                    camera_pos: std::array::from_fn(|i| c.m.r32(RENDER_VIEW + 8 + 4 * i as u32) as i32),
+                    camera_rot: std::array::from_fn(|i| c.m.r32(RENDER_VIEW + 0x14 + 4 * i as u32) as i32),
+                    projection: c.m.r32(super::race::addr::CAMERA_ZOOM),
+                    view_env: self.view_env,
+                    chunks: (0..n.min(64)).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect(),
+                    car_facets: self.car_facets.clone(),
+                    glows: self.track_glows.iter().chain(&self.car_glows).cloned().collect(),
+                    weather: self.weather.clone(),
+                    sky_overlay: view_sky,
+                    night_beam: super::race::NightBeam::read(c, a1),
+                });
                 0
             }
 

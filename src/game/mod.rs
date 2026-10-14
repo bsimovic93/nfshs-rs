@@ -38,6 +38,8 @@ pub struct Input {
     pub steer_axis: f32,
     pub throttle_axis: f32,
     pub brake_axis: f32,
+    /// The second controller's PS1 buttons (player 2), as they are.
+    pub pad2: u16,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -111,6 +113,11 @@ pub struct Game {
     pub cam_pos: Vec3,
     pub cam_target: Vec3,
     pub cam_mode: CameraMode,
+    /// The racer the current view follows (split screen: player 2's view follows racer 1).
+    pub view_player: usize,
+    /// The current view's height to width as shown (3/4 for the whole 4:3 screen, 3/8 for
+    /// half of it).
+    view_ratio: f32,
     pub cam_up: Vec3,
     /// tan of half the vertical field of view.
     pub tan_half_v: f32,
@@ -329,6 +336,8 @@ impl Game {
             phase: Phase::Countdown(3.0),
             race_time: 0.0,
             cam_mode: CameraMode::Chase,
+            view_player: 0,
+            view_ratio: 0.75,
             car_facets_override: None,
             chunks_override: None,
             skids_override: None,
@@ -381,23 +390,65 @@ impl Game {
     }
 
     /// Copy car poses and the start sequence from the original simulation.
-    fn sync_original(&mut self, frame_dt: f32) {
+    /// The views the original draws: 2 split screen (top and bottom), else 1.
+    pub fn view_count(&self) -> usize {
+        self.sim.as_ref().map_or(1, |s| s.view_count())
+    }
+
+    /// View `k`'s rectangle on the PS1 screen (x, y, w, h) and the screen's size.
+    pub fn view_rect(&self, k: usize) -> ([f32; 4], [f32; 2]) {
+        let Some(s) = &self.sim else { return ([0.0, 0.0, 1.0, 1.0], [1.0, 1.0]) };
+        let last = s.snapshot();
+        let screen = [last.display[2].max(1) as f32, last.display[3].max(1) as f32];
+        match s.view_snapshot_rect(k) {
+            Some(r) => (r.map(|v| v as f32), screen),
+            None => ([0.0, 0.0, screen[0], screen[1]], screen),
+        }
+    }
+
+    /// View `k`'s place in a `w` x `h` window: its band of the 4:3 picture, the window's
+    /// full width (the 3D is as wide as the window, as with one view).
+    pub fn view_viewport(&self, k: usize, w: f32, h: f32) -> [f32; 4] {
+        let (rect, screen) = self.view_rect(k);
+        let ah = if w * 3.0 > h * 4.0 { h } else { w * 0.75 };
+        let oy = (h - ah) / 2.0;
+        [0.0, oy + rect[1] / screen[1] * ah, w, rect[3] / screen[1] * ah]
+    }
+
+    /// Look through view `k` (split screen: the player it follows, its camera and what the
+    /// original put into it).
+    pub fn set_view(&mut self, k: usize) {
         let Some(sim) = &self.sim else { return };
-        let snap = sim.snapshot();
-        let (poses, camera) = sim.poses();
+        sim.set_view(k);
+        self.view_player = sim.view_player().min(self.racers.len().saturating_sub(1));
+        let (rect, screen) = self.view_rect(k);
+        self.view_ratio = (rect[3] / screen[1]) / (rect[2] / screen[0]).max(1e-3) * 0.75;
+        self.apply_camera();
+    }
+
+    /// The current view's camera as the original computed it (interpolated).
+    fn apply_camera(&mut self) {
+        let Some(sim) = &self.sim else { return };
+        let (_, camera) = sim.poses();
         if let Some(cam) = camera {
             self.cam_pos = cam.pos;
             self.cam_target = cam.pos + cam.forward;
             self.cam_up = cam.up;
             // keep the original horizontal field of view on a 4:3 screen
-            self.tan_half_v = cam.tan_half_h * 0.75;
+            self.tan_half_v = cam.tan_half_h * self.view_ratio;
             self.y_scale = cam.y_scale;
             // the bumper view does not show the player's car
-            self.cam_mode = match self.racers.first() {
+            self.cam_mode = match self.racers.get(self.view_player) {
                 Some(r) if r.car.pos.distance(cam.pos) < 2.0 => CameraMode::Bumper,
                 _ => CameraMode::Chase,
             };
         }
+    }
+
+    fn sync_original(&mut self, frame_dt: f32) {
+        let Some(sim) = &self.sim else { return };
+        let snap = sim.snapshot();
+        let (poses, _) = sim.poses();
         for ((r, c), pose) in self.racers.iter_mut().zip(&snap.cars).zip(poses) {
             let car = &mut r.car;
             car.pos = pose.pos;
@@ -419,6 +470,8 @@ impl Game {
             (s @ 1..=3, _) => Phase::Countdown((4 - s) as f32),
             _ => Phase::Racing,
         };
+        // (after the cars: the bumper view is told by the player's car)
+        self.apply_camera();
     }
 
     pub fn font(&self) -> &hud::Font {
@@ -775,7 +828,7 @@ impl Game {
             night_beam: self.sim.as_ref().and_then(|s| {
                 let snap = s.snapshot();
                 let b = snap.night_beam.as_ref().filter(|b| b.flags & 1 != 0)?;
-                let car = &self.racers[0].car;
+                let car = &self.racers[self.view_player].car;
                 Some(crate::render::NightBeam {
                     origin: car.pos,
                     right: car.right(),
@@ -833,7 +886,7 @@ impl Game {
             }
         }
         for (i, r) in self.racers.iter().enumerate() {
-            if i == 0 && self.cam_mode == CameraMode::Bumper {
+            if i == self.view_player && self.cam_mode == CameraMode::Bumper {
                 continue;
             }
             if r.car.pos.distance_squared(self.cam_pos) > self.fog.2 * self.fog.2 {
@@ -950,7 +1003,7 @@ impl Game {
         let atlas_size = self.atlas_size;
         for (i, (r, f)) in self.racers.iter().zip(facets).enumerate() {
             let Some(env) = f.as_ref().and_then(|f| f.env) else { continue };
-            if i == 0 && self.cam_mode == CameraMode::Bumper {
+            if i == self.view_player && self.cam_mode == CameraMode::Bumper {
                 continue;
             }
             let m = &self.models[r.model];
@@ -1060,7 +1113,7 @@ impl Game {
         let mut out = Vec::new();
         let facets = self.car_facets();
         for (i, r) in self.racers.iter().enumerate() {
-            if i == 0 && self.cam_mode == CameraMode::Bumper {
+            if i == self.view_player && self.cam_mode == CameraMode::Bumper {
                 continue;
             }
             let m = &self.models[r.model];
@@ -1212,7 +1265,50 @@ impl Game {
         let screen = (s.display[2].max(1), s.display[3].max(1));
         // the sky layer first (its own vertices), the light glows, then the HUD, in one
         // atlas; paused, the HUD is the host's (empty here)
-        let sky = fe::FeFrame::build_in(crate::assets::Atlas::new(1024), &s.sky_overlay, vram, screen, w, h);
+        let (atlas, sky, glows, glows_sub) = self.layers(crate::assets::Atlas::new(1024), w, h, [0.0, 0.0, w, h], [0, 0])?;
+        // the weather (rain streaks, drops on the lens) under the HUD
+        let mut cmds = s.weather.clone();
+        if !s.paused {
+            cmds.extend(s.overlay.iter().cloned());
+        }
+        let hud = fe::FeFrame::build_in(atlas, &cmds, vram, screen, w, h);
+        Some((hud, sky, glows, glows_sub))
+    }
+
+    /// The current view's 2D (split screen) in a `w` x `h` window, the view at `vp` there:
+    /// its sky layer, glows (normal and subtracted) and weather, added to `atlas`.
+    #[allow(clippy::type_complexity)]
+    pub fn view_2d(&self, atlas: crate::assets::Atlas, w: f32, h: f32, vp: [f32; 4]) -> Option<(fe::FeFrame, Vec<Vertex>, Vec<Vertex>, Vec<Vertex>)> {
+        let sim = self.sim.as_ref()?;
+        let s = sim.snapshot();
+        let vram = s.vram.as_ref()?;
+        let screen = (s.display[2].max(1), s.display[3].max(1));
+        let (rect, _) = self.view_rect(sim.view());
+        let ofs = [rect[0] as i16, rect[1] as i16];
+        let (atlas, sky, glows, glows_sub) = self.layers(atlas, w, h, vp, ofs)?;
+        let weather: Vec<_> = s.weather.iter().map(|c| c.offset(ofs[0], ofs[1])).collect();
+        Some((fe::FeFrame::build_in(atlas, &weather, vram, screen, w, h), sky, glows, glows_sub))
+    }
+
+    /// The HUD over the whole window (split screen: after the views), added to `atlas`.
+    pub fn hud_2d(&self, atlas: crate::assets::Atlas, w: f32, h: f32) -> Option<fe::FeFrame> {
+        let s = self.sim.as_ref()?.snapshot();
+        let vram = s.vram.as_ref()?;
+        let screen = (s.display[2].max(1), s.display[3].max(1));
+        let cmds = if s.paused { &[][..] } else { &s.overlay[..] };
+        Some(fe::FeFrame::build_in(atlas, cmds, vram, screen, w, h))
+    }
+
+    /// The current view's sky layer and light glows for a `w` x `h` window, the view's 3D at
+    /// `vp` there and its 2D at `ofs` on the PS1 screen.
+    #[allow(clippy::type_complexity)]
+    fn layers(&self, atlas: crate::assets::Atlas, w: f32, h: f32, vp: [f32; 4], ofs: [i16; 2]) -> Option<(crate::assets::Atlas, Vec<Vertex>, Vec<Vertex>, Vec<Vertex>)> {
+        let sim = self.sim.as_ref()?;
+        let s = sim.snapshot();
+        let vram = s.vram.as_ref()?;
+        let screen = (s.display[2].max(1), s.display[3].max(1));
+        let moved = |cmds: &[crate::ps1::host::OverlayCmd]| -> Vec<crate::ps1::host::OverlayCmd> { cmds.iter().map(|c| c.offset(ofs[0], ofs[1])).collect() };
+        let sky = fe::FeFrame::build_in(atlas, &moved(&s.sky_overlay), vram, screen, w, h);
         let mut atlas = sky.atlas;
         let mut glows = Vec::new();
         // (the subtracted ones: PS1 semi-transparency mode 2, the smoke's dark puffs)
@@ -1220,11 +1316,12 @@ impl Game {
         // each glow moved from where the original's camera saw its light to where this
         // frame's (interpolated) camera sees it, and set at the depth the original sorts it
         // at (half way to the light: drawn over what is further, behind what is nearer)
-        let now = self.frame_params(w / h).view_proj;
-        let orig = sim.sim_camera().map(|c| self.view_proj_of(&c, w / h));
-        let to_px = |vp: Mat4, p: Vec3| -> Option<(Vec2, f32)> {
-            let c = vp * p.extend(1.0);
-            (c.w > 0.05).then(|| (Vec2::new((c.x / c.w + 1.0) * 0.5 * w, (1.0 - c.y / c.w) * 0.5 * h), c.z / c.w))
+        let aspect = vp[2] / vp[3].max(1.0);
+        let now = self.frame_params(aspect).view_proj;
+        let orig = sim.sim_camera().map(|c| self.view_proj_of(&c, aspect));
+        let to_px = |m: Mat4, p: Vec3| -> Option<(Vec2, f32)> {
+            let c = m * p.extend(1.0);
+            (c.w > 0.05).then(|| (Vec2::new(vp[0] + (c.x / c.w + 1.0) * 0.5 * vp[2], vp[1] + (1.0 - c.y / c.w) * 0.5 * vp[3]), c.z / c.w))
         };
         for g in &s.glows {
             let raw = Vec3::new(-(g.anchor[0] as f32), g.anchor[1] as f32, g.anchor[2] as f32) / 65536.0;
@@ -1238,7 +1335,7 @@ impl Game {
             let half = self.cam_pos + (now_p - self.cam_pos) * 0.5;
             let Some((_, depth)) = to_px(now, half) else { continue };
             // (a puff is reprojected afterwards: not cut at the original's screen edges)
-            let f = fe::FeFrame::build_clipped(atlas, &g.cmds, vram, screen, w, h, !g.smoke);
+            let f = fe::FeFrame::build_clipped(atlas, &moved(&g.cmds), vram, screen, w, h, !g.smoke);
             atlas = f.atlas;
             let d = p_now - p_orig;
             if g.smoke && std::env::var_os("NFSHS_NOSMOKE").is_some() {
@@ -1256,7 +1353,7 @@ impl Game {
             // puff's depth as the original's camera saw it, then seen by this frame's camera
             let Some((_, z_orig)) = to_px(orig_vp, raw) else { continue };
             let (orig_inv, inv) = (orig_vp.inverse(), now.inverse());
-            let ndc = |x: f32, y: f32| Vec2::new(x / w * 2.0 - 1.0, 1.0 - y / h * 2.0);
+            let ndc = |x: f32, y: f32| Vec2::new((x - vp[0]) / vp[2] * 2.0 - 1.0, 1.0 - (y - vp[1]) / vp[3] * 2.0);
             // the puff is a flat picture standing on the ground: below its anchor it covers the
             // road nearer the camera, which must not hide it (the PS1 draws it whole, sorted by
             // its anchor), so there it takes the depth of the road it covers
@@ -1281,18 +1378,12 @@ impl Game {
                 if is_sub(i) { glows_sub.push(v) } else { glows.push(v) }
             }
         }
-        // the weather (rain streaks, drops on the lens) under the HUD
-        let mut cmds = s.weather.clone();
-        if !s.paused {
-            cmds.extend(s.overlay.iter().cloned());
-        }
-        let hud = fe::FeFrame::build_in(atlas, &cmds, vram, screen, w, h);
-        Some((hud, sky.vertices, glows, glows_sub))
+        Some((atlas, sky.vertices, glows, glows_sub))
     }
 
     /// The view-projection of a camera the original computed (as `frame_params` builds it).
     fn view_proj_of(&self, c: &original::Camera, aspect: f32) -> Mat4 {
-        let tan_half_v = c.tan_half_h * 0.75;
+        let tan_half_v = c.tan_half_h * self.view_ratio;
         let fov = 2.0 * tan_half_v.atan();
         let squash = Mat4::from_scale(Vec3::new(1.0, c.y_scale, 1.0));
         let proj = squash * Mat4::perspective_infinite_reverse_rh(fov, aspect, 0.1);

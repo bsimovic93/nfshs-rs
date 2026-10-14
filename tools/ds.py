@@ -91,7 +91,9 @@ def _key(vk, up):
     scan = user32.MapVirtualKeyW(vk, 0)
     i = INPUT(type=INPUT_KEYBOARD)
     i.ki = KEYBDINPUT(vk, scan, KEYEVENTF_KEYUP if up else 0, 0, 0)
-    user32.SendInput(1, ctypes.byref(i), ctypes.sizeof(INPUT))
+    if user32.SendInput(1, ctypes.byref(i), ctypes.sizeof(INPUT)) != 1:
+        # (the session is locked or input is blocked: keys would be lost silently)
+        raise RuntimeError(f'SendInput refused (error {ctypes.get_last_error()}): is the session locked?')
 
 def find_window(title_part='DuckStation'):
     found = []
@@ -111,6 +113,8 @@ def focus(title_part='Need for Speed'):
     w = find_window(title_part) or find_window('DuckStation')
     if not w:
         raise RuntimeError('DuckStation window not found')
+    global TARGET_PID
+    TARGET_PID = pid
     h = w[0][0]
     user32.ShowWindow(h, 9)
     user32.SetForegroundWindow(h)
@@ -149,7 +153,27 @@ def focus_pid(pid):
     time.sleep(0.3)
     return h
 
+# the process keys are meant for (set by focus_pid): keys are only sent while its window is
+# in front, never to whatever else the user has focused
+TARGET_PID = None
+
+
+def _foreground_pid():
+    pid = ctypes.c_ulong(0)
+    user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
+    return pid.value
+
+
+def _ensure_target():
+    if TARGET_PID is None or _foreground_pid() == TARGET_PID:
+        return
+    focus_pid(TARGET_PID)
+    if _foreground_pid() != TARGET_PID:
+        raise RuntimeError('DuckStation is not the foreground window: not sending keys')
+
+
 def down(*keys):
+    _ensure_target()
     for k in keys:
         _key(VK[k], False)
 

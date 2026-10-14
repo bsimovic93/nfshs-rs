@@ -30,6 +30,10 @@ pub struct OriginalSim {
     /// Camera mode still to reach once the race starts (None when done).
     camera_target: Option<i16>,
     camera_wait: u32,
+    /// The view the snapshot and camera are of (split screen: 0 top, 1 bottom).
+    view: std::cell::Cell<usize>,
+    /// Split screen: the newest frame as each view sees it (see `Snapshot::for_view`).
+    view_snaps: Vec<Snapshot>,
 }
 
 /// The game's camera for the player view, in engine world space.
@@ -48,7 +52,8 @@ pub struct Camera {
 #[derive(Clone)]
 struct State {
     cars: Vec<Pose>,
-    camera: Camera,
+    /// Each view's camera (one, or two split screen).
+    cameras: Vec<Camera>,
 }
 
 /// Pose of a simulated car in engine world space.
@@ -76,6 +81,8 @@ impl OriginalSim {
             render_t: 0.0,
             camera_target: Some(PREFERRED_CAMERA.load(Ordering::Relaxed)),
             camera_wait: 0,
+            view: Default::default(),
+            view_snaps: Vec::new(),
         })
     }
 
@@ -127,6 +134,8 @@ impl OriginalSim {
             render_t: 0.0,
             camera_target: Some(PREFERRED_CAMERA.load(Ordering::Relaxed)),
             camera_wait: 0,
+            view: Default::default(),
+            view_snaps: Vec::new(),
         };
         sim.record();
         sim.render_t = sim.history.back().map_or(0.0, |h| h.0);
@@ -136,17 +145,25 @@ impl OriginalSim {
     fn record(&mut self) {
         let s = &self.thread.last;
         let t = s.sim_ticks as f64 / 64.0;
-        let raw = |i: usize| v3([s.camera_rot[i * 3], s.camera_rot[i * 3 + 1], s.camera_rot[i * 3 + 2]]);
-        let row = |i: usize| raw(i).normalize_or_zero();
-        let y_scale = (raw(1).length() / raw(2).length().max(1e-6)).clamp(0.5, 1.5);
-        let camera = Camera {
-            pos: v3(s.camera_pos),
-            forward: row(2),
-            up: row(1),
-            tan_half_h: (s.display[2].max(1) as f32 / 2.0) / s.projection.max(1) as f32,
-            y_scale: if y_scale.is_finite() { y_scale } else { 1.0 },
+        // (a view's width is its share of the screen's: split screen views are full width)
+        let camera = |pos: [i32; 3], rot: [i32; 9], projection: u32, width: i16| {
+            let raw = |i: usize| v3([rot[i * 3], rot[i * 3 + 1], rot[i * 3 + 2]]);
+            let row = |i: usize| raw(i).normalize_or_zero();
+            let y_scale = (raw(1).length() / raw(2).length().max(1e-6)).clamp(0.5, 1.5);
+            Camera {
+                pos: v3(pos),
+                forward: row(2),
+                up: row(1),
+                tan_half_h: (width.max(1) as f32 / 2.0) / projection.max(1) as f32,
+                y_scale: if y_scale.is_finite() { y_scale } else { 1.0 },
+            }
         };
-        let state = State { cars: s.cars.iter().map(pose).collect(), camera };
+        let cameras = match s.views.len() {
+            0 | 1 => vec![camera(s.camera_pos, s.camera_rot, s.projection, s.display[2] as i16)],
+            _ => s.views.iter().map(|v| camera(v.camera_pos, v.camera_rot, v.projection, v.rect[2])).collect(),
+        };
+        self.view_snaps = if s.views.len() > 1 { (0..s.views.len()).map(|k| s.for_view(k)).collect() } else { Vec::new() };
+        let state = State { cars: s.cars.iter().map(pose).collect(), cameras };
         match self.history.back_mut() {
             // no physics step this frame (start sequence): keep the newest state
             Some(h) if h.0 >= t => h.1 = state,
@@ -187,7 +204,8 @@ impl OriginalSim {
                 wheel_steer: p.wheel_steer + (q.wheel_steer - p.wheel_steer) * f,
             })
             .collect();
-        let (p, q) = (&a.camera, &b.camera);
+        let k = self.view.get();
+        let (Some(p), Some(q)) = (a.cameras.get(k).or(a.cameras.first()), b.cameras.get(k).or(b.cameras.first())) else { return (cars, None) };
         // a camera cut (new mode or intro shot) is not interpolated
         let cut = p.pos.distance(q.pos) > 3.0 || p.forward.dot(q.forward) < 0.9;
         let camera = if cut {
@@ -204,8 +222,34 @@ impl OriginalSim {
         (cars, Some(camera))
     }
 
+    /// The newest frame, as the current view sees it.
     pub fn snapshot(&self) -> &Snapshot {
-        &self.thread.last
+        self.view_snaps.get(self.view.get()).unwrap_or(&self.thread.last)
+    }
+
+    /// The player views the original drew (2 split screen).
+    pub fn view_count(&self) -> usize {
+        self.thread.last.views.len().max(1)
+    }
+
+    /// Look through view `k` (snapshot, camera) from now on.
+    pub fn set_view(&self, k: usize) {
+        self.view.set(k.min(self.view_count() - 1));
+    }
+
+    pub fn view(&self) -> usize {
+        self.view.get()
+    }
+
+    /// The player the current view shows.
+    pub fn view_player(&self) -> usize {
+        self.thread.last.views.get(self.view.get()).map_or(0, |v| v.player as usize)
+    }
+
+    /// View `k`'s rectangle on the PS1 screen (x, y, w, h), split screen.
+    pub fn view_snapshot_rect(&self, k: usize) -> Option<[i16; 4]> {
+        let v = &self.thread.last.views;
+        (v.len() > 1).then(|| v.get(k).map(|v| v.rect)).flatten()
     }
 
     /// PS1 controller buttons for the engine's input (the game's default layout:
@@ -247,7 +291,8 @@ impl OriginalSim {
 
     /// The camera of the newest simulated frame (the one the original's 2D was built for).
     pub fn sim_camera(&self) -> Option<Camera> {
-        self.history.back().map(|h| h.1.camera)
+        let k = self.view.get();
+        self.history.back().and_then(|h| h.1.cameras.get(k).or(h.1.cameras.first()).copied())
     }
 
     /// The 2D the original draws over the race (HUD, glares) is recorded (see
@@ -272,7 +317,7 @@ impl OriginalSim {
         while self.accum >= FRAME {
             if self.thread.last.front_end {
                 // the front end: its own buttons, no race bookkeeping
-                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), want_ram: false }) {
+                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), buttons2: input.pad2, want_ram: false }) {
                     log::warn!("original game ended: {e:#}");
                     self.stopped = true;
                     return;
@@ -300,7 +345,7 @@ impl OriginalSim {
                 None if CAMERA_MODES.contains(&mode) => PREFERRED_CAMERA.store(mode, Ordering::Relaxed),
                 None => {}
             }
-            if let Err(e) = self.thread.step(FrameInput { buttons, want_ram: false }) {
+            if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false }) {
                 log::warn!("original simulation ended: {e:#}");
                 self.stopped = true;
                 return;

@@ -193,6 +193,7 @@ impl App {
                 i.start |= pad.is_pressed(Button::Start);
                 i.select |= pad.is_pressed(Button::Select);
             }
+            i.pad2 = g.gamepads().nth(1).map_or(0, |(_, p)| ps1_buttons(&p));
         }
         i
     }
@@ -300,6 +301,7 @@ impl App {
                 i.down |= pad.is_pressed(Button::DPadDown);
                 i.accept |= pad.is_pressed(Button::South);
             }
+            i.pad2 = g.gamepads().nth(1).map_or(0, |(_, p)| ps1_buttons(&p));
         }
         i
     }
@@ -415,6 +417,10 @@ impl App {
         }
         let Some(r) = &mut self.renderer else { return };
         let (w, h) = r.size;
+        if let Screen::Race(game) = &mut self.screen {
+            draw_race(r, game, w as f32, h.max(1) as f32, false);
+            return;
+        }
         match &self.screen {
             Screen::FrontEnd(sim) => {
                 let snap = sim.snapshot();
@@ -476,16 +482,7 @@ impl App {
                 };
                 r.render(&params, &[], &[], &hud);
             }
-            Screen::Race(game) => {
-                let params = game.frame_params(w as f32 / h.max(1) as f32);
-                let dynamic = game.dynamic_geometry();
-                let mut hud = race_hud(r, game, w as f32, h as f32);
-                if game.phase == Phase::Finished {
-                    let s = (h as f32 / 240.0).max(1.0).floor();
-                    game.font().text(&mut hud, "PRESS ENTER", w as f32 * 0.5 - 33.0 * s * 1.5, h as f32 * 0.85, s * 1.5, [1.0, 1.0, 1.0, 1.0]);
-                }
-                r.render(&params, &game.track.sky, &dynamic, &hud);
-            }
+            Screen::Race(_) => {}
         }
     }
 }
@@ -774,15 +771,106 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                 if let Some(img) = draw_front_end(&mut r, scene, true) {
                     img.save(&out)?;
                 }
-            } else if let Some(g) = &game {
-                let params = g.frame_params(w as f32 / h as f32);
-                let hud = race_hud(&mut r, g, w as f32, h as f32);
-                r.screenshot(&params, &g.track.sky, &g.dynamic_geometry(), &hud).save(&out)?;
+            } else if let Some(g) = &mut game {
+                if let Some(img) = draw_race(&mut r, g, w as f32, h as f32, true) {
+                    img.save(&out)?;
+                }
             }
             println!("frame {frame}: {} written", out.display());
         }
     }
     Ok(())
+}
+
+/// A gamepad as a PS1 pad (the second player's): face buttons as they sit, the triggers
+/// also Cross and Square (accelerate and brake in a race), the left stick as the d-pad.
+fn ps1_buttons(pad: &gilrs::Gamepad) -> u16 {
+    use crate::ps1::race::pad;
+    use gilrs::{Axis, Button};
+    let (x, y) = (pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY));
+    let trigger = |b: Button| pad.button_data(b).is_some_and(|d| d.value() > 0.3);
+    let mut b = 0;
+    for (on, bit) in [
+        (pad.is_pressed(Button::DPadUp) || y > 0.6, pad::UP),
+        (pad.is_pressed(Button::DPadDown) || y < -0.6, pad::DOWN),
+        (pad.is_pressed(Button::DPadLeft) || x < -0.3, pad::LEFT),
+        (pad.is_pressed(Button::DPadRight) || x > 0.3, pad::RIGHT),
+        (pad.is_pressed(Button::South) || trigger(Button::RightTrigger2), pad::CROSS),
+        (pad.is_pressed(Button::West) || trigger(Button::LeftTrigger2), pad::SQUARE),
+        (pad.is_pressed(Button::East), pad::CIRCLE),
+        (pad.is_pressed(Button::North), pad::TRIANGLE),
+        (pad.is_pressed(Button::Start), pad::START),
+        (pad.is_pressed(Button::Select), pad::SELECT),
+        (pad.is_pressed(Button::LeftTrigger), pad::L1),
+        (pad.is_pressed(Button::RightTrigger), pad::R1),
+    ] {
+        if on {
+            b |= bit;
+        }
+    }
+    b
+}
+
+/// A race frame: the world and the original's 2D, one view or split screen (each player's
+/// view in its band of the screen, then the HUD over both). Returns the picture when `shot`.
+pub fn draw_race(r: &mut Renderer, game: &mut Game, w: f32, h: f32, shot: bool) -> Option<image::RgbaImage> {
+    if game.view_count() < 2 {
+        let params = game.frame_params(w / h.max(1.0));
+        let dynamic = game.dynamic_geometry();
+        let mut hud = race_hud(r, game, w, h);
+        if game.phase == Phase::Finished && game.sim.is_none() {
+            let s = (h / 240.0).max(1.0).floor();
+            game.font().text(&mut hud, "PRESS ENTER", w * 0.5 - 33.0 * s * 1.5, h * 0.85, s * 1.5, [1.0, 1.0, 1.0, 1.0]);
+        }
+        if shot {
+            return Some(r.screenshot(&params, &game.track.sky, &dynamic, &hud));
+        }
+        r.render(&params, &game.track.sky, &dynamic, &hud);
+        return None;
+    }
+    let mut atlas = Atlas::new(1024);
+    let mut views = Vec::new();
+    for k in 0..game.view_count() {
+        game.set_view(k);
+        let vp = game.view_viewport(k, w, h);
+        let params = game.frame_params(vp[2] / vp[3].max(1.0));
+        let dynamic = game.dynamic_geometry();
+        let (over, sky_layer, glows, glows_sub) = match game.view_2d(atlas, w, h, vp) {
+            Some(v) => v,
+            None => {
+                let empty = crate::game::fe::FeFrame { atlas: Atlas::new(1024), vertices: Vec::new(), subtract: Vec::new(), under: 0, floor: 0 };
+                (empty, Vec::new(), Vec::new(), Vec::new())
+            }
+        };
+        atlas = over.atlas;
+        views.push(crate::render::ViewDraw { viewport: vp, params, dynamic, sky_layer, glows, glows_sub, over: over.vertices, over_subtract: over.subtract });
+    }
+    game.set_view(0);
+    let hud = match game.hud_2d(atlas, w, h) {
+        Some(f) if !game.paused() => {
+            r.write_overlay_atlas(&f.atlas);
+            r.use_overlay_atlas = true;
+            r.hud_subtract = f.subtract;
+            f.vertices
+        }
+        Some(f) => {
+            // paused: the host's pause menu over the kept picture
+            r.write_overlay_atlas(&f.atlas);
+            r.use_overlay_atlas = false;
+            r.hud_subtract = Vec::new();
+            game.hud(w, h)
+        }
+        None => {
+            r.use_overlay_atlas = false;
+            r.hud_subtract = Vec::new();
+            game.hud(w, h)
+        }
+    };
+    if shot {
+        return Some(r.screenshot_views(&views, &game.track.sky, &hud));
+    }
+    r.render_views(&views, &game.track.sky, &hud);
+    None
 }
 
 /// A race's 2D: the HUD the original drew (recorded, with its own atlas), or the host's port.

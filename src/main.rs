@@ -350,7 +350,7 @@ fn real_main() -> Result<()> {
                 let trace = std::env::var_os("BOOT_TRACE").is_some();
                 for _ in 0..(secs * 60.0).round() as u32 {
                     let prev: Vec<[i32; 3]> = sim.last.cars.iter().map(|c| c.position).collect();
-                    let s = sim.step(FrameInput { buttons, want_ram: false })?;
+                    let s = sim.step(FrameInput { buttons, buttons2: 0, want_ram: false })?;
                     if trace {
                         let d: Vec<String> = s
                             .cars
@@ -375,7 +375,7 @@ fn real_main() -> Result<()> {
                 show_cam(&sim.last);
             }
             if std::env::var_os("BOOT_RAM").is_some() {
-                let s = sim.step(FrameInput { buttons: 0, want_ram: true })?;
+                let s = sim.step(FrameInput { buttons: 0, buttons2: 0, want_ram: true })?;
                 std::fs::create_dir_all("re/boot")?;
                 std::fs::write("re/boot/ram.bin", s.ram.as_deref().unwrap_or_default())?;
                 println!("RAM written to re/boot/ram.bin");
@@ -441,7 +441,7 @@ fn real_main() -> Result<()> {
                                 }
                             }
                         }
-                        return Some(b);
+                        return Some([b, 0]);
                     }
                     t -= n;
                 }
@@ -514,12 +514,26 @@ fn real_main() -> Result<()> {
         Some("fe-play") => {
             // fe-play SCRIPT SHOTS DIR: the app's path through the original (front end, race,
             // back) headless. SCRIPT "secs:keys,..." (x Cross/accept, t Triangle, c Circle,
-            // s Square, p Start, u/d/l/r d-pad; in races u accelerates as in the window), SHOTS
+            // s Square, p Start, u/d/l/r d-pad; in races u accelerates as in the window;
+            // "keys|keys" the second controller's after the bar, as PS1 buttons), SHOTS
             // "frame,frame,..." screenshots into DIR
             let mut script = Vec::new();
             for st in args[2].split(',').filter(|s| !s.is_empty()) {
                 let (secs, keys) = st.split_once(':').unwrap_or((st, "-"));
+                // "keys|keys2": the second controller's after a bar
+                let (keys, keys2) = keys.split_once('|').unwrap_or((keys, ""));
+                let pad2 = {
+                    use ps1::race::pad;
+                    let mut b = 0;
+                    for (k, bit) in [('u', pad::UP), ('d', pad::DOWN), ('l', pad::LEFT), ('r', pad::RIGHT), ('x', pad::CROSS), ('t', pad::TRIANGLE), ('c', pad::CIRCLE), ('s', pad::SQUARE), ('p', pad::START), ('e', pad::SELECT)] {
+                        if keys2.contains(k) {
+                            b |= bit;
+                        }
+                    }
+                    b
+                };
                 let i = game::Input {
+                    pad2,
                     up: keys.contains('u'),
                     down: keys.contains('d'),
                     left: keys.contains('l'),
