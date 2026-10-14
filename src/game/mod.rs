@@ -1281,7 +1281,12 @@ impl Game {
                 if is_sub(i) { glows_sub.push(v) } else { glows.push(v) }
             }
         }
-        let hud = fe::FeFrame::build_in(atlas, if s.paused { &[] } else { &s.overlay }, vram, screen, w, h);
+        // the weather (rain streaks, drops on the lens) under the HUD
+        let mut cmds = s.weather.clone();
+        if !s.paused {
+            cmds.extend(s.overlay.iter().cloned());
+        }
+        let hud = fe::FeFrame::build_in(atlas, &cmds, vram, screen, w, h);
         Some((hud, sky.vertices, glows, glows_sub))
     }
 

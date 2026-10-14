@@ -58,6 +58,9 @@ pub struct GameHost {
     last_hud: Vec<OverlayCmd>,
     /// This frame's sky layer (Flare_Sun's primitives), and the last one (kept while paused).
     sky_overlay: Vec<OverlayCmd>,
+    /// The weather (rain, snow, the drops on the lens) as Render_StartRenderingWorldView built
+    /// it this frame, recorded.
+    weather: Vec<OverlayCmd>,
     last_sky: Vec<OverlayCmd>,
     /// The race cars' light halos (DrawC_PrimHalo's primitives), drawn over the 3D.
     car_glows: Vec<Glow>,
@@ -150,6 +153,8 @@ pub struct FrameInfo {
     pub overlay: Vec<OverlayCmd>,
     /// 2D drawn over the sky and under the world (the sun's flare), as recorded.
     pub sky_overlay: Vec<OverlayCmd>,
+    /// See [`GameHost::weather`].
+    pub weather: Vec<OverlayCmd>,
     /// Light glows (track lights, car lights) with the world point each belongs to.
     pub glows: Vec<Glow>,
     /// The font's 16 colour palettes (Font_TextColor 0..15).
@@ -245,6 +250,9 @@ thread_local! {
     static GLARE_MARKS: std::cell::RefCell<Vec<(u32, [i32; 3])>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 const FLARE_HALO: u32 = 0x800C_EBFC;
+/// The weather's drawing (rain, snow, lens drops; Render_RenderWorld calls it with the view):
+/// skipped in tunnels and when the race has no weather.
+const WEATHER_RENDER: u32 = 0x800E_493C;
 /// Souffle_InsertFacet(view): the smoke and dust puffs (Sfx_BuildSouffleFacet for each in
 /// view), as Render_RenderWorld calls it.
 const SOUFFLE_INSERT_FACET: u32 = 0x800B_8ABC;
@@ -514,6 +522,7 @@ impl GameHost {
             frame_lists: Vec::new(),
             last_hud: Vec::new(),
             sky_overlay: Vec::new(),
+            weather: Vec::new(),
             last_sky: Vec::new(),
             showroom_shadow: Vec::new(),
             car_glows: Vec::new(),
@@ -565,6 +574,7 @@ impl GameHost {
                 }),
                 font_palettes: Vec::new(),
                 sky_overlay: Vec::new(),
+                weather: Vec::new(),
                 glows: Vec::new(),
             };
             if self.frame.on_frame.as_mut().and_then(|f| f(c, info)).is_none() {
@@ -778,6 +788,7 @@ impl GameHost {
                 g.append(&mut self.car_glows);
                 g
             },
+            weather: std::mem::take(&mut self.weather),
             sky_overlay: {
                 if self.mode == Mode::Race && Self::paused(c) && self.sky_overlay.is_empty() {
                     self.last_sky.clone()
@@ -2041,6 +2052,22 @@ impl Host for GameHost {
                             }
                         }
                         self.overlay = saved;
+                    }
+                }
+                // the weather (rain or snow, and the drops on the lens) as Render_RenderWorld
+                // builds it after the world, recorded
+                if self.hud_prims {
+                    let start = c.m.r32(0x1F80_0004);
+                    c.call_nested(WEATHER_RENDER, &[RENDER_VIEW]);
+                    let end = c.m.r32(0x1F80_0004);
+                    if std::env::var_os("NFSHS_WEATHERLOG").is_some() {
+                        eprintln!("weather: prims {start:#x}..{end:#x}");
+                    }
+                    if end > start && end - start < 0x4_0000 {
+                        let saved = std::mem::take(&mut self.overlay);
+                        self.prim_offset = [0, 0];
+                        self.record_packets(c, start, end);
+                        self.weather = std::mem::replace(&mut self.overlay, saved);
                     }
                 }
                 // the sun's flare (Hrz_BuildSky: Flare_Sun when the sky record's flags have
