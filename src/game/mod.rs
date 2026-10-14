@@ -520,7 +520,9 @@ impl Game {
         self.prev_camera_key = input.camera;
         if self.sim.is_some() {
             let mut input = input;
-            if input.autopilot || self.racers[0].finish_time.is_some() {
+            // (after the finish the original drives the car itself and its results screens
+            // take the pad: no engine driver then)
+            if input.autopilot {
                 // the engine's driver, through the digital pad
                 let r = &self.racers[0];
                 let c = self.autopilot.controls(&r.car, &self.path, r.progress, frame_dt);

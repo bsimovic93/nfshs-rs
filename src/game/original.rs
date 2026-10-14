@@ -268,7 +268,8 @@ impl OriginalSim {
             }
             return b;
         }
-        if input.up || input.throttle_axis > 0.3 {
+        // (Cross also confirms: the results screens after the finish take it)
+        if input.up || input.throttle_axis > 0.3 || input.accept {
             b |= pad::CROSS;
         }
         if input.down || input.brake_axis > 0.3 {
