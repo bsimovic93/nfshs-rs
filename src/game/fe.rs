@@ -24,6 +24,22 @@ pub struct FeFrame {
     pub under: usize,
     /// The showroom floor's vertices (just before `under`) start here.
     pub floor: usize,
+    /// Where each further car view (split car selects: another camera) is drawn: its key
+    /// (see [`car_view`]) and the vertex index it goes before, in drawing order.
+    pub more_cars: Vec<(CarView, usize)>,
+    /// The view of the car drawn first (the one `under` is for).
+    pub first_car: Option<CarView>,
+}
+
+/// What tells a showroom car's view apart: projection centre, distance and camera.
+pub type CarView = (i32, i32, u32, [i32; 3]);
+
+/// The view a showroom car is drawn in (None for other commands).
+pub fn car_view(cmd: &OverlayCmd) -> Option<CarView> {
+    match cmd {
+        OverlayCmd::ShowroomCar { ofx, ofy, h, cam_pos, .. } => Some((*ofx, *ofy, *h, *cam_pos)),
+        _ => None,
+    }
 }
 
 /// Texel `(u, v)` of texture page `tpage` through CLUT `clut`, as RGBA (alpha 0 transparent,
@@ -57,6 +73,8 @@ impl FeFrame {
     pub fn build_clipped(mut atlas: Atlas, cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32, clip: bool) -> Self {
         let clip_screen = clip;
         let mut under = 0;
+        let mut first_view = None;
+        let mut more_cars: Vec<(CarView, usize)> = Vec::new();
         let mut car_seen = false;
         // untextured semi-transparent quads blend as a whole: a texel with the semi bit
         let white_semi = atlas.add(1, 1, &[255, 255, 255, 128]);
@@ -94,9 +112,14 @@ impl FeFrame {
             if i == floor_at {
                 floor_start = vertices.len();
             }
-            if matches!(cmd, OverlayCmd::ShowroomCar { .. }) && !car_seen {
-                car_seen = true;
-                under = vertices.len();
+            if let Some(view) = car_view(cmd) {
+                if !car_seen {
+                    car_seen = true;
+                    first_view = Some(view);
+                    under = vertices.len();
+                } else if first_view != Some(view) && !more_cars.iter().any(|(v, _)| *v == view) {
+                    more_cars.push((view, vertices.len()));
+                }
                 continue;
             }
             if let &OverlayCmd::Clip { x, y, w, h } = cmd {
@@ -186,7 +209,7 @@ impl FeFrame {
             under = 0;
             floor_start = 0;
         }
-        Self { atlas, vertices, subtract, under, floor: floor_start.min(under) }
+        Self { atlas, vertices, subtract, under, floor: floor_start.min(under), more_cars, first_car: first_view }
     }
 }
 
@@ -260,23 +283,26 @@ impl MoviePlayer {
             color: [0.5, 0.5, 0.5, 1.0],
         };
         let q = [corner(0.0, 0.0), corner(1.0, 0.0), corner(1.0, 1.0), corner(0.0, 1.0)];
-        FeFrame { atlas, vertices: vec![q[0], q[1], q[2], q[0], q[2], q[3]], subtract: Vec::new(), under: 0, floor: 0 }
+        FeFrame { atlas, vertices: vec![q[0], q[1], q[2], q[0], q[2], q[3]], subtract: Vec::new(), under: 0, floor: 0, more_cars: Vec::new(), first_car: None }
     }
 }
 
 /// The showroom's car model (with its textures in an atlas the front end's are added to).
 pub struct Showroom {
-    /// The car's code and paint.
-    pub car: (String, u8),
-    model: crate::assets::CarModel,
+    /// The cars' codes and paints (two in the split car selects).
+    pub cars: Vec<(String, u8)>,
+    models: Vec<crate::assets::CarModel>,
     pub atlas: Atlas,
 }
 
 impl Showroom {
-    pub fn load(data: &crate::assets::GameData, car: &(String, u8)) -> Option<Self> {
+    pub fn load(data: &crate::assets::GameData, cars: &[(String, u8)]) -> Option<Self> {
         let mut atlas = Atlas::new(1024);
-        let model = crate::assets::load_car(data, &mut atlas, &car.0, true, false, None, car.1).ok()?;
-        Some(Self { car: car.clone(), model, atlas })
+        let mut models = Vec::new();
+        for car in cars {
+            models.push(crate::assets::load_car(data, &mut atlas, &car.0, true, false, None, car.1).ok()?);
+        }
+        (!models.is_empty()).then(|| Self { cars: cars.to_vec(), models, atlas })
     }
 
     /// The cars the front end asked for (the car and its reflection in the floor) as world
@@ -284,14 +310,17 @@ impl Showroom {
     /// `screen`, fitted at 4:3 into a `w` x `h` window.
     /// The reflections come first: their vertices end at the returned split.
     /// `env_map`: where reflection map A (DrawC_PrimStart's, from VRAM) is in the atlas.
-    pub fn geometry(&self, cmds: &[OverlayCmd], screen: (u16, u16), w: f32, h: f32, env_map: Option<(Rect, f32)>) -> Option<(Vec<Vertex>, u32, glam::Mat4)> {
+    /// `view`: only the cars drawn in that view (None: the first car's).
+    pub fn geometry(&self, cmds: &[OverlayCmd], view: Option<CarView>, screen: (u16, u16), w: f32, h: f32, env_map: Option<(Rect, f32)>) -> Option<(Vec<Vertex>, u32, glam::Mat4)> {
         use crate::game::original::{pose, v3};
         use glam::{Mat4, Vec3, Vec4};
         let mut out = Vec::new();
         let mut proj = None;
         let mut split = 0;
-        let reflections = cmds.iter().filter(|c| matches!(c, OverlayCmd::ShowroomCar { mirrored: true, .. }));
-        let cars = cmds.iter().filter(|c| matches!(c, OverlayCmd::ShowroomCar { mirrored: false, .. }));
+        let Some(view) = view.or_else(|| cmds.iter().find_map(car_view)) else { return None };
+        let in_view = |c: &&OverlayCmd| car_view(c) == Some(view);
+        let reflections = cmds.iter().filter(in_view).filter(|c| matches!(c, OverlayCmd::ShowroomCar { mirrored: true, .. }));
+        let cars = cmds.iter().filter(in_view).filter(|c| matches!(c, OverlayCmd::ShowroomCar { mirrored: false, .. }));
         for (k, cmd) in reflections.map(|c| (0, c)).chain(cars.map(|c| (1, c))) {
             if k == 1 && split == 0 {
                 split = out.len() as u32;
@@ -321,6 +350,8 @@ impl Showroom {
                 );
                 proj = Some(p * view);
             }
+            let Some(model_k) = self.cars.iter().position(|c| c.0 == car.code && c.1 == car.colour) else { continue };
+            let car_model = &self.models[model_k];
             // the car as in a race (model origin on the ground); its reflection mirrored in
             // the floor (y = 0) and darker
             let mut c = (**car).clone();
@@ -334,7 +365,7 @@ impl Showroom {
             if *mirrored {
                 model = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)) * model;
             }
-            for (pi, (part, &on)) in self.model.parts.iter().zip(parts.iter()).enumerate() {
+            for (pi, (part, &on)) in car_model.parts.iter().zip(parts.iter()).enumerate() {
                 if on == 0 || on >= 17 {
                     continue;
                 }
@@ -359,7 +390,7 @@ impl Showroom {
             let (sn, cs) = a.sin_cos();
             let rgb = [(env.colour & 0xFF) as f32 / 256.0, ((env.colour >> 8) & 0xFF) as f32 / 256.0, ((env.colour >> 16) & 0xFF) as f32 / 256.0];
             let towards = |p: Vec3| (v3(*cam_pos) - p).normalize_or_zero() * 0.01;
-            for (part, &on) in self.model.parts.iter().zip(parts.iter()) {
+            for (part, &on) in car_model.parts.iter().zip(parts.iter()) {
                 let (Some((normals, flags)), true) = (&part.env, on != 0) else { continue };
                 let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
                 for t in 0..flags.len() {
@@ -403,6 +434,18 @@ pub struct FeScene {
     pub mid: Vec<Vertex>,
     pub mid_subtract: Vec<std::ops::Range<u32>>,
     pub view_proj: Option<glam::Mat4>,
+    /// Further cars in views of their own (split car selects), in drawing order, each with
+    /// the 2D drawn after it.
+    pub more: Vec<FeCar>,
+}
+
+/// A showroom car in a view of its own and the 2D drawn after it, up to the next car.
+pub struct FeCar {
+    pub car: Vec<Vertex>,
+    pub car_split: u32,
+    pub view_proj: glam::Mat4,
+    pub over: Vec<Vertex>,
+    pub subtract: Vec<std::ops::Range<u32>>,
 }
 
 impl FeScene {
@@ -427,7 +470,7 @@ impl FeScene {
             }
             (atlas.add(tw, th, &rgba), atlas.size as f32)
         });
-        let (car, car_split, view_proj) = match showroom.and_then(|s| s.geometry(cmds, screen, w, h, env_map)) {
+        let (car, car_split, view_proj) = match showroom.and_then(|s| s.geometry(cmds, f.first_car, screen, w, h, env_map)) {
             Some((v, k, p)) => (v, k, Some(p)),
             None => (Vec::new(), 0, None),
         };
@@ -448,15 +491,38 @@ impl FeScene {
             .map(|r| (r.start - split as u32)..(r.end - split as u32))
             .collect();
         let under_subtract = f.subtract.iter().filter(|r| (r.end as usize) <= vertices.len()).cloned().collect();
-        Self { atlas, under: vertices, under_subtract, over, subtract, car, car_split, mid, mid_subtract, view_proj }
+        // further car views: the 2D after the first car up to the next, and so on
+        let mut over = over;
+        let mut subtract: Vec<std::ops::Range<u32>> = subtract;
+        let mut more: Vec<FeCar> = Vec::new();
+        if view_proj.is_some() {
+            let cuts: Vec<(CarView, usize)> = f.more_cars.iter().filter(|(_, at)| *at >= split).map(|&(v, at)| (v, (at - split).min(over.len()))).collect();
+            for (k, &(view, at)) in cuts.iter().enumerate().rev() {
+                let Some((cv, cs, cp)) = showroom.and_then(|s| s.geometry(cmds, Some(view), screen, w, h, None)) else { continue };
+                let tail = over.split_off(at);
+                let n = tail.len() as u32;
+                let (at32, end) = (at as u32, at as u32 + n);
+                let tail_sub = subtract.iter().filter(|r| r.start >= at32 && r.end <= end).map(|r| (r.start - at32)..(r.end - at32)).collect();
+                subtract.retain(|r| r.end <= at32);
+                let _ = k;
+                more.insert(0, FeCar { car: cv, car_split: cs, view_proj: cp, over: tail, subtract: tail_sub });
+            }
+        }
+        Self { atlas, under: vertices, under_subtract, over, subtract, car, car_split, mid, mid_subtract, view_proj, more }
     }
 
-    /// The showroom car's code and paint, when the front end shows one.
-    pub fn car_code(cmds: &[OverlayCmd]) -> Option<(String, u8)> {
-        cmds.iter().find_map(|c| match c {
-            OverlayCmd::ShowroomCar { car, .. } => Some((car.code.clone(), car.colour)),
-            _ => None,
-        })
+    /// The showroom cars' codes and paints (each once), when the front end shows any.
+    pub fn car_codes(cmds: &[OverlayCmd]) -> Vec<(String, u8)> {
+        let mut out: Vec<(String, u8)> = Vec::new();
+        for c in cmds {
+            if let OverlayCmd::ShowroomCar { car, .. } = c {
+                let key = (car.code.clone(), car.colour);
+                if !out.contains(&key) {
+                    out.push(key);
+                }
+            }
+        }
+        out
     }
 }
 

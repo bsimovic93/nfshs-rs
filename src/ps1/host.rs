@@ -91,6 +91,9 @@ pub struct GameHost {
     vram_dirty: bool,
     /// Inside a captured front-end drawing routine (see `capture_prims`).
     capturing: bool,
+    /// The primitive packets recorded this frame (front end, PS1_MISSLOG: packets the original
+    /// put in its ordering table that were not recorded are reported at DrawOTag).
+    recorded_packets: std::collections::HashSet<u32>,
     /// The GPU draw mode (texture page) as the captured primitives left it.
     draw_mode: u16,
     vram_shared: Option<std::sync::Arc<Vec<u16>>>,
@@ -518,8 +521,9 @@ const GP: u32 = 0x8013_D83C;
 const VIDEO_BLOCK_NAME: u32 = 0x8005_6F08;
 /// Front-end routines that build GPU primitives themselves (the video wall's DrawTV and
 /// DrawTVLines): run as they are and their primitives recorded (`capture_prims`).
-const CAPTURED_FE_DRAWING: [u32; 7] = [
+const CAPTURED_FE_DRAWING: [u32; 8] = [
     0x8002_24AC, // DrawTV
+    0x8002_4C4C, // DrawSlider (car statistics, options sliders)
     0x8002_2158, // DrawTVLines
     0x8001_C25C, // SubtractiveBox
     0x8003_79FC, // tScreenMain::DrawDropShadow
@@ -604,6 +608,7 @@ impl GameHost {
             vram: vec![0; VRAM_W * VRAM_H],
             vram_dirty: true,
             capturing: false,
+            recorded_packets: Default::default(),
             draw_mode: 0,
             vram_shared: None,
             pad_buffers: [0; 2],
@@ -713,6 +718,38 @@ impl GameHost {
     /// changes over the picture it keeps).
     fn paused(c: &mut Cpu) -> bool {
         c.m.r32(super::race::addr::SIM_PAUSED) != 0
+    }
+
+    /// PS1_MISSLOG: the primitives in the front end's ordering table (from `start`) that no
+    /// recording took, by code and first vertex (drawing the original made that is not shown).
+    fn report_unrecorded(&mut self, c: &mut Cpu, start: u32) {
+        let mut missed = std::collections::BTreeMap::<(u8, i16, i16), u32>::new();
+        let (mut a, mut n) = (start, 0);
+        while n < 20_000 {
+            let w = c.m.r32(a);
+            let len = w >> 24;
+            if len > 0 && !self.recorded_packets.contains(&a) {
+                let code = (c.m.r32(a + 4) >> 24) as u8;
+                if !(0xE1..=0xE6).contains(&code) && code != 0 {
+                    // (the first vertex: after the colour word)
+                    let v = c.m.r32(a + 8);
+                    *missed.entry((code, v as i16, (v >> 16) as i16)).or_default() += 1;
+                }
+            }
+            n += 1;
+            if w & 0xFF_FFFF == 0xFF_FFFF {
+                break;
+            }
+            a = 0x8000_0000 | (w & 0xFF_FFFF);
+        }
+        if std::env::var("PS1_MISSLOG").as_deref() == Ok("2") {
+            eprintln!("[{:>8}] ordering table {start:#x}: {n} entries, {} recorded packets", self.clock, self.recorded_packets.len());
+        }
+        if !missed.is_empty() {
+            let list: Vec<String> = missed.iter().take(24).map(|((code, x, y), k)| format!("{code:#04x}@{x},{y}x{k}")).collect();
+            eprintln!("[{:>8}] unrecorded front-end primitives: {} kinds: {}", self.clock, missed.len(), list.join(" "));
+        }
+        self.recorded_packets.clear();
     }
 
     /// Packets in an ordering table.
@@ -880,6 +917,7 @@ impl GameHost {
                     for (i, cmd) in self.overlay.iter().enumerate() {
                         let d = match cmd {
                             OverlayCmd::Quad { pts, tex, semi, abr, colours } => format!("quad {:?} tex {:x?} semi {semi} abr {abr} pts {pts:?} col {colours:x?}", pts[0], tex.as_ref().map(|t| (t.tpage, t.clut, t.uv[0], t.uv[3]))),
+                            OverlayCmd::ShowroomCar { car, cam_pos, h, ofx, ofy, mirrored, level, .. } => format!("showroom car {} pos {:?} cam {cam_pos:?} h {h} of {ofx},{ofy} mirrored {mirrored} level {level}", car.code, car.position),
                             other => format!("{}", format!("{other:?}").chars().take(60).collect::<String>()),
                         };
                         eprintln!("cmd {i} {d}");
@@ -1069,6 +1107,13 @@ impl GameHost {
     fn capture_prims(&mut self, c: &mut Cpu, addr: u32) -> u32 {
         let start = c.m.r32(0x1F80_0004);
         let args = [c.r[4], c.r[5], c.r[6], c.r[7]];
+        // arguments past the fourth are on the caller's stack: copy them to where the nested
+        // call's frame (see Cpu::call_nested) has them
+        let (sp, nested_sp) = (c.r[29], (c.r[29] - 0x100) & !7);
+        for i in 0..16 {
+            let w = c.m.r32(sp + 16 + 4 * i);
+            c.m.w32(nested_sp + 16 + 4 * i, w);
+        }
         self.capturing = true;
         let ret = c.call_nested(addr, &args);
         self.capturing = false;
@@ -1088,6 +1133,7 @@ impl GameHost {
                 continue;
             }
             packets.push((p, len));
+            self.recorded_packets.insert(p);
             p += 4 + 4 * len;
         }
         // the packets go into the ordering table head first, so they are drawn in reverse:
@@ -1597,6 +1643,9 @@ impl Host for GameHost {
             0x800E_E610 => {
                 if std::env::var_os("NFSHS_ENVDBG").is_some() {
                     eprintln!("DrawOTag {a0:#x} ra {:#x} gp4704 {}", c.r[31], c.m.r32(GP + 4704));
+                }
+                if self.mode == Mode::FrontEnd && std::env::var_os("PS1_MISSLOG").is_some() {
+                    self.report_unrecorded(c, a0);
                 }
                 // DrawOTag: rendering is done by the host engine. In races the views after
                 // the world's (HUD, tachometer, map) are recorded as 2D

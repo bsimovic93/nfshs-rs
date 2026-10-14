@@ -45,3 +45,4 @@
 800bcc74 AudioCmn_LoadBank (logged with PS1_CALLLOG; the original runs)
 800b754c Sim step (one per catch-up step: the spin detector does not take a step's work for waiting)
 800422dc tScreenTrackSelect::DrawVideoWall (the spinning track's video quads built just before are recorded)
+80024c4c DrawSlider (its primitives are captured)

@@ -451,11 +451,9 @@ impl App {
                 }
                 if let Some(vram) = &snap.vram {
                     // the showroom car, loaded when the front end shows a different one
-                    match crate::game::fe::FeScene::car_code(&snap.overlay) {
-                        Some(code) if self.showroom.as_ref().is_none_or(|s| s.car != code) => {
-                            self.showroom = crate::game::fe::Showroom::load(&self.data, &code);
-                        }
-                        _ => {}
+                    let codes = crate::game::fe::FeScene::car_codes(&snap.overlay);
+                    if !codes.is_empty() && self.showroom.as_ref().is_none_or(|s| s.cars != codes) {
+                        self.showroom = crate::game::fe::Showroom::load(&self.data, &codes);
                     }
                     let scene = crate::game::fe::FeScene::build(&snap.overlay, vram, (snap.display[2], snap.display[3]), w as f32, h as f32, self.showroom.as_ref());
                     draw_front_end(r, scene, false);
@@ -766,10 +764,9 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
             if let Some(s) = &sim {
                 let snap = s.snapshot();
                 let Some(vram) = &snap.vram else { continue };
-                if let Some(code) = crate::game::fe::FeScene::car_code(&snap.overlay) {
-                    if showroom.as_ref().is_none_or(|sr| sr.car != code) {
-                        showroom = crate::game::fe::Showroom::load(data, &code);
-                    }
+                let codes = crate::game::fe::FeScene::car_codes(&snap.overlay);
+                if !codes.is_empty() && showroom.as_ref().is_none_or(|sr| sr.cars != codes) {
+                    showroom = crate::game::fe::Showroom::load(data, &codes);
                 }
                 let scene = crate::game::fe::FeScene::build(&snap.overlay, vram, (snap.display[2], snap.display[3]), w as f32, h as f32, showroom.as_ref());
                 if let Some(img) = draw_front_end(&mut r, scene, true) {
@@ -842,7 +839,7 @@ pub fn draw_race(r: &mut Renderer, game: &mut Game, w: f32, h: f32, shot: bool) 
         let (over, sky_layer, glows, glows_sub) = match game.view_2d(atlas, w, h, vp) {
             Some(v) => v,
             None => {
-                let empty = crate::game::fe::FeFrame { atlas: Atlas::new(1024), vertices: Vec::new(), subtract: Vec::new(), under: 0, floor: 0 };
+                let empty = crate::game::fe::FeFrame { atlas: Atlas::new(1024), vertices: Vec::new(), subtract: Vec::new(), under: 0, floor: 0, more_cars: Vec::new(), first_car: None };
                 (empty, Vec::new(), Vec::new(), Vec::new())
             }
         };
@@ -930,7 +927,27 @@ pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: b
     r.hud_mid = scene.mid;
     r.hud_mid_subtract = scene.mid_subtract;
     r.dyn_mid = scene.car_split;
-    let img = if shot {
+    let img = if !scene.more.is_empty() {
+        // more cars in views of their own (the split car selects): a layer each
+        let showroom_params = |view_proj: Mat4| {
+            let mut p = flat_params();
+            p.view_proj = view_proj;
+            p.fog_start = 1.0e9;
+            p.fog_end = 2.0e9;
+            p
+        };
+        let mut layers = vec![crate::render::Layer { params, dynamic: scene.car, dyn_mid: scene.car_split, over: scene.over, over_subtract: r.hud_subtract.clone() }];
+        for c in scene.more {
+            let p = showroom_params(c.view_proj);
+            layers.push(crate::render::Layer { params: p, dynamic: c.car, dyn_mid: c.car_split, over: c.over, over_subtract: c.subtract });
+        }
+        if shot {
+            Some(r.screenshot_layers(&layers))
+        } else {
+            r.render_layers(&layers);
+            None
+        }
+    } else if shot {
         Some(r.screenshot(&params, &[], &scene.car, &scene.over))
     } else {
         r.render(&params, &[], &scene.car, &scene.over);

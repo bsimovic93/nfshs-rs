@@ -468,7 +468,7 @@ fn real_main() -> Result<()> {
                         }
                         img.save(std::path::Path::new(&dir).join(format!("vram_{f}.png")))?;
                     }
-                    let showroom = game::fe::FeScene::car_code(&overlay).and_then(|code| game::fe::Showroom::load(&data, &code));
+                    let showroom = game::fe::Showroom::load(&data, &game::fe::FeScene::car_codes(&overlay));
                     let scene = game::fe::FeScene::build(&overlay, &vram, screen, 960.0, 720.0, showroom.as_ref());
                     let n = (scene.under.len() + scene.over.len()) / 6;
                     let r = match &mut r {

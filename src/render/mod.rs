@@ -145,6 +145,18 @@ pub struct Pass {
     pub keep: bool,
     /// Only the 2D (`hud`), no world.
     pub no_world: bool,
+    /// No background (the sky) under this pass: it draws over the earlier ones.
+    pub no_sky: bool,
+}
+
+/// One layer of a front-end frame with several showroom cars: a car (its geometry, split
+/// after its reflection, and projection) and the 2D drawn after it.
+pub struct Layer {
+    pub params: FrameParams,
+    pub dynamic: Vec<Vertex>,
+    pub dyn_mid: u32,
+    pub over: Vec<Vertex>,
+    pub over_subtract: Vec<std::ops::Range<u32>>,
 }
 
 /// One view of a split-screen frame: its frame parameters, geometry and 2D layers.
@@ -652,8 +664,10 @@ impl Renderer {
                 drop(rp);
                 return enc.finish();
             }
-            rp.set_pipeline(&self.sky_pipeline);
-            rp.draw(0..3, 0..1);
+            if !pass.no_sky {
+                rp.set_pipeline(&self.sky_pipeline);
+                rp.draw(0..3, 0..1);
+            }
             if !self.hud_under.is_empty() {
                 set_vp(&mut rp, vp2d);
                 rp.set_pipeline(&self.hud_pipeline);
@@ -832,15 +846,63 @@ impl Renderer {
             self.glows = v.glows.clone();
             self.glows_sub = v.glows_sub.clone();
             self.hud_subtract = v.over_subtract.clone();
-            let cmd = self.encode_pass(target, &v.params, sky, &v.dynamic, &v.over, Pass { viewport: Some(v.viewport), keep: k > 0, no_world: false });
+            let cmd = self.encode_pass(target, &v.params, sky, &v.dynamic, &v.over, Pass { viewport: Some(v.viewport), keep: k > 0, ..Default::default() });
             // (each pass's buffers and uniforms are written before it is submitted)
             self.queue.submit([cmd]);
         }
         self.hud_subtract = hud_subtract;
         if let Some(v) = views.first() {
-            cmds.push(self.encode_pass(target, &v.params, sky, &[], hud, Pass { viewport: None, keep: true, no_world: true }));
+            cmds.push(self.encode_pass(target, &v.params, sky, &[], hud, Pass { viewport: None, keep: true, no_world: true, ..Default::default() }));
         }
         cmds
+    }
+
+    /// A frame drawn as layers (front end with several cars): the first with `hud_under`
+    /// and `hud_mid` as set, the rest over it, each layer's car then its 2D.
+    fn encode_layers(&mut self, target: &wgpu::TextureView, layers: &[Layer]) -> Vec<wgpu::CommandBuffer> {
+        let saved = (std::mem::take(&mut self.hud_subtract), self.dyn_mid);
+        let mut cmds = Vec::new();
+        for (k, l) in layers.iter().enumerate() {
+            if k == 1 {
+                self.hud_under.clear();
+                self.hud_under_subtract.clear();
+                self.hud_mid.clear();
+                self.hud_mid_subtract.clear();
+            }
+            self.hud_subtract = l.over_subtract.clone();
+            self.dyn_mid = l.dyn_mid;
+            let cmd = self.encode_pass(target, &l.params, &[], &l.dynamic, &l.over, Pass { keep: k > 0, no_sky: k > 0, ..Default::default() });
+            if k + 1 < layers.len() {
+                // (each pass's buffers are written before it is submitted)
+                self.queue.submit([cmd]);
+            } else {
+                cmds.push(cmd);
+            }
+        }
+        (self.hud_subtract, self.dyn_mid) = saved;
+        cmds
+    }
+
+    pub fn render_layers(&mut self, layers: &[Layer]) {
+        let Some((surface, config)) = &self.surface else { return };
+        let frame = match surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                surface.configure(&self.device, config);
+                return;
+            }
+            _ => return,
+        };
+        let view = frame.texture.create_view(&Default::default());
+        let cmds = self.encode_layers(&view, layers);
+        self.queue.submit(cmds);
+        self.queue.present(frame);
+    }
+
+    pub fn screenshot_layers(&mut self, layers: &[Layer]) -> image::RgbaImage {
+        let (tex, view) = self.shot_target();
+        let cmds = self.encode_layers(&view, layers);
+        self.read_back(&tex, cmds)
     }
 
     pub fn render_views(&mut self, views: &[ViewDraw], sky: &[Vertex], hud: &[Vertex]) {
