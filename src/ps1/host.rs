@@ -521,8 +521,9 @@ const GP: u32 = 0x8013_D83C;
 const VIDEO_BLOCK_NAME: u32 = 0x8005_6F08;
 /// Front-end routines that build GPU primitives themselves (the video wall's DrawTV and
 /// DrawTVLines): run as they are and their primitives recorded (`capture_prims`).
-const CAPTURED_FE_DRAWING: [u32; 8] = [
+const CAPTURED_FE_DRAWING: [u32; 9] = [
     0x8002_24AC, // DrawTV
+    0x800C_ECD0, // Flare_2DHalo (the glow beside a menu's selected row, DrawLeftFlare)
     0x8002_4C4C, // DrawSlider (car statistics, options sliders)
     0x8002_2158, // DrawTVLines
     0x8001_C25C, // SubtractiveBox
