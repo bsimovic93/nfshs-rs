@@ -241,6 +241,44 @@ pub fn power_on(data_root: &Path) -> Result<Cpu> {
     Ok(cpu)
 }
 
+/// The headlight beam of night driving (Night_SetEnviroment's parameters, kept in the draw
+/// cache): a vertex at (x, z) in the beam's space (the player car's axes, 1/64 m) with
+/// z0 <= z < z0 + 2^(zs+6) and |x| < 2^(xs+5) takes the level map[(z - z0) >> zs][(x + 2^(xs+5)) >> xs]
+/// (0..15) and its colour index s becomes table[s][level].
+#[derive(Clone, Debug, Default)]
+pub struct NightBeam {
+    /// Bit 0: the player's headlights are on.
+    pub flags: u8,
+    pub z0: i32,
+    pub xs: u32,
+    pub zs: u32,
+    /// 64 x 64 levels (Night's beam map, 0x8013ED20).
+    pub map: Vec<u8>,
+    /// 256 x 16 colour indices (Night_GenerateAllLightTables, 0x8013ED28).
+    pub table: Vec<u8>,
+}
+
+impl NightBeam {
+    fn read(c: &mut Cpu) -> Option<Self> {
+        let (map, table) = (c.m.r32(0x8013_ED20), c.m.r32(0x8013_ED28));
+        if map == 0 || table == 0 || c.m.r32(0x8011_44F8) == 0 {
+            return None;
+        }
+        let bytes = |c: &mut Cpu, a: u32, n: u32| (0..n).map(|i| c.m.r8(a + i)).collect::<Vec<u8>>();
+        // (DrawW sets the draw cache's copies per chunk: headlights on when the player's car
+        // has them on, Car_tObj+1095 bits 1..2; the shape from Night_SetEnviroment)
+        let player = c.m.r32(addr::CAR_LIST);
+        Some(Self {
+            flags: u8::from(player != 0 && c.m.r8(player + 1095) & 6 != 0),
+            z0: c.m.r16(0x8013_ED10) as i16 as i32,
+            xs: c.m.r8(0x8013_ED18) as u32,
+            zs: c.m.r8(0x8013_ED1C) as u32,
+            map: bytes(c, map, 4096),
+            table: bytes(c, table, 4096),
+        })
+    }
+}
+
 /// One car as the original simulation sees it (PS1 world space, 16.16 fixed point, metres).
 #[derive(Clone, Debug, Default)]
 pub struct CarState {
@@ -634,6 +672,8 @@ pub struct Snapshot {
     pub hud: Option<std::sync::Arc<HudSetup>>,
     /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
     pub light_table: Vec<u32>,
+    /// Night driving: the player's headlight beam as Night_NightCalc lights the world with it.
+    pub night_beam: Option<NightBeam>,
     /// The track's glowing lights (read once the track is loaded).
     pub glares: Vec<Glare>,
     /// BWorld_gChunkBuildList: the track chunks the original draws this frame and how
@@ -717,6 +757,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()
         },
         skids: read_skids(&mut |a| c.m.r32(a)),
+        night_beam: NightBeam::read(c),
         light_table: {
             let t = c.m.r32(addr::LIGHT_TABLE);
             if t == 0 { Vec::new() } else { (0..256).map(|i| c.m.r32(t + 4 * i)).collect() }

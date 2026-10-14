@@ -19,6 +19,46 @@ struct Globals {
     head_dir: [f32; 4],
     /// Camera forward axis; w = 1 when `fog` holds PS1 depth-cue parameters.
     cam_fwd: [f32; 4],
+    /// The night headlight beam (see [`NightBeam`]): right axis (w xs), forward axis (w z0),
+    /// origin (w 1 = on), (zs, ..).
+    beam: [[f32; 4]; 4],
+    /// Its 64x64 level map, 256x16 colour-index table and 256 light-table colours, packed
+    /// as bytes / words.
+    night: [[u32; 4]; NIGHT_WORDS],
+}
+
+const NIGHT_WORDS: usize = 256 + 256 + 64;
+
+/// Night driving's headlight beam as the original applies it to the track's vertices
+/// (Night_NightCalc): in the beam's space (the player car's axes from its position, 1/64 m)
+/// a vertex at z0 <= z < z0 + 2^(zs+6), |x| < 2^(xs+5) has its light-table index s replaced by
+/// table[s][map[(z - z0) >> zs][(x + 2^(xs+5)) >> xs]].
+#[derive(Clone)]
+pub struct NightBeam {
+    pub origin: Vec3,
+    pub right: Vec3,
+    pub forward: Vec3,
+    pub z0: f32,
+    pub xs: f32,
+    pub zs: f32,
+    /// The map, table and light-table colours packed (`NIGHT_WORDS` vec4s).
+    pub data: Arc<Vec<[u32; 4]>>,
+}
+
+impl NightBeam {
+    /// Pack the beam map (4096 bytes), colour table (4096 bytes) and light table (256 words).
+    pub fn pack(map: &[u8], table: &[u8], light: &[u32]) -> Vec<[u32; 4]> {
+        let words = |b: &[u8]| -> Vec<u32> { b.chunks(4).map(|c| c.iter().enumerate().fold(0u32, |w, (i, &x)| w | (x as u32) << (8 * i))).collect() };
+        let mut w = words(&map[..4096.min(map.len())]);
+        w.resize(1024, 0);
+        let mut t = words(&table[..4096.min(table.len())]);
+        t.resize(1024, 0);
+        let mut l = light.to_vec();
+        l.resize(256, 0);
+        w.extend(t);
+        w.extend(l);
+        w.chunks(4).map(|c| [c[0], c[1], c[2], c[3]]).collect()
+    }
 }
 
 /// The PS1's depth cueing (GTE DPCS/DPCT): vertex colours fade towards `far` by
@@ -54,6 +94,8 @@ pub struct FrameParams {
     pub cam_fwd: Vec3,
     /// When set, replaces the linear fog.
     pub depth_cue: Option<DepthCue>,
+    /// Night driving with the headlights on.
+    pub night_beam: Option<NightBeam>,
 }
 
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -487,6 +529,19 @@ impl Renderer {
             head_pos: p.headlight.1.extend(1.0).into(),
             head_dir: p.headlight.2.extend(0.0).into(),
             cam_fwd: p.cam_fwd.extend(if p.depth_cue.is_some() { 1.0 } else { 0.0 }).into(),
+            beam: match &p.night_beam {
+                Some(b) => [b.right.extend(b.xs).into(), b.forward.extend(b.z0).into(), b.origin.extend(1.0).into(), [b.zs, 0.0, 0.0, 0.0]],
+                None => [[0.0; 4]; 4],
+            },
+            night: {
+                let mut n = [[0u32; 4]; NIGHT_WORDS];
+                if let Some(b) = &p.night_beam {
+                    for (d, s) in n.iter_mut().zip(b.data.iter()) {
+                        *d = *s;
+                    }
+                }
+                n
+            },
         };
         self.queue.write_buffer(&self.world_globals, 0, bytemuck::bytes_of(&g));
         let (w, h) = (self.size.0 as f32, self.size.1 as f32);
@@ -500,6 +555,8 @@ impl Renderer {
             head_pos: [0.0; 4],
             head_dir: [0.0; 4],
             cam_fwd: [0.0; 4],
+            beam: [[0.0; 4]; 4],
+            night: [[0; 4]; NIGHT_WORDS],
         };
         self.queue.write_buffer(&self.hud_globals, 0, bytemuck::bytes_of(&hud_g));
         let sky_g = Globals {
@@ -512,6 +569,8 @@ impl Renderer {
             head_pos: [0.0; 4],
             head_dir: [0.0; 4],
             cam_fwd: [0.0; 4],
+            beam: [[0.0; 4]; 4],
+            night: [[0; 4]; NIGHT_WORDS],
         };
         self.queue.write_buffer(&self.sky_globals, 0, bytemuck::bytes_of(&sky_g));
         self.sky_vb.upload(&self.device, &self.queue, sky);

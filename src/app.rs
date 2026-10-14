@@ -472,6 +472,7 @@ impl App {
                     fog_end: 1.0,
                     cam_fwd: Vec3::Z,
                     depth_cue: None,
+                    night_beam: None,
                 };
                 r.render(&params, &[], &[], &hud);
             }
@@ -670,6 +671,7 @@ pub fn flat_params() -> FrameParams {
         fog_end: 1.0,
         cam_fwd: Vec3::Z,
         depth_cue: None,
+        night_beam: None,
     }
 }
 
@@ -719,6 +721,12 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                 }
             } else if let Some(g) = &mut game {
                 g.update(1.0 / 60.0, input);
+                if std::env::var_os("NFSHS_BEAMLOG").is_some() && frame % 60 == 0 {
+                    if let Some(b) = g.sim.as_ref().and_then(|s| s.snapshot().night_beam.clone()) {
+                        let nz = b.map.iter().filter(|&&v| v != 0).count();
+                        println!("frame {frame}: beam flags {:#x} z0 {} xs {} zs {}, map cells lit {nz}, max {}", b.flags, b.z0, b.xs, b.zs, b.map.iter().max().unwrap_or(&0));
+                    }
+                }
                 if std::env::var_os("NFSHS_CARSLOG").is_some() && frame % 60 == 0 {
                     if let Some(sim) = &g.sim {
                         let s = sim.snapshot();
@@ -867,6 +875,7 @@ pub fn menu_screenshot(data: &GameData, out: &std::path::Path) -> anyhow::Result
         fog_end: 1.0,
                     cam_fwd: Vec3::Z,
                     depth_cue: None,
+                    night_beam: None,
     };
     r.screenshot(&params, &[], &[], &menu.draw(&font, &art, 960.0, 720.0)).save(out)?;
     Ok(())

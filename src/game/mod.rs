@@ -124,6 +124,9 @@ pub struct Game {
     /// Ambient light multiplier (night < 1).
     pub ambient: f32,
     pub night: bool,
+    /// Night driving (the track's night variant): the original draws the world without its
+    /// depth cue then (DrawW_DrawQuad takes DrawW_NightColorCalc's colours instead).
+    pub night_driving: bool,
     /// The recompiled original simulation, when it drives this race.
     pub sim: Option<original::OriginalSim>,
     /// The original HUD (when the simulation provides its layout).
@@ -187,6 +190,9 @@ impl Game {
         };
         // the track's vertex colours come from the original's light table
         let light = sim.as_ref().map(|s| s.snapshot().light_table.clone()).unwrap_or_default();
+        if std::env::var_os("NFSHS_LIGHTLOG").is_some() {
+            println!("light table: {}", light.iter().step_by(8).map(|c| format!("{:06x}", c & 0xFF_FFFF)).collect::<Vec<_>>().join(" "));
+        }
         let sky = sim.as_ref().and_then(|s| s.snapshot().sky.clone());
         let track = assets::load_track(data, atlas, cfg.track, cfg.variant, &light, sky.as_ref())?;
         let font = hud::Font::new(atlas);
@@ -340,13 +346,17 @@ impl Game {
             accum: 0.0,
             font,
             fog,
+            // (this engine's own night and wet looks; races the original runs light their
+            // tracks as it does: its night/wet track data and depth cue)
             ambient: match cfg.variant {
                 // linear-light multipliers (output is sRGB)
+                _ if sim.is_some() => 1.0,
                 "N" => 0.1,
                 "W" => 0.65,
                 _ => 1.0,
             },
-            night: cfg.variant == "N",
+            night: cfg.variant == "N" && sim.is_none(),
+            night_driving: matches!(cfg.variant, "N" | "S"),
             ps1hud: None,
             sim,
         };
@@ -762,13 +772,27 @@ impl Game {
             fog_start: self.fog.1,
             fog_end: self.fog.2,
             cam_fwd: (self.cam_target - self.cam_pos).normalize_or(Vec3::Z),
+            night_beam: self.sim.as_ref().and_then(|s| {
+                let snap = s.snapshot();
+                let b = snap.night_beam.as_ref().filter(|b| b.flags & 1 != 0)?;
+                let car = &self.racers[0].car;
+                Some(crate::render::NightBeam {
+                    origin: car.pos,
+                    right: car.right(),
+                    forward: car.forward(),
+                    z0: b.z0 as f32,
+                    xs: b.xs as f32,
+                    zs: b.zs as f32,
+                    data: std::sync::Arc::new(crate::render::NightBeam::pack(&b.map, &b.table, &snap.light_table)),
+                })
+            }),
             depth_cue: self.sim.as_ref().map(|s| {
                 // the GTE far colour / depth-cue values the game set for this view
                 let e = s.snapshot().view_env;
                 crate::render::DepthCue {
                     far: Vec3::new(e[0] as f32, e[1] as f32, e[2] as f32) / 16.0,
-                    dqa: e[3] as f32,
-                    dqb: e[4] as f32,
+                    dqa: if self.night_driving { 0.0 } else { e[3] as f32 },
+                    dqb: if self.night_driving { 0.0 } else { e[4] as f32 },
                     h: e[5].max(1) as f32,
                 }
             }),

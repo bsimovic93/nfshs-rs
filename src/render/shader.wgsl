@@ -13,6 +13,10 @@ struct Globals {
     head_dir: vec4<f32>,
     // camera forward axis; w = 1: `fog` holds the PS1 depth cue (DQA, DQB, H), fog_color the far colour
     cam_fwd: vec4<f32>,
+    // night headlight beam: right axis (w xs), forward axis (w z0), origin (w 1 = on), (zs)
+    beam: array<vec4<f32>, 4>,
+    // its level map (64x64 bytes), colour-index table (256x16 bytes), light table (256 words)
+    night: array<vec4<u32>, 576>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -33,12 +37,51 @@ struct VOut {
     @location(3) world: vec3<f32>,
 };
 
+fn night_word(i: u32) -> u32 {
+    return g.night[i >> 2u][i & 3u];
+}
+
+fn night_byte(i: u32) -> u32 {
+    return (night_word(i >> 2u) >> ((i & 3u) * 8u)) & 0xFFu;
+}
+
+// A track vertex carries its light-table index s as alpha + 2 (s + 1): at night inside the
+// headlight beam its colour becomes light[table[s][level]] (Night_NightCalc).
+fn track_colour(pos: vec3<f32>, c: vec4<f32>) -> vec4<f32> {
+    if (c.a < 1.5) {
+        return c;
+    }
+    let k = floor(c.a * 0.5);
+    var o = vec4<f32>(c.rgb, c.a - 2.0 * k);
+    let s = u32(k) - 1u;
+    if (g.beam[2].w < 0.5) {
+        return o;
+    }
+    let d = (pos - g.beam[2].xyz) * 64.0;
+    let x = i32(floor(dot(d, g.beam[0].xyz)));
+    let z = i32(floor(dot(d, g.beam[1].xyz)));
+    let xs = u32(g.beam[0].w);
+    let zs = u32(g.beam[3].x);
+    let z0 = i32(g.beam[1].w);
+    let half = 1 << (xs + 5u);
+    if (z <= z0 || z >= z0 + (1 << (zs + 6u)) || x <= -half || x >= half) {
+        return o;
+    }
+    let row = u32((z - z0) >> zs);
+    let col = u32((x + half) >> xs);
+    let level = night_byte(row * 64u + col);
+    let s2 = night_byte(4096u + s * 16u + level);
+    let l = night_word(2048u + s2);
+    o = vec4<f32>(f32(l & 0xFFu) / 256.0, f32((l >> 8u) & 0xFFu) / 256.0, f32((l >> 16u) & 0xFFu) / 256.0, o.a);
+    return o;
+}
+
 @vertex
 fn vs_main(v: VIn) -> VOut {
     var o: VOut;
     o.clip = g.view_proj * vec4<f32>(v.pos, 1.0);
     o.uv = v.uv;
-    o.color = v.color;
+    o.color = track_colour(v.pos, v.color);
     o.dist = distance(v.pos, g.cam_pos.xyz);
     o.world = v.pos;
     return o;

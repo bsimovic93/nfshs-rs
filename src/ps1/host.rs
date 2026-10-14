@@ -1963,6 +1963,9 @@ impl Host for GameHost {
                 // the original runs while rendering the HUD
                 let g = |r: usize| c.gte_read(32 + r) as i32;
                 self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
+                if std::env::var_os("NFSHS_ENVLOG").is_some() && self.frame.frames_run % 120 == 0 {
+                    eprintln!("view env (far rgb, dqa, dqb, h, back rgb) {:?}", self.view_env);
+                }
                 // which track chunks to draw, and how (detail level)
                 c.call_nested(SETUP_BUILD_MATRICES, &[RENDER_VIEW, 0x1F80_0000]);
                 c.call_nested(DRAWW_WORLD_SETUP_MATRIX, &[G_WORLD_MAT, 0x1F80_0014]);

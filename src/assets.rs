@@ -191,6 +191,9 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         // 2 = bottom-left, 3 = bottom-right
         (rect, [pmx[1], pmx[0], pmx[2], pmx[3]])
     };
+    // the vertex's light-table index rides on its alpha (+ 2 (s + 1)) for the shader's night
+    // headlight lookup
+    let tag = |s: i16| if !light.is_empty() && (0..256).contains(&s) { 2.0 * (s as f32 + 1.0) } else { 0.0 };
     let shade = |s: i16| {
         // vertex colour from the light table: 0x80 per channel is neutral (texture x 1)
         if let Some(&c) = light.get(s as usize) {
@@ -233,7 +236,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             for k in 0..4 {
                 let s = mesh.verts.get(q.v[k] as usize).map(|v| v[3]).unwrap_or(0);
                 let mut color = shade(s);
-                color[3] = alpha;
+                color[3] = alpha + tag(s);
                 verts.push(Vertex { pos: p[k].into(), uv: atlas.uv(rect, corners[k]), color });
             }
             let front = [base, base + 1, base + 2, base, base + 2, base + 3];
@@ -296,7 +299,9 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             let corners = [(p0 - d0, s0, Vec2::new(0.0, 0.0)), (p0 + d0, s0, Vec2::new(0.0, th)), (p1 + d1, s1, Vec2::new(tw, th)), (p1 - d1, s1, Vec2::new(tw, 0.0))];
             let base = verts.len() as u32;
             for (p, s, uv) in corners {
-                verts.push(Vertex { pos: (ps1_to_world(p) + lift).into(), uv: atlas.uv(rect, uv), color: shade(s) });
+                let mut color = shade(s);
+                color[3] += tag(s);
+                verts.push(Vertex { pos: (ps1_to_world(p) + lift).into(), uv: atlas.uv(rect, uv), color });
             }
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2]);
         }
@@ -625,8 +630,8 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
 
 /// Load a car as the race does (R3DCar_ReadInCarData / CarIO_ReadInCarTextureData): the
 /// player's car from `ZZZ<code>H.VIV`, the others from `ZZZ<code>S.VIV`. The PSH files hold
-/// the texture pages: the interior and underside ("i") on a page of their own, the body in
-/// a day ("l") and a night ("d", wheels "g") version.
+/// the texture pages: the interior and underside ("i") on a page of their own, the body's
+/// light ("l", paints 0..7) or dark ("d", paints 8..15) set, then "g".
 pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool, plate: Option<&str>, colour: u8) -> Result<CarModel> {
     let name = format!("ZZZ{code}{}.VIV", if player { "H" } else { "S" });
     // (police cars: the livery the game loaded for this track, e.g. CBMW -> ZZZGBMWS.VIV)
@@ -641,20 +646,23 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
     // two 256x256 pages; which page and shape each texture name is on
     let mut pages = [crate::formats::psh::Atlas::new(256), crate::formats::psh::Atlas::new(256)];
     let mut page_of: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let skip = if night { ['l'] } else { ['d'] };
+    // R3DCar_Instantiate3DCar: the body's second texture file is "d" for paints 8..15 and
+    // "l" for 0..7 (palette row = paint & 7), then "g"; night driving changes nothing here
+    let _ = night;
+    let skip = if colour >= 8 { ['l'] } else { ['d'] };
     let mut files: Vec<(char, Psh)> = Vec::new();
     for (n, d) in &viv.entries {
         let n = n.to_ascii_lowercase();
         let Some(stem) = n.strip_suffix(".psh") else { continue };
         let kind = stem.chars().last().unwrap_or(' ');
-        if skip.contains(&kind) || (kind == 'g' && !night) {
+        if skip.contains(&kind) {
             continue;
         }
         let mut psh = Psh::parse(d)?;
-        psh.paint(colour as usize);
+        psh.paint((colour & 7) as usize);
         files.push((kind, psh));
     }
-    // night replacements ("d", "g") last, so they cover the day shapes
+    // the later files ("d", "g") last, so they cover the shapes before them
     files.sort_by_key(|(k, _)| matches!(k, 'd' | 'g'));
     for (kind, psh) in &files {
         let page = usize::from(*kind == 'i');

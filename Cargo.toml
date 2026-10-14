@@ -10,7 +10,7 @@ members = ["crates/ps1rt", "crates/nfs4rc"]
 ps1rt = { path = "crates/ps1rt" }
 nfs4rc = { path = "crates/nfs4rc" }
 anyhow = "1.0.104"
-bytemuck = { version = "1.25.2", features = ["derive"] }
+bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
 cpal = "0.18.2"
 env_logger = "0.11"
 gilrs = "0.11.2"
