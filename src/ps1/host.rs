@@ -879,7 +879,7 @@ impl GameHost {
                 if std::env::var_os("PS1_CMDLOG").is_some() && self.mode == Mode::FrontEnd {
                     for (i, cmd) in self.overlay.iter().enumerate() {
                         let d = match cmd {
-                            OverlayCmd::Quad { pts, tex, semi, abr, colours } => format!("quad {:?} tex {} semi {semi} abr {abr} pts {pts:?} col {colours:x?}", pts[0], tex.is_some()),
+                            OverlayCmd::Quad { pts, tex, semi, abr, colours } => format!("quad {:?} tex {:x?} semi {semi} abr {abr} pts {pts:?} col {colours:x?}", pts[0], tex.as_ref().map(|t| (t.tpage, t.clut, t.uv[0], t.uv[3]))),
                             other => format!("{}", format!("{other:?}").chars().take(60).collect::<String>()),
                         };
                         eprintln!("cmd {i} {d}");
@@ -1219,7 +1219,11 @@ impl GameHost {
                 let pts = self.offset_pts(pts);
                 self.overlay.push(OverlayCmd::Quad { pts, colours: [c0, c1, c0, c1], tex: None, semi, abr });
             }
-            _ => {}
+            _ => {
+                if std::env::var_os("PS1_PRIMLOG").is_some() {
+                    eprintln!("prim {code:#04x} len {len} not drawn");
+                }
+            }
         }
     }
 
@@ -1336,6 +1340,19 @@ impl Host for GameHost {
         if self.overlay.len() > 200_000 {
             self.overlay.clear();
         }
+        if self.mode == Mode::FrontEnd && !self.capturing && addr == 0x8004_22DC && c.r[31] == 0x8004_1E5C {
+            // tScreenTrackSelect::DrawVideoWall from DrawBackground, which has just built the
+            // spinning track's two video quads (POLY_FT4, frames streamed to VRAM x 512) in the
+            // primitive buffer itself: record them, then run the wall as usual
+            let end = c.m.r32(0x1F80_0004);
+            let quad = |c: &mut Cpu, p: u32| c.m.r32(p) >> 24 == 9 && c.m.r8(p + 7) & 0xFC == 0x2C;
+            if std::env::var_os("PS1_VIDLOG").is_some() {
+                eprintln!("track video quads at {end:#x}: {:x?}", (0..20).map(|i| c.m.r32(end.wrapping_sub(80) + 4 * i)).collect::<Vec<_>>());
+            }
+            if quad(c, end.wrapping_sub(80)) && quad(c, end.wrapping_sub(40)) {
+                self.record_packets(c, end - 80, end);
+            }
+        }
         if self.mode == Mode::FrontEnd && !self.capturing && CAPTURED_FE_DRAWING.contains(&addr) {
             c.r[2] = self.capture_prims(c, addr);
             return true;
@@ -1346,6 +1363,14 @@ impl Host for GameHost {
             let mut videos = std::mem::take(&mut self.videos);
             let action = videos.call(addr, [a0, a1, a2, a3], |_| file.clone(), |f| self.lookup(f), clock);
             self.videos = videos;
+            if std::env::var_os("PS1_VIDLOG").is_some() && addr == 0x8005_1480 {
+                let o = c.r[23];
+                let f: Vec<i32> = [100u32, 104, 110, 112, 114, 116, 120, 124, 668].iter().map(|&k| if k == 110 || (112..=116).contains(&k) { c.m.r16(o + k) as i16 as i32 } else { c.m.r32(o + k) as i32 }).collect();
+                eprintln!("video state {:?} ticks {} fields 100,104,110,112,114,116,120,124,668 = {f:?}", action.as_ref().map(|a| match a { super::video::VideoAction::Return(r) => *r as i32, _ => -1 }), c.m.r32(0x8013_EF8C));
+            }
+            if std::env::var_os("PS1_VIDLOG").is_some() && addr != 0x8005_1480 && addr != 0x8005_1528 {
+                eprintln!("video {addr:#x} handle {a0:#x} {file} -> {}", match &action { Some(super::video::VideoAction::Return(r)) => format!("{r}"), Some(super::video::VideoAction::Create) => "create".into(), _ => "upload".into() });
+            }
             match action {
                 Some(super::video::VideoAction::Create) => {
                     // a heap block for the handle, as VIDEO_create's VIDEOSTRUCT ("VIDW")
