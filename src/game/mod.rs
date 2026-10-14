@@ -521,8 +521,8 @@ impl Game {
         if self.sim.is_some() {
             let mut input = input;
             // (after the finish the original drives the car itself and its results screens
-            // take the pad: no engine driver then)
-            if input.autopilot {
+            // take the pad: no engine driver then, even when switched on)
+            if input.autopilot && self.racers[0].finish_time.is_none() {
                 // the engine's driver, through the digital pad
                 let r = &self.racers[0];
                 let c = self.autopilot.controls(&r.car, &self.path, r.progress, frame_dt);

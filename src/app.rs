@@ -730,6 +730,10 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                         let p = s.cars[0].position;
                         let d = |c: &crate::ps1::race::CarState| (((c.position[0] - p[0]) as f64).hypot((c.position[2] - p[2]) as f64) / 65536.0) as i32;
                         println!("frame {frame}: speed {:.0} km/h, cars {:?}", s.cars[0].speed as f32 / 65536.0 * 3.6, s.cars.iter().skip(1).map(|c| format!("{} {}m", c.code, d(c))).collect::<Vec<_>>());
+                        for (k, v) in sim.frame_snapshot().views.iter().enumerate() {
+                            let m = |a: [i32; 3]| a.map(|x| x >> 16);
+                            println!("    view {k}: player {} camera {:?} fwd {:?} car0 {:?} fwd {:?} car1 {:?}", v.player, m(v.camera_pos), &v.camera_rot[6..9], m(s.cars[0].position), &s.cars[0].orient[6..9], s.cars.get(1).map(|c| m(c.position)));
+                        }
                     }
                 }
                 if std::env::var_os("NFSHS_PARTSLOG").is_some() && frame % 30 == 0 {

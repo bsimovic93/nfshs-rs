@@ -852,6 +852,13 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         .to_string(),
         views,
     };
+    if std::env::var_os("NFSHS_GSLOG").is_some() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let w: Vec<i32> = (0..24).map(|i| c.m.r32(addr::GAMESETUP + 4 * i) as i32).collect();
+            eprintln!("GameSetup words 0..0x60: {w:?}, cars {} players {}", c.m.r32(addr::GAMESETUP + 0x3C4), c.m.r32(addr::GAMESETUP + 0x3C8));
+        });
+    }
     // split screen: the fields that are per view are the first view's
     if snap.views.len() > 1 { snap.for_view(0).with_views(snap.views) } else { snap }
 }

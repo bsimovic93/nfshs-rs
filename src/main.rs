@@ -540,6 +540,8 @@ fn real_main() -> Result<()> {
                     right: keys.contains('r'),
                     accept: keys.contains('x'),
                     back: keys.contains('t'),
+                    // (Triangle in a race: the camera)
+                    camera: keys.contains('t'),
                     circle: keys.contains('c'),
                     square: keys.contains('s'),
                     start: keys.contains('p'),

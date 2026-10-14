@@ -227,6 +227,11 @@ impl OriginalSim {
         self.view_snaps.get(self.view.get()).unwrap_or(&self.thread.last)
     }
 
+    /// The whole frame's snapshot (split screen: with every view's).
+    pub fn frame_snapshot(&self) -> &Snapshot {
+        &self.thread.last
+    }
+
     /// The player views the original drew (2 split screen).
     pub fn view_count(&self) -> usize {
         self.thread.last.views.len().max(1)
@@ -329,6 +334,11 @@ impl OriginalSim {
             let mut buttons = user_buttons;
             let snap = &self.thread.last;
             let mode = snap.camera_mode;
+            // split screen: each player keeps the view the original starts them in (pad 1's
+            // Triangle would change only the top one)
+            if snap.views.len() > 1 {
+                self.camera_target = None;
+            }
             match self.camera_target {
                 // the game starts every race in the bumper view: after the start, press
                 // Triangle (like the player would) until the preferred view is up
@@ -343,7 +353,7 @@ impl OriginalSim {
                     }
                 }
                 Some(_) => {}
-                None if CAMERA_MODES.contains(&mode) => PREFERRED_CAMERA.store(mode, Ordering::Relaxed),
+                None if CAMERA_MODES.contains(&mode) && snap.views.len() <= 1 => PREFERRED_CAMERA.store(mode, Ordering::Relaxed),
                 None => {}
             }
             if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false }) {
