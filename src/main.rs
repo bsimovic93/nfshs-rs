@@ -702,7 +702,9 @@ fn car_atlas(viv: &formats::viv::Viv) -> Result<formats::psh::Atlas> {
     // body page variants: skip the duplicate "d" sheet and the "g"/"i" extras for now
     for (name, data) in &viv.entries {
         let n = name.to_ascii_lowercase();
-        if !n.ends_with(".psh") || n.ends_with("d.psh") || n.ends_with("g.psh") || n.ends_with("i.psh") {
+        // (the variant letter follows the base name, "zz" and four letters: zzsand.psh is none)
+        let Some(stem) = n.strip_suffix(".psh") else { continue };
+        if matches!(stem.chars().nth(6), Some('d' | 'g' | 'i')) {
             continue;
         }
         let psh = formats::psh::Psh::parse(data)?;

@@ -654,7 +654,9 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
     for (n, d) in &viv.entries {
         let n = n.to_ascii_lowercase();
         let Some(stem) = n.strip_suffix(".psh") else { continue };
-        let kind = stem.chars().last().unwrap_or(' ');
+        // the variant letter follows the base name ("zz" and the car's four letters):
+        // zzbmwmd.psh is the "d" sheet, zzsand.psh the only one (not a "d" variant)
+        let kind = stem.chars().nth(6).unwrap_or(' ');
         if skip.contains(&kind) {
             continue;
         }
