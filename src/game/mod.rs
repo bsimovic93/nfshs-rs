@@ -97,6 +97,27 @@ pub struct RaceConfig<'a> {
     pub traffic: Vec<String>,
 }
 
+/// A light glow from one frame to the next: its world anchor, its car and the view's place in
+/// the window (split screen).
+type GlowKey = ([i32; 3], u32, [i32; 2]);
+
+/// The world anchor standing for the sun in [`Game::glow_offsets`].
+const SUN_KEY: [i32; 3] = [i32::MIN; 3];
+
+/// The centre of the quads among `cmds` (PS1 screen pixels).
+fn quads_centre<'a>(cmds: impl IntoIterator<Item = &'a crate::ps1::host::OverlayCmd>) -> Option<Vec2> {
+    let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+    for c in cmds {
+        if let crate::ps1::host::OverlayCmd::Quad { pts, .. } = c {
+            for p in pts {
+                let v = Vec2::new(p[0] as f32, p[1] as f32);
+                (lo, hi) = (lo.min(v), hi.max(v));
+            }
+        }
+    }
+    (lo.x <= hi.x).then(|| (lo + hi) * 0.5)
+}
+
 pub struct Game {
     pub track: TrackAssets,
     pub models: Vec<CarModel>,
@@ -142,6 +163,9 @@ pub struct Game {
     pub sim: Option<original::OriginalSim>,
     /// The original HUD (when the simulation provides its layout).
     pub ps1hud: Option<ps1hud::Ps1Hud>,
+    /// Per light glow (and the sun) as last drawn: how far the PS1 put it from the light's
+    /// exact projection (PS1 pixels, smoothed) and the simulated frame it was seen in.
+    glow_offsets: std::cell::RefCell<std::collections::HashMap<GlowKey, (Vec2, u32)>>,
     /// The track's glowing lights (from the original's track data).
     glares: Vec<crate::ps1::race::Glare>,
     /// The track's reflection map page (atlas rectangle) and the atlas' size.
@@ -373,6 +397,7 @@ impl Game {
             shadow_tex,
             skid_tex,
             glares,
+            glow_offsets: Default::default(),
             white_semi,
             reflections,
             atlas_size: atlas.size as f32,
@@ -854,6 +879,7 @@ impl Game {
             },
             ambient: self.ambient,
             headlight: (if self.night { 2.2 } else { 0.0 }, p.pos + Vec3::Y * 0.7 + p.forward() * 2.0, (p.forward() - Vec3::Y * 0.08).normalize()),
+            sky_dome: self.track.sky_dome as u32,
             sky_view_proj: squash * Mat4::perspective_rh(fov, aspect, 1.0, 1000.0) * sky_view,
             sky_top: self.track.sky_colors.0 * if self.night { 0.12 } else { 1.0 },
             view_proj: proj * view,
@@ -1362,8 +1388,8 @@ impl Game {
         let vram = s.vram.as_ref()?;
         let screen = (s.display[2].max(1), s.display[3].max(1));
         let moved = |cmds: &[crate::ps1::host::OverlayCmd]| -> Vec<crate::ps1::host::OverlayCmd> { cmds.iter().map(|c| c.offset(ofs[0], ofs[1])).collect() };
-        let sky = fe::FeFrame::build_in(atlas, &moved(&s.sky_overlay), vram, screen, w, h);
-        let mut atlas = sky.atlas;
+        let mut sky = fe::FeFrame::build_in(atlas, &moved(&s.sky_overlay), vram, screen, w, h);
+        let mut atlas = std::mem::replace(&mut sky.atlas, crate::assets::Atlas::new(1));
         let mut glows = Vec::new();
         // (the subtracted ones: PS1 semi-transparency mode 2, the smoke's dark puffs)
         let mut glows_sub = Vec::new();
@@ -1378,6 +1404,45 @@ impl Game {
             (c.w > 0.05).then(|| (Vec2::new(vp[0] + (c.x / c.w + 1.0) * 0.5 * vp[2], vp[1] + (1.0 - c.y / c.w) * 0.5 * vp[3]), c.z / c.w))
         };
         let poses = sim.poses().0;
+        // the PS1 puts its 2D on whole pixels of its 320 x 240 screen: a light's glow is up to
+        // a pixel off its light, differently every frame, which this picture's finer pixels
+        // show as a wobble. Each glow keeps a smoothed offset from its light's exact
+        // projection and is drawn at that, never more than a PS1 pixel from where the PS1 drew
+        // it (a car's halos move with its lights, which the smoothing must not lag behind).
+        let (aw, ah) = if w * 3.0 > h * 4.0 { (h * 4.0 / 3.0, h) } else { (w, w * 0.75) };
+        let scale = Vec2::new(aw / screen.0 as f32, ah / screen.1 as f32);
+        let origin = Vec2::new((w - aw) / 2.0, (h - ah) / 2.0);
+        let view_at = [vp[0] as i32, vp[1] as i32];
+        let mut offsets = self.glow_offsets.borrow_mut();
+        let mut seen = Vec::new();
+        let mut steadied = |key: GlowKey, centre: Option<Vec2>, p_orig: Vec2| -> Vec2 {
+            let Some(centre) = centre else { return Vec2::ZERO };
+            seen.push(key);
+            let off = (origin + centre * scale - p_orig) / scale;
+            let e = offsets.entry(key).or_insert((off, s.frame));
+            // (another shape, or the glow came back: start over)
+            if (off - e.0).length() > 4.0 {
+                e.0 = off;
+            } else if e.1 != s.frame {
+                e.0 += (off - e.0) * 0.15;
+            }
+            e.1 = s.frame;
+            (off - e.0).clamp(Vec2::splat(-1.0), Vec2::splat(1.0)) * scale
+        };
+        // the sun as seen by this frame's camera: its flare moved from where the original's
+        // camera saw the sun's direction to where this one does (the sky is drawn with it)
+        if let (Some(orig_vp), Some(cam)) = (orig, sim.sim_camera()) {
+            let dir = Vec3::new(-(s.sun_dir[0] as f32), s.sun_dir[1] as f32, s.sun_dir[2] as f32).normalize_or_zero() * 500.0;
+            if let (Some((p_now, _)), Some((p_orig, _))) = (to_px(now, self.cam_pos + dir), to_px(orig_vp, cam.pos + dir)) {
+                let first = s.sky_overlay.iter().find(|c| matches!(c, crate::ps1::host::OverlayCmd::Quad { .. }));
+                let centre = quads_centre(first.map(|c| c.offset(ofs[0], ofs[1])).as_ref());
+                let d = p_now - p_orig - steadied((SUN_KEY, 0, view_at), centre, p_orig);
+                for v in &mut sky.vertices {
+                    v.pos[0] += d.x;
+                    v.pos[1] += d.y;
+                }
+            }
+        }
         for g in &s.glows {
             let raw = Vec3::new(-(g.anchor[0] as f32), g.anchor[1] as f32, g.anchor[2] as f32) / 65536.0;
             // a car's light follows the drawn (interpolated) car; its size keeps the glow in
@@ -1404,7 +1469,7 @@ impl Game {
             // (a puff is reprojected afterwards: not cut at the original's screen edges)
             let f = fe::FeFrame::build_clipped(atlas, &moved(&g.cmds), vram, screen, w, h, !g.smoke);
             atlas = f.atlas;
-            let d = p_now - p_orig;
+            let d = if g.smoke { p_now - p_orig } else { p_now - p_orig - steadied((g.anchor, g.car.unwrap_or(0), view_at), quads_centre(&moved(&g.cmds)), p_orig) };
             if g.smoke && std::env::var_os("NFSHS_NOSMOKE").is_some() {
                 continue;
             }
@@ -1445,6 +1510,7 @@ impl Game {
                 if is_sub(i) { glows_sub.push(v) } else { glows.push(v) }
             }
         }
+        offsets.retain(|k, _| k.2 != view_at || seen.contains(k));
         Some((atlas, sky.vertices, glows, glows_sub))
     }
 

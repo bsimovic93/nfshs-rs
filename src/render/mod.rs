@@ -85,6 +85,9 @@ pub struct FrameParams {
     pub headlight: (f32, Vec3, Vec3),
     /// Projection * rotation-only view, for the camera-centred sky.
     pub sky_view_proj: Mat4,
+    /// How many of the sky's vertices are its dome: the sky layer (the sun) goes between
+    /// the dome and the horizon band after it, as the PS1 draws them.
+    pub sky_dome: u32,
     pub sky_top: Vec3,
     pub view_proj: Mat4,
     pub cam_pos: Vec3,
@@ -695,11 +698,13 @@ impl Renderer {
                 rp.set_bind_group(0, &self.world_bg, &[]);
                 set_vp(&mut rp, vp3d);
             }
-            if !sky.is_empty() {
+            // the dome, the sun over it, then the horizon band over the sun
+            let dome = p.sky_dome.min(sky.len() as u32);
+            if dome > 0 {
                 rp.set_pipeline(&self.hud_pipeline);
                 rp.set_bind_group(0, &self.sky_bg, &[]);
                 rp.set_vertex_buffer(0, self.sky_vb.buf.slice(..));
-                rp.draw(0..sky.len() as u32, 0..1);
+                rp.draw(0..dome, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);
             }
             if !self.sky_layer.is_empty() {
@@ -715,6 +720,13 @@ impl Renderer {
                 rp.draw(0..self.sky_layer.len() as u32, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);
                 set_vp(&mut rp, vp3d);
+            }
+            if (sky.len() as u32) > dome {
+                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_bind_group(0, &self.sky_bg, &[]);
+                rp.set_vertex_buffer(0, self.sky_vb.buf.slice(..));
+                rp.draw(dome..sky.len() as u32, 0..1);
+                rp.set_bind_group(0, &self.world_bg, &[]);
             }
             rp.set_pipeline(&self.track_pipeline);
             if let Some((vb, ib, n)) = &self.static_vb {

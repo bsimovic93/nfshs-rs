@@ -736,6 +736,9 @@ pub struct Snapshot {
     pub camera_mode: i16,
     /// Sky and horizon set-up.
     pub sky: Option<SkyData>,
+    /// The sun's direction (Flare_Sun's SVECTOR, PS1 world axes), for moving its flare with
+    /// the drawn camera.
+    pub sun_dir: [i16; 3],
     /// HUD inputs: `DashHUD_gInfo` (0x80 bytes) and the HUD layout record (0x60 bytes).
     pub dash: Vec<u8>,
     pub hud_layout: Vec<u8>,
@@ -909,6 +912,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         projection: c.m.r32(addr::CAMERA_ZOOM),
         view_env: info.view_env,
         sky: SkyData::read(&mut c.m),
+        sun_dir: std::array::from_fn(|i| c.m.r16(0x8013_F0F8 + 2 * i as u32) as i16),
         hud: HudSetup::read(&mut c.m, info.font_clut, info.font_palettes.clone()).map(std::sync::Arc::new),
         map: MapView::read(&mut |a| c.m.r32(a)),
         car_facets,

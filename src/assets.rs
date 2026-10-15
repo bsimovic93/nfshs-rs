@@ -108,6 +108,8 @@ pub struct TrackAssets {
     pub animated: Vec<AnimatedObject>,
     /// Camera-relative sky cylinder (horizon panorama).
     pub sky: Vec<Vertex>,
+    /// How many of `sky`'s vertices are the dome (the horizon band follows).
+    pub sky_dome: usize,
     /// Sky colour sampled from the cloud texture (zenith) and panorama top row (horizon).
     pub sky_colors: (Vec3, Vec3),
     pub sprites: Vec<Sprite>,
@@ -400,11 +402,14 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
     log::info!("{} track-wide scenery objects", track.globals.len());
     let nodes = track.nodes.iter().map(|&n| ps1_to_world(n)).collect();
     log::info!("{} sprites", sprites.len());
-    let (sky, sky_colors) = match sky {
+    let (sky, sky_dome, sky_colors) = match sky {
         Some(s) => build_original_sky(s, &psh, &rects, atlas),
-        None => build_sky(&psh, &rects, atlas),
+        None => {
+            let (v, c) = build_sky(&psh, &rects, atlas);
+            (v, 0, c)
+        }
     };
-    Ok(TrackAssets { animated, verts, indices, tris, track, nodes, sprites, sky, sky_colors, block_ranges, global_range })
+    Ok(TrackAssets { animated, verts, indices, tris, track, nodes, sprites, sky, sky_dome, sky_colors, block_ranges, global_range })
 }
 
 fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
@@ -425,7 +430,7 @@ fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
 /// Horizon cylinder from the HZ01..HZ04 panorama strips (8 segments, ~22 degrees tall).
 /// The original's sky: a gouraud-shaded dome (`Hrz_BuildSky`) and the textured horizon band
 /// (`Hrz_BuildHorizon`), camera-centred and scaled to radius 100.
-fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, Vec3)) {
+fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, usize, (Vec3, Vec3)) {
     let mut verts = Vec::new();
     log::debug!("sky dome rings {:?}", (0..5).map(|r| s.dome_colors[r * 17 + 8]).collect::<Vec<_>>());
     // untextured: the PS1 draws the vertex colour itself (x2 cancels the shader's modulation)
@@ -460,6 +465,7 @@ fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], 
             }
         }
     }
+    let dome = verts.len();
     // horizon band: each segment textured with HZ01..HZ08 (`index & 7`) and as tall as its
     // texture against the tallest one (Hrz_Init2DRing's ratios, which
     // Horizon_InterpolateLineSCoords applies between the band's bottom and top), so the 1x1
@@ -493,7 +499,7 @@ fn build_original_sky(s: &crate::ps1::race::SkyData, psh: &Psh, rects: &[Rect], 
         }
     }
     let c = |c: [u8; 3]| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0;
-    (verts, (c(s.dome_colors[4 * 17]), c(s.dome_colors[0])))
+    (verts, dome, (c(s.dome_colors[4 * 17]), c(s.dome_colors[0])))
 }
 
 fn build_sky(psh: &Psh, rects: &[Rect], atlas: &Atlas) -> (Vec<Vertex>, (Vec3, Vec3)) {
