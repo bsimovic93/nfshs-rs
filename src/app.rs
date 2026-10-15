@@ -180,12 +180,12 @@ impl App {
         if let Some(g) = &mut self.gilrs {
             while g.next_event().is_some() {}
             if let Some((_, pad)) = g.gamepads().next() {
-                use gilrs::{Axis, Button};
-                let (x, y) = (pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY));
-                i.up |= pad.is_pressed(Button::DPadUp) || y > 0.6;
-                i.down |= pad.is_pressed(Button::DPadDown) || y < -0.6;
-                i.left |= pad.is_pressed(Button::DPadLeft) || x < -0.6;
-                i.right |= pad.is_pressed(Button::DPadRight) || x > 0.6;
+                use gilrs::Button;
+                // (the stick goes to the original as a stick: it reads it as directions too)
+                i.up |= pad.is_pressed(Button::DPadUp);
+                i.down |= pad.is_pressed(Button::DPadDown);
+                i.left |= pad.is_pressed(Button::DPadLeft);
+                i.right |= pad.is_pressed(Button::DPadRight);
                 i.accept |= pad.is_pressed(Button::South);
                 i.back |= pad.is_pressed(Button::North);
                 i.circle |= pad.is_pressed(Button::East);
@@ -810,19 +810,19 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
     Ok(())
 }
 
-/// A gamepad as a PS1 pad (the second player's): face buttons as they sit, the triggers
-/// also Cross and Square (accelerate and brake in a race), the left stick as the d-pad.
+/// A gamepad as a PS1 pad's buttons (the second player's): face buttons as they sit, the
+/// triggers also Cross and Square (accelerate and brake in a race). The sticks are the
+/// DualShock's (see [`ps1_sticks`]).
 fn ps1_buttons(pad: &gilrs::Gamepad) -> u16 {
     use crate::ps1::race::pad;
-    use gilrs::{Axis, Button};
-    let (x, y) = (pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY));
+    use gilrs::Button;
     let trigger = |b: Button| pad.button_data(b).is_some_and(|d| d.value() > 0.3);
     let mut b = 0;
     for (on, bit) in [
-        (pad.is_pressed(Button::DPadUp) || y > 0.6, pad::UP),
-        (pad.is_pressed(Button::DPadDown) || y < -0.6, pad::DOWN),
-        (pad.is_pressed(Button::DPadLeft) || x < -0.3, pad::LEFT),
-        (pad.is_pressed(Button::DPadRight) || x > 0.3, pad::RIGHT),
+        (pad.is_pressed(Button::DPadUp), pad::UP),
+        (pad.is_pressed(Button::DPadDown), pad::DOWN),
+        (pad.is_pressed(Button::DPadLeft), pad::LEFT),
+        (pad.is_pressed(Button::DPadRight), pad::RIGHT),
         (pad.is_pressed(Button::South) || trigger(Button::RightTrigger2), pad::CROSS),
         (pad.is_pressed(Button::West) || trigger(Button::LeftTrigger2), pad::SQUARE),
         (pad.is_pressed(Button::East), pad::CIRCLE),
@@ -840,17 +840,11 @@ fn ps1_buttons(pad: &gilrs::Gamepad) -> u16 {
 }
 
 /// A gamepad's sticks as a DualShock's in analog mode (RX, RY, LX, LY; 0x80 centred, 0 left
-/// and up). The d-pad pushes the left stick fully left or right: the original steers with the
-/// stick alone when it sees an analog pad.
+/// and up).
 fn ps1_sticks(pad: &gilrs::Gamepad) -> [u8; 4] {
-    use gilrs::{Axis, Button};
+    use gilrs::Axis;
     let byte = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 127.5).round() as u8;
-    let lx = match (pad.is_pressed(Button::DPadLeft), pad.is_pressed(Button::DPadRight)) {
-        (true, false) => -1.0,
-        (false, true) => 1.0,
-        _ => pad.value(Axis::LeftStickX),
-    };
-    [byte(pad.value(Axis::RightStickX)), byte(-pad.value(Axis::RightStickY)), byte(lx), byte(-pad.value(Axis::LeftStickY))]
+    [byte(pad.value(Axis::RightStickX)), byte(-pad.value(Axis::RightStickY)), byte(pad.value(Axis::LeftStickX)), byte(-pad.value(Axis::LeftStickY))]
 }
 
 /// A race frame: the world and the original's 2D, one view or split screen (each player's

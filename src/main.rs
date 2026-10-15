@@ -535,12 +535,14 @@ fn real_main() -> Result<()> {
                     }
                     b
                 };
+                // (FEPLAY_PAD=stick: the directions are the stick's alone)
+                let dpad = std::env::var("FEPLAY_PAD").as_deref() != Ok("stick");
                 let i = game::Input {
                     pad2,
-                    up: keys.contains('u'),
-                    down: keys.contains('d'),
-                    left: keys.contains('l'),
-                    right: keys.contains('r'),
+                    up: dpad && keys.contains('u'),
+                    down: dpad && keys.contains('d'),
+                    left: dpad && keys.contains('l'),
+                    right: dpad && keys.contains('r'),
                     accept: keys.contains('x'),
                     back: keys.contains('t'),
                     // (Triangle in a race: the camera)
@@ -550,6 +552,16 @@ fn real_main() -> Result<()> {
                     start: keys.contains('p'),
                     select: keys.contains('e'),
                     autopilot: keys.contains('a'),
+                    // FEPLAY_PAD=dpad|stick: a gamepad, its directions from the d-pad or the
+                    // left stick (as the window's gamepad input has them)
+                    sticks: match std::env::var("FEPLAY_PAD").as_deref() {
+                        Ok("dpad") => Some([0x80; 4]),
+                        Ok("stick") => {
+                            let axis = |neg: char, pos: char| if keys.contains(neg) { 0x00 } else if keys.contains(pos) { 0xFF } else { 0x80 };
+                            Some([0x80, 0x80, axis('l', 'r'), axis('u', 'd')])
+                        }
+                        _ => None,
+                    },
                     ..Default::default()
                 };
                 script.push((secs.parse::<f32>()?, i));

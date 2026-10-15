@@ -123,11 +123,12 @@ impl OriginalSim {
         b
     }
 
-    /// The first controller's sticks: a gamepad's, with the keyboard's left/right pushing the
-    /// left stick fully (in analog mode the original steers with the stick alone).
-    fn sticks(input: &Input) -> Option<[u8; 4]> {
-        input.sticks.map(|mut s| {
-            match (input.left, input.right) {
+    /// A gamepad's sticks in a race, with left/right (d-pad, keyboard) pushing the left stick
+    /// fully: in analog mode the original steers with the stick alone. (Not in the menus,
+    /// which read the stick as directions besides the d-pad: a press would count twice.)
+    fn race_sticks(sticks: Option<[u8; 4]>, left: bool, right: bool) -> Option<[u8; 4]> {
+        sticks.map(|mut s| {
+            match (left, right) {
                 (true, false) => s[2] = 0x00,
                 (false, true) => s[2] = 0xFF,
                 _ => {}
@@ -313,10 +314,12 @@ impl OriginalSim {
         if input.camera {
             b |= pad::TRIANGLE;
         }
-        if input.left || input.steer_axis < -0.3 {
+        // (a gamepad's stick goes to the original as the stick)
+        let digital = input.sticks.is_none();
+        if input.left || (digital && input.steer_axis < -0.3) {
             b |= pad::LEFT;
         }
-        if input.right || input.steer_axis > 0.3 {
+        if input.right || (digital && input.steer_axis > 0.3) {
             b |= pad::RIGHT;
         }
         b
@@ -350,7 +353,7 @@ impl OriginalSim {
         while self.accum >= FRAME {
             if self.thread.last.front_end {
                 // the front end: its own buttons, no race bookkeeping
-                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), buttons2: input.pad2, want_ram: false, sticks: [Self::sticks(input), input.pad2_sticks] }) {
+                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), buttons2: input.pad2, want_ram: false, sticks: [input.sticks, input.pad2_sticks] }) {
                     log::warn!("original game ended: {e:#}");
                     self.stopped = true;
                     return;
@@ -383,7 +386,11 @@ impl OriginalSim {
                 None if CAMERA_MODES.contains(&mode) && snap.views.len() <= 1 => PREFERRED_CAMERA.store(mode, Ordering::Relaxed),
                 None => {}
             }
-            if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false, sticks: [Self::sticks(input), input.pad2_sticks] }) {
+            let sticks = [
+                Self::race_sticks(input.sticks, input.left, input.right),
+                Self::race_sticks(input.pad2_sticks, input.pad2 & pad::LEFT != 0, input.pad2 & pad::RIGHT != 0),
+            ];
+            if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false, sticks }) {
                 log::warn!("original simulation ended: {e:#}");
                 self.stopped = true;
                 return;
