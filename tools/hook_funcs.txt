@@ -28,6 +28,7 @@
 800eed6c SetDrawEnv (logged with PS1_CALLLOG; the original runs)
 80027b38 Front_Menu (the front end runs: frames are its)
 800b2e30 R3DCar_InsertCarFacetII (recorded; then run for its light halos)
+800b03e4 R3DCar_Visibilty (run with a widened view for the host's wider picture)
 800c22e0 DrawC_Prim part drawing (skipped while the halos are recorded)
 800c0ac8 DrawC_Prim part drawing (skipped while the halos are recorded)
 800c5054 DrawC_ShadowPrimClip (skipped while the halos are recorded)
