@@ -532,8 +532,14 @@ impl Game {
                 let c = self.autopilot.controls(&r.car, &self.path, r.progress, frame_dt);
                 input.up = c.throttle > 0.5;
                 input.down = c.brake > 0.5;
-                input.left = c.steer < -0.2;
-                input.right = c.steer > 0.2;
+                match &mut input.sticks {
+                    // an analog pad: steering in proportion
+                    Some(s) => s[2] = ((c.steer.clamp(-1.0, 1.0) + 1.0) * 127.5).round() as u8,
+                    None => {
+                        input.left = c.steer < -0.2;
+                        input.right = c.steer > 0.2;
+                    }
+                }
                 input.handbrake = c.handbrake;
             }
             for r in &mut self.racers {
