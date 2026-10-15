@@ -624,6 +624,14 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
                 std::fs::write(path, v.iter().flat_map(|p| p.to_le_bytes()).collect::<Vec<u8>>())?;
             }
         }
+        // NFSHS_LIGHTTABLELOG=1: a checksum of the original's light table every 5 s
+        if std::env::var_os("NFSHS_LIGHTTABLELOG").is_some() && (t * 60.0) as u32 % 300 == 0 {
+            if let Some(s) = game.sim.as_ref() {
+                let lt = &s.snapshot().light_table;
+                let sum = lt.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64));
+                println!("  t={t:5.1} light table {sum:016x} [{:06x} {:06x} {:06x} {:06x}]", lt.get(16).unwrap_or(&0) & 0xFF_FFFF, lt.get(64).unwrap_or(&0) & 0xFF_FFFF, lt.get(128).unwrap_or(&0) & 0xFF_FFFF, lt.get(200).unwrap_or(&0) & 0xFF_FFFF);
+            }
+        }
         // NFSHS_SKYLOG=1: the original's sky dome colours (zenith .. horizon) every 2 s
         if std::env::var_os("NFSHS_SKYLOG").is_some() && (t * 60.0) as u32 % 120 == 0 {
             if let Some(sky) = game.sim.as_ref().and_then(|s| s.snapshot().sky.clone()) {
