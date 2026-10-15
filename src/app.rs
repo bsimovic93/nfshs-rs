@@ -761,7 +761,7 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                         }
                     }
                 }
-                if std::env::var_os("NFSHS_PARTSLOG").is_some() && frame % 30 == 0 {
+                if std::env::var_os("NFSHS_PARTSLOG").is_some() && frame % std::env::var("NFSHS_PARTSLOG").ok().and_then(|v| v.parse().ok()).unwrap_or(30) == 0 {
                     if let Some(s) = g.sim.as_ref() {
                         let snap = s.snapshot();
                         for (k, f) in snap.car_facets.iter().enumerate() {

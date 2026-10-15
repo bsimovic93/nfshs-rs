@@ -1357,17 +1357,30 @@ impl Game {
             let c = m * p.extend(1.0);
             (c.w > 0.05).then(|| (Vec2::new(vp[0] + (c.x / c.w + 1.0) * 0.5 * vp[2], vp[1] + (1.0 - c.y / c.w) * 0.5 * vp[3]), c.z / c.w))
         };
+        let poses = sim.poses().0;
         for g in &s.glows {
             let raw = Vec3::new(-(g.anchor[0] as f32), g.anchor[1] as f32, g.anchor[2] as f32) / 65536.0;
-            // a car's light follows the drawn (interpolated) car
-            let now_p = match g.car.and_then(|a| s.cars.iter().position(|c| c.addr == a)) {
-                Some(k) if k < self.racers.len() => raw + (self.racers[k].car.pos - original::pose(&s.cars[k]).pos),
-                _ => raw,
+            // a car's light follows the drawn (interpolated) car; its size keeps the glow in
+            // front of the car's own body
+            let car = g.car.and_then(|a| s.cars.iter().position(|c| c.addr == a));
+            let (now_p, radius) = match car {
+                Some(k) if k < self.racers.len() => (raw + (self.racers[k].car.pos - original::pose(&s.cars[k]).pos), self.models[self.racers[k].model].half_extents.length()),
+                Some(k) => {
+                    let drawn = poses.get(k).map_or(raw, |p| raw + (p.pos - original::pose(&s.cars[k]).pos));
+                    let size = self.traffic.iter().find(|t| t.0 == k).and_then(|t| self.models.get(t.1)).map_or(2.5, |m| m.half_extents.length());
+                    (drawn, size)
+                }
+                None => (raw, 0.0),
             };
             let (Some(orig_vp), Some((p_now, _))) = (orig, to_px(now, now_p)) else { continue };
             let Some((p_orig, _)) = to_px(orig_vp, raw) else { continue };
-            let half = self.cam_pos + (now_p - self.cam_pos) * 0.5;
-            let Some((_, depth)) = to_px(now, half) else { continue };
+            // the depth it is tested at: a light on a car just in front of that car (the PS1
+            // draws the halos over the body), any other half way to it (over what is further,
+            // behind what is nearer)
+            let dist = now_p.distance(self.cam_pos);
+            let toward = if radius > 0.0 { (radius + 0.2).min(dist * 0.9) } else { dist * 0.5 };
+            let front = now_p + (self.cam_pos - now_p).normalize_or_zero() * toward;
+            let Some((_, depth)) = to_px(now, front) else { continue };
             // (a puff is reprojected afterwards: not cut at the original's screen edges)
             let f = fe::FeFrame::build_clipped(atlas, &moved(&g.cmds), vram, screen, w, h, !g.smoke);
             atlas = f.atlas;

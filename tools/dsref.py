@@ -1,5 +1,5 @@
 """dsref.py OUTDIR [--state FILE|none] [--wait SECONDS] [--audio] [--keys K,K,...]  (K: key, hold:KEY:SECS, sleep:SECS,
-shot:NAME (screenshot while running), ram:NAME (paused screenshot + RAM dump),
+shot:NAME (screenshot while running), down:KEY/up:KEY, ram:NAME (paused screenshot + RAM dump),
 poke:ADDR:VALUE[:COUNT], save:NAME (save state into re/states/NAME.sav); --state NAME also
 finds re/states/NAME.sav)
 
@@ -164,6 +164,11 @@ def main():
                     g.write(addr, struct.pack('<I', val) * n)
                     g.cont()
                     ds.focus_pid(proc.pid)
+                elif k.startswith('down:'):
+                    # down:KEY / up:KEY: press and release separately (shots while held)
+                    ds.down(k.split(':')[1])
+                elif k.startswith('up:'):
+                    ds.up(k.split(':')[1])
                 elif k.startswith('hold:'):
                     _, key, secs = k.split(':')
                     ds.down(key)

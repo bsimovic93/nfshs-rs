@@ -191,11 +191,15 @@ impl FeFrame {
                 let c = colours[k];
                 Vertex { pos: [p.x, p.y, 0.0], uv: t, color: [(c & 0xFF) as f32 / div, ((c >> 8) & 0xFF) as f32 / div, ((c >> 16) & 0xFF) as f32 / div, alpha] }
             };
+            // the PS1 GPU draws a quad as the triangles (0, 1, 2) and (1, 3, 2): its gouraud
+            // shading too (a light's halo is a fan of quads coloured at corner 1 only); each is
             // clipped to the drawing area, in PS1 screen pixels, then placed in the window
-            let poly = clip_polygon(vec![corner(0), corner(1), corner(3), corner(2)], clip);
             let place = |v: Vertex| Vertex { pos: [ox + (v.pos[0] + shift) * scale_x, oy + (v.pos[1] + shift) * scale_y, 0.0], ..v };
-            for k in 1..poly.len().saturating_sub(1) {
-                vertices.extend([place(poly[0]), place(poly[k]), place(poly[k + 1])]);
+            for tri in [[0, 1, 2], [1, 3, 2]] {
+                let poly = clip_polygon(tri.iter().map(|&k| corner(k)).collect(), clip);
+                for k in 1..poly.len().saturating_sub(1) {
+                    vertices.extend([place(poly[0]), place(poly[k]), place(poly[k + 1])]);
+                }
             }
             if sub {
                 let end = vertices.len() as u32;
