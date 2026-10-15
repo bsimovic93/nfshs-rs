@@ -58,6 +58,8 @@ fn find<'a>(d: &'a [u8], kind: u32) -> Option<Chunk<'a>> {
     chunks(d).find(|c| c.kind == kind)
 }
 
+// (every field parsed, read or not: the record's layout)
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct TexEntry {
     pub shape: u16,
@@ -84,6 +86,8 @@ pub struct Mesh {
 }
 
 /// Object placement from a block's 0x03 chunk (length-prefixed records).
+// (every field parsed, read or not: the record's layout)
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct Placement {
     /// Record type: 1 = plain model (20 bytes), 5 = rotated/scaled model (36 bytes),
@@ -113,6 +117,8 @@ pub struct Block {
 }
 
 /// Virtual-road sample (0x21/0x0f): fine centre line with frame vectors and lane widths.
+// (every field parsed, read or not: the record's layout)
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct VRoad {
     pub pos: Vec3,

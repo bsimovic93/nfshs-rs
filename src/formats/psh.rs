@@ -154,9 +154,6 @@ impl Psh {
         }
     }
 
-    pub fn get(&self, name: &str) -> Option<&Shape> {
-        self.shapes.iter().find(|s| s.name == name)
-    }
 }
 
 /// Pixels-per-VRAM-word for a shape kind (VRAM x coordinates are in 16-bit units).

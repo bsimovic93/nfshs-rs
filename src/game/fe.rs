@@ -60,10 +60,6 @@ pub(crate) fn texel(vram: &[u16], tpage: u16, clut: u16, u: u32, v: u32) -> [u8;
 }
 
 impl FeFrame {
-    pub fn build(cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {
-        Self::build_in(Atlas::new(1024), cmds, vram, screen, w, h)
-    }
-
     /// As [`build`](Self::build), adding the textures to `atlas` (which may hold others, such
     /// as the showroom car's).
     pub fn build_in(atlas: Atlas, cmds: &[OverlayCmd], vram: &[u16], screen: (u16, u16), w: f32, h: f32) -> Self {

@@ -502,7 +502,7 @@ impl MapView {
         let flash = |r32: &mut dyn FnMut(u32) -> u32| if r32(0x8013_EA9C) != 0 || r32(0x8011_F38C) != 0 { 0xFF } else { 0xFF_0000 };
         let mut markers = Vec::new();
         // position on the map: the car's track slice, scaled and turned
-        let mut place = |r32: &mut dyn FnMut(u32) -> u32, car: u32| -> Option<(i32, i32)> {
+        let place = |r32: &mut dyn FnMut(u32) -> u32, car: u32| -> Option<(i32, i32)> {
             if (r32(car + 144) >> 8) & 0xFF == 0 || scale_x == 0 || scale_z == 0 || slices == 0 {
                 return None;
             }

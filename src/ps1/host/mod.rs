@@ -145,8 +145,6 @@ fn native_hud(ra: u32) -> bool {
     NATIVE_HUD.iter().any(|r| r.contains(&ra))
 }
 
-/// Inner hook for R3DCar_InsertCarFacetII(car): record what the original decided to draw
-/// (see [`CarFacet::parse`]) instead of building primitives.
 thread_local! {
     /// While the original's R3DCar_InsertCarFacetII runs for its halos (see
     /// `record_car_facet`); and the primitive buffer ranges they were built in.

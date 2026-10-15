@@ -140,7 +140,7 @@ impl Audio {
         let mixer = Arc::new(Mutex::new(Mixer { voices: Vec::new(), master: 0.8 }));
         let m = mixer.clone();
         let err = |e| log::warn!("audio stream error: {e}");
-        let mut render = move |data: &mut [f32]| {
+        let render = move |data: &mut [f32]| {
             let Ok(mut mx) = m.lock() else { return };
             let master = mx.master;
             for frame in data.chunks_mut(channels) {

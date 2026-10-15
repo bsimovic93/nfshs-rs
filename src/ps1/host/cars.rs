@@ -36,6 +36,8 @@ pub(super) fn glare_marker(c: &mut Cpu, addr: u32) -> bool {
     false
 }
 
+/// Inner hook for R3DCar_InsertCarFacetII(car): record what the original decided to draw
+/// (see [`CarFacet::parse`]) instead of building primitives.
 pub(super) fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     if HALO_PASS.get() {
         // the original's car drawing for its halos: the body's primitives are skipped

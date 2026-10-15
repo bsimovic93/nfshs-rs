@@ -463,7 +463,8 @@ impl GameHost {
                 // TILE / SPRT (variable or 1, 8, 16 pixels): the draw mode's texture page
                 let textured = code & 4 != 0;
                 let [x, y] = xy(w(c, 1));
-                let (mut tw, mut th, mut uv0, mut clut) = (0i32, 0i32, [0u16; 2], 0u16);
+                let (tw, th): (i32, i32);
+                let (mut uv0, mut clut) = ([0u16; 2], 0u16);
                 let mut k = 2;
                 if textured {
                     let t = w(c, 2);

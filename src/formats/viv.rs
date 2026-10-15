@@ -30,14 +30,6 @@ impl Viv {
         Ok(Self { entries })
     }
 
-    /// Case-insensitive lookup by file name.
-    pub fn get(&self, name: &str) -> Option<&[u8]> {
-        self.entries
-            .iter()
-            .find(|(n, _)| n.eq_ignore_ascii_case(name))
-            .map(|(_, d)| d.as_slice())
-    }
-
     /// First entry whose name ends with the given suffix (case-insensitive).
     pub fn find_suffix(&self, suffix: &str) -> Option<(&str, &[u8])> {
         let suffix = suffix.to_ascii_lowercase();

@@ -85,8 +85,6 @@ struct Glyph {
     dy: i8,
 }
 
-/// HudPmx_gShapes index of player 1's dial.
-const DIAL: usize = 129;
 const BIG0: usize = 44;
 const SML0: usize = 53; // sml1 = 54
 
