@@ -286,7 +286,11 @@ impl Game {
                         }
                         let (u0, v0) = (map[0] as u8, (map[0] >> 8) as u8);
                         let abr = (map[1] >> 16 >> 5) & 3;
+                        // a hair towards the camera, over the body it covers, and map B a hair
+                        // more, over map A (the PS1 draws them in that order on the same polygon)
+                        let pull = if needs == 0 { 0.01 } else { 0.02 };
                         for &(a, b, p) in &coords {
+                            let p = p + (self.cam_pos - p).normalize_or_zero() * pull;
                             let (u, v) = if needs == 0 {
                                 (u0.wrapping_add(64).wrapping_add(a[0]), v0.wrapping_add(a[1]))
                             } else {
