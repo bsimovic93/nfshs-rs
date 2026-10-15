@@ -139,10 +139,25 @@ pub fn opened_variant(code: &str) -> Option<String> {
     v.iter().rev().find(|n| n.len() == 3 + 1 + tail.len() + 5 && n[4..4 + tail.len()] == tail).map(|n| n.to_ascii_uppercase())
 }
 
+/// One controller during a frame: its buttons (active-high: bit 14 = Cross, 15 = Square,
+/// 4 = Up, ...) and, for a DualShock in analog mode, its sticks (RX, RY, LX, LY; 0x80 is
+/// centred, 0 left/up). Without sticks it is a digital pad.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct Pad {
+    pub buttons: u16,
+    pub sticks: Option<[u8; 4]>,
+}
+
+impl From<u16> for Pad {
+    fn from(buttons: u16) -> Self {
+        Self { buttons, sticks: None }
+    }
+}
+
 /// Called at the top of every main-loop iteration (one game frame, locked to a 60 Hz field)
-/// with the current field number; returns the PS1 digital buttons to hold during the frame
-/// (active-high: bit 14 = Cross, 15 = Square, 4 = Up, ...) or `None` to leave the loop.
-pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<[u16; 2]>>;
+/// with the current field number; returns the controllers to hold during the frame (port 1,
+/// port 2) or `None` to leave the loop.
+pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<[Pad; 2]>>;
 
 /// Host-side state handed to the frame callback.
 #[derive(Clone)]
@@ -854,7 +869,7 @@ impl GameHost {
         }
     }
 
-    fn frame_top(&mut self, c: &mut Cpu) -> Option<[u16; 2]> {
+    fn frame_top(&mut self, c: &mut Cpu) -> Option<[Pad; 2]> {
         self.otags = 0;
         // the recorded HUD views (in drawing order; overlays are kept last-drawn first): all
         // but the world's, or a paused game's menu view over the last full frame's HUD
@@ -972,14 +987,24 @@ impl GameHost {
         match input {
             // the host is done with the program: stop it where it is
             None => c.tick_limit = 0,
-            Some(buttons) => {
+            Some(pads) => {
                 self.frame.frames_run += 1;
                 // each port its own controller (the front end takes either player's)
-                for (b, buttons) in self.pad_buffers.into_iter().zip(buttons) {
+                for (b, pad) in self.pad_buffers.into_iter().zip(pads) {
                     if b != 0 {
                         c.m.w8(b, 0x00); // status: ok
-                        c.m.w8(b + 1, 0x41); // digital pad
-                        c.m.w16(b + 2, !buttons); // active low
+                        c.m.w16(b + 2, !pad.buttons); // active low
+                        match pad.sticks {
+                            // a DualShock in analog mode: the game then steers with the
+                            // left stick, unramped (Physics_RampCarControlValues)
+                            Some(sticks) => {
+                                c.m.w8(b + 1, 0x73);
+                                for (i, v) in sticks.into_iter().enumerate() {
+                                    c.m.w8(b + 4 + i as u32, v);
+                                }
+                            }
+                            None => c.m.w8(b + 1, 0x41), // digital pad
+                        }
                     }
                 }
             }
@@ -1309,7 +1334,7 @@ impl GameHost {
                 self.overlay.clear();
                 self.overlay.push(OverlayCmd::Movie { file: file.clone(), frame: k, fps });
                 let Some(pads) = self.frame_top(c) else { break 'play };
-                let buttons = pads[0] | pads[1];
+                let buttons = pads[0].buttons | pads[1].buttons;
                 if buttons != 0 {
                     if buttons == 1 << 3 || c.m.r8(0x8005_2EBE) != 0 {
                         c.m.w16(0x8005_2EBC, 1);

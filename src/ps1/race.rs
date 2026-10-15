@@ -754,6 +754,9 @@ pub struct FrameInput {
     pub buttons: u16,
     /// The second controller (player 2).
     pub buttons2: u16,
+    /// The controllers' sticks (RX, RY, LX, LY) when they are DualShocks in analog mode;
+    /// `None`: a digital pad.
+    pub sticks: [Option<[u8; 4]>; 2],
     /// Include a RAM copy in the resulting snapshot.
     pub want_ram: bool,
 }
@@ -929,7 +932,7 @@ impl RaceThread {
                 };
                 frame += 1;
                 want_ram = input.want_ram;
-                Some([input.buttons, input.buttons2])
+                Some([super::host::Pad { buttons: input.buttons, sticks: input.sticks[0] }, super::host::Pad { buttons: input.buttons2, sticks: input.sticks[1] }])
             });
             let host = cpu.host.as_mut().expect("host");
             // the host is always our GameHost

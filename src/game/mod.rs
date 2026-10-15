@@ -40,6 +40,10 @@ pub struct Input {
     pub brake_axis: f32,
     /// The second controller's PS1 buttons (player 2), as they are.
     pub pad2: u16,
+    /// The controllers' sticks (RX, RY, LX, LY) when they are gamepads: the original then
+    /// sees DualShocks in analog mode. `None`: a digital pad (keyboard).
+    pub sticks: Option<[u8; 4]>,
+    pub pad2_sticks: Option<[u8; 4]>,
 }
 
 #[derive(Clone, Copy, PartialEq)]

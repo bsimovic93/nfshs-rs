@@ -192,8 +192,10 @@ impl App {
                 i.square |= pad.is_pressed(Button::West);
                 i.start |= pad.is_pressed(Button::Start);
                 i.select |= pad.is_pressed(Button::Select);
+                i.sticks = Some(ps1_sticks(&pad));
             }
             i.pad2 = g.gamepads().nth(1).map_or(0, |(_, p)| ps1_buttons(&p));
+            i.pad2_sticks = g.gamepads().nth(1).map(|(_, p)| ps1_sticks(&p));
         }
         i
     }
@@ -300,8 +302,10 @@ impl App {
                 i.up |= pad.is_pressed(Button::DPadUp);
                 i.down |= pad.is_pressed(Button::DPadDown);
                 i.accept |= pad.is_pressed(Button::South);
+                i.sticks = Some(ps1_sticks(&pad));
             }
             i.pad2 = g.gamepads().nth(1).map_or(0, |(_, p)| ps1_buttons(&p));
+            i.pad2_sticks = g.gamepads().nth(1).map(|(_, p)| ps1_sticks(&p));
         }
         i
     }
@@ -823,6 +827,20 @@ fn ps1_buttons(pad: &gilrs::Gamepad) -> u16 {
         }
     }
     b
+}
+
+/// A gamepad's sticks as a DualShock's in analog mode (RX, RY, LX, LY; 0x80 centred, 0 left
+/// and up). The d-pad pushes the left stick fully left or right: the original steers with the
+/// stick alone when it sees an analog pad.
+fn ps1_sticks(pad: &gilrs::Gamepad) -> [u8; 4] {
+    use gilrs::{Axis, Button};
+    let byte = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 127.5).round() as u8;
+    let lx = match (pad.is_pressed(Button::DPadLeft), pad.is_pressed(Button::DPadRight)) {
+        (true, false) => -1.0,
+        (false, true) => 1.0,
+        _ => pad.value(Axis::LeftStickX),
+    };
+    [byte(pad.value(Axis::RightStickX)), byte(-pad.value(Axis::RightStickY)), byte(lx), byte(-pad.value(Axis::LeftStickY))]
 }
 
 /// A race frame: the world and the original's 2D, one view or split screen (each player's

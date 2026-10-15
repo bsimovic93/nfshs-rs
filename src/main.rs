@@ -272,7 +272,8 @@ fn real_main() -> Result<()> {
         Some("boot-race") => {
             // boot-race [--track N --variant V --car C --opponents A,B --laps N]: run the
             // recompiled original race simulation headless. BOOT_SCRIPT="secs:buttons,..."
-            // (x cross, s square, c circle, t triangle, l/r/u/d pad, 1-4 L1/R1/L2/R2, - none);
+            // (x cross, s square, c circle, t triangle, l/r/u/d pad, 1-4 L1/R1/L2/R2, - none;
+            // a: an analog pad (DualShock), L/R: its left stick fully left/right);
             // GS_SET="hexoff=value,..." pokes GameSetup words.
             use ps1::race::{FrameInput, RaceSetup, RaceThread, pad};
             let mut cars = vec![car.clone()];
@@ -327,6 +328,8 @@ fn real_main() -> Result<()> {
                 let (secs, b) = st.split_once(':').unwrap_or((st, "-"));
                 let secs: f32 = secs.parse()?;
                 let mut buttons = 0u16;
+                let lx = if b.contains('L') { 0x00 } else if b.contains('R') { 0xFF } else { 0x80 };
+                let sticks = b.contains(['a', 'L', 'R']).then_some([0x80, 0x80, lx, 0x80]);
                 for ch in b.chars() {
                     buttons |= match ch {
                         'x' => pad::CROSS,
@@ -350,7 +353,7 @@ fn real_main() -> Result<()> {
                 let trace = std::env::var_os("BOOT_TRACE").is_some();
                 for _ in 0..(secs * 60.0).round() as u32 {
                     let prev: Vec<[i32; 3]> = sim.last.cars.iter().map(|c| c.position).collect();
-                    let s = sim.step(FrameInput { buttons, buttons2: 0, want_ram: false })?;
+                    let s = sim.step(FrameInput { buttons, buttons2: 0, want_ram: false, sticks: [sticks, None] })?;
                     if trace {
                         let d: Vec<String> = s
                             .cars
@@ -375,7 +378,7 @@ fn real_main() -> Result<()> {
                 show_cam(&sim.last);
             }
             if std::env::var_os("BOOT_RAM").is_some() {
-                let s = sim.step(FrameInput { buttons: 0, buttons2: 0, want_ram: true })?;
+                let s = sim.step(FrameInput { buttons: 0, buttons2: 0, want_ram: true, ..Default::default() })?;
                 std::fs::create_dir_all("re/boot")?;
                 std::fs::write("re/boot/ram.bin", s.ram.as_deref().unwrap_or_default())?;
                 println!("RAM written to re/boot/ram.bin");
@@ -441,7 +444,7 @@ fn real_main() -> Result<()> {
                                 }
                             }
                         }
-                        return Some([b, 0]);
+                        return Some([b.into(), 0.into()]);
                     }
                     t -= n;
                 }

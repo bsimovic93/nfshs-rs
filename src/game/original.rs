@@ -121,6 +121,19 @@ impl OriginalSim {
         b
     }
 
+    /// The first controller's sticks: a gamepad's, with the keyboard's left/right pushing the
+    /// left stick fully (in analog mode the original steers with the stick alone).
+    fn sticks(input: &Input) -> Option<[u8; 4]> {
+        input.sticks.map(|mut s| {
+            match (input.left, input.right) {
+                (true, false) => s[2] = 0x00,
+                (false, true) => s[2] = 0xFF,
+                _ => {}
+            }
+            s
+        })
+    }
+
     pub fn start(data: &GameData, cfg: &RaceConfig) -> Result<Self> {
         let mut cars = vec![cfg.player_car.to_string()];
         cars.extend(cfg.opponents.iter().cloned());
@@ -323,7 +336,7 @@ impl OriginalSim {
         while self.accum >= FRAME {
             if self.thread.last.front_end {
                 // the front end: its own buttons, no race bookkeeping
-                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), buttons2: input.pad2, want_ram: false }) {
+                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), buttons2: input.pad2, want_ram: false, sticks: [Self::sticks(input), input.pad2_sticks] }) {
                     log::warn!("original game ended: {e:#}");
                     self.stopped = true;
                     return;
@@ -356,7 +369,7 @@ impl OriginalSim {
                 None if CAMERA_MODES.contains(&mode) && snap.views.len() <= 1 => PREFERRED_CAMERA.store(mode, Ordering::Relaxed),
                 None => {}
             }
-            if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false }) {
+            if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false, sticks: [Self::sticks(input), input.pad2_sticks] }) {
                 log::warn!("original simulation ended: {e:#}");
                 self.stopped = true;
                 return;
