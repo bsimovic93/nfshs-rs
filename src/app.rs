@@ -444,6 +444,7 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
 pub fn flat_params() -> FrameParams {
     FrameParams {
         world_ranges: None,
+        objects: Vec::new(),
         shadows: Vec::new(),
         subtract_late: Vec::new(),
         sky_view_proj: Mat4::IDENTITY,

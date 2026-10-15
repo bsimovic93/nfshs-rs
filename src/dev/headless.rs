@@ -16,9 +16,19 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
     let mut next_log = 10.0;
     let mut flipped = false;
     let trace = std::env::var_os("SHOT_TRACE").is_some();
+    // SHOT_SCRIPT="t:keys,...": from second t on, these keys (as --keys) instead
+    let script: Vec<(f32, Input)> = std::env::var("SHOT_SCRIPT")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| {
+            let (at, k) = s.split_once(':')?;
+            let has = |c| k.contains(c);
+            Some((at.parse().ok()?, Input { up: has('u'), down: has('d'), left: has('l'), right: has('r'), handbrake: has('h'), autopilot: has('a'), ..Default::default() }))
+        })
+        .collect();
     while t < seconds {
         let before = game.player().car.pos;
-        let mut input = input;
+        let mut input = script.iter().rev().find(|s| s.0 <= t).map_or(input, |s| s.1);
         for &(k, at) in taps {
             if (at..at + 0.1).contains(&t) {
                 match k {
@@ -73,11 +83,29 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         if trace && seconds - t < 0.5 {
             println!("  t={t:6.3} moved {:.3} m", game.player().car.pos.distance(before));
         }
+        // SHOT_SERIES=SECS: also a picture every SECS seconds (OUT_<t>.png), to find a place
+        if let Some(every) = std::env::var("SHOT_SERIES").ok().and_then(|v| v.parse::<f32>().ok()) {
+            if (t / every).floor() > ((t - dt) / every).floor() {
+                let params = game.frame_params(960.0 / 720.0);
+                let hud = race_hud(&mut r, &game, 960.0, 720.0);
+                let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
+                let stem = out.with_extension("");
+                img.save(format!("{}_{:03}.png", stem.display(), t.round() as u32))?;
+                let p = game.player().car.pos;
+                println!("  t={t:5.1} shot at pos ({:.1}, {:.1}, {:.1})", p.x, p.y, p.z);
+            }
+        }
         if t >= next_log {
             next_log += 10.0;
             let p = game.player();
             let order: Vec<String> = game.standings().iter().map(|&i| format!("{}:{}/{}", game.racers[i].name, game.racers[i].laps_done, game.racers[i].progress)).collect();
             println!("  t={t:5.1} {:?} speed={:.0} km/h  order={}", game.phase, p.car.speed() * 3.6, order.join(" "));
+        }
+    }
+    // NFSHS_OBJLOG=1: the track objects the original drew in the last frame
+    if std::env::var_os("NFSHS_OBJLOG").is_some() {
+        for o in &game.sim.snapshot().objects {
+            println!("  object model {:3} at ({:8.1}, {:6.1}, {:8.1}){} matrix {:?}", o.model, -(o.pos[0] as f32) / 65536.0, o.pos[1] as f32 / 65536.0, o.pos[2] as f32 / 65536.0, if o.billboard { " billboard" } else { "" }, o.matrix);
         }
     }
     let p = game.player();
@@ -88,13 +116,20 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         p.progress,
         game.path.len(),
     );
-    // NFSHS_CAM="x,y,z,tx,ty,tz": look from a fixed point (debugging)
+    // NFSHS_CAM="x,y,z,tx,ty,tz": look from a fixed point (debugging); several cameras
+    // separated by ';' save OUT_cam<i>.png each
     if let Ok(c) = std::env::var("NFSHS_CAM") {
-        let v: Vec<f32> = c.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-        if v.len() == 6 {
+        let cams: Vec<Vec<f32>> = c.split(';').map(|c| c.split(',').filter_map(|x| x.trim().parse().ok()).collect()).filter(|v: &Vec<f32>| v.len() == 6).collect();
+        for (i, v) in cams.iter().enumerate() {
             game.cam_pos = glam::Vec3::new(v[0], v[1], v[2]);
             game.cam_target = glam::Vec3::new(v[3], v[4], v[5]);
             game.cam_up = glam::Vec3::Y;
+            if cams.len() > 1 {
+                let params = game.frame_params(960.0 / 720.0);
+                let hud = race_hud(&mut r, &game, 960.0, 720.0);
+                let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
+                img.save(format!("{}_cam{i}.png", out.with_extension("").display()))?;
+            }
         }
     }
     let params = game.frame_params(960.0 / 720.0);

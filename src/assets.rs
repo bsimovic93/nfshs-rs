@@ -111,6 +111,10 @@ pub struct TrackAssets {
     pub block_ranges: Vec<[std::ops::Range<u32>; 5]>,
     /// The track-wide scenery (0x21/0x24: islands, headlands), drawn whatever the chunks.
     pub global_range: std::ops::Range<u32>,
+    /// Each track model's triangles in its own PS1 space (metres, not mirrored), its
+    /// two-sided polygons both ways round: the objects the original draws are placed from
+    /// these each frame.
+    pub models: Vec<Vec<Vertex>>,
     pub verts: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub track: grp::Track,
@@ -368,6 +372,15 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         }
     }
     let global_range = global_start..indices.len() as u32;
+    let models = track
+        .models
+        .iter()
+        .map(|model| {
+            let (mut local, mut idx) = (Vec::new(), Vec::new());
+            emit(model, &|v| v, &mut local, &mut idx);
+            idx.iter().map(|&i| local[i as usize]).collect()
+        })
+        .collect();
     let animated: Vec<AnimatedObject> = track
         .keyframed
         .iter()
@@ -392,7 +405,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             (v, 0, c)
         }
     };
-    Ok(TrackAssets { animated, verts, indices, track, nodes, sprites, sky, sky_dome, sky_colors, block_ranges, global_range })
+    Ok(TrackAssets { animated, verts, indices, track, nodes, sprites, sky, sky_dome, sky_colors, block_ranges, global_range, models })
 }
 
 fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
@@ -606,15 +619,15 @@ enum Placement {
 }
 
 /// How DrawW_BuildChunkObjectFacets orients a placed object:
-/// type 1 as is; type 5 by the quaternion at +20 (Quatern_QuatToMat) with column scales at
-/// +28/+30/+32; type 9 facing the camera if byte +5 bit 0 is set, otherwise by the Y angle
+/// type 1 as is; types 2 and 5 by the quaternion at +20 (Quatern_QuatToMat) with column
+/// scales at +28/+30/+32; type 9 facing the camera if byte +5 bit 0 is set, otherwise by the Y angle
 /// at +20 (1024 = 360 degrees), scaled by +24 (x, z) and +22 (y). Scales are 8.8.
 fn placement_transform(pl: &grp::Placement) -> Placement {
     let r = &pl.raw;
     let s16 = |o: usize| i16::from_le_bytes([r[o], r[o + 1]]) as f32;
     let scale = |v: f32| if v == 0.0 { 1.0 } else { v / 256.0 };
     match pl.kind {
-        5 => {
+        2 | 5 => {
             let (x, y, z, w) = (s16(20) / 16384.0, s16(22) / 16384.0, s16(24) / 16384.0, s16(26) / 16384.0);
             // the game's matrix is the transpose of the textbook quaternion rotation
             let m = glam::Mat3::from_cols(

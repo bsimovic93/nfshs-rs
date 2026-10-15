@@ -9,8 +9,11 @@ the others take the value shown. Player-facing settings are in the README.
 |---|---|
 | `SHOT_DT=SECS` | `shot`: the render step (a display faster than 60 Hz). |
 | `SHOT_CAMLOG=1` | `shot`: each frame's camera and player car, to look for jitter. |
+| `NFSHS_OBJLOG=1` | `shot`: the track objects the original drew in the last frame (model, world position, matrix). |
+| `SHOT_SCRIPT="t:keys,..."` | `shot`: from second t on, those keys (as `--keys`: u d l r h a). |
 | `SHOT_TRACE=1` | `shot`: how far the player's car moved in each of the last frames. |
-| `NFSHS_CAM="x,y,z,tx,ty,tz"` | `shot`: take the picture from a fixed point. |
+| `SHOT_SERIES=SECS` | `shot`: also a picture every SECS seconds (`OUT_<t>.png`) and where the car was, to find a place. |
+| `NFSHS_CAM="x,y,z,tx,ty,tz"` | `shot`: take the picture from a fixed point (several separated by `;`: `OUT_cam<i>.png` each). |
 | `NFSHS_VRAMDUMP=FILE` | `shot`: the original's VRAM (1024×512, 16-bit) at the end. |
 | `NFSHS_SKYLOG=1` | `shot`: the sky dome's colours and the depth cue every 2 s. |
 | `NFSHS_LIGHTTABLELOG=1` | `shot`: a checksum of the original's light table every 5 s. |
@@ -19,6 +22,7 @@ the others take the value shown. Player-facing settings are in the README.
 | `NFSHS_CARSLOG=1` | `fe-play`: every second, the cars' distances and each view's camera. |
 | `NFSHS_PARTSLOG=N` | `fe-play`: every N frames, the parts the original draws of each car. |
 | `NFSHS_BEAMLOG=1` | `fe-play`: every second, the night headlight beam's parameters. |
+| `NFSHS_COLOUR=N` | The player's paint (0..15) in races started without the front end. |
 | `NFSHS_TRAFFIC=N` | Traffic at density N in races started without the front end. |
 | `BOOT_SCRIPT="secs:buttons,..."` | `boot-race`, `boot-main`: pad input per stretch of time. |
 | `GS_SET="hexoff=value,..."` | `boot-race`: poke words of the GameSetup. |
@@ -38,6 +42,7 @@ the others take the value shown. Player-facing settings are in the README.
 | `NFSHS_NOSMOKE=1` | Smoke puffs not drawn. |
 | `NFSHS_SKIDLOG=1` | Tyre marks: how many, how many near, which slices. |
 | `NFSHS_TRAFLOG=1` | Nearby traffic cars' positions. |
+| `NFSHS_STATIC_OBJECTS=1` | The track objects from the track's data, not as the original drew them this frame. |
 | `NFSHS_HIDE_PART=a,b,...` | Car parts (GEO part numbers) not drawn. |
 | `NFSHS_ENVLOG=1` | Every 2 s, each view's GTE environment (far colour, depth cue). |
 | `NFSHS_ENVDBG=1` | Each DrawOTag call. |
@@ -51,6 +56,7 @@ the others take the value shown. Player-facing settings are in the README.
 
 | Variable | Effect |
 |---|---|
+| `NFSHS_PAINT=N` | The player's car's textures in paint N (colour 0..15, 8..15 the "d" sheet; +16, +32: the palette flags). |
 | `NFSHS_CAR_PAGES=DIR` | Save each car's assembled texture pages. |
 | `NFSHS_DUMP_MODEL=N` | Track prop model N's quads. |
 | `NFSHS_DUMP_PROPS=1` | How often each prop model is placed. |

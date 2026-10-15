@@ -49,3 +49,6 @@
 80024c4c DrawSlider (its primitives are captured)
 800cecd0 Flare_2DHalo (its primitives are captured in the front end)
 8004ec64 scaled shape POLY_GT4 builder (its primitives are captured)
+800c8c1c DrawObjectTransform (a track object: what the original draws is recorded)
+800c8f74 DrawObjectSimple (a track object: what the original draws is recorded)
+800c9930 ObjectClipped (not clipped while the objects are recorded: the host's view is wider)

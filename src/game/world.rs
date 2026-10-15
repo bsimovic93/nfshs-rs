@@ -12,9 +12,11 @@ impl Game {
         let proj = squash * Mat4::perspective_infinite_reverse_rh(fov, aspect, 0.1);
         let view = Mat4::look_at_rh(self.cam_pos, self.cam_target, self.cam_up);
         let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, self.cam_up);
+        let recorded = self.recorded_objects().is_some();
         FrameParams {
             world_ranges: self.chunk_list().map(|list| {
-                let mut r = vec![self.track.global_range.clone()];
+                // (the objects the original drew are placed by `objects`)
+                let mut r = if recorded { Vec::new() } else { vec![self.track.global_range.clone()] };
                 for (chunk, flags, rez) in list {
                     let Some(b) = self.track.block_ranges.get(chunk) else { continue };
                     // flags: 1 ground (DrawW_DoTrough: full or low detail by the chunk's
@@ -24,7 +26,7 @@ impl Game {
                         r.push(if rez != 0 { b[0].clone() } else { b[1].clone() });
                         r.push(b[2].clone());
                     }
-                    if flags & 2 != 0 {
+                    if flags & 2 != 0 && !recorded {
                         r.push(b[3].clone());
                     }
                     if flags & 4 != 0 {
@@ -33,6 +35,7 @@ impl Game {
                 }
                 r
             }),
+            objects: self.objects().0,
             shadows: {
                 let mut v = self.skids();
                 v.extend(self.shadows());
@@ -85,7 +88,9 @@ impl Game {
         let mut out = Vec::new();
         // chunks whose objects are drawn
         let list = self.chunk_list();
-        let objects_on = |block: usize| list.as_ref().is_none_or(|l| l.iter().any(|&(c, f, _)| c == block && f & 2 != 0));
+        let recorded = self.recorded_objects().is_some();
+        let objects_on = |block: usize| !recorded && list.as_ref().is_none_or(|l| l.iter().any(|&(c, f, _)| c == block && f & 2 != 0));
+        out.extend(self.objects().1);
         for s in self.track.sprites.iter().filter(|s| objects_on(s.block)) {
             let to_cam = (self.cam_pos - s.pos).with_y(0.0);
             if to_cam.length_squared() > self.fog.2 * self.fog.2 {
@@ -99,7 +104,7 @@ impl Game {
         // keyframed scenery (windmill sails), looping through its frames (ticks per frame
         // counted in 60 Hz fields)
         let fields = self.sim.snapshot().field as f64;
-        for a in &self.track.animated {
+        for a in self.track.animated.iter().filter(|_| !recorded) {
             let n = a.frames.len();
             let t = (fields / a.ticks as f64).rem_euclid(n as f64);
             let (k, f) = (t as usize % n, t.fract() as f32);
@@ -173,6 +178,46 @@ impl Game {
         out.extend(self.traffic_geometry());
         out.extend(self.car_reflections().0);
         out
+    }
+
+    /// The track objects the original drew this frame (DrawW_DoObjects recorded), when it
+    /// has drawn a view and the chunks are its own.
+    pub(super) fn recorded_objects(&self) -> Option<&[crate::ps1::host::ObjectDraw]> {
+        let o = &self.sim.snapshot().objects;
+        (self.chunks_override.is_none() && !o.is_empty() && std::env::var_os("NFSHS_STATIC_OBJECTS").is_none()).then_some(o.as_slice())
+    }
+
+    /// The recorded objects placed in the world: (fixed ones, drawn one-sided like the track;
+    /// those that face the camera, turned to this camera and drawn both sides like the
+    /// track's sprites).
+    pub(super) fn objects(&self) -> (Vec<Vertex>, Vec<Vertex>) {
+        let (mut fixed, mut facing) = (Vec::new(), Vec::new());
+        let Some(objects) = self.recorded_objects() else { return (fixed, facing) };
+        let fx = |v: i32| v as f32 / 65536.0;
+        for o in objects {
+            let Some(mesh) = self.track.models.get(o.model as usize) else { continue };
+            let m = o.matrix.map(fx);
+            let pos = Vec3::new(fx(o.pos[0]), fx(o.pos[1]), fx(o.pos[2]));
+            if o.billboard {
+                // (the original turns it to its camera: the scale is the matrix's columns')
+                let (w, h) = (Vec3::new(m[0], m[3], m[6]).length(), Vec3::new(m[1], m[4], m[7]).length());
+                let at = assets::ps1_to_world(pos);
+                let to_cam = (self.cam_pos - at).with_y(0.0);
+                if to_cam.length_squared() > self.fog.2 * self.fog.2 {
+                    continue;
+                }
+                let rot = Quat::from_rotation_y(to_cam.x.atan2(to_cam.z));
+                let scale = Vec3::new(w, h, w);
+                facing.extend(mesh.iter().map(|v| Vertex { pos: (at + rot * (assets::ps1_to_world(Vec3::from(v.pos)) * scale)).into(), ..*v }));
+            } else {
+                let rows = [Vec3::new(m[0], m[1], m[2]), Vec3::new(m[3], m[4], m[5]), Vec3::new(m[6], m[7], m[8])];
+                fixed.extend(mesh.iter().map(|v| {
+                    let p = Vec3::from(v.pos);
+                    Vertex { pos: assets::ps1_to_world(pos + Vec3::new(rows[0].dot(p), rows[1].dot(p), rows[2].dot(p))).into(), ..*v }
+                }));
+            }
+        }
+        (fixed, facing)
     }
 
     /// The original's chunk build list this frame: (chunk, draw flags); None without one.

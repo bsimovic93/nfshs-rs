@@ -31,6 +31,8 @@ pub struct FrameInfo {
     pub font_clut: [u16; 16],
     /// See [`GameHost::car_facets`].
     pub car_facets: Vec<CarFacet>,
+    /// See [`GameHost::objects`].
+    pub objects: Vec<ObjectDraw>,
     /// See [`GameHost::overlay`].
     pub overlay: Vec<OverlayCmd>,
     /// 2D drawn over the sky and under the world (the sun's flare), as recorded.
@@ -68,6 +70,7 @@ pub struct ViewCapture {
     /// BWorld_gChunkBuildList for this view: (chunk, detail flags).
     pub chunks: Vec<(i16, u16)>,
     pub car_facets: Vec<CarFacet>,
+    pub objects: Vec<ObjectDraw>,
     pub glows: Vec<Glow>,
     pub weather: Vec<OverlayCmd>,
     pub sky_overlay: Vec<OverlayCmd>,
@@ -107,6 +110,7 @@ impl GameHost {
                 view_env: self.view_env,
                 font_clut: [0; 16],
                 car_facets: Vec::new(),
+                objects: Vec::new(),
                 overlay,
                 front_end: true,
                 vram: Some({
@@ -186,6 +190,7 @@ impl GameHost {
             view_env: self.view_env,
             font_clut: self.clut(c.m.r32(0x8011_1F34) >> 16),
             car_facets: self.car_facets.clone(),
+            objects: self.objects.clone(),
             glows: {
                 let mut g = std::mem::take(&mut self.track_glows);
                 g.append(&mut self.car_glows);

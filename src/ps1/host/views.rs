@@ -121,6 +121,9 @@ impl GameHost {
                 c.call_nested(DRAWW_WORLD_SETUP_MATRIX, &[G_WORLD_MAT, 0x1F80_0014]);
                 let n = c.call_nested(SETUP_CHUNK_BUILD_LIST, &[RENDER_VIEW]);
                 c.m.w32(CHUNK_BUILD_COUNT, n);
+                // the objects drawn in those chunks and over the track (the original's own
+                // choice: knocked down, animated, shown from this slice)
+                self.objects = self.record_objects(c);
                 // the track lights' glares as the original builds them for the listed chunks
                 // (BWorld_BuildGlareEffects, as BWorld_OnyxBuildFacets calls it), recorded
                 let start = c.m.r32(0x1F80_0004);
@@ -271,6 +274,7 @@ impl GameHost {
                     view_env: self.view_env,
                     chunks: (0..n.min(64)).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect(),
                     car_facets: self.car_facets.clone(),
+                    objects: self.objects.clone(),
                     glows: self.track_glows.iter().chain(&self.car_glows).cloned().collect(),
                     weather: self.weather.clone(),
                     sky_overlay: view_sky,

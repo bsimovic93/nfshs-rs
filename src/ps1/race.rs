@@ -715,6 +715,8 @@ pub struct Snapshot {
     /// Per car (as in `cars`): what the game draws of it this frame (parts, light,
     /// shadow); `None` when the car is not in the view.
     pub car_facets: Vec<Option<super::host::CarFacet>>,
+    /// The track objects the game drew this frame (empty before it has drawn a view).
+    pub objects: Vec<super::host::ObjectDraw>,
     /// The 2D drawing (pause menu and the like) the game recorded this frame.
     pub overlay: Vec<super::host::OverlayCmd>,
     /// The race's sky layer (the sun's flare) as recorded.
@@ -778,6 +780,7 @@ pub struct ViewSnap {
     pub view_env: [i32; 9],
     pub chunks: Vec<(i16, u16)>,
     pub car_facets: Vec<Option<super::host::CarFacet>>,
+    pub objects: Vec<super::host::ObjectDraw>,
     pub glows: Vec<super::host::Glow>,
     pub weather: Vec<super::host::OverlayCmd>,
     pub sky_overlay: Vec<super::host::OverlayCmd>,
@@ -799,6 +802,7 @@ impl Snapshot {
             s.view_env = v.view_env;
             s.chunks = v.chunks.clone();
             s.car_facets = v.car_facets.clone();
+            s.objects = v.objects.clone();
             s.glows = v.glows.clone();
             s.weather = v.weather.clone();
             s.sky_overlay = v.sky_overlay.clone();
@@ -859,6 +863,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             view_env: v.view_env,
             chunks: v.chunks.clone(),
             car_facets: by_car(&v.car_facets),
+            objects: v.objects.clone(),
             glows: v.glows.clone(),
             weather: v.weather.clone(),
             sky_overlay: v.sky_overlay.clone(),
@@ -882,6 +887,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         hud: HudSetup::read(&mut c.m, info.font_clut, info.font_palettes.clone()).map(std::sync::Arc::new),
         map: MapView::read(&mut |a| c.m.r32(a)),
         car_facets,
+        objects: info.objects.clone(),
         overlay: info.overlay.clone(),
         sky_overlay: info.sky_overlay.clone(),
         weather: info.weather.clone(),

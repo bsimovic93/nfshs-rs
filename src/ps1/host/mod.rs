@@ -14,6 +14,7 @@ mod files;
 mod frame;
 mod game;
 mod gpu;
+mod objects;
 mod overlay;
 mod system;
 mod views;
@@ -21,6 +22,7 @@ mod views;
 pub use cars::{CarEnv, CarFacet, Glow};
 pub use files::{file_log, opened_variant};
 pub use frame::{FrameDriver, FrameInfo, Mode, Pad, ViewCapture};
+pub use objects::ObjectDraw;
 pub use overlay::{OverlayCmd, QuadTex};
 
 use cars::{glare_marker, record_car_facet, smoke_marker};
@@ -58,6 +60,8 @@ pub struct GameHost {
     pub view_env: [i32; 9],
     /// The cars the game put into the player view this frame (R3DCar_InsertCarFacetII).
     pub car_facets: Vec<CarFacet>,
+    /// The track objects the game drew in the player view this frame (DrawW_DoObjects).
+    pub objects: Vec<ObjectDraw>,
     /// 2D drawing recorded this frame (see [`OverlayCmd`]).
     pub overlay: Vec<OverlayCmd>,
     /// A screen the game puts straight into the display buffer while it loads (the title,
@@ -355,6 +359,7 @@ impl GameHost {
             display: [0; 4],
             view_env: [0; 9],
             car_facets: Vec::new(),
+            objects: Vec::new(),
             overlay: Vec::new(),
             loading: Vec::new(),
             loading_shown: 0,

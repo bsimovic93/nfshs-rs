@@ -90,8 +90,8 @@ pub struct Mesh {
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct Placement {
-    /// Record type: 1 = plain model (20 bytes), 5 = rotated/scaled model (36 bytes),
-    /// 9 = scaled object / sprite (28 bytes).
+    /// Record type: 1 = plain model (20 bytes), 2 and 5 = rotated/scaled model (36 bytes;
+    /// 5 can be knocked over), 9 = scaled object / sprite (28 bytes).
     pub kind: u8,
     pub model: u16,
     pub pos: Vec3,

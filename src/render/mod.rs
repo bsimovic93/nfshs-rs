@@ -72,6 +72,9 @@ pub struct DepthCue {
 pub struct FrameParams {
     /// Index ranges of the world to draw (None: all of it).
     pub world_ranges: Option<Vec<std::ops::Range<u32>>>,
+    /// More of the world placed this frame (the track objects the original draws), drawn
+    /// like the static world (one-sided).
+    pub objects: Vec<Vertex>,
     /// Subtractive primitives (PS1 semi-transparency mode 2: background - foreground), drawn
     /// over the track: the cars' ground shadows.
     pub shadows: Vec<Vertex>,
@@ -223,6 +226,7 @@ pub struct Renderer {
     static_vb: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     dyn_vb: DynBuf,
     shadow_vb: DynBuf,
+    objects_vb: DynBuf,
     late_vb: DynBuf,
     sub_pipeline: wgpu::RenderPipeline,
     hud_vb: DynBuf,
@@ -393,6 +397,7 @@ impl Renderer {
         let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
         let dyn_vb = DynBuf::new(&device, "dynamic");
         let shadow_vb = DynBuf::new(&device, "shadows");
+        let objects_vb = DynBuf::new(&device, "objects");
         let late_vb = DynBuf::new(&device, "subtract late");
         let hud_vb = DynBuf::new(&device, "hud");
         let under_vb = DynBuf::new(&device, "hud under");
@@ -444,6 +449,7 @@ impl Renderer {
             static_vb: None,
             dyn_vb,
             shadow_vb,
+            objects_vb,
             late_vb,
             sub_pipeline,
             hud_vb,
@@ -604,6 +610,7 @@ impl Renderer {
         self.sky_vb.upload(&self.device, &self.queue, sky);
         self.dyn_vb.upload(&self.device, &self.queue, dynamic);
         self.shadow_vb.upload(&self.device, &self.queue, &p.shadows);
+        self.objects_vb.upload(&self.device, &self.queue, &p.objects);
         self.late_vb.upload(&self.device, &self.queue, &p.subtract_late);
         self.hud_vb.upload(&self.device, &self.queue, hud);
         self.under_vb.upload(&self.device, &self.queue, &self.hud_under);
@@ -725,6 +732,10 @@ impl Renderer {
                     }
                     None => rp.draw_indexed(0..*n, 0, 0..1),
                 }
+            }
+            if !p.objects.is_empty() {
+                rp.set_vertex_buffer(0, self.objects_vb.buf.slice(..));
+                rp.draw(0..p.objects.len() as u32, 0..1);
             }
             if !p.shadows.is_empty() {
                 rp.set_pipeline(&self.sub_pipeline);
