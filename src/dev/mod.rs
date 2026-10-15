@@ -18,12 +18,12 @@ pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-sha
 pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::RaceConfig) -> Result<bool> {
     let (track, variant, car, laps) = (cfg.track, cfg.variant, cfg.player_car, cfg.laps);
     match cmd {
-        "ref-compare" => refcmp::compare(&data, Path::new(&args[2]))?,
+        "ref-compare" => refcmp::compare(data, Path::new(&args[2]))?,
         // match-shapes REF.png FILE.PSH NAME...: where each shape appears in a reference picture
         "match-shapes" => refcmp::match_shapes(Path::new(&args[2]), Path::new(&args[3]), &args[4..])?,
         "shot" => {
-            let secs: f32 = opt(&args, "--time").unwrap_or("0").parse()?;
-            let keys = opt(&args, "--keys").unwrap_or("");
+            let secs: f32 = opt(args, "--time").unwrap_or("0").parse()?;
+            let keys = opt(args, "--keys").unwrap_or("");
             let input = game::Input {
                 up: keys.contains('u'),
                 down: keys.contains('d'),
@@ -33,9 +33,9 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                 autopilot: keys.contains('a'),
                 ..Default::default()
             };
-            let out = opt(&args, "--out").unwrap_or("shot.png");
+            let out = opt(args, "--out").unwrap_or("shot.png");
             // --taps "s@5,d@5.5,x@6": press Start / Down / Up / accept (x) briefly at those times
-            let taps: Vec<(char, f32)> = opt(&args, "--taps")
+            let taps: Vec<(char, f32)> = opt(args, "--taps")
                 .unwrap_or("")
                 .split(',')
                 .filter_map(|t| {
@@ -43,7 +43,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     Some((k.chars().next()?, at.parse().ok()?))
                 })
                 .collect();
-            screenshot(&data, &cfg, Path::new(out), secs, input, &taps)?;
+            screenshot(data, cfg, Path::new(out), secs, input, &taps)?;
         }
         "dump-shape-pal" => {
             // dump-shape-pal FILE.PSH NAME PALETTE_SHAPE out.png: a shape drawn with another
@@ -334,7 +334,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         }
                         img.save(std::path::Path::new(&dir).join(format!("vram_{f}.png")))?;
                     }
-                    let showroom = game::fe::Showroom::load(&data, &game::fe::FeScene::car_codes(&overlay));
+                    let showroom = game::fe::Showroom::load(data, &game::fe::FeScene::car_codes(&overlay));
                     let scene = game::fe::FeScene::build(&overlay, &vram, screen, 960.0, 720.0, showroom.as_ref());
                     let n = (scene.under.len() + scene.over.len()) / 6;
                     let r = match &mut r {
@@ -434,7 +434,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                 script.push((secs.parse::<f32>()?, i));
             }
             let shots: Vec<u32> = args[3].split(',').filter_map(|s| s.parse().ok()).collect();
-            front_end_play(&data, &script, &shots, Path::new(&args[4]))?;
+            front_end_play(data, &script, &shots, Path::new(&args[4]))?;
             // the script is done: don't wait for the original to wind down (it would run on,
             // unpaced, through its results and front end)
             use std::io::Write;

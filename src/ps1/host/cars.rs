@@ -143,7 +143,7 @@ impl CarFacet {
 
     /// Records left by `record_car_facet`.
     pub(super) fn parse(w: &[u32]) -> Vec<Self> {
-        w.chunks_exact(Self::WORDS)
+        w.as_chunks::<{ Self::WORDS }>().0.iter()
             .map(|r| Self {
                 car: r[0],
                 light: r[1],

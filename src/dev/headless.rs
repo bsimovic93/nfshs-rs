@@ -49,13 +49,13 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
             }
         }
         // NFSHS_LIGHTTABLELOG=1: a checksum of the original's light table every 5 s
-        if std::env::var_os("NFSHS_LIGHTTABLELOG").is_some() && (t * 60.0) as u32 % 300 == 0 {
+        if std::env::var_os("NFSHS_LIGHTTABLELOG").is_some() && ((t * 60.0) as u32).is_multiple_of(300) {
             let lt = &game.sim.snapshot().light_table;
             let sum = lt.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64));
             println!("  t={t:5.1} light table {sum:016x} [{:06x} {:06x} {:06x} {:06x}]", lt.get(16).unwrap_or(&0) & 0xFF_FFFF, lt.get(64).unwrap_or(&0) & 0xFF_FFFF, lt.get(128).unwrap_or(&0) & 0xFF_FFFF, lt.get(200).unwrap_or(&0) & 0xFF_FFFF);
         }
         // NFSHS_SKYLOG=1: the original's sky dome colours (zenith .. horizon) every 2 s
-        if std::env::var_os("NFSHS_SKYLOG").is_some() && (t * 60.0) as u32 % 120 == 0 {
+        if std::env::var_os("NFSHS_SKYLOG").is_some() && ((t * 60.0) as u32).is_multiple_of(120) {
             if let Some(sky) = game.sim.snapshot().sky.clone() {
                 let e = game.sim.snapshot().view_env;
                 println!("  t={t:5.1} sky {:?} band top {:?} far colour {:?} dqa {} dqb {} h {}", (0..5).map(|r| sky.dome_colors[r * 17 + 8]).collect::<Vec<_>>(), sky.top_colors.get(8), [e[0] / 16, e[1] / 16, e[2] / 16], e[3], e[4], e[5]);
@@ -139,13 +139,13 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                 }
             } else if let Some(g) = &mut game {
                 g.update(1.0 / 60.0, input);
-                if std::env::var_os("NFSHS_BEAMLOG").is_some() && frame % 60 == 0 {
+                if std::env::var_os("NFSHS_BEAMLOG").is_some() && frame.is_multiple_of(60) {
                     if let Some(b) = g.sim.snapshot().night_beam.clone() {
                         let nz = b.map.iter().filter(|&&v| v != 0).count();
                         println!("frame {frame}: beam flags {:#x} z0 {} xs {} zs {}, map cells lit {nz}, max {}", b.flags, b.z0, b.xs, b.zs, b.map.iter().max().unwrap_or(&0));
                     }
                 }
-                if std::env::var_os("NFSHS_CARSLOG").is_some() && frame % 60 == 0 {
+                if std::env::var_os("NFSHS_CARSLOG").is_some() && frame.is_multiple_of(60) {
                     let s = g.sim.snapshot();
                     let p = s.cars[0].position;
                     let d = |c: &crate::ps1::race::CarState| (((c.position[0] - p[0]) as f64).hypot((c.position[2] - p[2]) as f64) / 65536.0) as i32;
@@ -155,7 +155,7 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                         println!("    view {k}: player {} camera {:?} fwd {:?} car0 {:?} fwd {:?} car1 {:?}", v.player, m(v.camera_pos), &v.camera_rot[6..9], m(s.cars[0].position), &s.cars[0].orient[6..9], s.cars.get(1).map(|c| m(c.position)));
                     }
                 }
-                if std::env::var_os("NFSHS_PARTSLOG").is_some() && frame % std::env::var("NFSHS_PARTSLOG").ok().and_then(|v| v.parse().ok()).unwrap_or(30) == 0 {
+                if std::env::var_os("NFSHS_PARTSLOG").is_some() && frame.is_multiple_of(std::env::var("NFSHS_PARTSLOG").ok().and_then(|v| v.parse().ok()).unwrap_or(30)) {
                     let snap = g.sim.snapshot();
                     for (k, f) in snap.car_facets.iter().enumerate() {
                         let Some(f) = f else { continue };

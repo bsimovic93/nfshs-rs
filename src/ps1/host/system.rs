@@ -30,8 +30,8 @@ impl GameHost {
                 slot.map_or(0, |h| std::mem::replace(h, a1))
             }
             0x800F_3238 => {
-                let old = self.callbacks.insert("vsync", a0).unwrap_or(0);
-                old
+                
+                self.callbacks.insert("vsync", a0).unwrap_or(0)
             }
             0x800E_A7CC | 0x800E_A8A0 => 1, // SetRCnt / StartRCnt
             0x800E_A868 => {

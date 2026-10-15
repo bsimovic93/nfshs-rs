@@ -357,7 +357,7 @@ impl CarState {
                     // fixeddiv(s << 16, fixedmult(speed, 2184)) >> 16
                     let d = (speed * 2184) >> 16;
                     if d != 0 {
-                        s = (s << 32) / d >> 16;
+                        s = ((s << 32) / d) >> 16;
                     }
                 }
                 (s * 32) as i32

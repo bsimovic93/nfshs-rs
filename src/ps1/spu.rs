@@ -84,7 +84,7 @@ impl Envelope {
             cycles *= 4;
         }
         if exponential && decreasing {
-            step = step * level >> 15;
+            step = (step * level) >> 15;
         }
         self.counter -= 1;
         if self.counter > 0 {
@@ -285,11 +285,10 @@ impl Spu {
                 self.check_irq(a as u32, 2);
                 self.transfer_addr = (self.transfer_addr + 2) & (RAM_SIZE as u32 - 1);
             }
-            0x1AA => {
-                if v & 0x40 == 0 {
+            0x1AA
+                if v & 0x40 == 0 => {
                     self.irq_flag = false;
                 }
-            }
             _ => {}
         }
     }
@@ -466,10 +465,10 @@ impl Spu {
         // the Gaussian over samples i-3..i (the chip's interpolation)
         let i = (vc.counter >> 12) as usize;
         let f = (vc.counter >> 4 & 0xFF) as usize;
-        let g = |k: usize, s: i16| GAUSS[k] as i32 * s as i32 >> 15;
+        let g = |k: usize, s: i16| (GAUSS[k] as i32 * s as i32) >> 15;
         let interp = (g(0xFF - f, vc.buf[i]) + g(0x1FF - f, vc.buf[i + 1]) + g(0x100 + f, vc.buf[i + 2]) + g(f, vc.buf[i + 3])).clamp(-32768, 32767);
         let sample = if noise { self.noise_level as i16 as i32 } else { interp };
-        let out = sample * vc.level >> 15;
+        let out = (sample * vc.level) >> 15;
         vc.last_out = out;
         vc.counter += step;
         if vc.counter >> 12 >= 28 {
@@ -517,7 +516,7 @@ impl Spu {
         let r = |i: usize| regs[i];
         let m = |i: usize| (r(i) as i64) << 3;
         let vol = |i: usize| r(i) as i16 as i32;
-        let mul = |a: i32, b: i32| a * b >> 15;
+        let mul = |a: i32, b: i32| (a * b) >> 15;
         let (lin, rin) = (mul(self.reverb_in[0], vol(30)), mul(self.reverb_in[1], vol(31)));
         let (d_apf1, d_apf2) = (m(0), m(1));
         let (v_iir, v_wall, v_apf1, v_apf2) = (vol(2), vol(7), vol(8), vol(9));
@@ -585,7 +584,7 @@ impl Spu {
                 }
                 let Some(s) = s else { continue };
                 let vc = &self.voices[v];
-                let (a, b) = (s * vc.vol[0] >> 15, s * vc.vol[1] >> 15);
+                let (a, b) = ((s * vc.vol[0]) >> 15, (s * vc.vol[1]) >> 15);
                 l += a;
                 r += b;
                 if eon >> v & 1 != 0 {
@@ -607,8 +606,8 @@ impl Spu {
             let cnt = self.spucnt();
             let (mut ol, mut or) = (0, 0);
             if cnt & 0x8000 != 0 && cnt & 0x4000 != 0 {
-                ol = (l.clamp(-32768, 32767) * self.main_vol[0] >> 15) + self.reverb_out[0];
-                or = (r.clamp(-32768, 32767) * self.main_vol[1] >> 15) + self.reverb_out[1];
+                ol = ((l.clamp(-32768, 32767) * self.main_vol[0]) >> 15) + self.reverb_out[0];
+                or = ((r.clamp(-32768, 32767) * self.main_vol[1]) >> 15) + self.reverb_out[1];
             }
             self.out.push(ol.clamp(-32768, 32767) as i16);
             self.out.push(or.clamp(-32768, 32767) as i16);

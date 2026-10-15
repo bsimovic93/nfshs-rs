@@ -517,7 +517,7 @@ impl Host for GameHost {
                 std::process::exit(4);
             }
         }
-        if self.idles % 500 == 0 && std::env::var_os("PS1_IDLELOG").is_some() {
+        if self.idles.is_multiple_of(500) && std::env::var_os("PS1_IDLELOG").is_some() {
             eprintln!("idle {} at clock {}: stack {:x?} recent {:x?}", self.idles, self.clock, c.stack, &c.recent[..4]);
         }
     }

@@ -40,14 +40,14 @@ impl Movie {
         let mut m = Movie { width: 0, height: 0, frames: Vec::new(), audio: Vec::new(), stereo: true, rate: 37800 };
         let mut current: Option<(u32, Vec<Option<Vec<u8>>>)> = None;
         let mut adpcm = [[0i32; 2]; 2];
-        for s in data.chunks_exact(SECTOR) {
+        for s in data.as_chunks::<SECTOR>().0 {
             let (submode, coding) = (s[2], s[3]);
             let body = &s[8..];
             if submode & 0x04 != 0 {
                 // XA audio: 18 sound groups of 128 bytes
                 m.stereo = coding & 1 != 0;
                 m.rate = if coding & 4 != 0 { 18900 } else { 37800 };
-                for g in body[..18 * 128].chunks_exact(128) {
+                for g in body[..18 * 128].as_chunks::<128>().0 {
                     decode_sound_group(g, m.stereo, &mut adpcm, &mut m.audio);
                 }
             } else if submode & 0x02 != 0 && u16::from_le_bytes([body[0], body[1]]) == 0x0160 {
@@ -103,7 +103,7 @@ fn decode_sound_group(g: &[u8], stereo: bool, prev: &mut [[i32; 2]; 2], out: &mu
         }
     }
     if stereo {
-        for pair in units.chunks_exact(2) {
+        for pair in units.as_chunks::<2>().0 {
             for j in 0..28 {
                 out.push(pair[0][j]);
                 out.push(pair[1][j]);

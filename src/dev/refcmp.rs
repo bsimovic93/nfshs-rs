@@ -70,7 +70,7 @@ fn ref_env(ram: &Ram, car: u32) -> crate::ps1::host::CarEnv {
     };
     let light = ram.i32(car + 2176) as u32;
     let level = (((light & 0xFF) + ((light >> 8) & 0xFF) + ((light >> 16) & 0xFF)) / 3).max(24);
-    let mut c = (level >> 2) * ram.0[0x13_E684] as u32 >> 7;
+    let mut c = ((level >> 2) * ram.0[0x13_E684] as u32) >> 7;
     if ia >= 11 {
         c = c * 2 / 3;
     }

@@ -99,7 +99,7 @@ impl Cpu {
 
     /// 3x3 matrix starting at control register `base` (RT = 32, LLM = 40, LCM = 48).
     fn matrix(&self, base: usize) -> [[i64; 3]; 3] {
-        let e = |k: usize| if k % 2 == 0 { self.lo(base + k / 2) } else { self.hi(base + k / 2) };
+        let e = |k: usize| if k.is_multiple_of(2) { self.lo(base + k / 2) } else { self.hi(base + k / 2) };
         [[e(0), e(1), e(2)], [e(3), e(4), e(5)], [e(6), e(7), e(8)]]
     }
     fn vector(&self, v: u32) -> [i64; 3] {

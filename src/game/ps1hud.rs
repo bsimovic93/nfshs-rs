@@ -182,7 +182,7 @@ impl Ps1Hud {
         let psh = Psh::parse(&data.read("ZHUD.PSH")?)?;
         let shapes: Vec<(u16, u16, u16, u16, u16)> = setup
             .shapes
-            .chunks_exact(20)
+            .as_chunks::<20>().0.iter()
             .map(|e| (e[0] as u16, e[1] as u16, u16le(e, 2), u16le(e, 16), u16le(e, 18)))
             .collect();
         // HudPmx_gShapes follows the load order in SHAPE_NAMES, except that shapes missing from

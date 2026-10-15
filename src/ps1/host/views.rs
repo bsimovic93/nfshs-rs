@@ -113,7 +113,7 @@ impl GameHost {
                 // the original runs while rendering the HUD
                 let g = |r: usize| c.gte_read(32 + r) as i32;
                 self.view_env = [g(21), g(22), g(23), g(27), g(28), g(26), g(13), g(14), g(15)];
-                if std::env::var_os("NFSHS_ENVLOG").is_some() && self.frame.frames_run % 120 == 0 {
+                if std::env::var_os("NFSHS_ENVLOG").is_some() && self.frame.frames_run.is_multiple_of(120) {
                     eprintln!("view {a0} env (far rgb, dqa, dqb, h, back rgb) {:?}, ofx {} ofy {}", self.view_env, c.gte_read(32 + 24) as i32 as f32 / 65536.0, c.gte_read(32 + 25) as i32 as f32 / 65536.0);
                 }
                 // which track chunks to draw, and how (detail level)

@@ -175,7 +175,7 @@ impl GameHost {
             unlock_everything(c);
         }
         // top of the original main loop: game frames are locked to 60 Hz fields
-        if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
+        if !self.clock.is_multiple_of(FIELD) || self.clock == self.frame.last_top {
             self.advance_to(c, (self.clock / FIELD + 1) * FIELD);
         }
         self.frame.last_top = self.clock;
@@ -210,7 +210,7 @@ impl GameHost {
                         let d = match cmd {
                             OverlayCmd::Quad { pts, tex, semi, abr, colours } => format!("quad {:?} tex {:x?} semi {semi} abr {abr} pts {pts:?} col {colours:x?}", pts[0], tex.as_ref().map(|t| (t.tpage, t.clut, t.uv[0], t.uv[3]))),
                             OverlayCmd::ShowroomCar { car, cam_pos, h, ofx, ofy, mirrored, level, .. } => format!("showroom car {} pos {:?} cam {cam_pos:?} h {h} of {ofx},{ofy} mirrored {mirrored} level {level}", car.code, car.position),
-                            other => format!("{}", format!("{other:?}").chars().take(60).collect::<String>()),
+                            other => format!("{other:?}").chars().take(60).collect::<String>().to_string(),
                         };
                         eprintln!("cmd {i} {d}");
                     }

@@ -107,7 +107,7 @@ impl Videos {
                 let rgba = self.decoder.get_or_insert_with(Decoder::default).frame(&m.frames[due as usize], m.width, m.height);
                 // (the original decodes with DecDCTin mode 2: 16-bit pixels with bit 15 set, so
                 // semi-transparent primitives blend every texel, black included)
-                let pixels = rgba.chunks_exact(4).map(|p| 0x8000 | (p[0] as u16 >> 3) | ((p[1] as u16 >> 3) << 5) | ((p[2] as u16 >> 3) << 10)).collect();
+                let pixels = rgba.as_chunks::<4>().0.iter().map(|p| 0x8000 | (p[0] as u16 >> 3) | ((p[1] as u16 >> 3) << 5) | ((p[2] as u16 >> 3) << 10)).collect();
                 return Some(VideoAction::Upload { x: a1, y: a2, w: m.width, h: m.height, pixels });
             }
             _ => return None,

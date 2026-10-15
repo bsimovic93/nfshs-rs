@@ -33,7 +33,7 @@ pub fn push_spu(samples: &[i16]) {
         }
     }
     let Ok(mut q) = SPU_QUEUE.lock() else { return };
-    q.buf.extend(samples.chunks_exact(2).map(|c| [c[0], c[1]]));
+    q.buf.extend(samples.as_chunks::<2>().0.iter().map(|c| [c[0], c[1]]));
     // far ahead of the output (or no output at all): drop the oldest
     let excess = q.buf.len().saturating_sub(SPU_MAX);
     if excess > 0 {
@@ -134,7 +134,7 @@ impl Audio {
         });
         let device = chosen.or_else(|| host.default_output_device()).ok_or_else(|| anyhow::anyhow!("no audio output device"))?;
         let supported = device.default_output_config()?;
-        let config: cpal::StreamConfig = supported.clone().into();
+        let config: cpal::StreamConfig = supported.into();
         let rate = config.sample_rate as f32;
         let channels = config.channels as usize;
         let mixer = Arc::new(Mutex::new(Mixer { voices: Vec::new(), master: 0.8 }));

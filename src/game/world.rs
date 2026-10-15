@@ -153,7 +153,7 @@ impl Game {
                 if part.subtract {
                     continue;
                 }
-                for (t, tri) in part.verts.chunks_exact(3).enumerate() {
+                for (t, tri) in part.verts.as_chunks::<3>().0.iter().enumerate() {
                     let w = [0, 1, 2].map(|k| tm.transform_point3(Vec3::from(tri[k].pos)));
                     if !front_facing(self.cam_pos, w) {
                         continue;
@@ -302,7 +302,7 @@ impl Game {
                 }
                 let _ = pi;
                 let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
-                for (t, tri) in part.verts.chunks_exact(3).enumerate() {
+                for (t, tri) in part.verts.as_chunks::<3>().0.iter().enumerate() {
                     let w = [0, 1, 2].map(|k| tm.transform_point3(Vec3::from(tri[k].pos)));
                     if !front_facing(self.cam_pos, w) {
                         continue;

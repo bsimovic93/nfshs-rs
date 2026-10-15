@@ -423,7 +423,7 @@ impl Cpu {
         self.ticks += 1;
         self.since_host += 1;
         if self.ticks & ((1 << 25) - 1) == 0 && std::env::var_os("PS1_SAMPLE").is_some() {
-            eprintln!("sample at {}M branches: stack {:x?} recent {:x?}", self.ticks >> 20, self.stack, &self.recent);
+            eprintln!("sample at {}M branches: stack {:x?} recent {:x?}", self.ticks >> 20, self.stack, self.recent);
         }
         if self.spin_limit != 0 && self.since_host >= self.spin_limit && !self.in_irq {
             self.since_host = 0;

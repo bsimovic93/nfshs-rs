@@ -51,7 +51,7 @@ pub fn parse_pt(d: &[u8], mut o: usize) -> Result<(HashMap<u8, u32>, usize)> {
         o += 1;
         match tag {
             0xFF => break,
-            0xFC | 0xFD | 0xFE => continue,
+            0xFC..=0xFE => continue,
             _ => {
                 let len = *d.get(o).unwrap_or(&0) as usize;
                 o += 1;

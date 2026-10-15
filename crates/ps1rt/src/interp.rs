@@ -87,7 +87,7 @@ impl Cpu {
                     self.r[31] = npc.wrapping_add(4);
                     call = Some((npc & 0xF000_0000) | ((w & 0x03FF_FFFF) << 2));
                 }
-                4 | 5 | 6 | 7 => {
+                4..=7 => {
                     let (a, b) = (self.r[rs], self.r[rt]);
                     let taken = match op {
                         4 => a == b,

@@ -254,7 +254,7 @@ impl Track {
                         }
                     }
                     if let Some(l) = find(c.body, 0x09) {
-                        b.lines = l.body.chunks_exact(4).take(l.count as usize).map(|r| [r[0], r[1], r[2], r[3]]).collect();
+                        b.lines = l.body.as_chunks::<4>().0.iter().take(l.count as usize).map(|r| [r[0], r[1], r[2], r[3]]).collect();
                     }
                     if let Some(g) = find(c.body, 0x17) {
                         let hdr = find(g.body, 0x1b).map(|h| h.body).unwrap_or(&[]);
@@ -295,7 +295,7 @@ impl Track {
                             0x02 => {
                                 textures = s
                                     .body
-                                    .chunks_exact(10)
+                                    .as_chunks::<10>().0.iter()
                                     .map(|r| TexEntry {
                                         shape: u16le(r, 0),
                                         mode: r[2],
