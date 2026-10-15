@@ -71,6 +71,8 @@ mod gs {
     pub const CAR_INFO: usize = 0x3D4;
     pub const CAR_INFO_SIZE: usize = 0xB4;
     pub const CAR_TYPE: usize = 0x00;
+    /// The paint (0..15; R3DCar_Instantiate3DCar keeps the low 4 bits at Car_tObj+0x840).
+    pub const CAR_COLOUR: usize = 0x0C;
     /// Bit mask: 1 = human race car, 2 = AI race car (4 = traffic).
     pub const CAR_CLASS: usize = 0x04;
     pub const STARTING_POS: usize = 0x54;
@@ -145,6 +147,10 @@ impl RaceSetup {
                 d.copy_within(gs::CAR_INFO..gs::CAR_INFO + gs::CAR_INFO_SIZE, o);
             }
             put(&mut d, o + gs::CAR_TYPE, t as i32);
+            // NFSHS_COLOUR=n: the player's paint in headless races
+            if let (0, Some(c)) = (k, std::env::var("NFSHS_COLOUR").ok().and_then(|v| v.parse::<i32>().ok())) {
+                put(&mut d, o + gs::CAR_COLOUR, c);
+            }
             put(&mut d, o + gs::CAR_CLASS, if k == 0 { 1 } else { 2 });
             // grid slot (10 track slices apart); the player starts at the back
             put(&mut d, o + gs::STARTING_POS, if k == 0 { n as i32 - 1 } else { k as i32 - 1 });
@@ -318,8 +324,10 @@ pub struct CarState {
     /// `control.steering`.
     pub steering: i32,
     pub lap: i32,
-    /// The paint: the row of the body textures' colour palettes (`Texture_ColorCarPalette`,
-    /// as `R3DCar_Instantiate3DCar` sets it from the car's colour and flags).
+    /// The paint as `R3DCar_Instantiate3DCar` reads it: the colour (Car_tObj+0x840, 0..15:
+    /// bit 3 picks the "d" body sheet) in the low 4 bits, the car's palette flags
+    /// (Car_tObj+0x8B3 bits 0 and 1: the second half of the body sheet's and the other
+    /// sheets' palettes) in bits 4 and 5. See [`crate::assets::load_car`].
     pub colour: u8,
     /// Car_tObj+0x570 bit 4: a traffic car parked out of the race (waiting to enter).
     pub parked: bool,
@@ -348,7 +356,7 @@ impl CarState {
             gear: m.r8(car + 0x442) as i8,
             steering: m.r32(car + 0x450) as i32,
             lap: m.r32(car + 0x264) as i32,
-            colour: (m.r16(car + 0x840) & 7) as u8 + ((m.r8(car + 0x8B3) & 1) << 3),
+            colour: (m.r16(car + 0x840) & 15) as u8 | (m.r8(car + 0x8B3) & 3) << 4,
             parked: m.r32(car + 0x570) & 4 != 0,
             wheel_rot: [m.r32(car + 0xD0) as u16, m.r32(car + 0xD4) as u16],
             wheel_steer: {

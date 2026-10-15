@@ -644,7 +644,8 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
 /// Load a car as the race does (R3DCar_ReadInCarData / CarIO_ReadInCarTextureData): the
 /// player's car from `ZZZ<code>H.VIV`, the others from `ZZZ<code>S.VIV`. The PSH files hold
 /// the texture pages: the interior and underside ("i") on a page of their own, the body's
-/// light ("l", paints 0..7) or dark ("d", paints 8..15) set, then "g".
+/// light ("l", colours 0..7) or dark ("d", colours 8..15) set, then "g". `colour` is the
+/// paint as [`crate::ps1::race::CarState::colour`] packs it.
 pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool, plate: Option<&str>, colour: u8) -> Result<CarModel> {
     let name = format!("ZZZ{code}{}.VIV", if player { "H" } else { "S" });
     // (police cars: the livery the game loaded for this track, e.g. CBMW -> ZZZGBMWS.VIV)
@@ -659,10 +660,13 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
     // two 256x256 pages; which page and shape each texture name is on
     let mut pages = [crate::formats::psh::Atlas::new(256), crate::formats::psh::Atlas::new(256)];
     let mut page_of: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    // R3DCar_Instantiate3DCar: the body's second texture file is "d" for paints 8..15 and
-    // "l" for 0..7 (palette row = paint & 7), then "g"; night driving changes nothing here
+    // R3DCar_Instantiate3DCar: the body's second texture file is "d" for colours 8..15 and
+    // "l" for 0..7, then "g"; each painted with palette row (colour & 7) + 8 when the car's
+    // flag for it is set (Car_tObj+0x8B3: bit 0 for the "l"/"d" sheet, bit 1 for the
+    // others); night driving changes nothing here
     let _ = night;
-    let skip = if colour >= 8 { ['l'] } else { ['d'] };
+    let skip = if colour & 8 != 0 { ['l'] } else { ['d'] };
+    let row = |flag: u8| (colour & 7) as usize + if colour >> 4 & flag != 0 { 8 } else { 0 };
     let mut files: Vec<(char, Psh)> = Vec::new();
     for (n, d) in &viv.entries {
         let n = n.to_ascii_lowercase();
@@ -674,8 +678,29 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
             continue;
         }
         let mut psh = Psh::parse(d)?;
-        psh.paint((colour & 7) as usize);
+        psh.paint(row(if matches!(kind, 'l' | 'd') { 1 } else { 2 }));
         files.push((kind, psh));
+    }
+    // the dents have no paint holder of their own: CarIO_ReadInCarTextureData draws each with
+    // the (painted) palette of the body texture it belongs to (the texture table at
+    // 0x8011FAF4: dHiF/dLoF the front, dHiR/dLoR the rear, dHiS/dLoS the side, dTp1 and dTop
+    // the tops), not with the holder that follows it in the file
+    let body_palette = |name: &str| files.iter().flat_map(|(_, p)| &p.shapes).find(|s| s.name == name && s.kind == 0x40).map(|s| s.palette.clone());
+    let dents: Vec<(&str, Option<Vec<u16>>)> = [("dHiF", "frnt"), ("dLoF", "frnt"), ("dHiR", "rear"), ("dLoR", "rear"), ("dHiS", "side"), ("dLoS", "side"), ("dTp1", "top1"), ("dTop", "top2")]
+        .into_iter()
+        .map(|(dent, body)| (dent, body_palette(body)))
+        .collect();
+    for (_, psh) in &mut files {
+        for s in psh.shapes.iter_mut().filter(|s| s.kind == 0x40) {
+            if let Some((_, Some(pal))) = dents.iter().find(|(d, _)| *d == s.name) {
+                if pal.len() >= 16 {
+                    for (k, &ix) in s.indices.iter().enumerate() {
+                        s.rgba[k * 4..k * 4 + 4].copy_from_slice(&crate::formats::psh::ps1_color(pal[ix as usize & 15]));
+                    }
+                    s.palette = pal.clone();
+                }
+            }
+        }
     }
     // the later files ("d", "g") last, so they cover the shapes before them
     files.sort_by_key(|(k, _)| matches!(k, 'd' | 'g'));

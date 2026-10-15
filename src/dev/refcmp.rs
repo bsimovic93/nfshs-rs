@@ -123,7 +123,7 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     // the player's paint as the captured game has it (its own boot has the template's)
     let colour = {
         let o = |a: u32| (a & 0x1F_FFFF) as usize;
-        ((ram.0[o(cars[0] + 0x840)] & 7) + ((ram.0[o(cars[0] + 0x8B3)] & 1) << 3)) as u8
+        (ram.0[o(cars[0] + 0x840)] & 15) | (ram.0[o(cars[0] + 0x8B3)] & 3) << 4
     };
     if let Some(r) = game.racers.first() {
         let night = matches!(variant, "N" | "S");

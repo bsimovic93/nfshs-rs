@@ -178,7 +178,11 @@ impl Game {
         // the race cars (the player first, then the opponents in the car list), as the original
         // set them up: paint, reflection normals, texture substitutes (lit lights, dents)
         let race_car = |k: usize| k == 0 || snap.cars.get(k).is_some_and(|c| crate::ps1::race::car_type(&c.code).is_some());
-        let colours: Vec<u8> = snap.cars.iter().enumerate().filter(|(k, _)| race_car(*k)).map(|(_, c)| c.colour).collect();
+        let mut colours: Vec<u8> = snap.cars.iter().enumerate().filter(|(k, _)| race_car(*k)).map(|(_, c)| c.colour).collect();
+        // NFSHS_PAINT=n (debug): the player's car's textures in paint n (CarState::colour)
+        if let (Some(c), Some(p)) = (colours.first_mut(), std::env::var("NFSHS_PAINT").ok().and_then(|v| v.parse().ok())) {
+            *c = p;
+        }
         log::info!("car colours {colours:?}");
         let env_normals: Vec<_> = snap.env_normals.iter().enumerate().filter(|(k, _)| race_car(*k)).map(|(_, n)| n.clone()).collect();
         let texture_subs: Vec<_> = snap.texture_subs.iter().enumerate().filter(|(k, _)| race_car(*k)).map(|(_, t)| t.clone()).collect();
