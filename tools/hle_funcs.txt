@@ -1,4 +1,4 @@
-# Retail NFS4.EXE (SLUS-00826) functions replaced on the host side (src/ps1/host.rs).
+# Retail NFS4.EXE (SLUS-00826) functions replaced on the host side (src/ps1/host/).
 # Excluded from recompilation by tools/recomp.py.  Format: address name
 800eb204 FILE_opensync
 800eb27c FILE_readsync

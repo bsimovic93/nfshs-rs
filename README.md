@@ -13,7 +13,7 @@ from your own disc image: no emulator, and no game data in this repository.
   Menus, game modes, car physics, AI, traffic, police, damage, the camera and the HUD logic
   are the game's own, step for step.
 - **The hardware, replaced.** The PS1's libraries are high-level replacements in
-  `src/ps1/host.rs`: CD and files read from the extracted disc; the pads come from keyboard
+  `src/ps1/host/`: CD and files read from the extracted disc; the pads come from keyboard
   and gamepads, with DualShock analog and vibration; the memory card is an image file;
   timers and VSync drive the game at 60 Hz; the SPU is modelled so the game's own EA sound
   driver plays its music and effects.

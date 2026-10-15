@@ -8,7 +8,7 @@ original. Run them from this folder (they import each other: `mips`, `ds`, `reco
 | Script | What it does |
 |---|---|
 | `recomp.py` | Static recompiler: `NFS4.EXE`'s MIPS functions to Rust (`crates/nfs4rc`). `python recomp.py ../crates/nfs4rc/src --all` |
-| `hle_funcs.txt` | Functions replaced on the host side (`src/ps1/host.rs`): calls to them reach the host. |
+| `hle_funcs.txt` | Functions replaced on the host side (`src/ps1/host/`): calls to them reach the host. |
 | `hook_funcs.txt` | Recompiled functions always called through `Cpu::call`, so the host can observe them. |
 
 ## Reading the original
