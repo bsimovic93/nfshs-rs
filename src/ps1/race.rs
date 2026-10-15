@@ -118,7 +118,10 @@ impl RaceSetup {
         put(&mut d, gs::TRACK, self.track as i32);
         put(&mut d, gs::NUM_LAPS, self.laps.max(1) as i32);
         put(&mut d, gs::REVERSE_TRACK, 0);
-        put(&mut d, gs::TRAFFIC_DENSITY, 0);
+        // NFSHS_TRAFFIC=N: traffic for headless runs at density N (the test drive's 2): the
+        // template's traffic cars follow the race cars (the front end sets up its own)
+        let traffic: i32 = std::env::var("NFSHS_TRAFFIC").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        put(&mut d, gs::TRAFFIC_DENSITY, traffic);
         let (weather, time) = match self.variant.as_str() {
             "N" => (0, 1),
             "W" => (1, 0),
@@ -145,6 +148,21 @@ impl RaceSetup {
             put(&mut d, o + gs::CAR_CLASS, if k == 0 { 1 } else { 2 });
             // grid slot (10 track slices apart); the player starts at the back
             put(&mut d, o + gs::STARTING_POS, if k == 0 { n as i32 - 1 } else { k as i32 - 1 });
+        }
+        if traffic > 0 {
+            let template_cars = i32::from_le_bytes(GAMESETUP_TEMPLATE[gs::NUM_CARS..gs::NUM_CARS + 4].try_into()?) as usize;
+            let mut total = n;
+            for k in 1..template_cars {
+                let src = gs::CAR_INFO + k * gs::CAR_INFO_SIZE;
+                let class = i32::from_le_bytes(GAMESETUP_TEMPLATE[src + gs::CAR_CLASS..src + gs::CAR_CLASS + 4].try_into()?);
+                if class != 4 || total >= 8 {
+                    continue;
+                }
+                let dst = gs::CAR_INFO + total * gs::CAR_INFO_SIZE;
+                d[dst..dst + gs::CAR_INFO_SIZE].copy_from_slice(&GAMESETUP_TEMPLATE[src..src + gs::CAR_INFO_SIZE]);
+                total += 1;
+            }
+            put(&mut d, gs::NUM_CARS, total as i32);
         }
         Ok(d)
     }

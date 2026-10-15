@@ -250,7 +250,19 @@ thread_local! {
     /// `record_car_facet`); and the primitive buffer ranges they were built in.
     static HALO_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static HALO_RANGES: std::cell::RefCell<Vec<(u32, u32, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// While the original's R3DCar_Visibilty runs inside its widened-view call.
+    static VISIBILITY_PASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+
+/// R3DCar_Visibilty(car, view): sets the car's level of detail (`Car_tObj` + 0x8C2), -1 when
+/// it is not drawn: beyond about 200 m, or outside a cone of |x| <= z in view space (90
+/// degrees, the PS1's 4:3 picture with room to spare).
+const R3DCAR_VISIBILITY: u32 = 0x800B_03E4;
+const CAR_DETAIL: u32 = 0x8C2;
+/// How much wider than the original's the car cone is made: the host draws the picture
+/// wider than 4:3 (the PS1's vertical field of view, the window's aspect), up to |x| <= 2z
+/// (21:9 with every camera).
+const CAR_CONE_WIDTH: i32 = 2;
 
 /// The car body's drawing in R3DCar_InsertCarFacetII / InsertCarFacetMenuII (the host
 /// draws the body): the part drawing, the shadow, the environment, and the menu's
@@ -372,10 +384,33 @@ fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
         }
         return false;
     }
+    if addr == R3DCAR_VISIBILITY && !VISIBILITY_PASS.get() {
+        // the original's test with the view's x row scaled down: the cone it allows is as
+        // much wider; the depth row (distance and level of detail) is left alone
+        let (car, view) = (c.r[4], c.r[5]);
+        let row: [u32; 3] = std::array::from_fn(|i| c.m.r32(view + 20 + 4 * i as u32));
+        for (i, v) in row.iter().enumerate() {
+            c.m.w32(view + 20 + 4 * i as u32, (*v as i32 / CAR_CONE_WIDTH) as u32);
+        }
+        VISIBILITY_PASS.set(true);
+        let depth = c.call_nested(R3DCAR_VISIBILITY, &[car, view]);
+        VISIBILITY_PASS.set(false);
+        for (i, v) in row.iter().enumerate() {
+            c.m.w32(view + 20 + 4 * i as u32, *v);
+        }
+        c.r[2] = depth;
+        return true;
+    }
     if addr != R3DCAR_INSERT_CAR_FACET_II {
         return false;
     }
     let car = c.r[4];
+    // not drawn this frame (R3DCar_Visibilty): the original returns at once (its
+    // R3DCar_ObjectVisible is still another car's)
+    if (c.m.r16(car + CAR_DETAIL) as i16) < 0 {
+        c.r[2] = 0;
+        return true;
+    }
     let light = c.call_nested(BWORLDSM_QUAD_LIGHT, &[car + 8]) & 0xFF_FFFF;
     let mut rec = vec![car, light, c.m.r32(SHADOW_ON)];
     // Newton_CalcRealShadowCoordinates left the shadow's corners at car + 488; keep them
