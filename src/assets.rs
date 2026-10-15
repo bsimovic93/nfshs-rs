@@ -222,10 +222,15 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                 })
                 .collect();
             let base = verts.len() as u32;
-            // semi-transparent materials (flags bit 0) blend their STP texels by their shape's
-            // translucency mode: added (smoke, clouds) or halved
+            // semi-transparent textures blend their STP texels by their shape's translucency
+            // mode: added (smoke, clouds) or halved. The PS1 makes a polygon semi-transparent
+            // when its texture's CLUT has an STP colour (Texture_LoadPmx: Draw_tPixMap +14,
+            // which DrawW_DrawQuad ORs into the GPU code), whatever the material says: Snowy
+            // Ridge's #CLD mist has no material flag; a material's bit 0 stands for it when
+            // the shape has no CLUT
             let te = track.textures.get(q.tex as usize);
-            let alpha = match te.filter(|t| t.flags & 1 != 0).and_then(|t| psh.shapes.get(t.shape as usize)).map(|s| s.translucency) {
+            let semi = |t: &&grp::TexEntry| psh.shapes.get(t.shape as usize).is_some_and(|s| if s.palette.is_empty() { t.flags & 1 != 0 } else { s.palette.iter().any(|&c| c > 0x8000) });
+            let alpha = match te.filter(semi).and_then(|t| psh.shapes.get(t.shape as usize)).map(|s| s.translucency) {
                 Some(1) => 0.0,
                 Some(0) => 0.5,
                 _ => 1.0,
