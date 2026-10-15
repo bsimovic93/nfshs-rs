@@ -734,14 +734,13 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
     }
     // the player's number plate (CarIO_CreateLicense): the name in ZLICENSE.PSH letters on
     // "blnk", split into the two halves the plate polygons show ("sFOf" and "sFOn" slots)
-    if let (Some(name), Ok(lic)) = (plate, data.read("ZLICENSE.PSH").and_then(|d| Psh::parse(&d))) {
+    // (only the race cars have one: CarIO_ReadInCarTextureData makes it for car types below
+    // 22, so the police cars keep their light bar's "sFOf"/"sFOn")
+    let plate_slots = crate::ps1::race::car_type(code).and_then(|t| PLATE_TEXTURES.get(t as usize)).copied();
+    if let (Some(name), Some((lt, rt)), Ok(lic)) = (plate, plate_slots, data.read("ZLICENSE.PSH").and_then(|d| Psh::parse(&d))) {
         let shape_pos = |n: &str| files.iter().flat_map(|(_, p)| p.shapes.iter()).find(|s| s.name == n).map(|s| ((s.vram.0 as usize % 64) * 4, s.vram.1 as usize % 256));
         // which textures the plate's halves replace, per car type (the game's table at
         // 0x8011FDD0: texture index for the left half, then the right half)
-        let (lt, rt) = match crate::ps1::race::car_type(code).and_then(|t| PLATE_TEXTURES.get(t as usize)) {
-            Some(&(l, r)) if l != 0 || r != 0 => (l, r),
-            _ => (27, 33),
-        };
         let (lname, rname) = (CAR_TEXTURES[lt as usize], CAR_TEXTURES[rt as usize]);
         if let (Some(blnk), Some(left), Some(right)) = (lic.shapes.iter().find(|s| s.name == "blnk"), shape_pos(lname), shape_pos(rname)) {
             let (w, h) = (blnk.width as usize, blnk.height as usize);
