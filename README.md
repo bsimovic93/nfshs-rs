@@ -123,14 +123,9 @@ nfshs dump-psh | dump-car | dump-track | dump-audio | dump-movie   asset viewers
 nfshs verify-decompress <files>     codecs against re/dec/*.bin
 ```
 
-`tools/` holds the reverse-engineering helpers:
-
-- `recomp.py`: the static recompiler.
-- `fdis.py ADDR`: disassembles a retail function.
-- `ramdis.py RAM ADDR N`: disassembles overlays from a RAM dump.
-- `carprims.py RAM [car]`: a car's GPU packets from a RAM dump.
-- `dsref.py OUT --state NAME --keys ...`: drives DuckStation from a save state in
-  `re/states` (see its README) and captures screenshots and RAM for comparison.
+`tools/` holds the reverse-engineering helpers: the recompiler, disassemblers, and DuckStation
+automation for reference captures (`dsref.py`, with save states in `re/states`). See
+[`tools/README.md`](tools/README.md).
 
 Symbol maps (retail ↔ development build) are in `re/*.tsv`.
 
