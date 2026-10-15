@@ -545,11 +545,23 @@ pub struct CarPart {
     /// and how many vertices the GEO part has.
     pub env_vertices: Vec<u16>,
     pub geo_vertices: usize,
+    /// Per triangle (as `verts`): its GEO texture, flags and UVs, for the texture
+    /// substitutes ([`CarModel::substitute`]).
+    pub tris: Vec<CarTri>,
     /// Wheel parts turn around their hub: which wheel (FL, FR, RL, RR) and where.
     pub wheel: Option<usize>,
     pub hub: Vec3,
     /// The part darkens what is behind it (the wheel arches' "shdw" texture, subtracted).
     pub subtract: bool,
+}
+
+/// A GEO polygon as the texture substitutes need it.
+#[derive(Clone, Copy)]
+pub struct CarTri {
+    pub texture: u8,
+    /// flags | flags2 << 8: the zone bits (0x3F0) and, as i16 below 0, the mirrored twin.
+    pub flags: u16,
+    pub uv: [[u8; 2]; 3],
 }
 
 /// A car model in local space (metres, origin at ground contact centre, +Z forward).
@@ -558,6 +570,15 @@ pub struct CarModel {
     pub parts: Vec<CarPart>,
     pub wheel_radius: f32,
     pub half_extents: Vec3,
+    /// Which of the model's two texture pages each GEO texture is on (`CAR_TEXTURES`
+    /// order; none when the car has no such texture), the pages in the atlas and its size.
+    pub texture_page: Vec<Option<u8>>,
+    pub page_rects: [Rect; 2],
+    pub atlas_size: f32,
+    /// The original's texture substitutes for this model and its parts' drawing modes (from
+    /// the running game, see `read_texture_subs`): empty until set.
+    pub texture_subs: Vec<crate::ps1::race::TextureSubs>,
+    pub part_modes: Vec<u8>,
 }
 
 /// `R3DCar_ObjectVisible` as the game leaves it during a race (used until the simulation
@@ -744,6 +765,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         let mut verts = Vec::new();
         let mut env = matches!(pi, 0 | 8 | 10 | 41 | 42 | 45 | 46).then(|| (Vec::new(), Vec::new()));
         let mut env_vertices = Vec::new();
+        let tris: Vec<CarTri> = part.polys.iter().map(|p| CarTri { texture: p.texture, flags: p.flags as u16 | (p.flags2 as u16) << 8, uv: p.uv }).collect();
         for poly in &part.polys {
             if let Some((normals, flags)) = &mut env {
                 flags.push((poly.flags as u16 | (poly.flags2 as u16) << 8) & 0xFFF);
@@ -766,7 +788,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
             }
         }
         let subtract = part.polys.iter().all(|p| CAR_TEXTURES.get(p.texture as usize) == Some(&"shdw")) && !part.polys.is_empty();
-        parts.push(CarPart { verts, env, env_vertices, geo_vertices: part.verts.len(), wheel, hub, subtract });
+        parts.push(CarPart { verts, env, env_vertices, geo_vertices: part.verts.len(), tris, wheel, hub, subtract });
     }
     let wheel_radius = parts.get(53).map(|p| p.hub.y).filter(|&r| r > 0.0).unwrap_or(0.33).max(0.2);
     let mut max = Vec3::ZERO;
@@ -775,10 +797,50 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
             max = max.max(Vec3::from(v.pos).abs());
         }
     }
-    Ok(CarModel { parts, wheel_radius, half_extents: max })
+    let texture_page = CAR_TEXTURES.iter().map(|n| page_of.get(*n).map(|&p| p as u8)).collect();
+    Ok(CarModel { parts, wheel_radius, half_extents: max, texture_page, page_rects: rects, atlas_size: atlas.size as f32, texture_subs: Vec::new(), part_modes: Vec::new() })
 }
 
 impl CarModel {
+    /// DrawC_Prim's texture substitute for triangle `t` of part `pi` (drawing modes 8 and 9)
+    /// under the car's light and damage `codes`: the triangle's UVs on the substitute texture
+    /// (the lit brake light, the dented panel) and whether it is drawn at full brightness
+    /// (mode 8, code bit 0x80: a lit lamp), or None to draw it as it is.
+    pub fn substitute(&self, pi: usize, t: usize, codes: &[u16]) -> Option<([[f32; 2]; 3], bool)> {
+        let mode = *self.part_modes.get(pi)?;
+        if mode != 8 && mode != 9 {
+            return None;
+        }
+        let tri = self.parts.get(pi)?.tris.get(t)?;
+        let code = *codes.get(tri.texture as usize)?;
+        if code == 0 {
+            return None;
+        }
+        // the mirrored twin takes the high byte
+        let mut a = if (tri.flags as i16) < 0 { code >> 8 } else { code & 0xFF } as u32;
+        // the polygon's damage zones pick the code's 2-bit field
+        let zones = (tri.flags & 0xFFF) as u32;
+        if zones & 0x3F0 != 0 {
+            a &= zones >> 4;
+            while a != 0 && a & 3 == 0 {
+                a >>= 2;
+            }
+        }
+        let k = (a & 3) as usize;
+        if k == 0 {
+            return None;
+        }
+        let (offset, du, dv) = self.texture_subs.get(tri.texture as usize)?[k - 1];
+        let texture = (tri.texture as i16 + offset) as usize;
+        let page = self.texture_page.get(texture).copied().flatten().or_else(|| self.texture_page.get(tri.texture as usize).copied().flatten())?;
+        let r = self.page_rects[page as usize];
+        let uv = tri.uv.map(|[u, v]| {
+            let (u, v) = (u.wrapping_add(du), v.wrapping_add(dv));
+            [(r.x as f32 + u as f32 + 0.5) / self.atlas_size, (r.y as f32 + v as f32 + 0.5) / self.atlas_size]
+        });
+        Some((uv, mode == 8 && a & 0x80 != 0))
+    }
+
     /// The reflection normals of part `pi` from per-vertex normals as the original keeps them
     /// in memory (R3DCar's loaded part objects: about 64 long, not the GEO's).
     /// (Left as they are when the model is another one than the game's: vertex counts differ.)

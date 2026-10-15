@@ -428,6 +428,8 @@ fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     rec.push(ok as u32);
     rec.extend((0..8).map(|i| c.m.r32(CAR_CACHE + 100 + 4 * i)));
     rec.extend([c.m.r32(CAR_CACHE + 132), c.m.r32(CAR_CACHE + 144), c.m.r16(R3DCAR_CENTER + 0x14) as u32]);
+    // DrawC_PrimStart's light and damage codes for this car (per texture, see CarFacet::codes)
+    rec.extend((0..26).map(|i| c.m.r32(LIGHT_CODES + 4 * i)));
     c.capture.extend(rec);
     // then the original itself, which adds the lights' halos (DrawC_PrimHalo: brake lights,
     // headlights) to the primitive buffer, everything else skipped
@@ -490,6 +492,8 @@ pub struct CarFacet {
     pub shadow: Option<([[i32; 3]; 4], [u8; 3])>,
     /// The reflection maps (DrawC_PrimStart), when the car is drawn.
     pub env: Option<CarEnv>,
+    /// DrawC_PrimStart's light and damage codes, per GEO texture (see `LIGHT_CODES`).
+    pub codes: Vec<u16>,
 }
 
 /// A car's reflection mapping for this frame: two of the track's reflection maps
@@ -505,7 +509,7 @@ pub struct CarEnv {
 }
 
 impl CarFacet {
-    const WORDS: usize = 3 + 12 + 1 + 57 + 1 + 8 + 3;
+    const WORDS: usize = 3 + 12 + 1 + 57 + 1 + 8 + 3 + 26;
 
     /// Records left by `record_car_facet`.
     fn parse(w: &[u32]) -> Vec<Self> {
@@ -521,6 +525,7 @@ impl CarFacet {
                     let map = |o: usize| (r[o] != 0).then(|| [r[o], r[o + 1], r[o + 2], r[o + 3]]);
                     CarEnv { a: map(74), b: map(78), scroll: r[82], colour: r[83] & 0xFF_FFFF, yaw: r[84] as u16 as i16 }
                 }),
+                codes: r[85..111].iter().flat_map(|&w| [w as u16, (w >> 16) as u16]).collect(),
             })
             .collect()
     }
@@ -560,6 +565,10 @@ const R3DCAR_INSERT_ALL_LIST_FACET: u32 = 0x800B_38C0;
 /// `R3DCar_ObjectVisible`.
 const R3DCAR_INSERT_CAR_FACET_II: u32 = 0x800B_2E30;
 const R3DCAR_OBJECT_VISIBLE: u32 = 0x8011_7B64;
+/// DrawC_PrimStart's per-texture codes for the car being drawn (52 halfwords): its lights
+/// (brake: bROf/bSOf |= 0x81, headlights ...) and damage zones; the low byte for a polygon,
+/// the high byte for its mirrored twin.
+const LIGHT_CODES: u32 = 0x8012_07F8;
 /// The font: CLUT of colour 0 (x in gp + 4864, y in shpfontclut + 14), the current CLUT
 /// (gp + 4880) and the space width (gp + 4882).
 const FONT_CLUT_X: u32 = 0x8013_D83C + 4864;

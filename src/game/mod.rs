@@ -239,6 +239,15 @@ impl Game {
                 snap.env_normals.iter().enumerate().filter(|(k, _)| race_car(*k)).map(|(_, n)| n.clone()).collect()
             })
             .unwrap_or_default();
+        // and their texture substitutes (lit lights, dents), the parts' drawing modes
+        let (texture_subs, part_modes): (Vec<Vec<crate::ps1::race::TextureSubs>>, Vec<u8>) = sim
+            .as_ref()
+            .map(|s| {
+                let snap = s.snapshot();
+                let race_car = |k: usize| k == 0 || snap.cars.get(k).is_some_and(|c| crate::ps1::race::car_type(&c.code).is_some());
+                (snap.texture_subs.iter().enumerate().filter(|(k, _)| race_car(*k)).map(|(_, t)| t.clone()).collect(), snap.part_modes.clone())
+            })
+            .unwrap_or_default();
         for (k, code) in codes.iter().enumerate() {
             let night = matches!(cfg.variant, "N" | "S");
             // the number plate shows the player's name (GameSetup carInfo + 0x68)
@@ -247,6 +256,8 @@ impl Game {
             for (pi, normals) in env_normals.get(k).into_iter().flatten() {
                 model.set_env_normals(*pi, normals);
             }
+            model.texture_subs = texture_subs.get(k).cloned().unwrap_or_default();
+            model.part_modes = part_modes.clone();
             let spec = load_spec(data, code, &model);
             // two-wide grid behind the start line, ~12 m between rows; the player starts last
             let slot = if k == 0 { slots - 1 } else { k - 1 };
@@ -296,7 +307,9 @@ impl Game {
                 let mi = match loaded.get(&c.code) {
                     Some(&mi) => mi,
                     None => match assets::load_car(data, atlas, &c.code, false, night, None, c.colour) {
-                        Ok(m) => {
+                        Ok(mut m) => {
+                            m.texture_subs = s.snapshot().texture_subs.get(k).cloned().unwrap_or_default();
+                            m.part_modes = s.snapshot().part_modes.clone();
                             models.push(m);
                             loaded.insert(c.code.clone(), models.len() - 1);
                             models.len() - 1
@@ -921,12 +934,12 @@ impl Game {
             // the parts the game draws (R3DCar_ObjectVisible), once it has put cars into a view,
             // lit by the track's light at the car (DrawC: the average of its channels)
             let facets = self.car_facets();
-            let (visible, tint): (&[u8], f32) = match facets {
+            let (visible, tint, codes): (&[u8], f32, &[u16]) = match facets {
                 Some(f) => match f.get(i).and_then(Option::as_ref) {
-                    Some(f) => (&f.parts, car_light(f.light) as f32 / 128.0),
-                    None => (&[], 1.0),
+                    Some(f) => (&f.parts, car_light(f.light) as f32 / 128.0, &f.codes),
+                    None => (&[], 1.0, &[]),
                 },
-                None => (&assets::CAR_PARTS_VISIBLE, 1.0),
+                None => (&assets::CAR_PARTS_VISIBLE, 1.0, &[]),
             };
             let hide: Vec<usize> = std::env::var("NFSHS_HIDE_PART").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
             for (pi, (part, &on)) in m.parts.iter().zip(visible).enumerate() {
@@ -954,15 +967,19 @@ impl Game {
                 if part.subtract {
                     continue;
                 }
-                for tri in part.verts.chunks_exact(3) {
+                for (t, tri) in part.verts.chunks_exact(3).enumerate() {
                     let w = [0, 1, 2].map(|k| tm.transform_point3(Vec3::from(tri[k].pos)));
                     if !front_facing(self.cam_pos, w) {
                         continue;
                     }
-                    for (v, p) in tri.iter().zip(w) {
+                    // a lit light or a dent: another texture, a lamp at full brightness
+                    let sub = m.substitute(pi, t, codes);
+                    let tint = if sub.is_some_and(|s| s.1) { 1.0 } else { tint };
+                    for (k, (v, p)) in tri.iter().zip(w).enumerate() {
                         let c = v.color;
                         let p = p + (self.cam_pos - p).normalize_or_zero() * pull;
-                        out.push(Vertex { pos: p.into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
+                        let uv = sub.map_or(v.uv, |s| s.0[k]);
+                        out.push(Vertex { pos: p.into(), uv, color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]] });
                     }
                 }
             }
@@ -1127,14 +1144,17 @@ impl Game {
                 }
                 let _ = pi;
                 let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
-                for tri in part.verts.chunks_exact(3) {
+                for (t, tri) in part.verts.chunks_exact(3).enumerate() {
                     let w = [0, 1, 2].map(|k| tm.transform_point3(Vec3::from(tri[k].pos)));
                     if !front_facing(self.cam_pos, w) {
                         continue;
                     }
-                    for (v, p) in tri.iter().zip(w) {
+                    let sub = m.substitute(pi, t, &facet.codes);
+                    let tint = if sub.is_some_and(|s| s.1) { 1.0 } else { tint };
+                    for (k, (v, p)) in tri.iter().zip(w).enumerate() {
                         let c = v.color;
-                        out.push(Vertex { pos: p.into(), color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]], ..*v });
+                        let uv = sub.map_or(v.uv, |s| s.0[k]);
+                        out.push(Vertex { pos: p.into(), uv, color: [c[0] * tint, c[1] * tint, c[2] * tint, c[3]] });
                     }
                 }
             }

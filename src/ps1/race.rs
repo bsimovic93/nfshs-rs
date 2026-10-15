@@ -562,6 +562,38 @@ pub struct Glare {
 /// A car's reflection normals as the original loaded them (R3DCar's part objects for its
 /// model slot and level of detail, `0x80117BC0`): per reflection-mapped part (0, 8, 10, 41,
 /// 42, 45, 46) its vertices' normals, about 64 long (the GEO's are 4096 and differ).
+/// A texture's substitutes (DrawC_Prim, drawing modes 8 and 9): when the polygon's light or
+/// damage code (the car's [`super::host::CarFacet::codes`]) has a value 1..3 it is drawn with
+/// texture `index + offset` and its UVs moved by (du, dv): the lit brake lights and
+/// headlights, the dented panels.
+pub type TextureSubs = [(i16, u8, u8); 3];
+
+/// A car's texture substitutes as its model was loaded (after the 57 part pointers of
+/// `0x80117BC0`): for the GEO's first 30 textures.
+pub fn read_texture_subs(m: &mut Mem, car: u32) -> Vec<TextureSubs> {
+    let slot = m.r16(car + 0x8BC) as i16;
+    if !(0..50).contains(&slot) {
+        return Vec::new();
+    }
+    let lod = (m.r8(car + 0x842) >> 7) as u32;
+    let parts = m.r32(0x8011_7BC0 + lod * 200 + slot as u32 * 4);
+    if !(0x8000_0000..0x8020_0000).contains(&parts) {
+        return Vec::new();
+    }
+    (0..30u32)
+        .map(|t| std::array::from_fn(|k| {
+            let e = parts + 228 + (t * 3 + k as u32) * 4;
+            (m.r16(e) as i16, m.r8(e + 2), m.r8(e + 3))
+        }))
+        .collect()
+}
+
+/// Each part's drawing mode (R3DCar's part table `0x80117898`, 6 bytes a part: the flags byte,
+/// & 9): 9 the reflection path, 8 the light path, both applying the texture substitutes.
+pub fn read_part_modes(m: &mut Mem) -> Vec<u8> {
+    (0..57).map(|i| m.r8(0x8011_7898 + 6 * i + 1) & 9).collect()
+}
+
 pub fn read_env_normals(m: &mut Mem, car: u32) -> Vec<(usize, Vec<[i16; 3]>)> {
     let slot = m.r16(car + 0x8BC) as i16;
     if !(0..50).contains(&slot) {
@@ -732,6 +764,10 @@ pub struct Snapshot {
     pub glares: Vec<Glare>,
     /// Per car (first frame of a race only): its reflection normals ([`read_env_normals`]).
     pub env_normals: Vec<Vec<(usize, Vec<[i16; 3]>)>>,
+    /// Per car (first frame only): its texture substitutes ([`read_texture_subs`]).
+    pub texture_subs: Vec<Vec<TextureSubs>>,
+    /// First frame only: the parts' drawing modes ([`read_part_modes`]).
+    pub part_modes: Vec<u8>,
     /// BWorld_gChunkBuildList: the track chunks the original draws this frame and how
     /// (detail flags).
     pub chunks: Vec<(i16, u16)>,
@@ -838,6 +874,8 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
     };
     let car_facets = by_car(&info.car_facets);
     let env_normals = if first { cars.iter().map(|car| read_env_normals(&mut c.m, car.addr)).collect() } else { Vec::new() };
+    let texture_subs = if first { cars.iter().map(|car| read_texture_subs(&mut c.m, car.addr)).collect() } else { Vec::new() };
+    let part_modes = if first { read_part_modes(&mut c.m) } else { Vec::new() };
     let views: Vec<ViewSnap> = info
         .views
         .iter()
@@ -884,6 +922,8 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         },
         glares: if first { read_glares(&mut c.m) } else { Vec::new() },
         env_normals,
+        texture_subs,
+        part_modes,
         chunks: {
             let n = c.m.r32(addr::GP + 608).min(64);
             (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()

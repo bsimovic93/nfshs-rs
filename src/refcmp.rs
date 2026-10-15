@@ -169,7 +169,7 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
                 let rot = Quat::from_mat3(&Mat3::from_cols(-right, up, forward)).normalize();
                 let pos = ram.v3(c + 0xA0) - up * (ram.i32(c + 0x138) as f32 / 65536.0);
                 let pose = crate::game::original::Pose { pos, rot, forward, up, vel: Vec3::ZERO, wheel_rot: [0.0; 2], wheel_steer: 0.0 };
-                (pose, crate::ps1::host::CarFacet { car: c, parts: vec![1; 57], light: 0x80_8080, shadow: None, env: None })
+                (pose, crate::ps1::host::CarFacet { car: c, parts: vec![1; 57], light: 0x80_8080, shadow: None, env: None, codes: Vec::new() })
             })
             .collect(),
     );
@@ -223,6 +223,8 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
             let corners = std::array::from_fn(|k| std::array::from_fn(|i| ram.i32(pc + 488 + 12 * k as u32 + 4 * i as u32).wrapping_sub(pos[i])));
             (corners, std::array::from_fn(|i| ram.0[((gp + 3652 + i as u32) & 0x1F_FFFF) as usize]))
         }),
+        // (the codes are DrawC_PrimStart's, rebuilt per car while drawing: not in the RAM)
+        codes: Vec::new(),
     })]);
     game.cam_mode = if game.racers[0].car.pos.distance(game.cam_pos) < 2.0 { crate::game::CameraMode::Bumper } else { crate::game::CameraMode::Chase };
 
