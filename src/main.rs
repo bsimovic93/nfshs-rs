@@ -4,7 +4,6 @@ mod audio;
 mod formats;
 mod game;
 mod iso;
-mod menu;
 mod ps1;
 mod refcmp;
 mod render;
@@ -69,7 +68,7 @@ fn real_main() -> Result<()> {
         .map(|s| s.to_ascii_uppercase())
         .collect();
     let laps: i32 = opt(&args, "--laps").unwrap_or("2").parse()?;
-    let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps, original_sim: true, traffic: Vec::new() };
+    let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps, traffic: Vec::new() };
     match args.get(1).map(String::as_str) {
         None | Some("menu") => app::run(&data, None)?,
         Some("play") => app::run(
@@ -82,7 +81,6 @@ fn real_main() -> Result<()> {
                 laps,
             }),
         )?,
-        Some("shot-menu") => app::menu_screenshot(&data, Path::new(opt(&args, "--out").unwrap_or("menu.png")))?,
         Some("ref-compare") => refcmp::compare(&data, Path::new(&args[2]))?,
         // match-shapes REF.png FILE.PSH NAME...: where each shape appears in a reference picture
         Some("match-shapes") => refcmp::match_shapes(Path::new(&args[2]), Path::new(&args[3]), &args[4..])?,
@@ -190,26 +188,6 @@ fn real_main() -> Result<()> {
                 }
             }
             println!("{ok} ok, {bad} bad");
-        }
-        Some("probe") => {
-            let from: usize = opt(&args, "--from").unwrap_or("0").parse()?;
-            let to: usize = opt(&args, "--to").unwrap_or("10").parse()?;
-            let mut atlas = assets::Atlas::new(2048);
-            let g = game::Game::load(&data, &mut atlas, &cfg)?;
-            for i in from..to {
-                let p = g.path[i];
-                let gh = g.world.ground(p + glam::Vec3::Y * 3.0, 6.0).map(|h| h.height);
-                let walls = g.world.walls(p + glam::Vec3::Y * 0.5, 2.0, p.y + 0.2, p.y + 1.2);
-                println!("{i}: path {:?} ground={:?} walls={:?} lim={:?}", p, gh, walls.map(|w| w.1), g.walls[i]);
-            }
-            if let Some(at) = opt(&args, "--at") {
-                let v: Vec<f32> = at.split(',').map(|x| x.parse().unwrap()).collect();
-                let p = glam::Vec3::new(v[0], v[1], v[2]);
-                for r in [0.5f32, 1.0, 2.0] {
-                    println!("at {p:?} r={r}: walls={:?}", g.world.walls(p + glam::Vec3::Y * 0.5, r, p.y + 0.2, p.y + 1.2));
-                }
-                println!("ground {:?}", g.world.ground(p + glam::Vec3::Y, 2.0).map(|h| (h.height, h.normal)));
-            }
         }
         Some("dump-audio") => {
             // dump-audio <file.bnk|.viv|stream> <outdir>: decode banks/streams to WAV with stats

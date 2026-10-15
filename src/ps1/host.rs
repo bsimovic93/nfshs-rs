@@ -46,10 +46,6 @@ pub struct GameHost {
     /// each overlay command went into, and the entry current for the running host call.
     overlay_ot: Vec<u32>,
     current_ot: u32,
-    /// Races: the HUD is what the original puts into its views' ordering tables (every
-    /// DrawOTag after the frame's first, the world's), recorded as overlay commands; off
-    /// with NFSHS_OWN_HUD=1 (the host's own port of the HUD).
-    pub hud_prims: bool,
     /// DrawOTag calls since the last frame.
     otags: u32,
     /// This frame's recorded views (each list in drawing order) and the last full frame's
@@ -698,7 +694,6 @@ impl GameHost {
             loading_shown: 0,
             overlay_ot: Vec::new(),
             current_ot: 0,
-            hud_prims: std::env::var_os("NFSHS_OWN_HUD").is_none(),
             otags: 0,
             frame_lists: Vec::new(),
             last_hud: Vec::new(),
@@ -967,7 +962,7 @@ impl GameHost {
         self.otags = 0;
         // the recorded HUD views (in drawing order; overlays are kept last-drawn first): all
         // but the world's, or a paused game's menu view over the last full frame's HUD
-        if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) {
+        if self.mode == Mode::Race && !Self::paused(c) {
             let mut lists = std::mem::take(&mut self.frame_lists);
             let hud: Vec<OverlayCmd> = match lists.len() {
                 0 => Vec::new(),
@@ -1063,7 +1058,7 @@ impl GameHost {
             },
             front_end: self.mode == Mode::FrontEnd,
             rumble: self.rumble(c),
-            vram: (self.mode == Mode::FrontEnd || self.hud_prims).then(|| {
+            vram: Some({
                 if self.vram_dirty || self.vram_shared.is_none() {
                     self.vram_shared = Some(std::sync::Arc::new(self.vram.clone()));
                     self.vram_dirty = false;
@@ -1796,7 +1791,7 @@ impl Host for GameHost {
                 }
                 // DrawOTag: rendering is done by the host engine. In races the views after
                 // the world's (HUD, tachometer, map) are recorded as 2D
-                if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) {
+                if self.mode == Mode::Race && !Self::paused(c) {
                     // (the world's list, thousands of primitives, is only counted)
                     let saved = std::mem::take(&mut self.overlay);
                     if self.otags > 0 || Self::ot_len(c, a0) < 1500 {
@@ -2189,7 +2184,7 @@ impl Host for GameHost {
 
             // the HUD's helpers: in races the original builds its primitives (recorded from
             // the HUD views' ordering tables)
-            0x800C_C7F0 | 0x800D_4E9C | 0x800D_8690 | 0x800D_9ABC | 0x800D_3558 if self.mode == Mode::Race && self.hud_prims && !Self::paused(c) => return false,
+            0x800C_C7F0 | 0x800D_4E9C | 0x800D_8690 | 0x800D_9ABC | 0x800D_3558 if self.mode == Mode::Race && !Self::paused(c) => return false,
             0x800C_C7F0 if self.mode == Mode::FrontEnd => {
                 self.font_quads(c, a0, a1 as i32, a2 as i32);
                 0
@@ -2302,98 +2297,92 @@ impl Host for GameHost {
                 c.m.w32(CHUNK_BUILD_COUNT, n);
                 // the track lights' glares as the original builds them for the listed chunks
                 // (BWorld_BuildGlareEffects, as BWorld_OnyxBuildFacets calls it), recorded
-                if self.hud_prims {
-                    let start = c.m.r32(0x1F80_0004);
-                    GLARE_MARKS.with_borrow_mut(Vec::clear);
-                    c.inner_hook = Some(glare_marker);
-                    for i in 0..n.min(64) {
-                        let chunk = c.m.r16(0x8011_02B0 + 4 * i) as i16;
-                        if chunk < 0 {
-                            continue;
-                        }
-                        let list = c.m.r32(TRACK_CHUNK_LIST);
-                        let group = c.m.r32(list + 112 * chunk as u32 + 84);
-                        if group != 0 {
-                            c.call_nested(BWORLD_BUILD_GLARE_EFFECTS, &[RENDER_VIEW, 0x1F80_0000, group]);
-                        }
+                let start = c.m.r32(0x1F80_0004);
+                GLARE_MARKS.with_borrow_mut(Vec::clear);
+                c.inner_hook = Some(glare_marker);
+                for i in 0..n.min(64) {
+                    let chunk = c.m.r16(0x8011_02B0 + 4 * i) as i16;
+                    if chunk < 0 {
+                        continue;
                     }
-                    c.inner_hook = None;
-                    let end = c.m.r32(0x1F80_0004);
-                    self.track_glows.clear();
-                    if end > start && end - start < 0x4_0000 {
-                        let marks = GLARE_MARKS.with_borrow(Clone::clone);
-                        let saved = std::mem::take(&mut self.overlay);
-                        self.prim_offset = [0, 0];
-                        for (k, &(from, anchor)) in marks.iter().enumerate() {
-                            let to = marks.get(k + 1).map_or(end, |m| m.0);
-                            if to > from {
-                                self.record_packets(c, from, to);
-                                let cmds = std::mem::take(&mut self.overlay);
-                                if !cmds.is_empty() {
-                                    self.track_glows.push(Glow { anchor, car: None, cmds, smoke: false });
-                                }
+                    let list = c.m.r32(TRACK_CHUNK_LIST);
+                    let group = c.m.r32(list + 112 * chunk as u32 + 84);
+                    if group != 0 {
+                        c.call_nested(BWORLD_BUILD_GLARE_EFFECTS, &[RENDER_VIEW, 0x1F80_0000, group]);
+                    }
+                }
+                c.inner_hook = None;
+                let end = c.m.r32(0x1F80_0004);
+                self.track_glows.clear();
+                if end > start && end - start < 0x4_0000 {
+                    let marks = GLARE_MARKS.with_borrow(Clone::clone);
+                    let saved = std::mem::take(&mut self.overlay);
+                    self.prim_offset = [0, 0];
+                    for (k, &(from, anchor)) in marks.iter().enumerate() {
+                        let to = marks.get(k + 1).map_or(end, |m| m.0);
+                        if to > from {
+                            self.record_packets(c, from, to);
+                            let cmds = std::mem::take(&mut self.overlay);
+                            if !cmds.is_empty() {
+                                self.track_glows.push(Glow { anchor, car: None, cmds, smoke: false });
                             }
                         }
-                        self.overlay = saved;
                     }
+                    self.overlay = saved;
                 }
                 // the tyre smoke and dust (Souffle_InsertFacet), each puff recorded with its
                 // position
-                if self.hud_prims {
-                    let start = c.m.r32(0x1F80_0004);
-                    GLARE_MARKS.with_borrow_mut(Vec::clear);
-                    c.inner_hook = Some(smoke_marker);
-                    c.call_nested(SOUFFLE_INSERT_FACET, &[RENDER_VIEW]);
-                    c.inner_hook = None;
-                    let end = c.m.r32(0x1F80_0004);
-                    if std::env::var_os("NFSHS_SMOKELOG").is_some() {
-                        let n = c.m.r32(GP + 3828);
-                        let arr = c.m.r32(GP + 3824);
-                        let live = (0..n.min(64)).filter(|&i| c.m.r8(arr + 68 * i) != 0).count();
-                        eprintln!("smoke: {n} souffles ({live} live), {} built, {} bytes", GLARE_MARKS.with_borrow(Vec::len), end.wrapping_sub(start));
-                    }
-                    if end > start && end - start < 0x4_0000 {
-                        let marks = GLARE_MARKS.with_borrow(Clone::clone);
-                        let saved = std::mem::take(&mut self.overlay);
-                        self.prim_offset = [0, 0];
-                        for (k, &(from, anchor)) in marks.iter().enumerate() {
-                            let to = marks.get(k + 1).map_or(end, |m| m.0);
-                            if to > from {
-                                self.record_packets(c, from, to);
-                                let cmds = std::mem::take(&mut self.overlay);
-                                if std::env::var_os("NFSHS_SMOKELOG").is_some() {
-                                    eprintln!("puff at {:?}: {}", anchor.map(|v| v >> 16), format!("{cmds:?}").chars().take(300).collect::<String>());
-                                }
-                                if !cmds.is_empty() {
-                                    self.track_glows.push(Glow { anchor, car: None, cmds, smoke: true });
-                                }
+                let start = c.m.r32(0x1F80_0004);
+                GLARE_MARKS.with_borrow_mut(Vec::clear);
+                c.inner_hook = Some(smoke_marker);
+                c.call_nested(SOUFFLE_INSERT_FACET, &[RENDER_VIEW]);
+                c.inner_hook = None;
+                let end = c.m.r32(0x1F80_0004);
+                if std::env::var_os("NFSHS_SMOKELOG").is_some() {
+                    let n = c.m.r32(GP + 3828);
+                    let arr = c.m.r32(GP + 3824);
+                    let live = (0..n.min(64)).filter(|&i| c.m.r8(arr + 68 * i) != 0).count();
+                    eprintln!("smoke: {n} souffles ({live} live), {} built, {} bytes", GLARE_MARKS.with_borrow(Vec::len), end.wrapping_sub(start));
+                }
+                if end > start && end - start < 0x4_0000 {
+                    let marks = GLARE_MARKS.with_borrow(Clone::clone);
+                    let saved = std::mem::take(&mut self.overlay);
+                    self.prim_offset = [0, 0];
+                    for (k, &(from, anchor)) in marks.iter().enumerate() {
+                        let to = marks.get(k + 1).map_or(end, |m| m.0);
+                        if to > from {
+                            self.record_packets(c, from, to);
+                            let cmds = std::mem::take(&mut self.overlay);
+                            if std::env::var_os("NFSHS_SMOKELOG").is_some() {
+                                eprintln!("puff at {:?}: {}", anchor.map(|v| v >> 16), format!("{cmds:?}").chars().take(300).collect::<String>());
+                            }
+                            if !cmds.is_empty() {
+                                self.track_glows.push(Glow { anchor, car: None, cmds, smoke: true });
                             }
                         }
-                        self.overlay = saved;
                     }
+                    self.overlay = saved;
                 }
                 // the weather (rain or snow, and the drops on the lens) as Render_RenderWorld
                 // builds it after the world, recorded
-                if self.hud_prims {
-                    let start = c.m.r32(0x1F80_0004);
-                    c.call_nested(WEATHER_RENDER, &[RENDER_VIEW]);
-                    let end = c.m.r32(0x1F80_0004);
-                    if std::env::var_os("NFSHS_WEATHERLOG").is_some() {
-                        eprintln!("weather: prims {start:#x}..{end:#x}");
-                    }
-                    if end > start && end - start < 0x4_0000 {
-                        let saved = std::mem::take(&mut self.overlay);
-                        self.prim_offset = [0, 0];
-                        self.record_packets(c, start, end);
-                        self.weather = std::mem::replace(&mut self.overlay, saved);
-                    }
+                let start = c.m.r32(0x1F80_0004);
+                c.call_nested(WEATHER_RENDER, &[RENDER_VIEW]);
+                let end = c.m.r32(0x1F80_0004);
+                if std::env::var_os("NFSHS_WEATHERLOG").is_some() {
+                    eprintln!("weather: prims {start:#x}..{end:#x}");
+                }
+                if end > start && end - start < 0x4_0000 {
+                    let saved = std::mem::take(&mut self.overlay);
+                    self.prim_offset = [0, 0];
+                    self.record_packets(c, start, end);
+                    self.weather = std::mem::replace(&mut self.overlay, saved);
                 }
                 // the sun's flare (Hrz_BuildSky: Flare_Sun when the sky record's flags have
                 // 4): the horizon's rotation (the view's matrix, no translation) on the GTE,
                 // its primitives recorded as the sky layer
                 let mut view_sky = Vec::new();
                 let sky = c.m.r32(GP + 4920);
-                if self.hud_prims && sky != 0 && c.m.r32(0x8012_45C8) & 4 != 0 {
+                if sky != 0 && c.m.r32(0x8012_45C8) & 4 != 0 {
                     let (rot, tr) = (std::array::from_fn::<u32, 8, _>(|i| c.gte_read(32 + i)), [c.gte_read(37), c.gte_read(38), c.gte_read(39)]);
                     c.call_nested(HRZ_SET_PSX_MATRIX, &[RENDER_VIEW + 68]);
                     for (i, v) in [37, 38, 39].into_iter().enumerate() {
@@ -2432,19 +2421,17 @@ impl Host for GameHost {
                 c.inner_hook = None;
                 self.car_facets = CarFacet::parse(&c.capture);
                 // the cars' light halos, as the original built them (screen space)
-                if self.hud_prims {
-                    let ranges = HALO_RANGES.with_borrow(Clone::clone);
-                    let saved = std::mem::take(&mut self.overlay);
-                    self.prim_offset = [0, 0];
-                    self.car_glows.clear();
-                    for (start, end, car) in ranges {
-                        self.record_packets(c, start, end);
-                        let cmds = std::mem::take(&mut self.overlay);
-                        let anchor = [c.m.r32(car + 0xA0) as i32, c.m.r32(car + 0xA4) as i32, c.m.r32(car + 0xA8) as i32];
-                        self.car_glows.push(Glow { anchor, car: Some(car), cmds, smoke: false });
-                    }
-                    self.overlay = saved;
+                let ranges = HALO_RANGES.with_borrow(Clone::clone);
+                let saved = std::mem::take(&mut self.overlay);
+                self.prim_offset = [0, 0];
+                self.car_glows.clear();
+                for (start, end, car) in ranges {
+                    self.record_packets(c, start, end);
+                    let cmds = std::mem::take(&mut self.overlay);
+                    let anchor = [c.m.r32(car + 0xA0) as i32, c.m.r32(car + 0xA4) as i32, c.m.r32(car + 0xA8) as i32];
+                    self.car_glows.push(Glow { anchor, car: Some(car), cmds, smoke: false });
                 }
+                self.overlay = saved;
                 // this view as set up (Draw_gViews[view]: its drawing environment's clip,
                 // relative to the first view's, and size)
                 let env = |c: &mut Cpu, v: u32, k: u32| c.m.r16(DRAW_VIEWS + 200 * v + 8 + 2 * k) as i16;

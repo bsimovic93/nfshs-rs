@@ -80,13 +80,6 @@ impl Atlas {
     }
 }
 
-/// Triangle soup with world-space positions, used for physics queries.
-#[derive(Clone, Copy, Debug)]
-pub struct CollTri {
-    pub p: [Vec3; 3],
-    pub n: Vec3,
-}
-
 /// A camera-facing object (trees): local-space triangles rotated about Y each frame.
 pub struct Sprite {
     pub pos: Vec3,
@@ -120,7 +113,6 @@ pub struct TrackAssets {
     pub global_range: std::ops::Range<u32>,
     pub verts: Vec<Vertex>,
     pub indices: Vec<u32>,
-    pub tris: Vec<CollTri>,
     pub track: grp::Track,
     pub nodes: Vec<Vec3>,
 }
@@ -155,7 +147,6 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
 
     let mut verts = Vec::new();
     let mut indices = Vec::new();
-    let mut tris = Vec::new();
     let line_rects: Vec<Option<Rect>> = match data.read("ZSFX.PSH").and_then(|d| Psh::parse(&d)) {
         Ok(sfx) => (0..10)
             .map(|i| sfx.shapes.iter().find(|s| s.name == format!("LIN{i}")).map(|s| atlas.add(s.width as u32, s.height as u32, &s.rgba)))
@@ -204,8 +195,8 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         let k = 1.0 - (s as f32 / 32.0).clamp(0.0, 0.6);
         [k * 0.5, k * 0.5, k * 0.5, 1.0]
     };
-    // Emit one mesh, positioned by `place` (local vertex -> world), into verts/indices (+collision).
-    let emit = |mesh: &grp::Mesh, place: &dyn Fn(Vec3) -> Vec3, collide: bool, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>, tris: &mut Vec<CollTri>| {
+    // Emit one mesh, positioned by `place` (local vertex -> world), into verts/indices.
+    let emit = |mesh: &grp::Mesh, place: &dyn Fn(Vec3) -> Vec3, verts: &mut Vec<Vertex>, indices: &mut Vec<u32>| {
         for q in &mesh.quads {
             let (rect, mut corners) = quad_uvs(q.tex);
             if q.strip {
@@ -247,14 +238,6 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             // Trk_Material flag 0x10: drawn without the back-face test (DrawW_DrawQuad)
             if track.textures.get(q.tex as usize).is_some_and(|t| t.mode & 0x10 != 0) {
                 indices.extend_from_slice(&back);
-            }
-            if collide {
-                for (a, b2, c) in [(0, 1, 2), (0, 2, 3)] {
-                    let n = (p[b2] - p[a]).cross(p[c] - p[a]);
-                    if n.length_squared() > 1e-8 {
-                        tris.push(CollTri { p: [p[a], p[b2], p[c]], n: n.normalize() });
-                    }
-                }
             }
         }
     };
@@ -314,14 +297,14 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         let origin = b.origin;
         let place = |v| ps1_to_world(origin + v);
         let start = indices.len() as u32;
-        emit(&b.ground, &place, true, &mut verts, &mut indices, &mut tris);
+        emit(&b.ground, &place, &mut verts, &mut indices);
         block_ranges[bi][0] = start..indices.len() as u32;
         let start = indices.len() as u32;
         let far = grp::Mesh { verts: b.ground.verts.clone(), quads: b.ground.far.clone(), far: Vec::new() };
-        emit(&far, &place, false, &mut verts, &mut indices, &mut tris);
+        emit(&far, &place, &mut verts, &mut indices);
         block_ranges[bi][1] = start..indices.len() as u32;
         let start = indices.len() as u32;
-        emit(&b.detail, &place, true, &mut verts, &mut indices, &mut tris);
+        emit(&b.detail, &place, &mut verts, &mut indices);
         block_ranges[bi][2] = start..indices.len() as u32;
         let objects_start = indices.len() as u32;
         for pl in &b.placements {
@@ -361,14 +344,14 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
                     // cut-out tree: rotated to face the camera every frame
                     let mut local = Vec::new();
                     let mut idx = Vec::new();
-                    emit(model, &|v| Vec3::new(-v.x, v.y, v.z) * scale, false, &mut local, &mut idx, &mut Vec::new());
+                    emit(model, &|v| Vec3::new(-v.x, v.y, v.z) * scale, &mut local, &mut idx);
                     let tri_verts: Vec<Vertex> = idx.iter().map(|&i| local[i as usize]).collect();
                     sprites.push(Sprite { pos: ps1_to_world(pl.pos), verts: tri_verts, block: bi });
                 }
                 Placement::Fixed(m) => {
                     let pos = pl.pos;
                     let place = move |v: Vec3| ps1_to_world(pos + m * v);
-                    emit(model, &place, false, &mut verts, &mut indices, &mut tris);
+                    emit(model, &place, &mut verts, &mut indices);
                 }
             }
         }
@@ -381,7 +364,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         if let Placement::Fixed(m) = placement_transform(pl) {
             let pos = pl.pos;
             let place = move |v: Vec3| ps1_to_world(pos + m * v);
-            emit(model, &place, false, &mut verts, &mut indices, &mut tris);
+            emit(model, &place, &mut verts, &mut indices);
         }
     }
     let global_range = global_start..indices.len() as u32;
@@ -392,7 +375,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             let model = track.models.get(k.model as usize)?;
             let mut local = Vec::new();
             let mut idx = Vec::new();
-            emit(model, &|v| Vec3::new(-v.x, v.y, v.z), false, &mut local, &mut idx, &mut Vec::new());
+            emit(model, &|v| Vec3::new(-v.x, v.y, v.z), &mut local, &mut idx);
             // the PS1's rotation seen in the mirrored world: axis (x, -y, -z)
             let frames = k.frames.iter().map(|&(p, q)| (ps1_to_world(p), Quat::from_xyzw(q[0], -q[1], -q[2], q[3]).normalize())).collect();
             Some(AnimatedObject { verts: idx.iter().map(|&i| local[i as usize]).collect(), ticks: k.ticks as f32, frames })
@@ -409,7 +392,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             (v, 0, c)
         }
     };
-    Ok(TrackAssets { animated, verts, indices, tris, track, nodes, sprites, sky, sky_dome, sky_colors, block_ranges, global_range })
+    Ok(TrackAssets { animated, verts, indices, track, nodes, sprites, sky, sky_dome, sky_colors, block_ranges, global_range })
 }
 
 fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
@@ -574,7 +557,6 @@ pub struct CarTri {
 pub struct CarModel {
     /// Indexed like the GEO (and `R3DCar_ObjectVisible`).
     pub parts: Vec<CarPart>,
-    pub wheel_radius: f32,
     pub half_extents: Vec3,
     /// Which of the model's two texture pages each GEO texture is on (`CAR_TEXTURES`
     /// order; none when the car has no such texture), the pages in the atlas and its size.
@@ -796,7 +778,6 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         let subtract = part.polys.iter().all(|p| CAR_TEXTURES.get(p.texture as usize) == Some(&"shdw")) && !part.polys.is_empty();
         parts.push(CarPart { verts, env, env_vertices, geo_vertices: part.verts.len(), tris, wheel, hub, subtract });
     }
-    let wheel_radius = parts.get(53).map(|p| p.hub.y).filter(|&r| r > 0.0).unwrap_or(0.33).max(0.2);
     let mut max = Vec3::ZERO;
     for p in parts.iter().filter(|p| p.wheel.is_none()) {
         for v in &p.verts {
@@ -804,7 +785,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         }
     }
     let texture_page = CAR_TEXTURES.iter().map(|n| page_of.get(*n).map(|&p| p as u8)).collect();
-    Ok(CarModel { parts, wheel_radius, half_extents: max, texture_page, page_rects: rects, atlas_size: atlas.size as f32, texture_subs: Vec::new(), part_modes: Vec::new() })
+    Ok(CarModel { parts, half_extents: max, texture_page, page_rects: rects, atlas_size: atlas.size as f32, texture_subs: Vec::new(), part_modes: Vec::new() })
 }
 
 impl CarModel {

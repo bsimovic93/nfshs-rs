@@ -22,11 +22,6 @@ pub fn decompress(d: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
-/// Decompress if the data carries an EA compression header, otherwise return it unchanged.
-pub fn maybe_decompress(d: Vec<u8>) -> Result<Vec<u8>> {
-    if is_compressed(&d) { decompress(&d) } else { Ok(d) }
-}
-
 fn be24(d: &[u8], o: usize) -> usize {
     ((d[o] as usize) << 16) | ((d[o + 1] as usize) << 8) | d[o + 2] as usize
 }

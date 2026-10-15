@@ -114,14 +114,12 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     let opponents: Vec<String> = cars[1..].iter().map(|&c| ram.code(c)).filter(|c| car_type(c).is_some()).collect();
     println!("track {track}{variant}, player {player}, opponents {opponents:?}");
     let mut atlas = Atlas::new(2048);
-    let cfg = RaceConfig { track, variant, player_car: &player, opponents: opponents.clone(), laps: 1, original_sim: true, traffic: Vec::new() };
+    let cfg = RaceConfig { track, variant, player_car: &player, opponents: opponents.clone(), laps: 1, traffic: Vec::new() };
     let traffic_cars: Vec<u32> = cars.iter().copied().skip(1).filter(|&c| car_type(&ram.code(c)).is_none()).collect();
     let cfg = RaceConfig { traffic: traffic_cars.iter().map(|&c| ram.code(c)).collect(), ..cfg };
     let mut game = Game::load(data, &mut atlas, &cfg)?;
     // let the original run a few frames so its view set-up (fog, colours) has happened
-    if let Some(sim) = &mut game.sim {
-        sim.advance(0.1, &crate::game::Input::default());
-    }
+    game.sim.advance(0.1, &crate::game::Input::default());
     // the player's paint as the captured game has it (its own boot has the template's)
     let colour = {
         let o = |a: u32| (a & 0x1F_FFFF) as usize;
@@ -155,7 +153,7 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
         let m = Mat3::from_cols(-right, up, forward);
         // model origin at ground level: the body-box centre minus dimension.y along up
         r.car.pos = ram.v3(c + 0xA0) - up * (ram.i32(c + 0x138) as f32 / 65536.0);
-        r.car.rot = Some(Quat::from_mat3(&m).normalize());
+        r.car.rot = Quat::from_mat3(&m).normalize();
         r.car.up = up;
         r.car.yaw = forward.x.atan2(forward.z);
     }
@@ -194,15 +192,13 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     // of the original draws for the player close up
     let mut own_parts = None;
     if !traffic_cars.is_empty() {
-        if let Some(sim) = &mut game.sim {
-            // (the start's camera may not show the car: run until it does)
-            for _ in 0..100 {
-                own_parts = sim.snapshot().car_facets.first().cloned().flatten().map(|f| f.parts).filter(|p| p.iter().any(|&v| v != 0));
-                if own_parts.is_some() {
-                    break;
-                }
-                sim.advance(0.1, &crate::game::Input::default());
+        // (the start's camera may not show the car: run until it does)
+        for _ in 0..100 {
+            own_parts = game.sim.snapshot().car_facets.first().cloned().flatten().map(|f| f.parts).filter(|p| p.iter().any(|&v| v != 0));
+            if own_parts.is_some() {
+                break;
             }
+            game.sim.advance(0.1, &crate::game::Input::default());
         }
     }
     let table: Vec<u8> = (0..57u32).map(|i| ram.0[((0x8011_7B64 + i) & 0x1F_FFFF) as usize]).collect();

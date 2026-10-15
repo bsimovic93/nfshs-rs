@@ -7,10 +7,6 @@ struct Globals {
     // x = fog start, y = fog end
     fog: vec4<f32>,
     sky_top: vec4<f32>,
-    // x = ambient light multiplier, y = headlight strength
-    light: vec4<f32>,
-    head_pos: vec4<f32>,
-    head_dir: vec4<f32>,
     // camera forward axis; w = 1: `fog` holds the PS1 depth cue (DQA, DQB, H), fog_color the far colour
     cam_fwd: vec4<f32>,
     // night headlight beam: right axis (w xs), forward axis (w z0), origin (w 1 = on), (zs)
@@ -131,16 +127,6 @@ fn shade(i: VOut) -> vec4<f32> {
         vc = mix(vc, g.fog_color.rgb, ir0);
     }
     var c = min(t.rgb * vc * 2.0, vec3<f32>(1.0));
-    // ambient (night darkening) + player headlight cone
-    var lit = g.light.x;
-    if (g.light.y > 0.0) {
-        let to = i.world - g.head_pos.xyz;
-        let d = length(to);
-        let cone = smoothstep(0.86, 0.97, dot(to / max(d, 0.001), g.head_dir.xyz));
-        let fall = clamp(1.0 - d / 70.0, 0.0, 1.0);
-        lit = lit + g.light.y * cone * fall * fall;
-    }
-    c = c * min(lit, 1.25);
     if (g.cam_fwd.w < 0.5) {
         let f = clamp((i.dist - g.fog.x) / max(g.fog.y - g.fog.x, 1.0), 0.0, 1.0);
         c = mix(c, g.fog_color.rgb, f);

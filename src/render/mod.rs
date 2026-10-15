@@ -14,9 +14,6 @@ struct Globals {
     fog_color: [f32; 4],
     fog: [f32; 4],
     sky_top: [f32; 4],
-    light: [f32; 4],
-    head_pos: [f32; 4],
-    head_dir: [f32; 4],
     /// Camera forward axis; w = 1 when `fog` holds PS1 depth-cue parameters.
     cam_fwd: [f32; 4],
     /// The night headlight beam (see [`NightBeam`]): right axis (w xs), forward axis (w z0),
@@ -80,9 +77,6 @@ pub struct FrameParams {
     pub shadows: Vec<Vertex>,
     /// Subtractive primitives drawn after the cars (their reflection maps).
     pub subtract_late: Vec<Vertex>,
-    pub ambient: f32,
-    /// Headlight strength (0 = off), position and direction.
-    pub headlight: (f32, Vec3, Vec3),
     /// Projection * rotation-only view, for the camera-centred sky.
     pub sky_view_proj: Mat4,
     /// How many of the sky's vertices are its dome: the sky layer (the sun) goes between
@@ -568,9 +562,6 @@ impl Renderer {
                 None => Vec4::new(p.fog_start, p.fog_end, 0.0, 0.0).into(),
             },
             sky_top: p.sky_top.extend(1.0).into(),
-            light: [p.ambient, p.headlight.0, 0.0, 0.0],
-            head_pos: p.headlight.1.extend(1.0).into(),
-            head_dir: p.headlight.2.extend(0.0).into(),
             cam_fwd: p.cam_fwd.extend(if p.depth_cue.is_some() { 1.0 } else { 0.0 }).into(),
             beam: match &p.night_beam {
                 Some(b) => [b.right.extend(b.xs).into(), b.forward.extend(b.z0).into(), b.origin.extend(1.0).into(), [b.zs, 0.0, 0.0, 0.0]],
@@ -594,9 +585,6 @@ impl Renderer {
             fog_color: [0.0; 4],
             fog: [1e9, 2e9, 0.0, 0.0],
             sky_top: [0.0; 4],
-            light: [1.0, 0.0, 0.0, 0.0],
-            head_pos: [0.0; 4],
-            head_dir: [0.0; 4],
             cam_fwd: [0.0; 4],
             beam: [[0.0; 4]; 4],
             night: [[0; 4]; NIGHT_WORDS],
@@ -608,9 +596,6 @@ impl Renderer {
             fog_color: p.sky_top.extend(1.0).into(),
             fog: [1e9, 2e9, 0.0, 0.0],
             sky_top: [0.0; 4],
-            light: [if p.ambient < 0.5 { p.ambient * 0.5 } else { p.ambient }, 0.0, 0.0, 0.0],
-            head_pos: [0.0; 4],
-            head_dir: [0.0; 4],
             cam_fwd: [0.0; 4],
             beam: [[0.0; 4]; 4],
             night: [[0; 4]; NIGHT_WORDS],

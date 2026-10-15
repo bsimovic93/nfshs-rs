@@ -203,70 +203,9 @@ impl Audio {
         }
     }
 
-    pub fn set(&self, id: VoiceId, gain: f32, pitch: f32) {
-        if let Some(Some(v)) = self.mixer.lock().unwrap().voices.get_mut(id) {
-            v.gain = gain;
-            v.pitch = pitch;
-        }
-    }
-
     pub fn stop(&self, id: VoiceId) {
         if let Some(v) = self.mixer.lock().unwrap().voices.get_mut(id) {
             *v = None;
-        }
-    }
-}
-
-/// Engine sound: four on-throttle and four off-throttle loops crossfaded by rpm.
-pub struct EngineSound {
-    on: Vec<(VoiceId, f32)>,
-    off: Vec<(VoiceId, f32)>,
-    throttle_mix: f32,
-}
-
-impl EngineSound {
-    /// `bank`: decoded car engine bank. Layer layout inferred from the banks:
-    /// entries 16..=19 on-throttle, 64..=67 off-throttle, ordered low to high rpm.
-    pub fn new(audio: &Audio, bank: &crate::formats::audio::Bank) -> Option<Self> {
-        let pick = |range: std::ops::RangeInclusive<usize>| -> Vec<Arc<Sample>> {
-            range.filter_map(|i| bank.sounds.get(i).cloned().flatten()).filter(|s| s.channels == 1).map(Arc::new).collect()
-        };
-        let on = pick(16..=19);
-        let off = pick(64..=67);
-        if on.is_empty() {
-            return None;
-        }
-        let layers = |v: Vec<Arc<Sample>>| -> Vec<(VoiceId, f32)> {
-            let n = v.len() as f32;
-            v.into_iter().enumerate().map(|(k, s)| (audio.play(s, 0.0, 1.0, true), (k as f32 + 1.0) / (n + 1.0))).collect()
-        };
-        Some(Self { on: layers(on), off: layers(off), throttle_mix: 0.0 })
-    }
-
-    /// `rpm_frac` = rpm / redline, `throttle` 0..1, `volume` overall gain.
-    pub fn update(&mut self, audio: &Audio, rpm_frac: f32, throttle: f32, volume: f32, dt: f32) {
-        self.throttle_mix += (throttle - self.throttle_mix) * (dt * 8.0).min(1.0);
-        let rpm = rpm_frac.clamp(0.08, 1.05);
-        let apply = |layers: &[(VoiceId, f32)], weight: f32| {
-            let spacing = if layers.len() > 1 { layers[1].1 - layers[0].1 } else { 1.0 };
-            for &(id, centre) in layers {
-                let d = ((rpm - centre) / spacing).abs();
-                let g = (1.0 - d).clamp(0.0, 1.0);
-                // lowest layer also covers idle, highest covers the top end
-                let g = if centre == layers[0].1 && rpm < centre { 1.0 } else if centre == layers[layers.len() - 1].1 && rpm > centre { 1.0 } else { g };
-                audio.set(id, g * weight * volume, (rpm / centre).clamp(0.5, 2.0));
-            }
-        };
-        let off_w = if self.off.is_empty() { 0.0 } else { 1.0 - self.throttle_mix };
-        apply(&self.on, if self.off.is_empty() { 1.0 } else { 0.35 + 0.65 * self.throttle_mix });
-        if !self.off.is_empty() {
-            apply(&self.off, off_w * 0.7);
-        }
-    }
-
-    pub fn stop(&self, audio: &Audio) {
-        for &(id, _) in self.on.iter().chain(&self.off) {
-            audio.stop(id);
         }
     }
 }

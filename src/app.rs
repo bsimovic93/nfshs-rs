@@ -1,8 +1,7 @@
-//! Window + event loop (winit 0.30 ApplicationHandler): front-end menu and races.
+//! Window + event loop (winit 0.30 ApplicationHandler): the original's front end and races.
 
 use crate::assets::{Atlas, GameData};
-use crate::game::{Game, Input, Phase, RaceConfig};
-use crate::menu::{CONDITIONS, Menu, MenuAction, MenuInput, TRACKS};
+use crate::game::{Game, Input, RaceConfig};
 use crate::render::{FrameParams, Renderer};
 use glam::{Mat4, Vec3};
 use std::sync::Arc;
@@ -14,7 +13,8 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 enum Screen {
-    Menu,
+    /// Before the window opens, and after the game could not go on (the app then closes).
+    Off,
     /// The original game's own front end, running in the recompiled original.
     FrontEnd(Box<crate::game::original::OriginalSim>),
     Race(Box<Game>),
@@ -29,7 +29,6 @@ struct Keys {
     space: bool,
     enter: bool,
     escape: bool,
-    reset: bool,
     camera: bool,
     backspace: bool,
     tab: bool,
@@ -39,13 +38,9 @@ struct Keys {
 pub struct App {
     data: GameData,
     screen: Screen,
-    menu: Menu,
-    menu_font: Option<crate::game::hud::Font>,
-    menu_art: crate::menu::MenuArt,
+    /// Why the game could not go on (returned by [`run`]).
+    error: Option<anyhow::Error>,
     audio: Option<crate::audio::Audio>,
-    engine: Option<crate::audio::EngineSound>,
-    music: Option<crate::audio::VoiceId>,
-    music_rx: Option<std::sync::mpsc::Receiver<crate::formats::audio::Sample>>,
     renderer: Option<Renderer>,
     window: Option<Arc<Window>>,
     keys: Keys,
@@ -74,38 +69,21 @@ pub struct RaceConfigOwned {
 }
 
 impl App {
+    /// The game cannot go on: the app closes and [`run`] returns `e`.
+    fn fail(&mut self, e: anyhow::Error) {
+        log::error!("{e:#}");
+        self.error = Some(e);
+        self.screen = Screen::Off;
+    }
+
+    /// Straight into a race (the command line's `play`).
     fn start_race(&mut self, cfg: RaceConfigOwned) {
         let mut atlas = Atlas::new(2048);
-        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true, traffic: Vec::new() };
-        let game = match Game::load(&self.data, &mut atlas, &rc) {
-            Ok(g) => g,
-            Err(e) => {
-                log::error!("could not load race: {e:#}");
-                self.enter_menu();
-                self.menu.error = Some(format!("{e:#}"));
-                return;
-            }
-        };
-        if let Some(r) = &mut self.renderer {
-            r.set_atlas(&atlas);
-            r.set_world(&game.track.verts, &game.track.indices);
+        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, traffic: Vec::new() };
+        match Game::load(&self.data, &mut atlas, &rc) {
+            Ok(game) => self.begin_race(game, atlas),
+            Err(e) => self.fail(e.context("could not load the race")),
         }
-        self.stop_sounds();
-        // (a race the original runs makes its own sound)
-        if let (Some(audio), None) = (&self.audio, &game.sim) {
-            let code = &game.player().name;
-            let bank = self
-                .data
-                .read(&format!("Z{code}ENG.VIV"))
-                .ok()
-                .and_then(|d| crate::formats::viv::Viv::parse(&d).ok())
-                .and_then(|v| v.find_suffix(".bnk").and_then(|(_, b)| crate::formats::audio::Bank::parse(b).ok()));
-            self.engine = bank.and_then(|b| crate::audio::EngineSound::new(audio, &b));
-        }
-        if game.sim.is_none() {
-            self.queue_music("game");
-        }
-        self.screen = Screen::Race(Box::new(game));
     }
 
     /// Power on the original game: its front end, from which it starts its own races.
@@ -115,51 +93,29 @@ impl App {
                 if let Some(r) = &mut self.renderer {
                     r.clear_world();
                 }
-                self.stop_sounds();
                 self.screen = Screen::FrontEnd(Box::new(sim));
             }
-            Err(e) => {
-                log::error!("the original front end did not start ({e:#}); using the engine's menu");
-                self.enter_menu();
-            }
+            Err(e) => self.fail(e.context("the original front end did not start")),
         }
     }
 
     /// The original left its front end for a race: load what it races and show it.
     fn front_end_race(&mut self, sim: Box<crate::game::original::OriginalSim>) {
         let cfg = race_of(sim.snapshot());
-        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true, traffic: Vec::new() };
+        let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, traffic: Vec::new() };
         log::info!("the original starts a race: track {}{} with {}", cfg.track, cfg.variant, cfg.player_car);
         let mut atlas = Atlas::new(2048);
-        match Game::load_with(&self.data, &mut atlas, &rc, Some(*sim)) {
+        match Game::load_with(&self.data, &mut atlas, &rc, *sim) {
             Ok(game) => self.begin_race(game, atlas),
-            Err(e) => {
-                log::error!("could not load the race: {e:#}");
-                self.enter_menu();
-            }
+            Err(e) => self.fail(e.context("could not load the race")),
         }
     }
 
-    /// Show a loaded race (assets, sounds).
+    /// Show a loaded race.
     fn begin_race(&mut self, game: Game, atlas: Atlas) {
         if let Some(r) = &mut self.renderer {
             r.set_atlas(&atlas);
             r.set_world(&game.track.verts, &game.track.indices);
-        }
-        self.stop_sounds();
-        // (a race the original runs makes its own sound)
-        if let (Some(audio), None) = (&self.audio, &game.sim) {
-            let code = &game.player().name;
-            let bank = self
-                .data
-                .read(&format!("Z{code}ENG.VIV"))
-                .ok()
-                .and_then(|d| crate::formats::viv::Viv::parse(&d).ok())
-                .and_then(|v| v.find_suffix(".bnk").and_then(|(_, b)| crate::formats::audio::Bank::parse(b).ok()));
-            self.engine = bank.and_then(|b| crate::audio::EngineSound::new(audio, &b));
-        }
-        if game.sim.is_none() {
-            self.queue_music("game");
         }
         self.screen = Screen::Race(Box::new(game));
     }
@@ -202,70 +158,6 @@ impl App {
         i
     }
 
-    fn enter_menu(&mut self) {
-        let mut atlas = Atlas::new(2048);
-        self.menu_font = Some(crate::game::hud::Font::new(&mut atlas));
-        self.menu_art = crate::menu::MenuArt::load(&self.data, &mut atlas);
-        if let Some(r) = &mut self.renderer {
-            r.set_atlas(&atlas);
-            r.clear_world();
-        }
-        self.stop_sounds();
-        self.queue_music("zmenu");
-        self.screen = Screen::Menu;
-    }
-
-    fn stop_sounds(&mut self) {
-        if let Some(audio) = &self.audio {
-            if let Some(e) = self.engine.take() {
-                e.stop(audio);
-            }
-            if let Some(m) = self.music.take() {
-                audio.stop(m);
-            }
-        }
-        self.music_rx = None;
-    }
-
-    /// Decode a random music stream whose name starts with `prefix` (menu: ZZZZAMUS, race: ZZZZYMUS).
-    fn queue_music(&mut self, prefix: &'static str) {
-        if self.audio.is_none() {
-            return;
-        }
-        let root = self.data.root.clone();
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as usize).unwrap_or(0);
-        let file = if prefix == "game" { "ZZZZYMUS.VIV" } else { "ZZZZAMUS.VIV" };
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let data = GameData::new(&root);
-            let Ok(viv) = data.read(file).and_then(|d| crate::formats::viv::Viv::parse(&d)) else { return };
-            let tracks: Vec<_> = viv.entries.iter().filter(|(n, _)| n.starts_with(prefix)).collect();
-            if tracks.is_empty() {
-                return;
-            }
-            let (name, d) = tracks[seed % tracks.len()];
-            if let Ok(s) = crate::formats::audio::decode_stream(d) {
-                log::info!("music: {name}");
-                let _ = tx.send(s);
-            }
-        });
-        self.music_rx = Some(rx);
-    }
-
-    fn update_audio(&mut self, dt: f32) {
-        let Some(audio) = &self.audio else { return };
-        if let Some(rx) = &self.music_rx {
-            if let Ok(s) = rx.try_recv() {
-                self.music = Some(audio.play(Arc::new(s), 0.45, 1.0, true));
-                self.music_rx = None;
-            }
-        }
-        if let (Some(engine), Screen::Race(game)) = (&mut self.engine, &self.screen) {
-            let p = game.player();
-            engine.update(audio, p.car.rpm / p.car.spec.redline, p.throttle, 0.55, dt);
-        }
-    }
-
     /// Merge keyboard and the first connected gamepad into game input.
     fn race_input(&mut self) -> Input {
         let k = self.keys;
@@ -275,7 +167,6 @@ impl App {
             left: k.left,
             right: k.right,
             handbrake: k.space,
-            reset: k.reset,
             camera: k.camera,
             autopilot: self.autopilot,
             start: k.escape,
@@ -298,7 +189,6 @@ impl App {
                 i.right |= pad.is_pressed(Button::DPadRight);
                 i.handbrake |= pad.is_pressed(Button::East);
                 i.camera |= pad.is_pressed(Button::North);
-                i.reset |= pad.is_pressed(Button::Select);
                 // Start pauses; the pause menu takes the d-pad and Cross
                 i.start |= pad.is_pressed(Button::Start);
                 i.up |= pad.is_pressed(Button::DPadUp);
@@ -318,8 +208,8 @@ impl App {
     fn update_rumble(&mut self) {
         let state = match &self.screen {
             Screen::FrontEnd(sim) => sim.frame_snapshot().rumble,
-            Screen::Race(game) => game.sim.as_ref().map_or([[0; 2]; 2], |s| s.frame_snapshot().rumble),
-            Screen::Menu => [[0; 2]; 2],
+            Screen::Race(game) => game.sim.frame_snapshot().rumble,
+            Screen::Off => [[0; 2]; 2],
         };
         let Some(g) = &mut self.gilrs else { return };
         let pads: Vec<gilrs::GamepadId> = g.gamepads().map(|(id, _)| id).take(2).collect();
@@ -350,25 +240,6 @@ impl App {
         }
     }
 
-    fn menu_input(&mut self) -> MenuInput {
-        let k = self.keys;
-        let mut m = MenuInput { up: k.up, down: k.down, left: k.left, right: k.right, accept: k.enter, back: k.escape };
-        if let Some(g) = &mut self.gilrs {
-            while g.next_event().is_some() {}
-            if let Some((_, pad)) = g.gamepads().next() {
-                use gilrs::{Axis, Button};
-                let (x, y) = (pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY));
-                m.up |= pad.is_pressed(Button::DPadUp) || y > 0.6;
-                m.down |= pad.is_pressed(Button::DPadDown) || y < -0.6;
-                m.left |= pad.is_pressed(Button::DPadLeft) || x < -0.6;
-                m.right |= pad.is_pressed(Button::DPadRight) || x > 0.6;
-                m.accept |= pad.is_pressed(Button::South) || pad.is_pressed(Button::Start);
-                m.back |= pad.is_pressed(Button::East);
-            }
-        }
-        m
-    }
-
     fn frame(&mut self, el: &ActiveEventLoop) {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
@@ -391,64 +262,37 @@ impl App {
                     return;
                 }
                 if !sim.in_front_end() {
-                    let Screen::FrontEnd(mut sim) = std::mem::replace(&mut self.screen, Screen::Menu) else { unreachable!() };
+                    let Screen::FrontEnd(mut sim) = std::mem::replace(&mut self.screen, Screen::Off) else { unreachable!() };
                     sim.reset_race();
                     self.front_end_race(sim);
                 }
             }
         }
-        match &self.screen {
-            Screen::FrontEnd(_) => {}
-            Screen::Menu => {
-                let mi = self.menu_input();
-                match self.menu.update(mi) {
-                    MenuAction::Quit => el.exit(),
-                    MenuAction::Start => {
-                        let m = &self.menu;
-                        let cfg = RaceConfigOwned {
-                            track: TRACKS[m.track].0,
-                            variant: CONDITIONS[m.condition].0.to_string(),
-                            player_car: crate::menu::CARS[m.car].0.to_string(),
-                            opponents: m.opponent_codes(),
-                            laps: m.laps as i32,
-                        };
-                        self.start_race(cfg);
-                    }
-                    MenuAction::None => {}
+        if let Screen::Race(_) = &self.screen {
+            let input = self.race_input();
+            if let Screen::Race(game) = &mut self.screen {
+                game.update(dt, input);
+                // the original has quit (its pause menu's Quit in a race started straight in)
+                if game.sim.stopped() {
+                    el.exit();
+                    return;
                 }
-            }
-            Screen::Race(_) => {
-                let input = self.race_input();
-                let keys = self.keys;
-                if let Screen::Race(game) = &mut self.screen {
-                    game.update(dt, input);
-                    // a race the original started from its front end: back to it when it is
-                    if game.sim.as_ref().is_some_and(|s| s.in_front_end()) {
-                        self.keys = Keys::default();
-                        let sim = game.sim.take().map(Box::new);
-                        if let (Some(sim), Some(r)) = (sim, &mut self.renderer) {
-                            r.clear_world();
-                            self.stop_sounds();
-                            self.screen = Screen::FrontEnd(sim);
-                        }
-                        return;
+                // a race the original started from its front end: back to it when it is
+                if game.sim.in_front_end() {
+                    self.keys = Keys::default();
+                    let Screen::Race(game) = std::mem::replace(&mut self.screen, Screen::Off) else { unreachable!() };
+                    if let Some(r) = &mut self.renderer {
+                        r.clear_world();
                     }
-                    let finished = game.phase == Phase::Finished;
-                    // with the original running, Escape is its Start button (pause menu) and
-                    // the race ends when the original leaves it
-                    let quit = match &game.sim {
-                        Some(sim) => sim.stopped(),
-                        None => keys.escape,
-                    };
-                    if quit || (finished && keys.enter) {
-                        self.keys.escape = false;
-                        self.keys.enter = false;
-                        self.enter_menu();
-                    }
+                    self.screen = Screen::FrontEnd(Box::new(game.sim));
+                    return;
                 }
             }
         }
-        self.update_audio(dt);
+        if let Screen::Off = self.screen {
+            el.exit();
+            return;
+        }
         self.update_rumble();
         // a front-end movie has ended: its soundtrack stops
         let playing = match &self.screen {
@@ -481,9 +325,6 @@ impl App {
                             if let Some(v) = self.movie_voice.take() {
                                 audio.stop(v);
                             }
-                            if let Some(v) = self.music.take() {
-                                audio.stop(v);
-                            }
                             self.movie_voice = Some(audio.play(Arc::new(m.audio_from(frame, fps)), 1.0, 1.0, false));
                         }
                     }
@@ -504,29 +345,7 @@ impl App {
                     draw_front_end(r, scene, false);
                 }
             }
-            Screen::Menu => {
-                let hud = self.menu_font.as_ref().map(|f| self.menu.draw(f, &self.menu_art, w as f32, h as f32)).unwrap_or_default();
-                let params = FrameParams {
-                    world_ranges: None,
-                    shadows: Vec::new(),
-                    subtract_late: Vec::new(),
-                    ambient: 1.0,
-                    headlight: (0.0, Vec3::ZERO, Vec3::Z),
-                    sky_view_proj: Mat4::IDENTITY,
-                    sky_dome: 0,
-                    sky_top: Vec3::new(0.0, 0.01, 0.04),
-                    view_proj: Mat4::IDENTITY,
-                    cam_pos: Vec3::ZERO,
-                    fog_color: Vec3::new(0.0, 0.0, 0.01),
-                    fog_start: 0.0,
-                    fog_end: 1.0,
-                    cam_fwd: Vec3::Z,
-                    depth_cue: None,
-                    night_beam: None,
-                };
-                r.render(&params, &[], &[], &hud);
-            }
-            Screen::Race(_) => {}
+            Screen::Off | Screen::Race(_) => {}
         }
     }
 }
@@ -551,7 +370,6 @@ impl ApplicationHandler for App {
         }
         match self.direct.take() {
             Some(cfg) => self.start_race(cfg),
-            None if std::env::var_os("NFSHS_ENGINE_MENU").is_some() => self.enter_menu(),
             None => self.enter_front_end(),
         }
         self.last = Instant::now();
@@ -576,7 +394,6 @@ impl ApplicationHandler for App {
                     KeyCode::Space => k.space = down,
                     KeyCode::Enter | KeyCode::NumpadEnter => k.enter = down,
                     KeyCode::Escape => k.escape = down,
-                    KeyCode::KeyR => k.reset = down,
                     KeyCode::KeyC => k.camera = down,
                     KeyCode::Backspace => k.backspace = down,
                     KeyCode::Tab => k.tab = down,
@@ -600,14 +417,9 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
     let el = EventLoop::new()?;
     let mut app = App {
         data: GameData::new(&data.root),
-        screen: Screen::Menu,
-        menu: Menu::default(),
-        menu_font: None,
-        menu_art: Default::default(),
+        screen: Screen::Off,
+        error: None,
         audio: None,
-        engine: None,
-        music: None,
-        music_rx: None,
         renderer: None,
         window: None,
         keys: Keys::default(),
@@ -622,7 +434,10 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
         showroom: None,
     };
     el.run_app(&mut app)?;
-    Ok(())
+    match app.error.take() {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Headless: simulate `seconds` with a scripted input and save a screenshot.
@@ -656,29 +471,27 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         // SHOT_CAMLOG=1: each rendered frame's camera and player car (interpolated), to look for
         // jitter: the camera's step and its offset from the car
         if std::env::var_os("SHOT_CAMLOG").is_some() {
-            if let Some((cars, Some(cam))) = game.sim.as_ref().map(|s| s.poses()) {
+            if let (cars, Some(cam)) = game.sim.poses() {
                 let car = cars[0].pos;
                 println!("camlog {t:.4} cam {:.3} {:.3} {:.3} car {:.3} {:.3} {:.3} fwd {:.4} {:.4} {:.4} speed {:.1}", cam.pos.x, cam.pos.y, cam.pos.z, car.x, car.y, car.z, cam.forward.x, cam.forward.y, cam.forward.z, cars[0].vel.length() * 2.237);
             }
         }
         // NFSHS_VRAMDUMP=FILE: the original's VRAM (1024 x 512 16-bit) at the end
         if t + 1.0 / 60.0 >= seconds {
-            if let (Some(path), Some(v)) = (std::env::var_os("NFSHS_VRAMDUMP"), game.sim.as_ref().and_then(|s| s.snapshot().vram.clone())) {
+            if let (Some(path), Some(v)) = (std::env::var_os("NFSHS_VRAMDUMP"), game.sim.snapshot().vram.clone()) {
                 std::fs::write(path, v.iter().flat_map(|p| p.to_le_bytes()).collect::<Vec<u8>>())?;
             }
         }
         // NFSHS_LIGHTTABLELOG=1: a checksum of the original's light table every 5 s
         if std::env::var_os("NFSHS_LIGHTTABLELOG").is_some() && (t * 60.0) as u32 % 300 == 0 {
-            if let Some(s) = game.sim.as_ref() {
-                let lt = &s.snapshot().light_table;
-                let sum = lt.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64));
-                println!("  t={t:5.1} light table {sum:016x} [{:06x} {:06x} {:06x} {:06x}]", lt.get(16).unwrap_or(&0) & 0xFF_FFFF, lt.get(64).unwrap_or(&0) & 0xFF_FFFF, lt.get(128).unwrap_or(&0) & 0xFF_FFFF, lt.get(200).unwrap_or(&0) & 0xFF_FFFF);
-            }
+            let lt = &game.sim.snapshot().light_table;
+            let sum = lt.iter().fold(0u64, |a, &v| a.wrapping_mul(31).wrapping_add(v as u64));
+            println!("  t={t:5.1} light table {sum:016x} [{:06x} {:06x} {:06x} {:06x}]", lt.get(16).unwrap_or(&0) & 0xFF_FFFF, lt.get(64).unwrap_or(&0) & 0xFF_FFFF, lt.get(128).unwrap_or(&0) & 0xFF_FFFF, lt.get(200).unwrap_or(&0) & 0xFF_FFFF);
         }
         // NFSHS_SKYLOG=1: the original's sky dome colours (zenith .. horizon) every 2 s
         if std::env::var_os("NFSHS_SKYLOG").is_some() && (t * 60.0) as u32 % 120 == 0 {
-            if let Some(sky) = game.sim.as_ref().and_then(|s| s.snapshot().sky.clone()) {
-                let e = game.sim.as_ref().map(|s| s.snapshot().view_env).unwrap_or_default();
+            if let Some(sky) = game.sim.snapshot().sky.clone() {
+                let e = game.sim.snapshot().view_env;
                 println!("  t={t:5.1} sky {:?} band top {:?} far colour {:?} dqa {} dqb {} h {}", (0..5).map(|r| sky.dome_colors[r * 17 + 8]).collect::<Vec<_>>(), sky.top_colors.get(8), [e[0] / 16, e[1] / 16, e[2] / 16], e[3], e[4], e[5]);
             }
         }
@@ -703,13 +516,11 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
     }
     let p = game.player();
     println!(
-        "after {seconds}s: pos={:?} speed={:.1} km/h gear={} progress={}/{} on_ground={}",
+        "after {seconds}s: pos={:?} speed={:.1} km/h progress={}/{}",
         p.car.pos,
         p.car.speed() * 3.6,
-        p.car.gear + 1,
         p.progress,
         game.path.len(),
-        p.car.on_ground
     );
     // NFSHS_CAM="x,y,z,tx,ty,tz": look from a fixed point (debugging)
     if let Ok(c) = std::env::var("NFSHS_CAM") {
@@ -733,8 +544,6 @@ pub fn flat_params() -> FrameParams {
         world_ranges: None,
         shadows: Vec::new(),
         subtract_late: Vec::new(),
-        ambient: 1.0,
-        headlight: (0.0, Vec3::ZERO, Vec3::Z),
         sky_view_proj: Mat4::IDENTITY,
         sky_dome: 0,
         sky_top: Vec3::ZERO,
@@ -786,9 +595,9 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                     s.reset_race();
                     let cfg = race_of(s.snapshot());
                     println!("frame {frame}: race {}{} with {} vs {:?}, {} laps (cars {:?})", cfg.track, cfg.variant, cfg.player_car, cfg.opponents, cfg.laps, s.snapshot().cars.iter().map(|c| c.code.clone()).collect::<Vec<_>>());
-                    let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, original_sim: true, traffic: Vec::new() };
+                    let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, traffic: Vec::new() };
                     let mut atlas = Atlas::new(2048);
-                    let g = Game::load_with(data, &mut atlas, &rc, Some(*s))?;
+                    let g = Game::load_with(data, &mut atlas, &rc, *s)?;
                     r.set_atlas(&atlas);
                     r.set_world(&g.track.verts, &g.track.indices);
                     game = Some(Box::new(g));
@@ -796,31 +605,27 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
             } else if let Some(g) = &mut game {
                 g.update(1.0 / 60.0, input);
                 if std::env::var_os("NFSHS_BEAMLOG").is_some() && frame % 60 == 0 {
-                    if let Some(b) = g.sim.as_ref().and_then(|s| s.snapshot().night_beam.clone()) {
+                    if let Some(b) = g.sim.snapshot().night_beam.clone() {
                         let nz = b.map.iter().filter(|&&v| v != 0).count();
                         println!("frame {frame}: beam flags {:#x} z0 {} xs {} zs {}, map cells lit {nz}, max {}", b.flags, b.z0, b.xs, b.zs, b.map.iter().max().unwrap_or(&0));
                     }
                 }
                 if std::env::var_os("NFSHS_CARSLOG").is_some() && frame % 60 == 0 {
-                    if let Some(sim) = &g.sim {
-                        let s = sim.snapshot();
-                        let p = s.cars[0].position;
-                        let d = |c: &crate::ps1::race::CarState| (((c.position[0] - p[0]) as f64).hypot((c.position[2] - p[2]) as f64) / 65536.0) as i32;
-                        println!("frame {frame}: speed {:.0} km/h, cars {:?}", s.cars[0].speed as f32 / 65536.0 * 3.6, s.cars.iter().skip(1).map(|c| format!("{} {}m", c.code, d(c))).collect::<Vec<_>>());
-                        for (k, v) in sim.frame_snapshot().views.iter().enumerate() {
-                            let m = |a: [i32; 3]| a.map(|x| x >> 16);
-                            println!("    view {k}: player {} camera {:?} fwd {:?} car0 {:?} fwd {:?} car1 {:?}", v.player, m(v.camera_pos), &v.camera_rot[6..9], m(s.cars[0].position), &s.cars[0].orient[6..9], s.cars.get(1).map(|c| m(c.position)));
-                        }
+                    let s = g.sim.snapshot();
+                    let p = s.cars[0].position;
+                    let d = |c: &crate::ps1::race::CarState| (((c.position[0] - p[0]) as f64).hypot((c.position[2] - p[2]) as f64) / 65536.0) as i32;
+                    println!("frame {frame}: speed {:.0} km/h, cars {:?}", s.cars[0].speed as f32 / 65536.0 * 3.6, s.cars.iter().skip(1).map(|c| format!("{} {}m", c.code, d(c))).collect::<Vec<_>>());
+                    for (k, v) in g.sim.frame_snapshot().views.iter().enumerate() {
+                        let m = |a: [i32; 3]| a.map(|x| x >> 16);
+                        println!("    view {k}: player {} camera {:?} fwd {:?} car0 {:?} fwd {:?} car1 {:?}", v.player, m(v.camera_pos), &v.camera_rot[6..9], m(s.cars[0].position), &s.cars[0].orient[6..9], s.cars.get(1).map(|c| m(c.position)));
                     }
                 }
                 if std::env::var_os("NFSHS_PARTSLOG").is_some() && frame % std::env::var("NFSHS_PARTSLOG").ok().and_then(|v| v.parse().ok()).unwrap_or(30) == 0 {
-                    if let Some(s) = g.sim.as_ref() {
-                        let snap = s.snapshot();
-                        for (k, f) in snap.car_facets.iter().enumerate() {
-                            let Some(f) = f else { continue };
-                            let c = &snap.cars[k];
-                            println!("frame {frame}: car {k} {} pos {:?} orient {:?} parts {}", c.code, c.position.map(|v| v >> 16), &c.orient[..3], f.parts.iter().enumerate().filter(|(_, v)| **v != 0).map(|(i, v)| format!("{i}:{v}")).collect::<Vec<_>>().join(" "));
-                        }
+                    let snap = g.sim.snapshot();
+                    for (k, f) in snap.car_facets.iter().enumerate() {
+                        let Some(f) = f else { continue };
+                        let c = &snap.cars[k];
+                        println!("frame {frame}: car {k} {} pos {:?} orient {:?} parts {}", c.code, c.position.map(|v| v >> 16), &c.orient[..3], f.parts.iter().enumerate().filter(|(_, v)| **v != 0).map(|(i, v)| format!("{i}:{v}")).collect::<Vec<_>>().join(" "));
                     }
                 }
                 if std::env::var_os("NFSHS_FLIPLOG").is_some() {
@@ -829,10 +634,9 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                         println!("frame {frame}: TIPPED up={:.2} pos={:.1?} speed={:.0} km/h", c.up.y, c.pos, c.speed() * 3.6);
                     }
                 }
-                if g.sim.as_ref().is_some_and(|s| s.in_front_end()) {
+                if g.sim.in_front_end() {
                     println!("frame {frame}: back in the front end");
-                    sim = g.sim.take().map(Box::new);
-                    game = None;
+                    sim = game.take().map(|g| Box::new(g.sim));
                     r.clear_world();
                 }
             }
@@ -927,11 +731,7 @@ pub fn draw_race(r: &mut Renderer, game: &mut Game, w: f32, h: f32, shot: bool) 
     if game.view_count() < 2 {
         let params = game.frame_params(w / h.max(1.0));
         let dynamic = game.dynamic_geometry();
-        let mut hud = race_hud(r, game, w, h);
-        if game.phase == Phase::Finished && game.sim.is_none() {
-            let s = (h / 240.0).max(1.0).floor();
-            game.font().text(&mut hud, "PRESS ENTER", w * 0.5 - 33.0 * s * 1.5, h * 0.85, s * 1.5, [1.0, 1.0, 1.0, 1.0]);
-        }
+        let hud = race_hud(r, game, w, h);
         if shot {
             return Some(r.screenshot(&params, &game.track.sky, &dynamic, &hud));
         }
@@ -1069,33 +869,4 @@ pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: b
     r.hud_mid_subtract = Vec::new();
     r.dyn_mid = 0;
     img
-}
-
-/// Headless render of the front-end menu.
-pub fn menu_screenshot(data: &GameData, out: &std::path::Path) -> anyhow::Result<()> {
-    let mut atlas = Atlas::new(2048);
-    let font = crate::game::hud::Font::new(&mut atlas);
-    let art = crate::menu::MenuArt::load(data, &mut atlas);
-    let mut r = pollster::block_on(Renderer::new(None, (960, 720), &atlas))?;
-    let menu = Menu::default();
-    let params = FrameParams {
-        world_ranges: None,
-        shadows: Vec::new(),
-        subtract_late: Vec::new(),
-        ambient: 1.0,
-        headlight: (0.0, Vec3::ZERO, Vec3::Z),
-        sky_view_proj: Mat4::IDENTITY,
-        sky_dome: 0,
-        sky_top: Vec3::new(0.0, 0.01, 0.04),
-        view_proj: Mat4::IDENTITY,
-        cam_pos: Vec3::ZERO,
-        fog_color: Vec3::new(0.0, 0.0, 0.01),
-        fog_start: 0.0,
-        fog_end: 1.0,
-                    cam_fwd: Vec3::Z,
-                    depth_cue: None,
-                    night_beam: None,
-    };
-    r.screenshot(&params, &[], &[], &menu.draw(&font, &art, 960.0, 720.0)).save(out)?;
-    Ok(())
 }
