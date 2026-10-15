@@ -182,7 +182,7 @@ impl Game {
 
     /// The track objects the original drew this frame (DrawW_DoObjects recorded), when it
     /// has drawn a view and the chunks are its own.
-    pub(super) fn recorded_objects(&self) -> Option<&[crate::ps1::host::ObjectDraw]> {
+    pub fn recorded_objects(&self) -> Option<&[crate::ps1::host::ObjectDraw]> {
         let o = &self.sim.snapshot().objects;
         (self.chunks_override.is_none() && !o.is_empty() && std::env::var_os("NFSHS_STATIC_OBJECTS").is_none()).then_some(o.as_slice())
     }
@@ -221,7 +221,7 @@ impl Game {
     }
 
     /// The original's chunk build list this frame: (chunk, draw flags); None without one.
-    pub(super) fn chunk_list(&self) -> Option<Vec<(usize, u8, u8)>> {
+    pub fn chunk_list(&self) -> Option<Vec<(usize, u8, u8)>> {
         let chunks = match &self.chunks_override {
             Some(c) => c.as_slice(),
             None => self.sim.snapshot().chunks.as_slice(),
@@ -274,8 +274,6 @@ impl Game {
                             let x = (cs * nx + sn * nz) as i32;
                             let z = (-sn * nx + cs * nz) as i32;
                             let p = model.transform_point3(Vec3::from(tri[k].pos));
-                            // a hair towards the camera, over the body it covers
-                            let p = p + (self.cam_pos - p).normalize_or_zero() * 0.01;
                             ([x as u8, z.unsigned_abs() as u8], [n[1] as u8, n[2] as u8], p)
                         })
                         .collect();

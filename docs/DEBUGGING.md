@@ -74,7 +74,7 @@ the others take the value shown. Player-facing settings are in the README.
 | `NFSHS_REF_CAR=CODE` | Another car's model at the player's pose. |
 | `NFSHS_REF_NOCAR=1` | No player car (to see what is under it). |
 | `NFSHS_REF_OVERLAY=pause` | The pause menu as the game draws it. |
-| `NFSHS_PICK="x0,y0,x1,y1"` | The track quads whose centre falls in that screen box. |
+| `NFSHS_PICK="x0,y0,x1,y1"` | The track quads whose centre falls in that screen box (also `shot`, 960x720). |
 
 ## The machine
 

@@ -132,6 +132,7 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
             }
         }
     }
+    super::refcmp::pick_quads(&game, data, cfg.track, cfg.variant, 960, 720)?;
     let params = game.frame_params(960.0 / 720.0);
     let hud = race_hud(&mut r, &game, 960.0, 720.0);
     let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);

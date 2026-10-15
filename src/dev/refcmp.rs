@@ -224,44 +224,7 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     })]);
     game.cam_mode = if game.racers[0].car.pos.distance(game.cam_pos) < 2.0 { crate::game::CameraMode::Bumper } else { crate::game::CameraMode::Chase };
 
-    // NFSHS_PICK="x0,y0,x1,y1": list the track quads whose centre projects into that screen
-    // rectangle (texture name, material flags, mesh) — for chasing rendering differences
-    if let Ok(pick) = std::env::var("NFSHS_PICK") {
-        let r: Vec<f32> = pick.split(',').filter_map(|v| v.parse().ok()).collect();
-        let vp = game.frame_params(W as f32 / H as f32).view_proj;
-        let psh = crate::formats::psh::Psh::parse(&data.read(&format!("ZTR{track:02}{variant}0.PSH"))?)?;
-        let t = &game.track.track;
-        for (bi, b) in t.blocks.iter().enumerate() {
-            let far = crate::formats::grp::Mesh { verts: b.ground.verts.clone(), quads: b.ground.far.clone(), far: Vec::new() };
-            for (mesh, kind) in [(&b.ground, "ground"), (&far, "far"), (&b.detail, "detail")] {
-                for q in &mesh.quads {
-                    let c = q.v.iter().map(|&i| mesh.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).sum::<Vec3>() / 4.0;
-                    let w = crate::assets::ps1_to_world(b.origin + c);
-                    let p = vp * w.extend(1.0);
-                    if p.w <= 0.1 {
-                        continue;
-                    }
-                    let (sx, sy) = ((p.x / p.w * 0.5 + 0.5) * W as f32, (0.5 - p.y / p.w * 0.5) * H as f32);
-                    if sx >= r[0] && sx < r[2] && sy >= r[1] && sy < r[3] {
-                        let te = t.textures.get(q.tex as usize);
-                        let name = te.and_then(|te| psh.shapes.get(te.shape as usize)).map(|s| s.name.as_str()).unwrap_or("?");
-                        let pts: Vec<Vec3> = q.v.iter().map(|&i| mesh.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).collect();
-                        let edges: Vec<String> = (0..4).map(|k| format!("{:.1}", pts[k].distance(pts[(k + 1) % 4]))).collect();
-                        let shape = te.and_then(|te| psh.shapes.get(te.shape as usize)).map(|s| (s.width, s.height)).unwrap_or((0, 0));
-                        println!("  quad edges {edges:?} (v0->v1, v1->v2, ...), texture {shape:?}, heights {:?}", pts.iter().map(|p| format!("{:.1}", p.y)).collect::<Vec<_>>());
-                        println!(
-                            "block {bi} {kind} strip={} tex {} {name} flag {:02x} uv {:02x} at ({sx:.0},{sy:.0}) dist {:.0}",
-                            q.strip,
-                            q.tex,
-                            te.map(|t| t.mode).unwrap_or(0),
-                            te.map(|t| t.flags).unwrap_or(0),
-                            p.w
-                        );
-                    }
-                }
-            }
-        }
-    }
+    pick_quads(&game, data, track, variant, W, H)?;
     let mut r = pollster::block_on(Renderer::new(None, (W, H), &atlas))?;
     r.set_world(&game.track.verts, &game.track.indices);
     let params = game.frame_params(W as f32 / H as f32);
@@ -361,6 +324,66 @@ pub fn match_shapes(reference: &Path, psh: &Path, names: &[String]) -> Result<()
             }
         }
         println!("{name} {sw}x{shh}: best at ({}, {}) error {:.0}", best.1, best.2, best.0);
+    }
+    Ok(())
+}
+
+/// NFSHS_PICK="x0,y0,x1,y1": list the track quads whose centre projects into that screen
+/// rectangle of a `width` x `height` picture (texture name, material flags, mesh) — for chasing
+/// rendering differences.
+pub fn pick_quads(game: &Game, data: &GameData, track: u32, variant: &str, width: u32, height: u32) -> Result<()> {
+    if let Ok(pick) = std::env::var("NFSHS_PICK") {
+        let r: Vec<f32> = pick.split(',').filter_map(|v| v.parse().ok()).collect();
+        let vp = game.frame_params(width as f32 / height as f32).view_proj;
+        let psh = crate::formats::psh::Psh::parse(&data.read(&format!("ZTR{track:02}{variant}0.PSH"))?)?;
+        let t = &game.track.track;
+        // (only the chunks the original draws, with the detail it draws them at)
+        let list = game.chunk_list();
+        for (bi, b) in t.blocks.iter().enumerate() {
+            let drawn = list.as_ref().map_or(Some(1), |l| l.iter().find(|c| c.0 == bi).map(|c| c.2));
+            let Some(rez) = drawn else { continue };
+            let far = crate::formats::grp::Mesh { verts: b.ground.verts.clone(), quads: b.ground.far.clone(), far: Vec::new() };
+            let ground = if rez != 0 { (&b.ground, "ground") } else { (&far, "far") };
+            for (mesh, kind) in [ground, (&b.detail, "detail")] {
+                for q in &mesh.quads {
+                    let c = q.v.iter().map(|&i| mesh.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).sum::<Vec3>() / 4.0;
+                    let w = crate::assets::ps1_to_world(b.origin + c);
+                    let p = vp * w.extend(1.0);
+                    if p.w <= 0.1 {
+                        continue;
+                    }
+                    let (sx, sy) = ((p.x / p.w * 0.5 + 0.5) * width as f32, (0.5 - p.y / p.w * 0.5) * height as f32);
+                    if sx >= r[0] && sx < r[2] && sy >= r[1] && sy < r[3] {
+                        let te = t.textures.get(q.tex as usize);
+                        let name = te.and_then(|te| psh.shapes.get(te.shape as usize)).map(|s| s.name.as_str()).unwrap_or("?");
+                        let pts: Vec<Vec3> = q.v.iter().map(|&i| mesh.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).collect();
+                        let edges: Vec<String> = (0..4).map(|k| format!("{:.1}", pts[k].distance(pts[(k + 1) % 4]))).collect();
+                        let shape = te.and_then(|te| psh.shapes.get(te.shape as usize)).map(|s| (s.width, s.height)).unwrap_or((0, 0));
+                        println!("  quad edges {edges:?} (v0->v1, v1->v2, ...), texture {shape:?}, heights {:?}", pts.iter().map(|p| format!("{:.1}", p.y)).collect::<Vec<_>>());
+                        println!(
+                            "block {bi} {kind} strip={} tex {} {name} flag {:02x} uv {:02x} at ({sx:.0},{sy:.0}) dist {:.0}",
+                            q.strip,
+                            q.tex,
+                            te.map(|t| t.mode).unwrap_or(0),
+                            te.map(|t| t.flags).unwrap_or(0),
+                            p.w
+                        );
+                    }
+                }
+            }
+        }
+        // and the objects the original drew (their placement point)
+        for o in game.recorded_objects().unwrap_or(&[]) {
+            let w = crate::assets::ps1_to_world(Vec3::new(o.pos[0] as f32, o.pos[1] as f32, o.pos[2] as f32) / 65536.0);
+            let p = vp * w.extend(1.0);
+            let (sx, sy) = ((p.x / p.w * 0.5 + 0.5) * width as f32, (0.5 - p.y / p.w * 0.5) * height as f32);
+            if p.w > 0.1 && sx >= r[0] && sx < r[2] && sy >= r[1] && sy < r[3] {
+                let tex = t.models.get(o.model as usize).and_then(|m| m.quads.first()).map_or(0, |q| q.tex);
+                let te = t.textures.get(tex as usize);
+                let name = te.and_then(|te| psh.shapes.get(te.shape as usize)).map(|s| s.name.as_str()).unwrap_or("?");
+                println!("object model {} {name} flag {:02x} uv {:02x}{} at ({sx:.0},{sy:.0}) dist {:.0}", o.model, te.map_or(0, |t| t.mode), te.map_or(0, |t| t.flags), if o.billboard { " billboard" } else { "" }, p.w);
+            }
+        }
     }
     Ok(())
 }
