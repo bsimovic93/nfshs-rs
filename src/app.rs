@@ -606,8 +606,18 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
                 }
             }
         }
-        game.update(1.0 / 60.0, input);
-        t += 1.0 / 60.0;
+        // SHOT_DT=SECS: the render step (a faster display than 60 Hz)
+        let dt = std::env::var("SHOT_DT").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0 / 60.0);
+        game.update(dt, input);
+        t += dt;
+        // SHOT_CAMLOG=1: each rendered frame's camera and player car (interpolated), to look for
+        // jitter: the camera's step and its offset from the car
+        if std::env::var_os("SHOT_CAMLOG").is_some() {
+            if let Some((cars, Some(cam))) = game.sim.as_ref().map(|s| s.poses()) {
+                let car = cars[0].pos;
+                println!("camlog {t:.4} cam {:.3} {:.3} {:.3} car {:.3} {:.3} {:.3} fwd {:.4} {:.4} {:.4} speed {:.1}", cam.pos.x, cam.pos.y, cam.pos.z, car.x, car.y, car.z, cam.forward.x, cam.forward.y, cam.forward.z, cars[0].vel.length() * 2.237);
+            }
+        }
         // NFSHS_VRAMDUMP=FILE: the original's VRAM (1024 x 512 16-bit) at the end
         if t + 1.0 / 60.0 >= seconds {
             if let (Some(path), Some(v)) = (std::env::var_os("NFSHS_VRAMDUMP"), game.sim.as_ref().and_then(|s| s.snapshot().vram.clone())) {

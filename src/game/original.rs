@@ -54,6 +54,8 @@ struct State {
     cars: Vec<Pose>,
     /// Each view's camera (one, or two split screen).
     cameras: Vec<Camera>,
+    /// The position of the car each camera follows (its player's).
+    followed: Vec<Option<Vec3>>,
 }
 
 /// Pose of a simulated car in engine world space.
@@ -176,7 +178,13 @@ impl OriginalSim {
             _ => s.views.iter().map(|v| camera(v.camera_pos, v.camera_rot, v.projection, v.rect[2])).collect(),
         };
         self.view_snaps = if s.views.len() > 1 { (0..s.views.len()).map(|k| s.for_view(k)).collect() } else { Vec::new() };
-        let state = State { cars: s.cars.iter().map(pose).collect(), cameras };
+        let followed = (0..cameras.len())
+            .map(|k| {
+                let player = s.views.get(k).map_or(0, |v| v.player as usize).min(1);
+                s.cars.iter().find(|c| c.addr != 0 && c.addr == s.player_cars[player]).map(|c| v3(c.position))
+            })
+            .collect();
+        let state = State { cars: s.cars.iter().map(pose).collect(), cameras, followed };
         match self.history.back_mut() {
             // no physics step this frame (start sequence): keep the newest state
             Some(h) if h.0 >= t => h.1 = state,
@@ -219,8 +227,14 @@ impl OriginalSim {
             .collect();
         let k = self.view.get();
         let (Some(p), Some(q)) = (a.cameras.get(k).or(a.cameras.first()), b.cameras.get(k).or(b.cameras.first())) else { return (cars, None) };
-        // a camera cut (new mode or intro shot) is not interpolated
-        let cut = p.pos.distance(q.pos) > 3.0 || p.forward.dot(q.forward) < 0.9;
+        // a camera cut (new mode or intro shot) is not interpolated. It is a jump in where the
+        // camera sits relative to the car it follows: at speed the camera itself moves several
+        // metres between two states (2 x 1/64 s at 215 mph is 3 m)
+        let moved = match (a.followed.get(k).copied().flatten(), b.followed.get(k).copied().flatten()) {
+            (Some(ca), Some(cb)) => (q.pos - p.pos) - (cb - ca),
+            _ => q.pos - p.pos,
+        };
+        let cut = moved.length() > 3.0 || p.forward.dot(q.forward) < 0.9;
         let camera = if cut {
             *q
         } else {

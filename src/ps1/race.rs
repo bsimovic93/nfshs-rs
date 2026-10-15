@@ -39,6 +39,8 @@ pub mod addr {
     pub const SIM_PAUSED: u32 = 0x8013_E71C;
     /// `Cars_gList`: every simulated Car_tObj*, in `carInfo` order (player first).
     pub const CAR_LIST: u32 = 0x8011_0CA0;
+    /// The human players' cars (`Car_tObj *[2]`).
+    pub const HUMAN_CARS: u32 = 0x8011_0D0C;
     /// Start sequence stage read by `Hud_Render321Go`: 0 = intro, 1..3 = lights, 4 = go.
     pub const COUNTDOWN_STAGE: u32 = 0x8013_D930;
     /// 128 Hz timer tick counter.
@@ -638,6 +640,8 @@ pub struct Snapshot {
     /// 60 Hz field number of the virtual clock.
     pub field: u64,
     pub cars: Vec<CarState>,
+    /// The human players' cars (`Car_tObj` addresses, 0 when there is none): player 1, 2.
+    pub player_cars: [u32; 2],
     /// See [`addr::COUNTDOWN_STAGE`].
     pub countdown: u8,
     pub ticks: u32,
@@ -805,6 +809,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
     let snap = Snapshot {
         frame,
         field: info.field,
+        player_cars: [c.m.r32(addr::HUMAN_CARS), c.m.r32(addr::HUMAN_CARS + 4)],
         cars,
         countdown: c.m.r8(addr::COUNTDOWN_STAGE),
         ticks: c.m.r32(addr::TICKS),
