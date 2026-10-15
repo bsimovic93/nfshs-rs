@@ -443,6 +443,39 @@ fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     true
 }
 
+/// The front end's `tCarManager` (cars: count, then the table of `tCarInfo`, 204 bytes each:
+/// +0 the model, +2 its class) and `tTrackManager`.
+const CAR_MANAGER: u32 = 0x8011_552C;
+const TRACK_MANAGER: u32 = 0x8011_5D08;
+
+/// Every track and car available in the front end, as winning everything would leave them:
+/// `tTrackManager::SetTrackAvailable` for the eleven track slots and
+/// `tCarManager::SetCarAvailable` for the cars of classes 0..7 (the race cars, the bonus
+/// cars and the police cars; class 8 is traffic): available (+520) and unlocked (+568, which
+/// the car lists go by). Done every front-end frame, since loading a save sets them again.
+/// NFSHS_LOCKED=1: as the save has it.
+fn unlock_everything(c: &mut Cpu) {
+    static LOCKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *LOCKED.get_or_init(|| std::env::var_os("NFSHS_LOCKED").is_some()) {
+        return;
+    }
+    for t in 0..11 {
+        c.m.w32(TRACK_MANAGER + 8 + 4 * t, 1);
+    }
+    let (count, table) = (c.m.r32(CAR_MANAGER), c.m.r32(CAR_MANAGER + 4));
+    // (before the front end has set its cars up)
+    if !(1..=64).contains(&count) || !(0x8000_0000..0x8020_0000).contains(&table) {
+        return;
+    }
+    for k in 0..count {
+        let (model, class) = (c.m.r8(table + 204 * k) as i8, c.m.r8(table + 204 * k + 2));
+        if model >= 0 && class <= 7 {
+            c.m.w8(CAR_MANAGER + 520 + model as u32, 1);
+            c.m.w8(CAR_MANAGER + 568 + model as u32, 1);
+        }
+    }
+}
+
 /// What the game decided to draw of one car this frame.
 #[derive(Clone, Debug, Default)]
 pub struct CarFacet {
@@ -943,6 +976,9 @@ impl GameHost {
         if !self.loading.is_empty() {
             self.loading_frames(c);
             self.loading.clear();
+        }
+        if self.mode == Mode::FrontEnd {
+            unlock_everything(c);
         }
         // top of the original main loop: game frames are locked to 60 Hz fields
         if self.clock % FIELD != 0 || self.clock == self.frame.last_top {
