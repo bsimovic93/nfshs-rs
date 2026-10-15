@@ -26,7 +26,8 @@ from your own disc image: no emulator, and no game data in this repository.
   Rendering runs at the display's rate, interpolated between the game's 60 Hz steps, and
   the 3D widens to fill wide windows.
 
-Formats and findings are in [`docs/FORMATS.md`](docs/FORMATS.md).
+Formats and findings are in [`docs/FORMATS.md`](docs/FORMATS.md); the diagnostic switches in
+[`docs/DEBUGGING.md`](docs/DEBUGGING.md).
 
 ## What works
 
