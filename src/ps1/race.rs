@@ -768,6 +768,8 @@ pub struct Snapshot {
     pub texture_subs: Vec<Vec<TextureSubs>>,
     /// First frame only: the parts' drawing modes ([`read_part_modes`]).
     pub part_modes: Vec<u8>,
+    /// The DualShock motors per controller (small 0 / 1, big 0..255) as the game drives them.
+    pub rumble: [[u8; 2]; 2],
     /// BWorld_gChunkBuildList: the track chunks the original draws this frame and how
     /// (detail flags).
     pub chunks: Vec<(i16, u16)>,
@@ -853,7 +855,7 @@ pub struct FrameInput {
 /// `first`: the first frame of a race (one-off reads such as the track's lights).
 fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: bool, first: bool) -> Snapshot {
     if info.front_end {
-        return Snapshot { frame, field: info.field, overlay: info.overlay, vram: info.vram, display: info.display, front_end: true, ..Default::default() };
+        return Snapshot { frame, field: info.field, overlay: info.overlay, vram: info.vram, display: info.display, front_end: true, rumble: info.rumble, ..Default::default() };
     }
     let mut cars = Vec::new();
     for k in 0..9 {
@@ -924,6 +926,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         env_normals,
         texture_subs,
         part_modes,
+        rumble: info.rumble,
         chunks: {
             let n = c.m.r32(addr::GP + 608).min(64);
             (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()

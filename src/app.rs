@@ -51,6 +51,8 @@ pub struct App {
     keys: Keys,
     autopilot: bool,
     gilrs: Option<gilrs::Gilrs>,
+    /// The force feedback effects of the connected gamepads (the game's DualShock motors).
+    rumble: Vec<Rumble>,
     last: Instant,
     fps: (u32, Instant),
     /// Start straight into a race (command-line `play` with explicit options).
@@ -310,6 +312,44 @@ impl App {
         i
     }
 
+    /// The game's DualShock motors on the gamepads: controller 1 the first gamepad, 2 the
+    /// second (as the input), the big motor (0..255) the strong one and the small one (on or
+    /// off) the weak one. NFSHS_NO_RUMBLE=1: none.
+    fn update_rumble(&mut self) {
+        let state = match &self.screen {
+            Screen::FrontEnd(sim) => sim.frame_snapshot().rumble,
+            Screen::Race(game) => game.sim.as_ref().map_or([[0; 2]; 2], |s| s.frame_snapshot().rumble),
+            Screen::Menu => [[0; 2]; 2],
+        };
+        let Some(g) = &mut self.gilrs else { return };
+        let pads: Vec<gilrs::GamepadId> = g.gamepads().map(|(id, _)| id).take(2).collect();
+        self.rumble.retain(|r| pads.contains(&r.id));
+        if std::env::var_os("NFSHS_NO_RUMBLE").is_some() {
+            return;
+        }
+        for (port, &id) in pads.iter().enumerate() {
+            if !self.rumble.iter().any(|r| r.id == id) {
+                if !g.gamepad(id).is_ff_supported() {
+                    continue;
+                }
+                match (Rumble::effect(g, id, true), Rumble::effect(g, id, false)) {
+                    (Ok(strong), Ok(weak)) => self.rumble.push(Rumble { id, strong, weak, level: [0.0; 2] }),
+                    (Err(e), _) | (_, Err(e)) => {
+                        log::warn!("no force feedback on gamepad {id}: {e}");
+                        continue;
+                    }
+                }
+            }
+            let Some(r) = self.rumble.iter_mut().find(|r| r.id == id) else { continue };
+            let level = [state[port][1] as f32 / 255.0, if state[port][0] != 0 { 1.0 } else { 0.0 }];
+            if level != r.level {
+                let _ = r.strong.set_gain(level[0]);
+                let _ = r.weak.set_gain(level[1]);
+                r.level = level;
+            }
+        }
+    }
+
     fn menu_input(&mut self) -> MenuInput {
         let k = self.keys;
         let mut m = MenuInput { up: k.up, down: k.down, left: k.left, right: k.right, accept: k.enter, back: k.escape };
@@ -409,6 +449,7 @@ impl App {
             }
         }
         self.update_audio(dt);
+        self.update_rumble();
         // a front-end movie has ended: its soundtrack stops
         let playing = match &self.screen {
             Screen::FrontEnd(sim) => sim.snapshot().overlay.iter().any(|o| matches!(o, crate::ps1::host::OverlayCmd::Movie { .. })),
@@ -571,6 +612,7 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
         keys: Keys::default(),
         autopilot: false,
         gilrs: gilrs::Gilrs::new().map_err(|e| log::warn!("gamepad support disabled: {e}")).ok(),
+        rumble: Vec::new(),
         last: Instant::now(),
         fps: (0, Instant::now()),
         direct,
@@ -845,6 +887,28 @@ fn ps1_buttons(pad: &gilrs::Gamepad) -> u16 {
         }
     }
     b
+}
+
+/// A gamepad's force feedback: two endless effects whose gains follow the game's motors.
+struct Rumble {
+    id: gilrs::GamepadId,
+    strong: gilrs::ff::Effect,
+    weak: gilrs::ff::Effect,
+    level: [f32; 2],
+}
+
+impl Rumble {
+    fn effect(g: &mut gilrs::Gilrs, id: gilrs::GamepadId, strong: bool) -> Result<gilrs::ff::Effect, gilrs::ff::Error> {
+        use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder, Replay, Ticks};
+        let kind = if strong { BaseEffectType::Strong { magnitude: u16::MAX } } else { BaseEffectType::Weak { magnitude: u16::MAX } };
+        let effect = EffectBuilder::new()
+            .add_effect(BaseEffect { kind, scheduling: Replay { play_for: Ticks::from_ms(1000), ..Default::default() }, envelope: Default::default() })
+            .gamepads(&[id])
+            .gain(0.0)
+            .finish(g)?;
+        effect.play()?;
+        Ok(effect)
+    }
 }
 
 /// A gamepad's sticks as a DualShock's in analog mode (RX, RY, LX, LY; 0x80 centred, 0 left

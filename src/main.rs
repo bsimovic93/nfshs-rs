@@ -517,7 +517,8 @@ fn real_main() -> Result<()> {
         Some("fe-play") => {
             // fe-play SCRIPT SHOTS DIR: the app's path through the original (front end, race,
             // back) headless. SCRIPT "secs:keys,..." (x Cross/accept, t Triangle, c Circle,
-            // s Square, p Start, u/d/l/r d-pad; in races u accelerates as in the window;
+            // s Square, p Start, u/d/l/r d-pad; in races u accelerates as in the window; g a
+            // gamepad that step, so a plugged in or pulled out pad;
             // "keys|keys" the second controller's after the bar, as PS1 buttons), SHOTS
             // "frame,frame,..." screenshots into DIR
             let mut script = Vec::new();
@@ -554,7 +555,10 @@ fn real_main() -> Result<()> {
                     autopilot: keys.contains('a'),
                     // FEPLAY_PAD=dpad|stick: a gamepad, its directions from the d-pad or the
                     // left stick (as the window's gamepad input has them)
+                    // ('g': this step's on a gamepad whatever FEPLAY_PAD says, as if one had
+                    // just been plugged in)
                     sticks: match std::env::var("FEPLAY_PAD").as_deref() {
+                        _ if keys.contains('g') => Some([0x80; 4]),
                         Ok("dpad") => Some([0x80; 4]),
                         Ok("stick") => {
                             let axis = |neg: char, pos: char| if keys.contains(neg) { 0x00 } else if keys.contains(pos) { 0xFF } else { 0x80 };

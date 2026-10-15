@@ -102,6 +102,9 @@ pub struct GameHost {
     vram_shared: Option<std::sync::Arc<Vec<u16>>>,
     /// Controller receive buffers registered with PadInitDirect (port 1, port 2).
     pub pad_buffers: [u32; 2],
+    /// Each port's actuator data as the game gave it to PadSetAct (its DualShock motors: the
+    /// small one on / off, the big one 0..255), 0 before it has.
+    pub actuators: [u32; 2],
     /// Callbacks the game registered (vsync, draw sync, ...), keyed by kind.
     pub callbacks: HashMap<&'static str, u32>,
     next_event: u32,
@@ -188,6 +191,8 @@ pub struct FrameInfo {
     pub vram: Option<std::sync::Arc<Vec<u16>>>,
     /// The player views drawn this frame (none in the front end or paused).
     pub views: Vec<ViewCapture>,
+    /// The DualShock motors per port (small 0 / 1, big 0..255), as the game drives them.
+    pub rumble: [[u8; 2]; 2],
 }
 
 /// 2D drawing the game asked for this frame outside the HUD (pause menu and the like):
@@ -641,6 +646,13 @@ impl GameHost {
     /// Move the virtual clock forward, queueing the timer interrupts that fall in between.
     fn advance_to(&mut self, c: &mut Cpu, t: u64) {
         c.pending_ticks += (t / TICK - self.clock / TICK) as u32;
+        // the VSync callback (VSyncCallback: the game's Force_Vbl, the DualShock motors) at each
+        // 60 Hz field, run like the interrupt it is once this host call returns
+        if let Some(&cb) = self.callbacks.get("vsync").filter(|&&cb| cb != 0) {
+            for _ in 0..(t / FIELD - self.clock / FIELD).min(4) {
+                c.deferred.push((cb, Vec::new()));
+            }
+        }
         // the sound hardware runs along (44.1 kHz of the virtual clock)
         let samples = t * super::spu::RATE / 1920 - self.clock * super::spu::RATE / 1920;
         self.clock = t;
@@ -661,12 +673,13 @@ impl GameHost {
     }
 
     pub fn new(root: PathBuf) -> Self {
+        let memcard = super::memcard::MemCard::new(&root);
         Self {
             root,
             files: HashMap::new(),
             mounts: Vec::new(),
             next_handle: 0x100,
-            memcard: super::memcard::MemCard::new(),
+            memcard,
             showroom_car: None,
             videos: Default::default(),
             idles: 0,
@@ -710,6 +723,7 @@ impl GameHost {
             draw_mode: 0,
             vram_shared: None,
             pad_buffers: [0; 2],
+            actuators: [0; 2],
             callbacks: HashMap::new(),
             next_event: 0xF000_0001,
             frame: FrameDriver::default(),
@@ -746,6 +760,7 @@ impl GameHost {
                 weather: Vec::new(),
                 glows: Vec::new(),
                 views: Vec::new(),
+                rumble: self.rumble(c),
             };
             if self.frame.on_frame.as_mut().and_then(|f| f(c, info)).is_none() {
                 c.tick_limit = 0;
@@ -1045,6 +1060,7 @@ impl GameHost {
                 std::mem::take(&mut self.overlay)
             },
             front_end: self.mode == Mode::FrontEnd,
+            rumble: self.rumble(c),
             vram: (self.mode == Mode::FrontEnd || self.hud_prims).then(|| {
                 if self.vram_dirty || self.vram_shared.is_none() {
                     self.vram_shared = Some(std::sync::Arc::new(self.vram.clone()));
@@ -1093,6 +1109,11 @@ impl GameHost {
             eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
         }
         input
+    }
+
+    /// The motors' state per port from the game's actuator data (see `actuators`).
+    fn rumble(&self, c: &mut Cpu) -> [[u8; 2]; 2] {
+        self.actuators.map(|a| if a == 0 { [0; 2] } else { [c.m.r8(a), c.m.r8(a + 1)] })
     }
 
     /// The front end's shape emitter (0x8004E74C) as quads: the shape is cut into strips that
@@ -2103,7 +2124,14 @@ impl Host for GameHost {
             0x800F_07BC => 1, // PadStartCom
             0x800F_07FC => 6, // PadGetState: PadStateStable
             0x800F_08BC => u32::from(a1 == 1) * 4, // PadInfoMode: a digital pad (ID 4), no extended modes
-            0x800F_0A88 | 0x800F_0B08 => 1, // PadSetActAlign / PadSetAct
+            0x800F_0A88 => 1, // PadSetActAlign
+            0x800F_0B08 => {
+                // PadSetAct(port, data, len): libpad sends data[0..len] to the motors at every
+                // VSync (the game's Force_Vbl / ShakeIt keep updating it)
+                let port = ((a0 >> 4) & 1) as usize;
+                self.actuators[port] = if a2 >= 2 { a1 } else { 0 };
+                1
+            }
 
             // ---- events (BIOS)
             0x8010_77CC => {
