@@ -230,11 +230,23 @@ impl Game {
             })
             .unwrap_or_default();
         log::info!("car colours {colours:?}");
+        // the race cars' reflection normals as the original loaded them
+        let env_normals: Vec<Vec<(usize, Vec<[i16; 3]>)>> = sim
+            .as_ref()
+            .map(|s| {
+                let snap = s.snapshot();
+                let race_car = |k: usize| k == 0 || snap.cars.get(k).is_some_and(|c| crate::ps1::race::car_type(&c.code).is_some());
+                snap.env_normals.iter().enumerate().filter(|(k, _)| race_car(*k)).map(|(_, n)| n.clone()).collect()
+            })
+            .unwrap_or_default();
         for (k, code) in codes.iter().enumerate() {
             let night = matches!(cfg.variant, "N" | "S");
             // the number plate shows the player's name (GameSetup carInfo + 0x68)
             let plate = crate::ps1::race::player_plate();
-            let model = assets::load_car(data, atlas, code, k == 0, night, (k == 0).then_some(plate.as_str()), colours.get(k).copied().unwrap_or(0))?;
+            let mut model = assets::load_car(data, atlas, code, k == 0, night, (k == 0).then_some(plate.as_str()), colours.get(k).copied().unwrap_or(0))?;
+            for (pi, normals) in env_normals.get(k).into_iter().flatten() {
+                model.set_env_normals(*pi, normals);
+            }
             let spec = load_spec(data, code, &model);
             // two-wide grid behind the start line, ~12 m between rows; the player starts last
             let slot = if k == 0 { slots - 1 } else { k - 1 };
@@ -1006,9 +1018,12 @@ impl Game {
     /// DrawC_PrimHalo as 2D, not the part's polygons.)
     /// The cars' reflections (DrawC_Prim's environment path, flags 9): each polygon of a
     /// reflection-mapped part again with reflection map A and, for polygons flagged 0x3F3,
-    /// map B (scrolled), blended as the maps' texture pages say. The map coordinates come
+    /// map B (scrolled), blended as the maps' texture pages say. Map A's coordinates come
     /// from the vertex normals turned by the camera's yaw around the car (RotMatrix of
-    /// R3DCar_yawCam): u = u0 + 64 + x, v = v0 + |z|. Returns (blended, subtractive).
+    /// R3DCar_yawCam): u = u0 + 64 + x, v = v0 + |z|. Map B's from the normals as they are:
+    /// u = u0 + 64 + y, v = v0 + scroll + z (low bytes), inside a texture window (GP0 E2,
+    /// the car cache's packet at +72) that keeps them on the 128 x 64 map at (u0, v0).
+    /// Returns (blended, subtractive).
     fn car_reflections(&self) -> (Vec<Vertex>, Vec<Vertex>) {
         let (mut add, mut sub) = (Vec::new(), Vec::new());
         let (Some(facets), Some(page)) = (self.car_facets(), self.reflections) else { return (add, sub) };
@@ -1029,7 +1044,8 @@ impl Game {
                 let (Some((normals, flags)), true) = (&part.env, on != 0) else { continue };
                 for (t, &fl) in flags.iter().enumerate() {
                     let tri = &part.verts[t * 3..t * 3 + 3];
-                    let coords: Vec<(u8, u8, Vec3)> = (0..3)
+                    // per corner: map A's (x, |z|), map B's (y, z), the position
+                    let coords: Vec<([u8; 2], [u8; 2], Vec3)> = (0..3)
                         .map(|k| {
                             let n = normals[t * 3 + k];
                             let (nx, nz) = (n[0] as f32, n[2] as f32);
@@ -1038,7 +1054,7 @@ impl Game {
                             let p = model.transform_point3(Vec3::from(tri[k].pos));
                             // a hair towards the camera, over the body it covers
                             let p = p + (self.cam_pos - p).normalize_or_zero() * 0.01;
-                            (x as u8, z.unsigned_abs() as u8, p)
+                            ([x as u8, z.unsigned_abs() as u8], [n[1] as u8, n[2] as u8], p)
                         })
                         .collect();
                     for (map, scroll, needs) in [(env.a, 0u8, 0u16), (env.b, env.scroll as u8, 0x3F3)] {
@@ -1048,10 +1064,16 @@ impl Game {
                         }
                         let (u0, v0) = (map[0] as u8, (map[0] >> 8) as u8);
                         let abr = (map[1] >> 16 >> 5) & 3;
-                        for &(x, z, p) in &coords {
+                        for &(a, b, p) in &coords {
+                            let (u, v) = if needs == 0 {
+                                (u0.wrapping_add(64).wrapping_add(a[0]), v0.wrapping_add(a[1]))
+                            } else {
+                                let (u, v) = (u0.wrapping_add(64).wrapping_add(b[0]), v0.wrapping_add(scroll).wrapping_add(b[1]));
+                                ((u & 0x7F) | (u0 & 0x80), (v & 0x3F) | (v0 & 0xC0))
+                            };
                             let vert = Vertex {
                                 pos: p.into(),
-                                uv: uv(u0.wrapping_add(64).wrapping_add(x), v0.wrapping_add(scroll).wrapping_add(z)),
+                                uv: uv(u, v),
                                 color: [rgb[0], rgb[1], rgb[2], if abr == 1 { 0.0 } else { 0.5 }],
                             };
                             if abr == 2 { sub.push(vert) } else { add.push(vert) }

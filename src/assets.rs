@@ -541,6 +541,10 @@ pub struct CarPart {
     /// Reflection-mapped parts (R3DCar_ObjectInfo flags 9: DrawC_Prim's environment path):
     /// per vertex the model-space normal / 64 (PS1 axes), per triangle the polygon flags.
     pub env: Option<(Vec<[i16; 3]>, Vec<u16>)>,
+    /// Reflection-mapped parts: per triangle corner its GEO vertex (for normals from elsewhere),
+    /// and how many vertices the GEO part has.
+    pub env_vertices: Vec<u16>,
+    pub geo_vertices: usize,
     /// Wheel parts turn around their hub: which wheel (FL, FR, RL, RR) and where.
     pub wheel: Option<usize>,
     pub hub: Vec3,
@@ -739,9 +743,11 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         let hub = if wheel.is_some() { ps1_to_world(off) } else { Vec3::ZERO };
         let mut verts = Vec::new();
         let mut env = matches!(pi, 0 | 8 | 10 | 41 | 42 | 45 | 46).then(|| (Vec::new(), Vec::new()));
+        let mut env_vertices = Vec::new();
         for poly in &part.polys {
             if let Some((normals, flags)) = &mut env {
                 flags.push((poly.flags as u16 | (poly.flags2 as u16) << 8) & 0xFFF);
+                env_vertices.extend(poly.v.map(|v| v as u16));
                 for k in 0..3 {
                     let n = part.normals.get(poly.v[k] as usize).copied().unwrap_or([0; 3]);
                     normals.push(n.map(|c| c >> 6));
@@ -760,7 +766,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
             }
         }
         let subtract = part.polys.iter().all(|p| CAR_TEXTURES.get(p.texture as usize) == Some(&"shdw")) && !part.polys.is_empty();
-        parts.push(CarPart { verts, env, wheel, hub, subtract });
+        parts.push(CarPart { verts, env, env_vertices, geo_vertices: part.verts.len(), wheel, hub, subtract });
     }
     let wheel_radius = parts.get(53).map(|p| p.hub.y).filter(|&r| r > 0.0).unwrap_or(0.33).max(0.2);
     let mut max = Vec3::ZERO;
@@ -770,6 +776,24 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         }
     }
     Ok(CarModel { parts, wheel_radius, half_extents: max })
+}
+
+impl CarModel {
+    /// The reflection normals of part `pi` from per-vertex normals as the original keeps them
+    /// in memory (R3DCar's loaded part objects: about 64 long, not the GEO's).
+    /// (Left as they are when the model is another one than the game's: vertex counts differ.)
+    pub fn set_env_normals(&mut self, pi: usize, normals: &[[i16; 3]]) {
+        let Some(part) = self.parts.get_mut(pi) else { return };
+        if part.geo_vertices != normals.len() {
+            return;
+        }
+        let Some((env, _)) = &mut part.env else { return };
+        for (n, &v) in env.iter_mut().zip(&part.env_vertices) {
+            if let Some(&m) = normals.get(v as usize) {
+                *n = m;
+            }
+        }
+    }
 }
 
 /// The track's reflection maps (ZTR<nn>R.PSH: "test", "tree", "tunn", "buil"), laid out as

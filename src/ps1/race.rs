@@ -559,6 +559,35 @@ pub struct Glare {
 
 /// Every chunk's glare list (`Track_chunkList[i] + 84`: count, then 16-byte entries). The
 /// chunk count is not kept in a variable: callers keep the chunks the track has.
+/// A car's reflection normals as the original loaded them (R3DCar's part objects for its
+/// model slot and level of detail, `0x80117BC0`): per reflection-mapped part (0, 8, 10, 41,
+/// 42, 45, 46) its vertices' normals, about 64 long (the GEO's are 4096 and differ).
+pub fn read_env_normals(m: &mut Mem, car: u32) -> Vec<(usize, Vec<[i16; 3]>)> {
+    let slot = m.r16(car + 0x8BC) as i16;
+    if !(0..50).contains(&slot) {
+        return Vec::new();
+    }
+    let lod = (m.r8(car + 0x842) >> 7) as u32;
+    let parts = m.r32(0x8011_7BC0 + lod * 200 + slot as u32 * 4);
+    let in_ram = |a: u32| (0x8000_0000..0x8020_0000).contains(&a);
+    if !in_ram(parts) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for pi in [0usize, 8, 10, 41, 42, 45, 46] {
+        let part = m.r32(parts + 4 * pi as u32);
+        if !in_ram(part) {
+            continue;
+        }
+        let (nv, normals) = (m.r16(part) as u32, m.r32(part + 20));
+        if nv == 0 || nv > 512 || !in_ram(normals) {
+            continue;
+        }
+        out.push((pi, (0..nv).map(|i| std::array::from_fn(|k| m.r16(normals + 6 * i + 2 * k as u32) as i16)).collect()));
+    }
+    out
+}
+
 pub fn read_glares(m: &mut Mem) -> Vec<Glare> {
     const TRACK_CHUNK_LIST: u32 = 0x8013_E79C;
     let list = m.r32(TRACK_CHUNK_LIST);
@@ -701,6 +730,8 @@ pub struct Snapshot {
     pub night_beam: Option<NightBeam>,
     /// The track's glowing lights (read once the track is loaded).
     pub glares: Vec<Glare>,
+    /// Per car (first frame of a race only): its reflection normals ([`read_env_normals`]).
+    pub env_normals: Vec<Vec<(usize, Vec<[i16; 3]>)>>,
     /// BWorld_gChunkBuildList: the track chunks the original draws this frame and how
     /// (detail flags).
     pub chunks: Vec<(i16, u16)>,
@@ -806,6 +837,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         out
     };
     let car_facets = by_car(&info.car_facets);
+    let env_normals = if first { cars.iter().map(|car| read_env_normals(&mut c.m, car.addr)).collect() } else { Vec::new() };
     let views: Vec<ViewSnap> = info
         .views
         .iter()
@@ -851,6 +883,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
             if l == 0 { Vec::new() } else { (0..0x60).map(|i| c.m.r8(l + i)).collect() }
         },
         glares: if first { read_glares(&mut c.m) } else { Vec::new() },
+        env_normals,
         chunks: {
             let n = c.m.r32(addr::GP + 608).min(64);
             (0..n).map(|i| (c.m.r16(0x8011_02B0 + 4 * i) as i16, c.m.r16(0x8011_02B2 + 4 * i))).collect()

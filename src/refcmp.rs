@@ -122,6 +122,32 @@ pub fn compare(data: &GameData, dir: &Path) -> Result<()> {
     if let Some(sim) = &mut game.sim {
         sim.advance(0.1, &crate::game::Input::default());
     }
+    // the player's paint as the captured game has it (its own boot has the template's)
+    let colour = {
+        let o = |a: u32| (a & 0x1F_FFFF) as usize;
+        ((ram.0[o(cars[0] + 0x840)] & 7) + ((ram.0[o(cars[0] + 0x8B3)] & 1) << 3)) as u8
+    };
+    if let Some(r) = game.racers.first() {
+        let night = matches!(variant, "N" | "S");
+        let plate = crate::ps1::race::player_plate();
+        game.models[r.model] = crate::assets::load_car(data, &mut atlas, &player, true, night, Some(plate.as_str()), colour)?;
+        // the reflection normals as the game has them in memory (see read_env_normals)
+        {
+            let o = |a: u32| (a & 0x1F_FFFF) as usize;
+            let r16 = |a: u32| i16::from_le_bytes([ram.0[o(a)], ram.0[o(a) + 1]]);
+            let slot = r16(cars[0] + 0x8BC) as u32;
+            let arr = ram.i32(0x8011_7BC0 + slot * 4) as u32;
+            for pi in [0usize, 8, 10, 41, 42, 45, 46] {
+                let part = ram.i32(arr + 4 * pi as u32) as u32;
+                if part < 0x8000_0000 { continue; }
+                let nv = (ram.i32(part) & 0xFFFF) as u32;
+                let np = ram.i32(part + 20) as u32;
+                if np < 0x8000_0000 { continue; }
+                let normals: Vec<[i16; 3]> = (0..nv).map(|i| [r16(np + 6 * i), r16(np + 6 * i + 2), r16(np + 6 * i + 4)]).collect();
+                game.models[r.model].set_env_normals(pi, &normals);
+            }
+        }
+    }
     let race_cars: Vec<u32> = cars.iter().copied().filter(|&c| car_type(&ram.code(c)).is_some()).collect();
     for (r, &c) in game.racers.iter_mut().zip(&race_cars) {
         let row = |i: u32| ram.v3(c + 0xF0 + 12 * i).normalize_or_zero();
