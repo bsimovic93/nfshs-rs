@@ -146,16 +146,24 @@ impl Game {
             };
             let (Some(orig_vp), Some((p_now, _))) = (orig, to_px(now, now_p)) else { continue };
             let Some((p_orig, _)) = to_px(orig_vp, raw) else { continue };
-            // the depth it is tested at: a light on a car just in front of that car (the PS1
-            // draws the halos over the body), any other half way to it (over what is further,
-            // behind what is nearer)
-            let dist = now_p.distance(self.cam_pos);
-            let toward = if radius > 0.0 { (radius + 0.2).min(dist * 0.9) } else { dist * 0.5 };
-            let front = now_p + (self.cam_pos - now_p).normalize_or_zero() * toward;
-            let Some((_, depth)) = to_px(now, front) else { continue };
             // (a puff is reprojected afterwards: not cut at the original's screen edges)
             let f = fe::FeFrame::build_clipped(atlas, &moved(&g.cmds), vram, screen, w, h, !g.smoke);
             atlas = f.atlas;
+            // the depth it is tested at: a light on a car just in front of that car (the PS1
+            // draws the halos over the body); any other just in front of its light, by twice
+            // the glow's own size (the PS1 sorts it at its light's depth: over its lamp and the
+            // wall it is on, seen however slanting, and under whatever is nearer)
+            let dist = now_p.distance(self.cam_pos);
+            let toward = if radius > 0.0 {
+                (radius + 0.2).min(dist * 0.9)
+            } else {
+                let (lo, hi) = f.vertices.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), v| (lo.min(Vec2::new(v.pos[0], v.pos[1])), hi.max(Vec2::new(v.pos[0], v.pos[1]))));
+                let half_px = if hi.x >= lo.x { ((hi - lo) * 0.5).max_element() } else { 0.0 };
+                let size = half_px * 2.0 * dist * self.tan_half_v / vp[3].max(1.0);
+                (2.0 * size + 1.0).min(dist * 0.5)
+            };
+            let front = now_p + (self.cam_pos - now_p).normalize_or_zero() * toward;
+            let Some((_, depth)) = to_px(now, front) else { continue };
             let d = if g.smoke { p_now - p_orig } else { p_now - p_orig - steadied((g.anchor, g.car.unwrap_or(0), view_at), quads_centre(&moved(&g.cmds)), p_orig) };
             if g.smoke && std::env::var_os("NFSHS_NOSMOKE").is_some() {
                 continue;
