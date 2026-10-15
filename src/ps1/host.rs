@@ -236,7 +236,9 @@ pub enum OverlayCmd {
 pub struct QuadTex {
     pub tpage: u16,
     pub clut: u16,
-    pub uv: [[u8; 2]; 4],
+    /// 0..=256: a sprite's right or bottom edge can be the page's end (its texels wrap at 256,
+    /// see `fe::texel`).
+    pub uv: [[u16; 2]; 4],
 }
 
 /// HUD functions whose drawing the host renders from its own port (Hud_RenderMapView,
@@ -1152,8 +1154,8 @@ impl GameHost {
                 width = 1;
             }
             let (xa, xb) = if flags & 4 != 0 { (w + x - s1 + extra - 1, w + x - (s1 + width) + extra - 1) } else { (s1 + x, s1 + x + width) };
-            let (va, vb) = (v0 as u8, (h0 + v0) as u8);
-            let (ua, ub) = (u0 as u8, (u0 + width) as u8);
+            let (va, ua) = ((v0 & 0xFF) as u16, (u0 & 0xFF) as u16);
+            let (vb, ub) = ((va as i32 + h0).max(0) as u16, ua + width as u16);
             self.overlay.push(OverlayCmd::Quad {
                 pts: [[xa as i16, top as i16], [xb as i16, top as i16], [xa as i16, bottom as i16], [xb as i16, bottom as i16]],
                 colours,
@@ -1213,8 +1215,8 @@ impl GameHost {
             let (adv, dx, dy) = (c.m.r8(g + 8) as i8 as i32, c.m.r8(g + 9) as i8 as i32, c.m.r8(g + 10) as i8 as i32);
             if w > 0 && h > 0 && upside_down {
                 // the glyph's top row (from one texel above it) at the bottom, around y + 5
-                let (u0, v0) = (u as u8, (((fy as i32 + v) & 0xFF) - 1) as u8);
-                let (u1, v1) = ((u + w) as u8, (v0 as i32 + h) as u8);
+                let (u0, v0) = ((u & 0xFF) as u16, ((((fy as i32 + v) & 0xFF) - 1) & 0xFF) as u16);
+                let (u1, v1) = (u0 + w as u16, v0 + h as u16);
                 let (top, bottom) = (y + 5 - h - dy, y + 5 - dy);
                 let (l, r) = (x + dx, x + dx + w);
                 self.overlay.push(OverlayCmd::Quad {
@@ -1225,8 +1227,8 @@ impl GameHost {
                     abr: 0,
                 });
             } else if w > 0 && h > 0 {
-                let (u0, v0) = (u as u8, ((fy as i32 + v) & 0xFF) as u8);
-                let (u1, v1) = ((u + w) as u8, (v0 as i32 + h) as u8);
+                let (u0, v0) = ((u & 0xFF) as u16, ((fy as i32 + v) & 0xFF) as u16);
+                let (u1, v1) = (u0 + w as u16, v0 + h as u16);
                 self.overlay.push(OverlayCmd::Quad {
                     pts: rect_pts(x + dx, y + dy, w, h),
                     colours: [colour; 4],
@@ -1319,7 +1321,7 @@ impl GameHost {
                 let per = 1 + u32::from(textured) + u32::from(gouraud);
                 let mut pts = [[0i16; 2]; 4];
                 let mut colours = [w0 & 0xFF_FFFF; 4];
-                let mut uv = [[0u8; 2]; 4];
+                let mut uv = [[0u16; 2]; 4];
                 let (mut clut, mut tpage) = (0u16, self.draw_mode);
                 for k in 0..n {
                     let base = 1 + per * k as u32;
@@ -1329,7 +1331,7 @@ impl GameHost {
                     pts[k] = xy(w(c, base));
                     if textured {
                         let t = w(c, base + 1);
-                        uv[k] = [t as u8, (t >> 8) as u8];
+                        uv[k] = [t as u8 as u16, (t >> 8) as u8 as u16];
                         match k {
                             0 => clut = (t >> 16) as u16,
                             1 => tpage = (t >> 16) as u16,
@@ -1360,11 +1362,11 @@ impl GameHost {
                 // TILE / SPRT (variable or 1, 8, 16 pixels): the draw mode's texture page
                 let textured = code & 4 != 0;
                 let [x, y] = xy(w(c, 1));
-                let (mut tw, mut th, mut uv0, mut clut) = (0i32, 0i32, [0u8; 2], 0u16);
+                let (mut tw, mut th, mut uv0, mut clut) = (0i32, 0i32, [0u16; 2], 0u16);
                 let mut k = 2;
                 if textured {
                     let t = w(c, 2);
-                    uv0 = [t as u8, (t >> 8) as u8];
+                    uv0 = [t as u8 as u16, (t >> 8) as u8 as u16];
                     clut = (t >> 16) as u16;
                     k = 3;
                 }
@@ -1382,7 +1384,8 @@ impl GameHost {
                 let colours = if textured && raw { [0x80_8080; 4] } else { [w0 & 0xFF_FFFF; 4] };
                 let tex = textured.then(|| {
                     let (u0, v0) = (uv0[0], uv0[1]);
-                    let (u1, v1) = (u0.wrapping_add(tw as u8), v0.wrapping_add(th as u8));
+                    // (its last texels can be the page's last: the edge is then 256)
+                    let (u1, v1) = (u0 + tw as u16, v0 + th as u16);
                     QuadTex { tpage: self.draw_mode, clut, uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]] }
                 });
                 let abr = (self.draw_mode >> 5) as u8 & 3;
@@ -1982,7 +1985,7 @@ impl Host for GameHost {
                     let tex: [u32; 4] = std::array::from_fn(|i| c.m.r32(tex_at + 4 * i as u32));
                     let clut = (tex[0] >> 16) as u16;
                     let tpage = ((tex[1] >> 16) as u16 & !0x60) | (1 << 5);
-                    let uv = tex.map(|w| [w as u8, (w >> 8) as u8]);
+                    let uv = tex.map(|w| [w as u8 as u16, (w >> 8) as u8 as u16]);
                     for t in 0..32u32 {
                         let (a, b) = (2 * t, (2 * t + 2) % 64);
                         let pts = [a, b, a + 1, b + 1].map(|i| {

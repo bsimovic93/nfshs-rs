@@ -45,6 +45,8 @@ pub fn car_view(cmd: &OverlayCmd) -> Option<CarView> {
 /// Texel `(u, v)` of texture page `tpage` through CLUT `clut`, as RGBA (alpha 0 transparent,
 /// 128 semi-transparent texel, 255 opaque).
 pub(crate) fn texel(vram: &[u16], tpage: u16, clut: u16, u: u32, v: u32) -> [u8; 4] {
+    // (texel coordinates wrap inside the 256 x 256 page)
+    let (u, v) = (u & 0xFF, v & 0xFF);
     let px = (tpage & 0xF) as usize * 64;
     let py = ((tpage >> 4) & 1) as usize * 256 + v as usize;
     let at = |x: usize, y: usize| vram.get((y % 512) * VRAM_W + (x % VRAM_W)).copied().unwrap_or(0);
@@ -78,7 +80,7 @@ impl FeFrame {
         let mut car_seen = false;
         // untextured semi-transparent quads blend as a whole: a texel with the semi bit
         let white_semi = atlas.add(1, 1, &[255, 255, 255, 128]);
-        let mut cache: HashMap<(u16, u16, u8, u8, u8, u8), Rect> = HashMap::new();
+        let mut cache: HashMap<(u16, u16, u16, u16, u16, u16), Rect> = HashMap::new();
         let (sw, sh) = (screen.0.max(1) as f32, screen.1.max(1) as f32);
         let (aw, ah) = if w * 3.0 > h * 4.0 { (h * 4.0 / 3.0, h) } else { (w, w * 0.75) };
         let (scale_x, scale_y) = (aw / sw, ah / sh);
