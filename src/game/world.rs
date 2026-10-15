@@ -266,6 +266,10 @@ impl Game {
                 let (Some((normals, flags)), true) = (&part.env, on != 0) else { continue };
                 for (t, &fl) in flags.iter().enumerate() {
                     let tri = &part.verts[t * 3..t * 3 + 3];
+                    // (DrawC_Prim's NCLIP: only the polygons facing the camera, reflections too)
+                    if !front_facing(self.cam_pos, [0, 1, 2].map(|k| model.transform_point3(Vec3::from(tri[k].pos)))) {
+                        continue;
+                    }
                     // per corner: map A's (x, |z|), map B's (y, z), the position
                     let coords: Vec<([u8; 2], [u8; 2], Vec3)> = (0..3)
                         .map(|k| {
