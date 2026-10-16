@@ -88,15 +88,21 @@ const CAR_TYPES: &[&str] = &[
     "BNS1", "BNS2",
 ];
 
+/// The police cars' codes, car types 22 on (after the race cars in the game's table): the hot
+/// pursuit car select shows them. CHSV has no model on the disc.
+const POLICE_TYPES: &[&str] = &["CCPR", "", "CBMW", "CCOV", "CCMR", "CDBL"];
+
 /// The player's licence plate text (GameSetup carInfo[0] + 0x68) of the race setup.
 pub fn player_plate() -> String {
     let o = gs::CAR_INFO + 0x68;
     GAMESETUP_TEMPLATE[o..o + 12].iter().take_while(|&&b| b != 0).map(|&b| b as char).collect()
 }
 
-/// The car file code of a car type (the inverse of [`car_type`]).
+/// The car file code of a car type (the inverse of [`car_type`], which knows only the race
+/// cars), police cars included.
 pub fn car_code(car_type: u32) -> Option<&'static str> {
-    CAR_TYPES.get(car_type as usize).copied().filter(|c| !c.is_empty())
+    let t = car_type as usize;
+    CAR_TYPES.get(t).or_else(|| POLICE_TYPES.get(t.checked_sub(22)?)).copied().filter(|c| !c.is_empty())
 }
 
 pub fn car_type(code: &str) -> Option<u32> {
