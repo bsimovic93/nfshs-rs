@@ -218,10 +218,12 @@ impl Game {
                 let scale = Vec3::new(w, h, w);
                 facing.extend(mesh.iter().map(|v| Vertex { pos: (at + rot * (assets::ps1_to_world(Vec3::from(v.pos)) * scale)).into(), ..*v }));
             } else {
-                let rows = [Vec3::new(m[0], m[1], m[2]), Vec3::new(m[3], m[4], m[5]), Vec3::new(m[6], m[7], m[8])];
+                // (DrawObjectTransform: the GTE gets (M * view)ᵀ = viewᵀ * Mᵀ, so the
+                // model is placed by Mᵀ)
+                let cols = [Vec3::new(m[0], m[3], m[6]), Vec3::new(m[1], m[4], m[7]), Vec3::new(m[2], m[5], m[8])];
                 fixed.extend(mesh.iter().map(|v| {
                     let p = Vec3::from(v.pos);
-                    Vertex { pos: assets::ps1_to_world(pos + Vec3::new(rows[0].dot(p), rows[1].dot(p), rows[2].dot(p))).into(), ..*v }
+                    Vertex { pos: assets::ps1_to_world(pos + Vec3::new(cols[0].dot(p), cols[1].dot(p), cols[2].dot(p))).into(), ..*v }
                 }));
             }
         }

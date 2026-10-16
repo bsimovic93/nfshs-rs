@@ -9,7 +9,8 @@ use super::*;
 pub struct ObjectDraw {
     /// The track model (the GRP's 0x21/0x08 models, `0x8013E7BC`'s table).
     pub model: u16,
-    /// Rotation and scale in PS1 space (`matrixtdef`, rows, 16.16), applied as M * v.
+    /// Rotation and scale in PS1 space (`matrixtdef`, rows, 16.16). The model is placed
+    /// by its transpose (DrawObjectTransform loads the GTE with (M * view)ᵀ).
     pub matrix: [i32; 9],
     /// Position in PS1 space (16.16).
     pub pos: [i32; 3],

@@ -699,7 +699,8 @@ const CAR_TEXTURES: [&str; 51] = [
 enum Placement {
     /// Faces the camera (yaw only); scale (width, height, width).
     Billboard(Vec3),
-    /// Fixed orientation and scale, in PS1 space (applied as M * v).
+    /// Fixed orientation and scale, in PS1 space (applied as M * v): the transpose of the
+    /// game's matrix, as DrawObjectTransform hands the GTE (matrix * view)ᵀ.
     Fixed(glam::Mat3),
 }
 
@@ -721,7 +722,7 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
                 Vec3::new(2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)),
             );
             let sc = Vec3::new(scale(s16(28)), scale(s16(30)), scale(s16(32)));
-            Placement::Fixed(glam::Mat3::from_cols(m.x_axis * sc.x, m.y_axis * sc.y, m.z_axis * sc.z))
+            Placement::Fixed(glam::Mat3::from_cols(m.x_axis * sc.x, m.y_axis * sc.y, m.z_axis * sc.z).transpose())
         }
         9 => {
             let (w, h) = (scale(s16(24)), scale(s16(22)));
@@ -732,7 +733,7 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
                 let (sn, c) = a.sin_cos();
                 // xformy: rows (c, 0, -s), (0, 1, 0), (s, 0, c)
                 let m = glam::Mat3::from_cols(Vec3::new(c * w, 0.0, sn * w), Vec3::new(0.0, h, 0.0), Vec3::new(-sn * w, 0.0, c * w));
-                Placement::Fixed(m)
+                Placement::Fixed(m.transpose())
             }
         }
         _ => Placement::Fixed(glam::Mat3::IDENTITY),
