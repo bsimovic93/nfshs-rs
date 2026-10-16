@@ -6,11 +6,18 @@ use crate::assets::{Atlas, GameData};
 use crate::game::{Game, Input, RaceConfig};
 use crate::render::Renderer;
 
+/// SHOT_SIZE=WxH: the headless pictures' size (960x720 by default).
+fn shot_size() -> (u32, u32) {
+    std::env::var("SHOT_SIZE").ok().and_then(|v| v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))).unwrap_or((960, 720))
+}
+
 /// Headless: simulate `seconds` with a scripted input and save a screenshot.
 pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seconds: f32, input: Input, taps: &[(char, f32)]) -> anyhow::Result<()> {
     let mut atlas = Atlas::new(2048);
     let mut game = Game::load(data, &mut atlas, cfg)?;
-    let mut r = pollster::block_on(Renderer::new(None, (960, 720), &atlas))?;
+    let (w, h) = shot_size();
+    let (wf, hf) = (w as f32, h as f32);
+    let mut r = pollster::block_on(Renderer::new(None, (w, h), &atlas))?;
     r.set_world(&game.track.verts, &game.track.indices);
     let mut t = 0.0;
     let mut next_log = 10.0;
@@ -90,8 +97,8 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         // SHOT_SERIES=SECS: also a picture every SECS seconds (OUT_<t>.png), to find a place
         if let Some(every) = std::env::var("SHOT_SERIES").ok().and_then(|v| v.parse::<f32>().ok()) {
             if (t / every).floor() > ((t - dt) / every).floor() {
-                let params = game.frame_params(960.0 / 720.0);
-                let hud = race_hud(&mut r, &game, 960.0, 720.0);
+                let params = game.frame_params(wf / hf);
+                let hud = race_hud(&mut r, &game, wf, hf);
                 let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
                 let stem = out.with_extension("");
                 img.save(format!("{}_{:03}.png", stem.display(), t.round() as u32))?;
@@ -135,16 +142,16 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
             game.cam_target = glam::Vec3::new(v[3], v[4], v[5]);
             game.cam_up = glam::Vec3::Y;
             if cams.len() > 1 {
-                let params = game.frame_params(960.0 / 720.0);
-                let hud = race_hud(&mut r, &game, 960.0, 720.0);
+                let params = game.frame_params(wf / hf);
+                let hud = race_hud(&mut r, &game, wf, hf);
                 let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
                 img.save(format!("{}_cam{i}.png", out.with_extension("").display()))?;
             }
         }
     }
-    super::refcmp::pick_quads(&game, data, cfg.track, cfg.variant, 960, 720)?;
-    let params = game.frame_params(960.0 / 720.0);
-    let hud = race_hud(&mut r, &game, 960.0, 720.0);
+    super::refcmp::pick_quads(&game, data, cfg.track, cfg.variant, w, h)?;
+    let params = game.frame_params(wf / hf);
+    let hud = race_hud(&mut r, &game, wf, hf);
     let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
     img.save(out)?;
     Ok(())
@@ -155,7 +162,7 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
 /// frames in `shots` written to `dir`.
 pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], dir: &std::path::Path) -> anyhow::Result<()> {
     use crate::game::original::OriginalSim;
-    let (w, h) = (960u32, 720u32);
+    let (w, h) = shot_size();
     let mut sim = Some(Box::new(OriginalSim::start_main(data)?));
     let mut game: Option<Box<Game>> = None;
     let mut showroom: Option<crate::game::fe::Showroom> = None;

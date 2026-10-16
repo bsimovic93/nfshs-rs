@@ -7,6 +7,7 @@ the others take the value shown. Player-facing settings are in the README.
 
 | Variable | Effect |
 |---|---|
+| `SHOT_SIZE=WxH` | `shot`, `fe-play`: the pictures' size (default 960x720), e.g. `1920x1080`. |
 | `SHOT_DT=SECS` | `shot`: the render step (a display faster than 60 Hz). |
 | `SHOT_CAMLOG=1` | `shot`: each frame's camera and player car, to look for jitter. |
 | `NFSHS_OBJLOG=1` | `shot`: the track objects the original drew in the last frame (model, world position, matrix). |

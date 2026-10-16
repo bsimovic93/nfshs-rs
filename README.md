@@ -5,6 +5,14 @@ natively on PC. The game's own code drives everything (front end, races, physics
 sound) and a new renderer draws it at any resolution and frame rate. Everything is loaded
 from your own disc image: no emulator, and no game data in this repository.
 
+![Durham Road](docs/screenshots/durham_road.png)
+
+| | |
+|---|---|
+| ![Title screen](docs/screenshots/title.png) | ![Race type menu](docs/screenshots/race_type.png) |
+| ![Car select](docs/screenshots/car_select.png) | ![Snowy Ridge in the snow](docs/screenshots/snowy_ridge.png) |
+
+
 ## How it works
 
 - **The original code, recompiled.** `NFS4.EXE` and its front-end overlay are statically
