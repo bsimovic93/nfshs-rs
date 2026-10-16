@@ -170,11 +170,13 @@ impl Game {
         }
         let n = path.len();
 
-        let mut codes = vec![cfg.player_car.to_string()];
+        let snap = sim.snapshot();
+        // (the player's car as the original runs it: GS_SET can make it a police car)
+        let player = snap.cars.first().map(|c| c.code.clone()).filter(|c| !c.is_empty()).unwrap_or_else(|| cfg.player_car.to_string());
+        let mut codes = vec![player];
         codes.extend(cfg.opponents.iter().cloned());
         let mut models = Vec::new();
         let mut racers = Vec::new();
-        let snap = sim.snapshot();
         // the race cars (the player first, then the opponents in the car list), as the original
         // set them up: paint, reflection normals, texture substitutes (lit lights, dents)
         let race_car = |k: usize| k == 0 || snap.cars.get(k).is_some_and(|c| crate::ps1::race::car_type(&c.code).is_some());

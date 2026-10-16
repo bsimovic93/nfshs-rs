@@ -16,20 +16,25 @@ static CAR_FILES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new
 pub(super) fn note_open(name: &str) {
     let n = name.rsplit(['\\', '/', ':']).next().unwrap_or(name).to_ascii_lowercase();
     if n.starts_with("zzz") && n.ends_with(".viv") {
+        // (a file opened again moves to the end: the latest race's files come last)
         if let Ok(mut v) = CAR_FILES.lock() {
-            if !v.contains(&n) {
-                v.push(n);
-            }
+            v.retain(|o| *o != n);
+            v.push(n);
         }
     }
 }
 
 /// The model file the game opened for car `code` whose first letter it replaced (police cars:
-/// "CBMW" -> "zzzgbmws.viv"), as the name to read.
-pub fn opened_variant(code: &str) -> Option<String> {
+/// "CBMW" -> "zzzgbmws.viv"), as the name to read: the detailed "h" model for a player's car,
+/// the "s" one for the others (an AI police car of the player's model opens both; the "s" file
+/// lacks the body's detailed parts the original draws for a player).
+pub fn opened_variant(code: &str, player: bool) -> Option<String> {
     let tail = code.get(1..)?.to_ascii_lowercase();
     let v = CAR_FILES.lock().ok()?;
-    v.iter().rev().find(|n| n.len() == 3 + 1 + tail.len() + 5 && n[4..4 + tail.len()] == tail).map(|n| n.to_ascii_uppercase())
+    let matches = |n: &&String| n.len() == 3 + 1 + tail.len() + 5 && n[4..4 + tail.len()] == tail;
+    let want = if player { 'h' } else { 's' };
+    let found = v.iter().rev().filter(matches).find(|n| n.as_bytes()[4 + tail.len()] == want as u8);
+    found.or_else(|| v.iter().rev().find(matches)).map(|n| n.to_ascii_uppercase())
 }
 
 impl GameHost {

@@ -443,6 +443,7 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
 /// Frame parameters for drawing 2D only (no world).
 pub fn flat_params() -> FrameParams {
     FrameParams {
+        atlas_writes: Vec::new(),
         world_ranges: None,
         objects: Vec::new(),
         shadows: Vec::new(),

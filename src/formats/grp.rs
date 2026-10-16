@@ -66,7 +66,10 @@ pub struct TexEntry {
     pub mode: u8,
     pub flags: u8,
     pub color: [u8; 3],
-    pub extra: u16,
+    /// Trk_Material::textureCount: frames of a cycling texture (the shapes that follow).
+    pub count: u8,
+    /// Trk_Material::interval: ticks per animation step.
+    pub interval: u8,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -301,7 +304,8 @@ impl Track {
                                         mode: r[2],
                                         flags: r[3],
                                         color: [r[4], r[5], r[6]],
-                                        extra: u16le(r, 8),
+                                        count: r[7],
+                                        interval: r[8],
                                     })
                                     .collect();
                             }

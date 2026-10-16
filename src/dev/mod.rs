@@ -142,12 +142,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             let mut cars = vec![car.to_string()];
             cars.extend(cfg.opponents.iter().cloned());
             let setup = RaceSetup { track, variant: variant.to_string(), cars, laps: laps as u32 };
-            let mut gs = setup.game_setup()?;
-            for kv in std::env::var("GS_SET").unwrap_or_default().split(',').filter(|s| !s.is_empty()) {
-                let (o, v) = kv.split_once('=').expect("off=value");
-                let o = usize::from_str_radix(o, 16)?;
-                gs[o..o + 4].copy_from_slice(&v.parse::<i32>()?.to_le_bytes());
-            }
+            let gs = setup.game_setup()?;
             let t = std::time::Instant::now();
             let mut sim = RaceThread::start(data.root.clone(), gs)?;
             println!("booted into race in {:?}", t.elapsed());

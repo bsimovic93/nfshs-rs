@@ -5,7 +5,7 @@
 
 use super::host::GameHost;
 use super::{Cpu, Mem, new_cpu};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
@@ -169,6 +169,13 @@ impl RaceSetup {
                 total += 1;
             }
             put(&mut d, gs::NUM_CARS, total as i32);
+        }
+        // GS_SET="hexoff=value,..." (debug): poke GameSetup words (a police car as the player:
+        // 3d4=27; the next car's type is at 488)
+        for kv in std::env::var("GS_SET").unwrap_or_default().split(',').filter(|s| !s.is_empty()) {
+            let (o, v) = kv.split_once('=').context("GS_SET: off=value")?;
+            let o = usize::from_str_radix(o, 16)?;
+            d[o..o + 4].copy_from_slice(&v.parse::<i32>()?.to_le_bytes());
         }
         Ok(d)
     }
@@ -585,6 +592,30 @@ pub fn read_texture_subs(m: &mut Mem, car: u32) -> Vec<TextureSubs> {
         .collect()
 }
 
+/// The track's scrolling textures as Track_AnimateTextures moved them this frame: per material
+/// (index into the track's materials, the `Track_tMaterial` array at gp+3960) of a type 0x80
+/// controller (16 bytes each at gp+3988, count gp+3984), how many texels its pixmap's V
+/// coordinates are past the controller's base ones (`Track_gPixMaps` 0x8011F454: 16 bytes a
+/// pixmap, V0 at +1). DrawW_DrawQuad draws those quads inside a texture window the size of
+/// the shape, so the scroll wraps round within it. (The cycling type 4 is used by no track.)
+pub fn read_texture_scroll(m: &mut Mem) -> Vec<(u16, u8)> {
+    let (n, ctrl, mats, pixmaps) = (m.r32(addr::GP + 3984).min(64), m.r32(addr::GP + 3988), m.r32(addr::GP + 3960), m.r32(0x8011_F454));
+    if ctrl == 0 || mats == 0 || pixmaps == 0 {
+        return Vec::new();
+    }
+    (0..n)
+        .map(|i| ctrl + 16 * i)
+        .filter_map(|c| {
+            if m.r16(c) != 0x80 {
+                return None;
+            }
+            let mat = m.r32(c + 12);
+            let pixmap = m.r16(mat + 2) as i16;
+            (mat >= mats && pixmap >= 0).then(|| (((mat - mats) / 4) as u16, m.r8(pixmaps + 16 * pixmap as u32 + 1).wrapping_sub(m.r8(c + 4))))
+        })
+        .collect()
+}
+
 /// Each part's drawing mode (R3DCar's part table `0x80117898`, 6 bytes a part: the flags byte,
 /// & 9): 9 the reflection path, 8 the light path, both applying the texture substitutes.
 pub fn read_part_modes(m: &mut Mem) -> Vec<u8> {
@@ -739,6 +770,8 @@ pub struct Snapshot {
     pub texture_subs: Vec<Vec<TextureSubs>>,
     /// First frame only: the parts' drawing modes ([`read_part_modes`]).
     pub part_modes: Vec<u8>,
+    /// The scrolling track textures' offsets ([`read_texture_scroll`]).
+    pub texture_scroll: Vec<(u16, u8)>,
     /// The DualShock motors per controller (small 0 / 1, big 0..255) as the game drives them.
     pub rumble: [[u8; 2]; 2],
     /// BWorld_gChunkBuildList: the track chunks the original draws this frame and how
@@ -901,6 +934,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         env_normals,
         texture_subs,
         part_modes,
+        texture_scroll: read_texture_scroll(&mut c.m),
         rumble: info.rumble,
         chunks: {
             let n = c.m.r32(addr::GP + 608).min(64);

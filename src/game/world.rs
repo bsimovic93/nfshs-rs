@@ -14,6 +14,14 @@ impl Game {
         let sky_view = Mat4::look_at_rh(Vec3::ZERO, self.cam_target - self.cam_pos, self.cam_up);
         let recorded = self.recorded_objects().is_some();
         FrameParams {
+            // the track's scrolling textures where the original has them this frame
+            atlas_writes: self
+                .sim
+                .snapshot()
+                .texture_scroll
+                .iter()
+                .filter_map(|&(m, dv)| self.track.scrolling.iter().find(|s| s.material == m).map(|s| s.scrolled(dv)))
+                .collect(),
             world_ranges: self.chunk_list().map(|list| {
                 // (the objects the original drew are placed by `objects`)
                 let mut r = if recorded { Vec::new() } else { vec![self.track.global_range.clone()] };

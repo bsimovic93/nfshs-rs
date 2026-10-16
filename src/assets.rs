@@ -42,7 +42,10 @@ pub struct Atlas {
 impl Atlas {
     pub fn new(size: u32) -> Self {
         let mut a = Self { size, rgba: vec![0; (size * size * 4) as usize], cursor: (0, 0), shelf_h: 0, white: Rect::default() };
-        a.white = a.add(4, 4, &[255; 64]);
+        // (a placeholder atlas too small for it keeps the default rectangle)
+        if size >= 8 {
+            a.white = a.add(4, 4, &[255; 64]);
+        }
         a
     }
 
@@ -53,7 +56,7 @@ impl Atlas {
             self.shelf_h = 0;
         }
         if self.cursor.1 + ph > self.size {
-            log::warn!("atlas full");
+            log::warn!("atlas full: no room for {w}x{h} (size {}, shelf at y {})", self.size, self.cursor.1);
             return self.white;
         }
         let r = Rect { x: self.cursor.0 + 1, y: self.cursor.1 + 1, w, h };
@@ -97,8 +100,34 @@ pub struct AnimatedObject {
     pub frames: Vec<(Vec3, Quat)>,
 }
 
+/// A track texture Track_AnimateTextures scrolls (material flag 0x80): the material's own atlas
+/// rectangle (with its 1-texel gutter) and the shape's texels, which are written into it each
+/// frame turned up by the original's V offset, as its texture window wraps them.
+pub struct ScrollTexture {
+    pub material: u16,
+    pub rect: Rect,
+    pub rgba: Vec<u8>,
+}
+
+impl ScrollTexture {
+    /// The rectangle's texels (gutter included) with the shape scrolled by `dv` rows.
+    pub fn scrolled(&self, dv: u8) -> crate::render::AtlasWrite {
+        let (w, h) = (self.rect.w, self.rect.h);
+        let mut rgba = Vec::with_capacity(((w + 2) * (h + 2) * 4) as usize);
+        for y in 0..h + 2 {
+            let sy = (y.clamp(1, h) - 1 + dv as u32) % h;
+            for x in 0..w + 2 {
+                let o = ((sy * w + x.clamp(1, w) - 1) * 4) as usize;
+                rgba.extend_from_slice(&self.rgba[o..o + 4]);
+            }
+        }
+        crate::render::AtlasWrite { x: self.rect.x - 1, y: self.rect.y - 1, w: w + 2, h: h + 2, rgba }
+    }
+}
+
 pub struct TrackAssets {
     pub animated: Vec<AnimatedObject>,
+    pub scrolling: Vec<ScrollTexture>,
     /// Camera-relative sky cylinder (horizon panorama).
     pub sky: Vec<Vertex>,
     /// How many of `sky`'s vertices are the dome (the horizon band follows).
@@ -146,7 +175,9 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
     let rects: Vec<Rect> = psh
         .shapes
         .iter()
-        .map(|s| if s.width <= 1 && s.height <= 1 { atlas.white } else { atlas.add(s.width as u32, s.height as u32, &s.rgba) })
+        // (a 1x1 shape is one texel all over its polygons: "TRAN" is colour 0, which the PS1
+        // does not draw, so those polygons are invisible)
+        .map(|s| if s.rgba.len() < 4 { atlas.white } else { atlas.add(s.width.max(1) as u32, s.height.max(1) as u32, &s.rgba) })
         .collect();
 
     let mut verts = Vec::new();
@@ -160,9 +191,22 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             Vec::new()
         }
     };
+    // the scrolling materials (Track_AnimateTextures' type 0x80 controllers are made for flag
+    // 0x80): each its own copy of its shape, rewritten per frame by its scroll
+    let scrolling: Vec<ScrollTexture> = track
+        .textures
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.mode & 0x80 != 0)
+        .filter_map(|(i, t)| {
+            let sh = psh.shapes.get(t.shape as usize).filter(|s| s.width > 1 && s.height > 1)?;
+            Some(ScrollTexture { material: i as u16, rect: atlas.add(sh.width as u32, sh.height as u32, &sh.rgba), rgba: sh.rgba.clone() })
+        })
+        .collect();
     let quad_uvs = |tex: u16| -> (Rect, [Vec2; 4]) {
         let te = track.textures.get(tex as usize);
-        let rect = te.and_then(|t| rects.get(t.shape as usize)).copied().unwrap_or(atlas.white);
+        let own = scrolling.iter().find(|s| s.material == tex).map(|s| s.rect);
+        let rect = own.or_else(|| te.and_then(|t| rects.get(t.shape as usize)).copied()).unwrap_or(atlas.white);
         let (w, h) = (rect.w as f32, rect.h as f32);
         // UV slots as the PS1 pixmap stores them: top-left, top-right, bottom-left, bottom-right
         let mut pmx = [Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(0.0, h), Vec2::new(w, h)];
@@ -255,6 +299,29 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         let (mn, mx) = all.fold((i16::MAX, i16::MIN), |(a, b), v| (a.min(v[3]), b.max(v[3])));
         println!("vertex shade index range {mn}..={mx}");
     }
+    // NFSHS_DUMP_MATERIALS=1 (debug): the animated materials (Trk_Material flag 0x80 or a
+    // texture count) and their shapes
+    if std::env::var_os("NFSHS_DUMP_MATERIALS").is_some() {
+        // (where the first ground or detail quad with material i is, in world space)
+        let first_at = |i: usize| {
+            track.blocks.iter().find_map(|b| {
+                let m = [&b.ground, &b.detail].into_iter().find(|m| m.quads.iter().any(|q| q.tex as usize == i))?;
+                let q = m.quads.iter().find(|q| q.tex as usize == i)?;
+                let v = m.verts.get(q.v[0] as usize)?;
+                Some(ps1_to_world(b.origin + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0))
+            })
+        };
+        for (i, t) in track.textures.iter().enumerate() {
+            if let Some(sh) = psh.shapes.get(t.shape as usize).filter(|s| s.width <= 1 && s.height <= 1) {
+                println!("material {i}: 1x1 shape {} {:?} rgba {:?} flag {:#x} uv {:#x}, at {:?}", t.shape, sh.name, sh.rgba, t.mode, t.flags, first_at(i));
+            }
+        }
+        for (i, t) in track.textures.iter().enumerate().filter(|(_, t)| t.mode & 0x80 != 0 || t.count > 1) {
+            let sh = psh.shapes.get(t.shape as usize);
+            let at = first_at(i);
+            println!("material {i}: shape {} {:?} {:?}, flag {:#x} uv {:#x} count {} interval {}, at {at:?}", t.shape, sh.map(|s| &s.name), sh.map(|s| (s.width, s.height, s.vram)), t.mode, t.flags, t.count, t.interval);
+        }
+    }
     if std::env::var_os("NFSHS_DUMP_PROPS").is_some() {
         let mut hist = std::collections::BTreeMap::new();
         for b in &track.blocks {
@@ -319,15 +386,6 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         for pl in &b.placements {
             let Some(model) = track.models.get(pl.model as usize) else { continue };
             let flat_quad = model.quads.len() == 1 && model.verts.iter().all(|v| v[2] == 0);
-            if std::env::var("NFSHS_DUMP_MODEL").ok().and_then(|v| v.parse::<u16>().ok()) == Some(pl.model) {
-                for q in &model.quads {
-                    let te = track.textures.get(q.tex as usize);
-                    let name = te.and_then(|t| psh.shapes.get(t.shape as usize)).map(|s| s.name.as_str()).unwrap_or("?");
-                    let p: Vec<Vec3> = q.v.iter().map(|&i| model.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).collect();
-                    let n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
-                    println!("  quad tex {} {name} uv {:02x} mode {:02x} n(ps1) {n:.2} verts {p:.2?}", q.tex, te.map(|t| t.flags).unwrap_or(0), te.map(|t| t.mode).unwrap_or(0));
-                }
-            }
             if std::env::var_os("NFSHS_DUMP_PROPS").is_some() {
                 let tex = model.quads.first().map(|q| q.tex).unwrap_or(0);
                 let shape = track.textures.get(tex as usize).map(|t| t.shape as usize).unwrap_or(0);
@@ -377,6 +435,28 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         }
     }
     let global_range = global_start..indices.len() as u32;
+    // NFSHS_DUMP_MODEL=N (debug): track model N's quads (placed or drawn by the original)
+    if let Some(n) = std::env::var("NFSHS_DUMP_MODEL").ok().and_then(|v| v.parse::<usize>().ok()) {
+        if let Some(model) = track.models.get(n) {
+            for q in &model.quads {
+                let te = track.textures.get(q.tex as usize);
+                let shape = te.and_then(|t| psh.shapes.get(t.shape as usize));
+                let name = shape.map(|s| s.name.as_str()).unwrap_or("?");
+                let p: Vec<Vec3> = q.v.iter().map(|&i| model.verts.get(i as usize).map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0).unwrap_or(Vec3::ZERO)).collect();
+                let shades: Vec<i16> = q.v.iter().map(|&i| model.verts.get(i as usize).map(|v| v[3]).unwrap_or(0)).collect();
+                let n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+                println!(
+                    "  quad tex {} {name} {:?} translucency {:?} stp {:?} uv {:02x} mode {:02x} shades {shades:?} n(ps1) {n:.2} verts {p:.2?}",
+                    q.tex,
+                    shape.map(|s| (s.width, s.height)),
+                    shape.map(|s| s.translucency),
+                    shape.map(|s| s.palette.iter().any(|&c| c > 0x8000)),
+                    te.map(|t| t.flags).unwrap_or(0),
+                    te.map(|t| t.mode).unwrap_or(0)
+                );
+            }
+        }
+    }
     let models = track
         .models
         .iter()
@@ -410,7 +490,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
             (v, 0, c)
         }
     };
-    Ok(TrackAssets { animated, verts, indices, track, nodes, sprites, sky, sky_dome, sky_colors, block_ranges, global_range, models })
+    Ok(TrackAssets { animated, scrolling, verts, indices, track, nodes, sprites, sky, sky_dome, sky_colors, block_ranges, global_range, models })
 }
 
 fn avg_color(rgba: &[u8], rows: std::ops::Range<usize>, w: usize) -> Vec3 {
@@ -671,7 +751,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
         &data
             .read(&name)
             .or_else(|_| data.read(&format!("ZZZ{code}.VIV")))
-            .or_else(|e| crate::ps1::host::opened_variant(code).map_or(Err(e), |f| data.read(&f)))?,
+            .or_else(|e| crate::ps1::host::opened_variant(code, player).map_or(Err(e), |f| data.read(&f)))?,
     )?;
     let (_, geo) = viv.find_suffix(".geo").context("car viv has no .geo")?;
     let geo = Geo::parse(geo)?;

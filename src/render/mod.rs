@@ -69,7 +69,19 @@ pub struct DepthCue {
     pub h: f32,
 }
 
+/// Texels to replace in the scene's atlas before drawing (x, y, w, h in texels; RGBA rows).
+#[derive(Clone)]
+pub struct AtlasWrite {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub rgba: Vec<u8>,
+}
+
 pub struct FrameParams {
+    /// Atlas texels this frame changes (the track's scrolling textures).
+    pub atlas_writes: Vec<AtlasWrite>,
     /// Index ranges of the world to draw (None: all of it).
     pub world_ranges: Option<Vec<std::ops::Range<u32>>>,
     /// More of the world placed this frame (the track objects the original draws), drawn
@@ -584,6 +596,16 @@ impl Renderer {
             },
         };
         self.queue.write_buffer(&self.world_globals, 0, bytemuck::bytes_of(&g));
+        for a in &p.atlas_writes {
+            if a.x + a.w <= self.atlas_tex.width() && a.y + a.h <= self.atlas_tex.height() {
+                self.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo { texture: &self.atlas_tex, mip_level: 0, origin: wgpu::Origin3d { x: a.x, y: a.y, z: 0 }, aspect: wgpu::TextureAspect::All },
+                    &a.rgba,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(a.w * 4), rows_per_image: Some(a.h) },
+                    wgpu::Extent3d { width: a.w, height: a.h, depth_or_array_layers: 1 },
+                );
+            }
+        }
         let (w, h) = (self.size.0 as f32, self.size.1 as f32);
         let hud_g = Globals {
             view_proj: Mat4::orthographic_rh(0.0, w, h, 0.0, -1.0, 1.0).to_cols_array_2d(),

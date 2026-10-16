@@ -58,6 +58,10 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
                 std::fs::write(path, v.iter().flat_map(|p| p.to_le_bytes()).collect::<Vec<u8>>())?;
             }
         }
+        // NFSHS_SCROLLLOG=1: the scrolling track textures' offsets every 10 frames
+        if std::env::var_os("NFSHS_SCROLLLOG").is_some() && ((t * 60.0) as u32).is_multiple_of(10) {
+            println!("  t={t:5.2} texture scroll {:?}", game.sim.snapshot().texture_scroll);
+        }
         // NFSHS_LIGHTTABLELOG=1: a checksum of the original's light table every 5 s
         if std::env::var_os("NFSHS_LIGHTTABLELOG").is_some() && ((t * 60.0) as u32).is_multiple_of(300) {
             let lt = &game.sim.snapshot().light_table;
@@ -106,6 +110,12 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
     if std::env::var_os("NFSHS_OBJLOG").is_some() {
         for o in &game.sim.snapshot().objects {
             println!("  object model {:3} at ({:8.1}, {:6.1}, {:8.1}){} matrix {:?}", o.model, -(o.pos[0] as f32) / 65536.0, o.pos[1] as f32 / 65536.0, o.pos[2] as f32 / 65536.0, if o.billboard { " billboard" } else { "" }, o.matrix);
+        }
+    }
+    // NFSHS_GLOWLOG=1: the light glows the original drew in the last frame (world anchor)
+    if std::env::var_os("NFSHS_GLOWLOG").is_some() {
+        for g in game.sim.snapshot().glows.iter().filter(|g| !g.smoke) {
+            println!("  glow at ({:8.1}, {:6.1}, {:8.1}) car {:?}, {} commands", -(g.anchor[0] as f32) / 65536.0, g.anchor[1] as f32 / 65536.0, g.anchor[2] as f32 / 65536.0, g.car, g.cmds.len());
         }
     }
     let p = game.player();
