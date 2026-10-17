@@ -797,8 +797,11 @@ pub struct Snapshot {
     pub display: [u16; 4],
     /// Full RAM copy, when requested.
     pub ram: Option<Vec<u8>>,
-    /// A front-end frame (only `frame`, `field`, `overlay`, `vram` and `display` are set).
+    /// A front-end frame (only `frame`, `field`, `overlay`, `vram`, `display` and `quit` are
+    /// set).
     pub front_end: bool,
+    /// The front end's Quit was chosen (see `GameHost::quit`).
+    pub quit: bool,
     /// VRAM, for front-end frames.
     pub vram: Option<std::sync::Arc<Vec<u16>>>,
     /// The race GameSetup describes: track number and variant ("", "N", "W", "S").
@@ -870,7 +873,7 @@ pub struct FrameInput {
 /// `first`: the first frame of a race (one-off reads such as the track's lights).
 fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: bool, first: bool) -> Snapshot {
     if info.front_end {
-        return Snapshot { frame, field: info.field, overlay: info.overlay, vram: info.vram, display: info.display, front_end: true, rumble: info.rumble, ..Default::default() };
+        return Snapshot { frame, field: info.field, overlay: info.overlay, vram: info.vram, display: info.display, front_end: true, rumble: info.rumble, quit: info.quit, ..Default::default() };
     }
     let mut cars = Vec::new();
     for k in 0..9 {
@@ -961,6 +964,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         camera_rot: std::array::from_fn(|i| c.m.r32(super::host::RENDER_VIEW + 0x14 + 4 * i as u32) as i32),
         ram: want_ram.then(|| c.m.ram.to_vec()),
         front_end: false,
+        quit: false,
         vram: info.vram.clone(),
         track: c.m.r32(addr::GAMESETUP + 0x3C),
         laps: c.m.r32(addr::GAMESETUP + gs::NUM_LAPS as u32),

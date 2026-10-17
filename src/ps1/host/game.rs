@@ -202,6 +202,11 @@ impl GameHost {
                 self.loading_frames(c);
                 return None;
             }
+            QUIT_CALLBACK => {
+                // the game setup menu's Quit (see `add_quit_item`)
+                self.quit = true;
+                0
+            }
             0x8002_7B38 => {
                 // Front_Menu: the front end runs (also its post-race screens, before
                 // Front_BuildStream)

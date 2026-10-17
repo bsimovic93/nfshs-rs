@@ -392,6 +392,11 @@ impl OriginalSim {
                     self.stopped = true;
                     return;
                 }
+                // the game setup menu's Quit
+                if self.thread.last.quit {
+                    self.stopped = true;
+                    return;
+                }
                 self.accum -= FRAME;
                 continue;
             }

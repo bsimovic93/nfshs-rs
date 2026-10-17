@@ -107,6 +107,8 @@ pub struct GameHost {
     draw_envs: HashMap<u32, ([i16; 4], [i16; 2])>,
     /// The game started from main (its title and front end), not straight into a race.
     pub from_main: bool,
+    /// The game setup menu's Quit (see `add_quit_item`) was chosen: the app closes.
+    pub quit: bool,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     pub rcnt: u32,
@@ -224,6 +226,56 @@ fn unlock_everything(c: &mut Cpu) {
             c.m.w8(CAR_MANAGER + 568 + model as u32, 1);
         }
     }
+}
+
+/// The game setup menu (One Player, Two Player, Game Options, Trophy Room): the front end's
+/// pointer to its first item, a `tMenuItemGoToMenuNFS4Button` (44 bytes: +4 its text, +0x14
+/// +0xc the icon shown by the title while it is selected, +0x14 the menu it goes to, +0x1c a
+/// function called with the menu command when it is chosen).
+/// The menu (`tMenuNFS4`, its vtable at +0x68) is allocated right after its four items and
+/// lists them from +0x10, null-terminated (room for 16).
+const GAME_SETUP_FIRST_ITEM: u32 = 0x8005_1EE0;
+const MENU_NFS4_VTABLE: u32 = 0x8001_0798;
+const MENU_ITEM_SIZE: u32 = 44;
+/// ZTEXT's "ONE PLAYER" and "QUIT".
+const ONE_PLAYER_TEXT: u32 = 92;
+const QUIT_TEXT: u32 = 156;
+/// `__builtin_new(size)`: how the front end allocates its menu items.
+const BUILTIN_NEW: u32 = 0x800A_48C0;
+/// What the Quit item calls when chosen: no code, the host takes the call.
+const QUIT_CALLBACK: u32 = 0x8000_F000;
+
+/// A Quit at the bottom of the game setup menu (the console game has none): a copy of its
+/// Game Options item (its icon the plain one) that shows "QUIT", goes to no menu and calls
+/// [`QUIT_CALLBACK`].
+/// Done every front-end frame, since the front end builds its menus again after a race.
+fn add_quit_item(c: &mut Cpu) {
+    let first = c.m.r32(GAME_SETUP_FIRST_ITEM);
+    if !(0x8000_0000..0x8020_0000).contains(&first) {
+        return;
+    }
+    let menu = first + 4 * MENU_ITEM_SIZE;
+    if c.m.r32(menu + 0x68) != MENU_NFS4_VTABLE || c.m.r32(menu + 0x10) != first || c.m.r32(first + 4) != ONE_PLAYER_TEXT {
+        return;
+    }
+    // (five: the Quit is there already)
+    let items: Vec<u32> = (0..5).map(|k| c.m.r32(menu + 0x10 + 4 * k)).take_while(|&i| i != 0).collect();
+    if items.len() != 4 {
+        return;
+    }
+    let item = c.call_nested(BUILTIN_NEW, &[MENU_ITEM_SIZE]);
+    if item == 0 {
+        return;
+    }
+    for i in (0..MENU_ITEM_SIZE).step_by(4) {
+        let w = c.m.r32(items[2] + i);
+        c.m.w32(item + i, w);
+    }
+    c.m.w32(item + 4, QUIT_TEXT);
+    c.m.w32(item + 0x14, 0);
+    c.m.w32(item + 0x1C, QUIT_CALLBACK);
+    c.m.w32(menu + 0x20, item);
+    c.m.w32(menu + 0x24, 0);
 }
 
 pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
@@ -386,6 +438,7 @@ impl GameHost {
             draw_origin: [0, 0],
             draw_envs: HashMap::new(),
             from_main: false,
+            quit: false,
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],

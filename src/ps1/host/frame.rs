@@ -51,6 +51,8 @@ pub struct FrameInfo {
     pub views: Vec<ViewCapture>,
     /// The DualShock motors per port (small 0 / 1, big 0..255), as the game drives them.
     pub rumble: [[u8; 2]; 2],
+    /// See [`GameHost::quit`].
+    pub quit: bool,
 }
 
 /// One player's view as the original set it up this frame (Render_RenderPlayerView): two
@@ -126,6 +128,7 @@ impl GameHost {
                 glows: Vec::new(),
                 views: Vec::new(),
                 rumble: self.rumble(c),
+                quit: self.quit,
             };
             if self.frame.on_frame.as_mut().and_then(|f| f(c, info)).is_none() {
                 c.tick_limit = 0;
@@ -178,6 +181,7 @@ impl GameHost {
         }
         if self.mode == Mode::FrontEnd {
             unlock_everything(c);
+            add_quit_item(c);
         }
         // top of the original main loop: game frames are locked to 60 Hz fields
         if !self.clock.is_multiple_of(FIELD) || self.clock == self.frame.last_top {
@@ -237,6 +241,7 @@ impl GameHost {
             },
             front_end: self.mode == Mode::FrontEnd,
             rumble: self.rumble(c),
+            quit: self.quit,
             vram: Some({
                 if self.vram_dirty || self.vram_shared.is_none() {
                     self.vram_shared = Some(std::sync::Arc::new(self.vram.clone()));
