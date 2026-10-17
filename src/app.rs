@@ -3,7 +3,7 @@
 use crate::assets::{Atlas, GameData};
 use crate::game::{Game, Input, RaceConfig};
 use crate::render::{FrameParams, Renderer};
-use crate::settings::Settings;
+use crate::settings::{Controls, Settings};
 use glam::{Mat4, Vec3};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -147,27 +147,25 @@ impl App {
             start: k.start,
             ..Default::default()
         };
-        if let Some(g) = &mut self.gilrs {
-            while g.next_event().is_some() {}
-            if let Some((_, pad)) = g.gamepads().next() {
-                use gilrs::Button;
-                // (the stick goes to the original as a stick: it reads it as directions too)
-                i.up |= pad.is_pressed(Button::DPadUp);
-                i.down |= pad.is_pressed(Button::DPadDown);
-                i.left |= pad.is_pressed(Button::DPadLeft);
-                i.right |= pad.is_pressed(Button::DPadRight);
-                i.accept |= pad.is_pressed(Button::South);
-                i.back |= pad.is_pressed(Button::North);
-                i.circle |= pad.is_pressed(Button::East);
-                i.square |= pad.is_pressed(Button::West);
-                i.start |= pad.is_pressed(Button::Start);
-                i.select |= pad.is_pressed(Button::Select);
-                i.sticks = Some(ps1_sticks(&pad));
-            }
-            i.pad2 = g.gamepads().nth(1).map_or(0, |(_, p)| ps1_buttons(&p));
-            i.pad2_sticks = g.gamepads().nth(1).map(|(_, p)| ps1_sticks(&p));
-        }
+        // (the stick goes to the original as a stick: it reads it as directions too)
+        self.read_gamepads(&mut i, [false; 2]);
         i
+    }
+
+    /// The first two gamepads into `i` as the PS1's controllers 1 and 2, in the settings'
+    /// layout; `driving`: each one drives a car rather than working a menu.
+    fn read_gamepads(&mut self, i: &mut Input, driving: [bool; 2]) {
+        let controls = self.settings.controls;
+        let Some(g) = &mut self.gilrs else { return };
+        while g.next_event().is_some() {}
+        for (k, (_, pad)) in g.gamepads().take(2).enumerate() {
+            let (buttons, sticks) = (ps1_buttons(&pad, controls, driving[k]), Some(ps1_sticks(&pad)));
+            if k == 0 {
+                (i.pad1, i.sticks) = (buttons, sticks);
+            } else {
+                (i.pad2, i.pad2_sticks) = (buttons, sticks);
+            }
+        }
     }
 
     /// Merge keyboard and the first connected gamepad into game input.
@@ -185,32 +183,16 @@ impl App {
             accept: k.enter,
             ..Default::default()
         };
-        if let Some(g) = &mut self.gilrs {
-            while g.next_event().is_some() {}
-            if let Some((_, pad)) = g.gamepads().next() {
-                use gilrs::{Axis, Button};
-                let stick = pad.value(Axis::LeftStickX);
-                if stick.abs() > 0.12 {
-                    i.steer_axis = stick;
-                }
-                let rt = pad.button_data(Button::RightTrigger2).map(|b| b.value()).unwrap_or(0.0);
-                let lt = pad.button_data(Button::LeftTrigger2).map(|b| b.value()).unwrap_or(0.0);
-                i.throttle_axis = rt.max(pad.is_pressed(Button::South) as u8 as f32);
-                i.brake_axis = lt.max(pad.is_pressed(Button::West) as u8 as f32);
-                i.left |= pad.is_pressed(Button::DPadLeft);
-                i.right |= pad.is_pressed(Button::DPadRight);
-                i.handbrake |= pad.is_pressed(Button::East);
-                i.camera |= pad.is_pressed(Button::North);
-                // Start pauses; the pause menu takes the d-pad and Cross
-                i.start |= pad.is_pressed(Button::Start);
-                i.up |= pad.is_pressed(Button::DPadUp);
-                i.down |= pad.is_pressed(Button::DPadDown);
-                i.accept |= pad.is_pressed(Button::South);
-                i.sticks = Some(ps1_sticks(&pad));
+        // the pause menu and, for player 1, the results screens after the finish (the
+        // original drives the car then) are menus
+        let driving = match &self.screen {
+            Screen::Race(game) => {
+                let paused = game.sim.frame_snapshot().paused;
+                [!paused && game.racers.first().is_none_or(|r| r.finish_time.is_none()), !paused]
             }
-            i.pad2 = g.gamepads().nth(1).map_or(0, |(_, p)| ps1_buttons(&p));
-            i.pad2_sticks = g.gamepads().nth(1).map(|(_, p)| ps1_sticks(&p));
-        }
+            _ => [false; 2],
+        };
+        self.read_gamepads(&mut i, driving);
         i
     }
 
@@ -615,33 +597,43 @@ pub fn race_of(snap: &crate::ps1::race::Snapshot) -> RaceConfigOwned {
     }
 }
 
-/// A gamepad as a PS1 pad's buttons (the second player's): face buttons as they sit, the
-/// triggers also Cross and Square (accelerate and brake in a race). The sticks are the
-/// DualShock's (see [`ps1_sticks`]).
-fn ps1_buttons(pad: &gilrs::Gamepad) -> u16 {
-    use crate::ps1::race::pad;
-    use gilrs::Button;
-    let trigger = |b: Button| pad.button_data(b).is_some_and(|d| d.value() > 0.3);
-    let mut b = 0;
-    for (on, bit) in [
-        (pad.is_pressed(Button::DPadUp), pad::UP),
-        (pad.is_pressed(Button::DPadDown), pad::DOWN),
-        (pad.is_pressed(Button::DPadLeft), pad::LEFT),
-        (pad.is_pressed(Button::DPadRight), pad::RIGHT),
-        (pad.is_pressed(Button::South) || trigger(Button::RightTrigger2), pad::CROSS),
-        (pad.is_pressed(Button::West) || trigger(Button::LeftTrigger2), pad::SQUARE),
-        (pad.is_pressed(Button::East), pad::CIRCLE),
-        (pad.is_pressed(Button::North), pad::TRIANGLE),
-        (pad.is_pressed(Button::Start), pad::START),
-        (pad.is_pressed(Button::Select), pad::SELECT),
-        (pad.is_pressed(Button::LeftTrigger), pad::L1),
-        (pad.is_pressed(Button::RightTrigger), pad::R1),
-    ] {
-        if on {
-            b |= bit;
+/// A gamepad as a PS1 pad's buttons in the layout `controls` (`driving`: a car, not a menu).
+/// Original: the buttons as they sit on a DualShock (bumpers L1 and R1, triggers L2 and R2),
+/// so the game's own controller configuration decides what they do. Modern (Underground 2,
+/// Most Wanted, Carbon) is for the game's default configuration A (its table at 0x801220EC:
+/// Cross accelerate, Square brake/reverse, Circle handbrake, Triangle camera, R1 and R2 shift
+/// up and down, L2 look behind, Up horn, L1 the lights and police modifier, Select reset):
+/// driving, the triggers accelerate and brake, A is the handbrake, Y the camera, B looks
+/// behind, RB and LB shift; in a menu A accepts (Cross) and B goes back (Triangle). The sticks
+/// are the DualShock's (see [`ps1_sticks`]).
+fn ps1_buttons(pad: &gilrs::Gamepad, controls: Controls, driving: bool) -> u16 {
+    use crate::ps1::race::pad::*;
+    use gilrs::Button::*;
+    let held = |b: gilrs::Button| match b {
+        LeftTrigger2 | RightTrigger2 => pad.button_data(b).is_some_and(|d| d.value() > 0.3),
+        _ => pad.is_pressed(b),
+    };
+    let layout: &[(gilrs::Button, u16)] = match (controls, driving) {
+        (Controls::Original, _) => {
+            &[(South, CROSS), (East, CIRCLE), (West, SQUARE), (North, TRIANGLE), (LeftTrigger, L1), (RightTrigger, R1), (LeftTrigger2, L2), (RightTrigger2, R2)]
         }
-    }
-    b
+        (Controls::Modern, true) => &[
+            (RightTrigger2, CROSS),
+            (LeftTrigger2, SQUARE),
+            (South, CIRCLE),
+            (North, TRIANGLE),
+            (East, L2),
+            (RightTrigger, R1),
+            (LeftTrigger, R2),
+            (West, UP),
+            (LeftThumb, L1),
+        ],
+        (Controls::Modern, false) => {
+            &[(South, CROSS), (East, TRIANGLE), (West, SQUARE), (North, CIRCLE), (LeftTrigger, L1), (RightTrigger, R1), (LeftTrigger2, L2), (RightTrigger2, R2)]
+        }
+    };
+    let common = [(DPadUp, UP), (DPadDown, DOWN), (DPadLeft, LEFT), (DPadRight, RIGHT), (Start, START), (Select, SELECT)];
+    layout.iter().chain(&common).filter(|(b, _)| held(*b)).fold(0, |m, (_, bit)| m | bit)
 }
 
 /// A gamepad's force feedback: two endless effects whose gains follow the game's motors.

@@ -61,6 +61,15 @@ threshold = 0.6
 [input]
 ; gamepad vibration
 rumble = true
+; the gamepad's layout:
+; 1: original - the buttons as they sit on the PlayStation pad (bumpers L1/R1, triggers L2/R2):
+;    the game's own controller configuration applies (its default A: Cross accelerate, Square
+;    brake/reverse, Circle handbrake, Triangle camera, R1/R2 shift up/down, L2 look behind,
+;    d-pad up horn, L1 + a button: lights and police, Select reset)
+; 2: modern - as in Underground 2, Most Wanted and Carbon (with the game's configuration A):
+;    RT accelerate, LT brake/reverse, A handbrake, Y camera, B look behind, RB/LB shift up/down,
+;    X horn, left stick click the L1 (lights and police) button, Back reset; menus: A accept, B back
+controls = 1
 
 [audio]
 ; an output device other than the default (part of its name; empty: the default)
@@ -91,9 +100,19 @@ pub struct Settings {
     pub bloom: bool,
     pub bloom_params: Bloom,
     pub rumble: bool,
+    pub controls: Controls,
     pub audio_device: String,
     pub memcard: String,
     pub locked: bool,
+}
+
+/// The gamepad's layout (`[input] controls`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Controls {
+    /// The PlayStation pad's buttons as they sit: the game's own configuration decides.
+    Original,
+    /// Underground 2 / Most Wanted / Carbon: triggers accelerate and brake.
+    Modern,
 }
 
 impl Default for Settings {
@@ -112,6 +131,7 @@ impl Default for Settings {
             bloom: false,
             bloom_params: Bloom::default(),
             rumble: true,
+            controls: Controls::Original,
             audio_device: String::new(),
             memcard: String::new(),
             locked: false,
@@ -197,6 +217,13 @@ impl Settings {
                 ("bloom", "intensity") => set_f32(&mut self.bloom_params.intensity, value) && self.bloom_params.intensity >= 0.0,
                 ("bloom", "threshold") => set_f32(&mut self.bloom_params.threshold, value),
                 ("input", "rumble") => set_bool(&mut self.rumble, value),
+                ("input", "controls") => match value.to_ascii_lowercase().as_str() {
+                    "1" | "original" => Some(Controls::Original),
+                    "2" | "modern" => Some(Controls::Modern),
+                    _ => None,
+                }
+                .map(|c| self.controls = c)
+                .is_some(),
                 ("audio", "device") => {
                     self.audio_device = value.to_string();
                     true

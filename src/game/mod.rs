@@ -32,11 +32,9 @@ pub struct Input {
     pub circle: bool,
     pub square: bool,
     pub select: bool,
-    /// Analog controls (gamepad); override the digital ones when non-zero.
-    pub steer_axis: f32,
-    pub throttle_axis: f32,
-    pub brake_axis: f32,
-    /// The second controller's PS1 buttons (player 2), as they are.
+    /// The gamepads' PS1 buttons (controller 1 besides the keyboard above, and player 2's),
+    /// as they are.
+    pub pad1: u16,
     pub pad2: u16,
     /// The controllers' sticks (RX, RY, LX, LY) when they are gamepads: the original then
     /// sees DualShocks in analog mode. `None`: a digital pad (keyboard).

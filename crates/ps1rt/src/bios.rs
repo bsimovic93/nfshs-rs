@@ -215,6 +215,9 @@ pub fn call(c: &mut Cpu, table: u32) {
             c.rand_seed = a0;
             0
         }
+        // SysEnqIntRP / SysDeqIntRP: the host raises interrupts itself (libpad's
+        // _padStopCom dequeues its handler when the game closes the pad for the memory card)
+        (0xC0, 0x02) | (0xC0, 0x03) => 0,
         _ => {
             static REPORTED: std::sync::Mutex<Vec<(u32, u32)>> = std::sync::Mutex::new(Vec::new());
             if let Ok(mut r) = REPORTED.lock() {

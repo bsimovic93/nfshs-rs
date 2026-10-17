@@ -326,7 +326,7 @@ impl OriginalSim {
         (v.len() > 1).then(|| v.get(k).map(|v| v.rect)).flatten()
     }
 
-    /// PS1 controller buttons for the engine's input (the game's default layout:
+    /// PS1 controller buttons for the keyboard's input (the game's default layout:
     /// Cross accelerate, Square brake/reverse, Circle handbrake, d-pad steer).
     fn buttons(input: &Input, menu: bool) -> u16 {
         let mut b = 0;
@@ -343,10 +343,10 @@ impl OriginalSim {
             return b;
         }
         // (Cross also confirms: the results screens after the finish take it)
-        if input.up || input.throttle_axis > 0.3 || input.accept {
+        if input.up || input.accept {
             b |= pad::CROSS;
         }
-        if input.down || input.brake_axis > 0.3 {
+        if input.down {
             b |= pad::SQUARE;
         }
         if input.handbrake {
@@ -355,12 +355,10 @@ impl OriginalSim {
         if input.camera {
             b |= pad::TRIANGLE;
         }
-        // (a gamepad's stick goes to the original as the stick)
-        let digital = input.sticks.is_none();
-        if input.left || (digital && input.steer_axis < -0.3) {
+        if input.left {
             b |= pad::LEFT;
         }
-        if input.right || (digital && input.steer_axis > 0.3) {
+        if input.right {
             b |= pad::RIGHT;
         }
         b
@@ -385,11 +383,11 @@ impl OriginalSim {
         }
         self.accum = (self.accum + dt).min(FRAME * 6.0);
         let paused = self.thread.last.paused;
-        let user_buttons = Self::buttons(input, paused);
+        let user_buttons = Self::buttons(input, paused) | input.pad1;
         while self.accum >= FRAME {
             if self.thread.last.front_end {
                 // the front end: its own buttons, no race bookkeeping
-                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input), buttons2: input.pad2, want_ram: false, sticks: [input.sticks, input.pad2_sticks] }) {
+                if let Err(e) = self.thread.step(FrameInput { buttons: Self::front_end_buttons(input) | input.pad1, buttons2: input.pad2, want_ram: false, sticks: [input.sticks, input.pad2_sticks] }) {
                     log::warn!("original game ended: {e:#}");
                     self.stopped = true;
                     return;
@@ -423,7 +421,7 @@ impl OriginalSim {
                 None => {}
             }
             let sticks = [
-                Self::race_sticks(input.sticks, input.left, input.right),
+                Self::race_sticks(input.sticks, input.left || input.pad1 & pad::LEFT != 0, input.right || input.pad1 & pad::RIGHT != 0),
                 Self::race_sticks(input.pad2_sticks, input.pad2 & pad::LEFT != 0, input.pad2 & pad::RIGHT != 0),
             ];
             if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false, sticks }) {

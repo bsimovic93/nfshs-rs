@@ -37,6 +37,50 @@ pub fn opened_variant(code: &str, player: bool) -> Option<String> {
     found.or_else(|| v.iter().rev().find(matches)).map(|n| n.to_ascii_uppercase())
 }
 
+/// Paints the car select offers that the original leaves out: (car, paint 0..15 as
+/// [`crate::ps1::race::CarState::colour`] has it, 0..7 the "l" body sheet, 8..15 the "d").
+/// Each is a finished palette row (on every body part, dents too), not near a paint the car
+/// already has; the car select gives them in this order, after the original's.
+const EXTRA_PAINTS: &[(&str, u8)] = &[
+    ("BMWZ", 2),  // olive green
+    ("BMWZ", 10), // black
+    ("CMRO", 3),  // mustard gold
+    ("TRAM", 2),  // gold
+    ("TRAM", 11), // charcoal
+    ("F550", 3),  // silver
+    ("F550", 2),  // champagne
+    ("F550", 12), // dark green
+    ("F375", 1),  // navy
+    ("F375", 5),  // silver
+    ("F375", 8),  // dark green
+    ("DIAB", 1),  // lime green
+    ("MCF1", 3),  // silver
+    ("MCF1", 4),  // purple
+    ("MCF1", 5),  // blue
+    ("MCF1", 6),  // green
+    ("MCF1", 7),  // gold
+];
+
+/// Add [`EXTRA_PAINTS`] to a car list (`ZFECARS*.CAR`, tCarManager::LoadDescription): a u32
+/// count, then 204-byte entries with the model ("zDIAB1") at +8, the number of "l" and "d"
+/// paints at +172 and +173 (the game only uses their sum) and the paints from +175 (16 at
+/// most). Only a model's first entry, the stock car; a later one is its police car, whose one
+/// paint is its livery. The new paint goes last, so saved choices keep their places.
+fn add_paints(d: &mut [u8]) {
+    const SIZE: usize = 204;
+    let n = if d.len() >= 4 { crate::formats::u32le(d, 0) as usize } else { 0 };
+    for &(code, paint) in EXTRA_PAINTS {
+        let model = format!("z{code}1");
+        let Some(e) = (0..n).map(|i| 4 + i * SIZE).take_while(|e| e + SIZE <= d.len()).find(|&e| d[e + 8..e + 16].split(|&b| b == 0).next() == Some(model.as_bytes())) else { continue };
+        let count = (d[e + 172] + d[e + 173]) as usize;
+        if count >= 16 || d[e + 175..e + 175 + count].contains(&paint) {
+            continue;
+        }
+        d[e + 175 + count] = paint;
+        d[e + if paint < 8 { 172 } else { 173 }] += 1;
+    }
+}
+
 impl GameHost {
     pub(super) fn new_op(&mut self, result: u32, user: u32) -> u32 {
         let op = self.next_op;
@@ -55,16 +99,16 @@ impl GameHost {
         if std::env::var_os("PS1_FILES").is_some() {
             eprintln!("file: {name}");
         }
-        if let Some(p) = self.resolve(name) {
-            return std::fs::read(p).ok();
-        }
         let base = name.rsplit(['\\', '/', ':']).next().unwrap_or(name);
-        for (_, entries) in self.mounts.iter().rev() {
-            if let Some((_, d)) = entries.iter().find(|(n, _)| n.eq_ignore_ascii_case(base)) {
-                return Some(d.clone());
-            }
+        let mut data = match self.resolve(name) {
+            Some(p) => std::fs::read(p).ok()?,
+            None => self.mounts.iter().rev().find_map(|(_, entries)| entries.iter().find(|(n, _)| n.eq_ignore_ascii_case(base)).map(|(_, d)| d.clone()))?,
+        };
+        let upper = base.to_ascii_uppercase();
+        if upper.starts_with("ZFECARS") && upper.ends_with(".CAR") {
+            add_paints(&mut data);
         }
-        None
+        Some(data)
     }
 
     /// The EA file layer (FILE_*sync): files from the extracted disc. `None`: not one of these (or the original's own code runs).
