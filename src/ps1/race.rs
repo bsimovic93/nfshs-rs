@@ -764,6 +764,9 @@ pub struct Snapshot {
     pub glows: Vec<super::host::Glow>,
     /// The race is paused (`gSimQueue_BlockSelf`).
     pub paused: bool,
+    /// The game drew nothing this frame (the first ones after the pause menu closes): the
+    /// 2D and views are the last drawn frame's, and so is the camera (the cars have moved on).
+    pub held: bool,
     /// The HUD as Hud_Init built it (read once, see [`HudSetup`]).
     pub hud: Option<std::sync::Arc<HudSetup>>,
     /// The track's vertex colour table (`Chunk_lightTable`, 256 entries of 0xBBGGRR).
@@ -932,6 +935,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         weather: info.weather.clone(),
         glows: info.glows.clone(),
         paused: c.m.r32(addr::SIM_PAUSED) != 0,
+        held: false,
         dash: (0..0x80).map(|i| c.m.r8(addr::DASHHUD + i)).collect(),
         hud_layout: {
             let l = c.m.r32(addr::GP + 6352);
@@ -1024,6 +1028,8 @@ impl RaceThread {
             // the pause menu as last drawn: the game only redraws it when it changes and
             // shows the copied picture in between
             let mut menu: Vec<super::host::OverlayCmd> = Vec::new();
+            // the last frame that drew something, shown again over frames that draw nothing
+            let mut drawn: Option<Snapshot> = None;
             let mut in_race = false;
             let on_frame: super::host::FrameFn = Box::new(move |c: &mut Cpu, info: super::host::FrameInfo| {
                 // report the state after the previous frame (or boot), then wait for input
@@ -1036,6 +1042,20 @@ impl RaceThread {
                     menu = s.overlay.clone();
                 } else {
                     s.overlay = menu.clone();
+                }
+                if s.front_end {
+                    drawn = None;
+                } else if !s.paused {
+                    if !s.views.is_empty() || !s.overlay.is_empty() {
+                        drawn = Some(Snapshot { overlay: s.overlay.clone(), sky_overlay: s.sky_overlay.clone(), weather: s.weather.clone(), glows: s.glows.clone(), views: s.views.clone(), ..Default::default() });
+                    } else if let Some(d) = &drawn {
+                        s.held = true;
+                        s.overlay = d.overlay.clone();
+                        s.sky_overlay = d.sky_overlay.clone();
+                        s.weather = d.weather.clone();
+                        s.glows = d.glows.clone();
+                        s.views = d.views.clone();
+                    }
                 }
                 if quit || out.send(Ok(s)).is_err() {
                     return None;

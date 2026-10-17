@@ -56,6 +56,19 @@ struct State {
     cameras: Vec<Camera>,
     /// The position of the car each camera follows (its player's).
     followed: Vec<Option<Vec3>>,
+    /// The game drew nothing this frame: the cameras are guessed (see `record`).
+    held: bool,
+}
+
+impl State {
+    /// View `k`'s camera at the place it has relative to its car in `from`, its car here.
+    fn camera_following(&self, k: usize, from: &State) -> Option<Camera> {
+        let mut c = *from.cameras.get(k)?;
+        if let (Some(Some(a)), Some(Some(b))) = (from.followed.get(k), self.followed.get(k)) {
+            c.pos += b - a;
+        }
+        Some(c)
+    }
 }
 
 /// Pose of a simulated car in engine world space.
@@ -185,7 +198,15 @@ impl OriginalSim {
                 s.cars.iter().find(|c| c.addr != 0 && c.addr == s.player_cars[player]).map(|c| v3(c.position))
             })
             .collect();
-        let state = State { cars: s.cars.iter().map(pose).collect(), cameras, followed };
+        let mut state = State { cars: s.cars.iter().map(pose).collect(), cameras, followed, held: s.held };
+        // a frame the game drew nothing in (just after the pause menu closes): its camera is
+        // the last drawn one's while the cars have moved on; it keeps its place behind the car
+        // until the next drawn frame
+        if s.held
+            && let Some((_, prev)) = self.history.back()
+        {
+            state.cameras = (0..state.cameras.len()).map(|k| state.camera_following(k, prev).unwrap_or(state.cameras[k])).collect();
+        }
         match self.history.back_mut() {
             // no physics step this frame (start sequence): keep the newest state
             Some(h) if h.0 >= t => h.1 = state,
@@ -193,6 +214,26 @@ impl OriginalSim {
         }
         while self.history.len() > 8 {
             self.history.pop_front();
+        }
+        self.fill_held_cameras();
+    }
+
+    /// A drawn frame after held ones: their cameras go from the last drawn camera to this one
+    /// (relative to the car each follows), so the game's catching up is spread over them.
+    fn fill_held_cameras(&mut self) {
+        let n = self.history.len();
+        if n < 3 || self.history[n - 1].1.held || !self.history[n - 2].1.held {
+            return;
+        }
+        let Some(a) = (0..n - 1).rev().find(|&i| !self.history[i].1.held) else { return };
+        let (ta, tb) = (self.history[a].0, self.history[n - 1].0);
+        let (from, to) = (self.history[a].1.clone(), self.history[n - 1].1.clone());
+        for (t, h) in self.history.range_mut(a + 1..n - 1) {
+            let f = ((*t - ta) / (tb - ta).max(1e-9)).clamp(0.0, 1.0) as f32;
+            for k in 0..h.cameras.len() {
+                let (Some(p), Some(q)) = (h.camera_following(k, &from), h.camera_following(k, &to)) else { continue };
+                h.cameras[k] = Camera { pos: p.pos.lerp(q.pos, f), forward: p.forward.lerp(q.forward, f).normalize_or(q.forward), up: p.up.lerp(q.up, f).normalize_or(q.up), ..q };
+            }
         }
     }
 
@@ -325,10 +366,11 @@ impl OriginalSim {
         b
     }
 
-    /// The camera of the newest simulated frame (the one the original's 2D was built for).
+    /// The camera of the newest drawn frame (the one the original's 2D was built for).
     pub fn sim_camera(&self) -> Option<Camera> {
         let k = self.view.get();
-        self.history.back().and_then(|h| h.1.cameras.get(k).or(h.1.cameras.first()).copied())
+        let h = self.history.iter().rev().find(|h| !h.1.held).or(self.history.back())?;
+        h.1.cameras.get(k).or(h.1.cameras.first()).copied()
     }
 
     /// The original's main loop has ended (the race was quit from its menu).
@@ -394,7 +436,11 @@ impl OriginalSim {
         }
         // simulation time runs at real speed (16 steps of 1/64 s per 15 frames), so the render
         // clock just advances by dt, kept about two physics steps behind the newest state;
-        // it is only corrected when it drifts beyond that step jitter
+        // it is only corrected when it drifts beyond that step jitter. Paused, it stands still
+        // (it would run up to the newest state and resume with nothing to interpolate)
+        if self.thread.last.paused {
+            return;
+        }
         let newest = self.history.back().map_or(0.0, |h| h.0);
         let target = newest - 2.0 / 64.0;
         self.render_t += dt as f64;

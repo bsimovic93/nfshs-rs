@@ -97,6 +97,8 @@ pub struct GameHost {
     /// menu views drawn into it since (the game redraws only what changes), and the lists
     /// already in it.
     paused_buffers: HashMap<i32, (Vec<OverlayCmd>, std::collections::HashSet<u64>)>,
+    /// The players' cameras (`Camera_gInfo`) as the pause found them (see `hold_cameras`).
+    paused_cameras: Option<Vec<u8>>,
     /// The drawing offset of the view being recorded (DR_OFFSET, display-relative).
     prim_offset: [i16; 2],
     area_tl: [i32; 2],
@@ -375,6 +377,7 @@ impl GameHost {
             car_glows: Vec::new(),
             track_glows: Vec::new(),
             paused_buffers: HashMap::new(),
+            paused_cameras: None,
             views: Vec::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],

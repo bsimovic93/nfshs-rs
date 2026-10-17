@@ -170,6 +170,7 @@ impl GameHost {
             self.overlay.extend(hud);
             self.overlay.reverse();
         }
+        self.hold_cameras(c);
         // the screen shown while loading, until this frame
         if !self.loading.is_empty() {
             self.loading_frames(c);
@@ -284,6 +285,34 @@ impl GameHost {
             eprintln!("frame {} at field {field} (ticks pending {}, calls {})", self.frame.frames_run, c.pending_ticks, c.calls);
         }
         input
+    }
+
+    /// Paused, the cameras stand still. The original's Camera_Update runs every main loop
+    /// iteration, paused or not: its chase cameras would go on easing towards their place
+    /// behind the (stopped) cars, unseen under the kept picture, and jump there on resuming.
+    /// Each paused frame puts `Camera_gInfo` back as the pause found it (unless a camera's
+    /// mode has changed meanwhile).
+    fn hold_cameras(&mut self, c: &mut Cpu) {
+        const SIZE: u32 = 2 * 0x110;
+        const MODE: usize = 0x70;
+        let base = crate::ps1::race::addr::CAMERA_INFO;
+        if self.mode != Mode::Race || !Self::paused(c) {
+            self.paused_cameras = None;
+            return;
+        }
+        let now: Vec<u8> = (0..SIZE).map(|i| c.m.r8(base + i)).collect();
+        let Some(held) = &self.paused_cameras else {
+            self.paused_cameras = Some(now);
+            return;
+        };
+        let modes = |b: &[u8]| [0, 0x110].map(|k| u16::from_le_bytes([b[k + MODE], b[k + MODE + 1]]));
+        if modes(held) != modes(&now) {
+            self.paused_cameras = Some(now);
+            return;
+        }
+        for (i, &b) in held.iter().enumerate() {
+            c.m.w8(base + i as u32, b);
+        }
     }
 
     /// The motors' state per port from the game's actuator data (see `actuators`).
