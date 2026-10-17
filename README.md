@@ -73,6 +73,9 @@ cd tools && python recomp.py ../crates/nfs4rc/src --all && cd ..
 cargo build --release
 # play (gamedata/ is found next to the project or the executable; or --data DIR / NFSHS_DATA)
 ./target/release/nfshs
+# the settings (frame rate, texture filtering, mipmaps, CRT filter...) are in nfshs.ini,
+# written with the defaults on the first start; --fps N and --bilinear override it
+./target/release/nfshs --fps 144
 # or straight into a race
 ./target/release/nfshs play --track 5 --variant N --car F375 --opponents MCF1,DIAB --laps 3
 ```
@@ -105,9 +108,15 @@ Menus:
 | Square | Tab | X |
 | Start | F1 | Start |
 
-`P` toggles a test autopilot in races.
+`P` toggles a test autopilot in races, `F3` the frame-rate counter, `F4` bilinear texture filtering, `F5` fullscreen, `F6` a CRT screen filter and `F7` bloom (for the session; `nfshs.ini` sets how the game starts).
+
+### Settings (nfshs.ini)
+
+`nfshs.ini` holds the player's settings, each with a comment: the display (fullscreen, a frame rate held without vsync, the frame-rate counter, antialiasing and supersampling), the textures (nearest or bilinear filtering, mipmaps and their bias), the CRT filter and its look (curvature, aperture grille, scanlines, gamma, brightness, vignette), bloom (its intensity and threshold), gamepad vibration, the audio device, the memory card and locked tracks and cars. It is read from the current directory or next to the executable, else beside the game data folder (where it is written with the defaults when there is none; `--config FILE` for another). The game reads it again whenever it is saved, so the settings can be tried while playing. Deleting it brings the defaults back.
 
 ### Settings (environment variables)
+
+These override nfshs.ini.
 
 | Variable | Effect |
 |---|---|
@@ -122,7 +131,7 @@ Menus:
 ## Developer tools
 
 ```
-nfshs shot --track N --time S --keys u|a --out x.png   headless race + screenshot
+nfshs shot --track N --time S --keys u|a --out x.png [--bilinear] [--mipmaps] [--supersample N] [--msaa N]   headless race + screenshot
 nfshs fe-play SCRIPT SHOTS DIR      the whole app headless: SCRIPT "secs:keys,..."
                                     (x t c s p u d l r, a autopilot, g a gamepad that step)
 nfshs boot-race --track N --car C   headless original race, car states per step

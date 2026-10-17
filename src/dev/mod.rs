@@ -43,7 +43,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     Some((k.chars().next()?, at.parse().ok()?))
                 })
                 .collect();
-            screenshot(data, cfg, Path::new(out), secs, input, &taps)?;
+            screenshot(data, cfg, Path::new(out), secs, input, &taps, args.iter().any(|a| a == "--bilinear"), args.iter().any(|a| a == "--mipmaps"), opt(args, "--supersample").unwrap_or("1").parse()?, opt(args, "--msaa").unwrap_or("1").parse()?)?;
         }
         "dump-shape-pal" => {
             // dump-shape-pal FILE.PSH NAME PALETTE_SHAPE out.png: a shape drawn with another

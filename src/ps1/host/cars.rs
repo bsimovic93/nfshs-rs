@@ -49,19 +49,25 @@ pub(super) fn record_car_facet(c: &mut Cpu, addr: u32) -> bool {
     }
     if addr == R3DCAR_VISIBILITY && !VISIBILITY_PASS.get() {
         // the original's test with the view's x row scaled down: the cone it allows is as
-        // much wider; the depth row (distance and level of detail) is left alone
+        // much wider; both rows scaled down by CAR_RANGE as well, so cars are drawn that much
+        // further (the depth it returns scaled back up for the sorting)
         let (car, view) = (c.r[4], c.r[5]);
-        let row: [u32; 3] = std::array::from_fn(|i| c.m.r32(view + 20 + 4 * i as u32));
-        for (i, v) in row.iter().enumerate() {
-            c.m.w32(view + 20 + 4 * i as u32, (*v as i32 / CAR_CONE_WIDTH) as u32);
+        let rows: [u32; 6] = std::array::from_fn(|i| c.m.r32(view + [20, 24, 28, 44, 48, 52][i]));
+        for (i, v) in rows.iter().enumerate() {
+            let scale = if i < 3 { CAR_CONE_WIDTH * CAR_RANGE } else { CAR_RANGE };
+            c.m.w32(view + [20, 24, 28, 44, 48, 52][i], (*v as i32 / scale) as u32);
         }
         VISIBILITY_PASS.set(true);
         let depth = c.call_nested(R3DCAR_VISIBILITY, &[car, view]);
         VISIBILITY_PASS.set(false);
-        for (i, v) in row.iter().enumerate() {
-            c.m.w32(view + 20 + 4 * i as u32, *v);
+        for (i, v) in rows.iter().enumerate() {
+            c.m.w32(view + [20, 24, 28, 44, 48, 52][i], *v);
         }
-        c.r[2] = depth;
+        // no level of detail by distance: 1 and 2 (further than about 12 and 60) drawn as 0
+        if matches!(c.m.r16(car + CAR_DETAIL), 1 | 2) {
+            c.m.w16(car + CAR_DETAIL, 0);
+        }
+        c.r[2] = if depth == 0x8000_0000 { depth } else { (depth as i32).saturating_mul(CAR_RANGE) as u32 };
         return true;
     }
     if addr != R3DCAR_INSERT_CAR_FACET_II {

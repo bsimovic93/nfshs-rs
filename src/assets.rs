@@ -29,6 +29,10 @@ pub struct Rect {
     pub h: u32,
 }
 
+/// A race atlas' size and its mip levels (down to an eighth of the textures' size).
+const RACE_ATLAS_SIZE: u32 = 4096;
+const RACE_MIP_LEVELS: u32 = 5;
+
 /// Shelf-packed RGBA atlas shared by the whole scene.
 #[derive(Clone)]
 pub struct Atlas {
@@ -37,11 +41,31 @@ pub struct Atlas {
     cursor: (u32, u32),
     shelf_h: u32,
     pub white: Rect,
+    /// Texels of each rectangle's edge repeated around it (at least this many on each side).
+    pub gutter: u32,
+    /// Mip levels the layout keeps apart (1: none; see [`Atlas::mipmapped`]).
+    pub mip_levels: u32,
 }
 
 impl Atlas {
     pub fn new(size: u32) -> Self {
-        let mut a = Self { size, rgba: vec![0; (size * size * 4) as usize], cursor: (0, 0), shelf_h: 0, white: Rect::default() };
+        Self::with_layout(size, 1, 1)
+    }
+
+    /// An atlas whose rectangles stay apart in `levels` mip levels: each starts on a multiple
+    /// of the last level's texel (2^(levels-1)) inside a gutter of one such texel, so neither
+    /// a mip texel nor its bilinear neighbour takes in another rectangle.
+    pub fn mipmapped(size: u32, levels: u32) -> Self {
+        Self::with_layout(size, 1 << (levels - 1), levels)
+    }
+
+    /// A race's atlas: the track, the cars and the HUD, the 3D with its mip levels.
+    pub fn race() -> Self {
+        Self::mipmapped(RACE_ATLAS_SIZE, RACE_MIP_LEVELS)
+    }
+
+    fn with_layout(size: u32, gutter: u32, mip_levels: u32) -> Self {
+        let mut a = Self { size, rgba: vec![0; (size * size * 4) as usize], cursor: (0, 0), shelf_h: 0, white: Rect::default(), gutter, mip_levels };
         // (a placeholder atlas too small for it keeps the default rectangle)
         if size >= 8 {
             a.white = a.add(4, 4, &[255; 64]);
@@ -50,7 +74,10 @@ impl Atlas {
     }
 
     pub fn add(&mut self, w: u32, h: u32, rgba: &[u8]) -> Rect {
-        let (pw, ph) = (w + 2, h + 2); // 1px gutter
+        // the gutter on the left and top; on the right and bottom, to the next multiple of it
+        // and one more (a gutter of 1: 1px all round)
+        let g = self.gutter;
+        let (pw, ph) = ((g + w).next_multiple_of(g) + g, (g + h).next_multiple_of(g) + g);
         if self.cursor.0 + pw > self.size {
             self.cursor = (0, self.cursor.1 + self.shelf_h);
             self.shelf_h = 0;
@@ -59,12 +86,12 @@ impl Atlas {
             log::warn!("atlas full: no room for {w}x{h} (size {}, shelf at y {})", self.size, self.cursor.1);
             return self.white;
         }
-        let r = Rect { x: self.cursor.0 + 1, y: self.cursor.1 + 1, w, h };
+        let r = Rect { x: self.cursor.0 + g, y: self.cursor.1 + g, w, h };
         // copy with clamped gutter so nearest/linear sampling at edges never bleeds
         for yy in 0..ph {
             for xx in 0..pw {
-                let sx = (xx as i32 - 1).clamp(0, w as i32 - 1) as u32;
-                let sy = (yy as i32 - 1).clamp(0, h as i32 - 1) as u32;
+                let sx = (xx as i32 - g as i32).clamp(0, w as i32 - 1) as u32;
+                let sy = (yy as i32 - g as i32).clamp(0, h as i32 - 1) as u32;
                 let si = ((sy * w + sx) * 4) as usize;
                 let di = (((self.cursor.1 + yy) * self.size + self.cursor.0 + xx) * 4) as usize;
                 self.rgba[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
@@ -73,6 +100,11 @@ impl Atlas {
         self.cursor.0 += pw;
         self.shelf_h = self.shelf_h.max(ph);
         r
+    }
+
+    /// The share of the atlas' rows the shelves take so far.
+    pub fn used(&self) -> f32 {
+        (self.cursor.1 + self.shelf_h) as f32 / self.size as f32
     }
 
     /// Texel coordinate (in rect-local pixels) to normalized atlas UV.
@@ -101,27 +133,29 @@ pub struct AnimatedObject {
 }
 
 /// A track texture Track_AnimateTextures scrolls (material flag 0x80): the material's own atlas
-/// rectangle (with its 1-texel gutter) and the shape's texels, which are written into it each
-/// frame turned up by the original's V offset, as its texture window wraps them.
+/// rectangle (with its gutter) and the shape's texels, which are written into it each frame
+/// turned up by the original's V offset, as its texture window wraps them.
 pub struct ScrollTexture {
     pub material: u16,
     pub rect: Rect,
     pub rgba: Vec<u8>,
+    /// The atlas' gutter (texels written on each side).
+    pub gutter: u32,
 }
 
 impl ScrollTexture {
     /// The rectangle's texels (gutter included) with the shape scrolled by `dv` rows.
     pub fn scrolled(&self, dv: u8) -> crate::render::AtlasWrite {
-        let (w, h) = (self.rect.w, self.rect.h);
-        let mut rgba = Vec::with_capacity(((w + 2) * (h + 2) * 4) as usize);
-        for y in 0..h + 2 {
-            let sy = (y.clamp(1, h) - 1 + dv as u32) % h;
-            for x in 0..w + 2 {
-                let o = ((sy * w + x.clamp(1, w) - 1) * 4) as usize;
+        let (w, h, g) = (self.rect.w, self.rect.h, self.gutter);
+        let mut rgba = Vec::with_capacity(((w + 2 * g) * (h + 2 * g) * 4) as usize);
+        for y in 0..h + 2 * g {
+            let sy = (y.clamp(g, h + g - 1) - g + dv as u32) % h;
+            for x in 0..w + 2 * g {
+                let o = ((sy * w + x.clamp(g, w + g - 1) - g) * 4) as usize;
                 rgba.extend_from_slice(&self.rgba[o..o + 4]);
             }
         }
-        crate::render::AtlasWrite { x: self.rect.x - 1, y: self.rect.y - 1, w: w + 2, h: h + 2, rgba }
+        crate::render::AtlasWrite { x: self.rect.x - g, y: self.rect.y - g, w: w + 2 * g, h: h + 2 * g, rgba }
     }
 }
 
@@ -200,7 +234,7 @@ pub fn load_track(data: &GameData, atlas: &mut Atlas, track_no: u32, variant: &s
         .filter(|(_, t)| t.mode & 0x80 != 0)
         .filter_map(|(i, t)| {
             let sh = psh.shapes.get(t.shape as usize).filter(|s| s.width > 1 && s.height > 1)?;
-            Some(ScrollTexture { material: i as u16, rect: atlas.add(sh.width as u32, sh.height as u32, &sh.rgba), rgba: sh.rgba.clone() })
+            Some(ScrollTexture { material: i as u16, rect: atlas.add(sh.width as u32, sh.height as u32, &sh.rgba), rgba: sh.rgba.clone(), gutter: atlas.gutter })
         })
         .collect();
     let quad_uvs = |tex: u16| -> (Rect, [Vec2; 4]) {

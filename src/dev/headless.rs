@@ -11,13 +11,21 @@ fn shot_size() -> (u32, u32) {
     std::env::var("SHOT_SIZE").ok().and_then(|v| v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))).unwrap_or((960, 720))
 }
 
-/// Headless: simulate `seconds` with a scripted input and save a screenshot.
-pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seconds: f32, input: Input, taps: &[(char, f32)]) -> anyhow::Result<()> {
-    let mut atlas = Atlas::new(2048);
+/// Headless: simulate `seconds` with a scripted input and save a screenshot (`bilinear`:
+/// with the 3D's textures filtered; `mipmaps`: from their mip levels; `supersample`: drawn at
+/// that many times the size and averaged down; `msaa`: samples per pixel).
+#[allow(clippy::too_many_arguments)]
+pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seconds: f32, input: Input, taps: &[(char, f32)], bilinear: bool, mipmaps: bool, supersample: u32, msaa: u32) -> anyhow::Result<()> {
+    let mut atlas = Atlas::race();
     let mut game = Game::load(data, &mut atlas, cfg)?;
+    log::info!("race atlas: {:.0}% used", atlas.used() * 100.0);
     let (w, h) = shot_size();
     let (wf, hf) = (w as f32, h as f32);
     let mut r = pollster::block_on(Renderer::new(None, (w, h), &atlas))?;
+    r.bilinear = bilinear;
+    r.mipmaps = mipmaps;
+    r.supersample = supersample;
+    r.msaa = msaa;
     r.set_world(&game.track.verts, &game.track.indices);
     let mut t = 0.0;
     let mut next_log = 10.0;
@@ -93,6 +101,16 @@ pub fn screenshot(data: &GameData, cfg: &RaceConfig, out: &std::path::Path, seco
         }
         if trace && seconds - t < 0.5 {
             println!("  t={t:6.3} moved {:.3} m", game.player().car.pos.distance(before));
+        }
+        // SHOT_SEQ=N: also the last N frames (OUT_seq<k>.png), to compare frame to frame
+        if let Some(n) = std::env::var("SHOT_SEQ").ok().and_then(|v| v.parse::<f32>().ok()) {
+            let k = ((seconds - t) / dt).round();
+            if k < n {
+                let params = game.frame_params(wf / hf);
+                let hud = race_hud(&mut r, &game, wf, hf);
+                let img = r.screenshot(&params, &game.track.sky, &game.dynamic_geometry(), &hud);
+                img.save(format!("{}_seq{:02}.png", out.with_extension("").display(), (n - 1.0 - k) as u32))?;
+            }
         }
         // SHOT_SERIES=SECS: also a picture every SECS seconds (OUT_<t>.png), to find a place
         if let Some(every) = std::env::var("SHOT_SERIES").ok().and_then(|v| v.parse::<f32>().ok()) {
@@ -184,7 +202,7 @@ pub fn front_end_play(data: &GameData, script: &[(f32, Input)], shots: &[u32], d
                     let cfg = race_of(s.snapshot());
                     println!("frame {frame}: race {}{} with {} vs {:?}, {} laps (cars {:?})", cfg.track, cfg.variant, cfg.player_car, cfg.opponents, cfg.laps, s.snapshot().cars.iter().map(|c| c.code.clone()).collect::<Vec<_>>());
                     let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, traffic: Vec::new() };
-                    let mut atlas = Atlas::new(2048);
+                    let mut atlas = Atlas::race();
                     let g = Game::load_with(data, &mut atlas, &rc, *s)?;
                     r.set_atlas(&atlas);
                     r.set_world(&g.track.verts, &g.track.indices);

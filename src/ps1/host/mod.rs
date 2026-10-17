@@ -97,6 +97,8 @@ pub struct GameHost {
     /// menu views drawn into it since (the game redraws only what changes), and the lists
     /// already in it.
     paused_buffers: HashMap<i32, (Vec<OverlayCmd>, std::collections::HashSet<u64>)>,
+    /// The players' cameras (`Camera_gInfo`) as the pause found them (see `hold_cameras`).
+    paused_cameras: Option<Vec<u8>>,
     /// The drawing offset of the view being recorded (DR_OFFSET, display-relative).
     prim_offset: [i16; 2],
     area_tl: [i32; 2],
@@ -167,6 +169,8 @@ const CAR_DETAIL: u32 = 0x8C2;
 /// wider than 4:3 (the PS1's vertical field of view, the window's aspect), up to |x| <= 2z
 /// (21:9 with every camera).
 const CAR_CONE_WIDTH: i32 = 2;
+/// How much further than the original's (about 200) cars are drawn: past every weather's fog.
+const CAR_RANGE: i32 = 3;
 
 /// The car body's drawing in R3DCar_InsertCarFacetII / InsertCarFacetMenuII (the host
 /// draws the body): the part drawing, the shadow, the environment, and the menu's
@@ -199,10 +203,10 @@ const TRACK_MANAGER: u32 = 0x8011_5D08;
 /// `tCarManager::SetCarAvailable` for the cars of classes 0..7 (the race cars, the bonus
 /// cars and the police cars; class 8 is traffic): available (+520) and unlocked (+568, which
 /// the car lists go by). Done every front-end frame, since loading a save sets them again.
-/// NFSHS_LOCKED=1: as the save has it.
+/// The settings' `locked` or NFSHS_LOCKED=1: as the save has it.
 fn unlock_everything(c: &mut Cpu) {
     static LOCKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *LOCKED.get_or_init(|| std::env::var_os("NFSHS_LOCKED").is_some()) {
+    if *LOCKED.get_or_init(|| crate::settings::get().locked || std::env::var_os("NFSHS_LOCKED").is_some()) {
         return;
     }
     for t in 0..11 {
@@ -375,6 +379,7 @@ impl GameHost {
             car_glows: Vec::new(),
             track_glows: Vec::new(),
             paused_buffers: HashMap::new(),
+            paused_cameras: None,
             views: Vec::new(),
             prim_offset: [0, 0],
             area_tl: [0, 0],

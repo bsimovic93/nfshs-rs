@@ -7,6 +7,7 @@ mod dev;
 mod iso;
 mod ps1;
 mod render;
+mod settings;
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -60,7 +61,11 @@ fn main() -> Result<()> {
 fn real_main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<String> = std::env::args().collect();
-    let data = assets::GameData::new(&find_data_dir(opt(&args, "--data")));
+    let data_dir = find_data_dir(opt(&args, "--data"));
+    let data = assets::GameData::new(&data_dir);
+    // the settings file, then what the command line sets
+    let settings_path = settings::path(opt(&args, "--config"), &data_dir);
+    let mut settings = settings::Settings::load(&settings_path);
     let track: u32 = opt(&args, "--track").unwrap_or("0").parse()?;
     let variant = opt(&args, "--variant").unwrap_or("").to_ascii_uppercase();
     let car = opt(&args, "--car").unwrap_or("BMWM").to_ascii_uppercase();
@@ -71,9 +76,19 @@ fn real_main() -> Result<()> {
         .map(|s| s.to_ascii_uppercase())
         .collect();
     let laps: i32 = opt(&args, "--laps").unwrap_or("2").parse()?;
+    if let Some(n) = opt(&args, "--fps") {
+        settings.fps = match n.parse() {
+            Ok(n) if n == 0 || (10..=1000).contains(&n) => n,
+            _ => anyhow::bail!("--fps {n}: not 0 (vsync) or a frame rate from 10 to 1000"),
+        };
+    }
+    if args.iter().any(|a| a == "--bilinear") {
+        settings.bilinear = true;
+    }
+    settings::init(settings.clone());
     let cfg = game::RaceConfig { track, variant: &variant, player_car: &car, opponents, laps, traffic: Vec::new() };
     match command(&args) {
-        None => app::run(&data, None)?,
+        None => app::run(&data, None, settings, settings_path)?,
         Some("play") => app::run(
             &data,
             Some(app::RaceConfigOwned {
@@ -83,6 +98,8 @@ fn real_main() -> Result<()> {
                 opponents: cfg.opponents.clone(),
                 laps,
             }),
+            settings,
+            settings_path,
         )?,
         Some("extract") => {
             let bin = PathBuf::from(&args[2]);
@@ -118,8 +135,10 @@ fn real_main() -> Result<()> {
             if !dev::run(cmd, &args, &data, &cfg)? {
                 eprintln!(
                     "usage:
-  nfshs [--data DIR]                     the game (the original's front end)
-  nfshs play [--track N] [--variant N|S|W] [--car CODE] [--opponents A,B|none] [--laps N]
+  nfshs [--data DIR] [--config FILE] [--fps N] [--bilinear]   the game (the original's front
+                                         end); the settings are in nfshs.ini (or FILE), --fps
+                                         and --bilinear override its fps and texture filter
+  nfshs play [--fps N] [--bilinear] [--track N] [--variant N|S|W] [--car CODE] [--opponents A,B|none] [--laps N]
   nfshs extract <image.bin> [outdir]
 developer commands (see src/dev): {}",
                     dev::COMMANDS.join(", ")

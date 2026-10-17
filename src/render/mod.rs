@@ -16,6 +16,9 @@ struct Globals {
     sky_top: [f32; 4],
     /// Camera forward axis; w = 1 when `fog` holds PS1 depth-cue parameters.
     cam_fwd: [f32; 4],
+    /// x = 1: bilinear texture filtering (see [`Renderer::bilinear`]); y the last mip level
+    /// sampled, z the mip level bias (see [`Renderer::mipmaps`]).
+    texfilter: [f32; 4],
     /// The night headlight beam (see [`NightBeam`]): right axis (w xs), forward axis (w z0),
     /// origin (w 1 = on), (zs, ..).
     beam: [[f32; 4]; 4],
@@ -111,6 +114,11 @@ pub struct FrameParams {
 }
 
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const ATLAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Bloom's levels: in linear light, which adds up past 1.
+const BLOOM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// The most levels bloom has (the first half the window's size, each half the one before).
+const BLOOM_LEVELS: usize = 6;
 
 struct DynBuf {
     buf: wgpu::Buffer,
@@ -190,11 +198,17 @@ pub struct Renderer {
     pub queue: wgpu::Queue,
     surface: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration)>,
     pub format: wgpu::TextureFormat,
-    world_pipeline: wgpu::RenderPipeline,
-    track_pipeline: wgpu::RenderPipeline,
-    hud_pipeline: wgpu::RenderPipeline,
-    /// 2D drawn subtracting, and which ranges of the next frame's 2D vertices use it.
-    hud_sub_pipeline: wgpu::RenderPipeline,
+    /// The scene's pipelines, for `pipes.samples` samples per pixel.
+    pipes: ScenePipelines,
+    /// For building them again (see [`Renderer::msaa`]).
+    shader: wgpu::ShaderModule,
+    layout: wgpu::PipelineLayout,
+    /// MSAA: samples per pixel asked for (1: none); the scene is drawn with the most the GPU
+    /// has up to that (`msaa_counts`), to `msaa_color` and resolved to the target.
+    pub msaa: u32,
+    msaa_counts: Vec<u32>,
+    msaa_color: Option<(wgpu::TextureView, u32, u32, u32)>,
+    /// Which ranges of the next frame's 2D vertices are drawn subtracting.
     pub hud_subtract: Vec<std::ops::Range<u32>>,
     /// 2D drawn first, under the 3D geometry (the front end's background behind its car).
     pub hud_under: Vec<Vertex>,
@@ -214,17 +228,14 @@ pub struct Renderer {
     /// against the 3D but not written, with the 2D pass's atlas.
     pub glows: Vec<Vertex>,
     glow_vb: DynBuf,
-    glow_pipeline: wgpu::RenderPipeline,
     /// Glows subtracted (PS1 mode 2: the smoke's dark puffs), tested like `glows`.
     pub glows_sub: Vec<Vertex>,
     glow_sub_vb: DynBuf,
-    glow_sub_pipeline: wgpu::RenderPipeline,
     /// The 2D pass's own atlas (a race's HUD recorded from the original, textured from its
     /// VRAM), when set.
     overlay_atlas: Option<(wgpu::Texture, wgpu::BindGroup)>,
     pub use_overlay_atlas: bool,
     mid_vb: DynBuf,
-    sky_pipeline: wgpu::RenderPipeline,
     world_globals: wgpu::Buffer,
     hud_globals: wgpu::Buffer,
     sky_globals: wgpu::Buffer,
@@ -234,14 +245,59 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     world_bg: wgpu::BindGroup,
     hud_bg: wgpu::BindGroup,
-    depth: Option<(wgpu::TextureView, u32, u32)>,
+    /// Depth buffers by size and samples (the scene's, and the window's for `stats`).
+    depth: Vec<(wgpu::TextureView, u32, u32, u32)>,
     static_vb: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     dyn_vb: DynBuf,
     shadow_vb: DynBuf,
     objects_vb: DynBuf,
     late_vb: DynBuf,
-    sub_pipeline: wgpu::RenderPipeline,
     hud_vb: DynBuf,
+    /// Drawn over every frame shown in the window (not screenshots): the frame-rate counter.
+    pub stats: Vec<Vertex>,
+    stats_vb: DynBuf,
+    stats_pipeline: wgpu::RenderPipeline,
+    /// Bilinear filtering of the 3D scene's textures (the world, cars and sky; the 2D
+    /// overlay stays sharp).
+    pub bilinear: bool,
+    /// The 3D scene's textures sampled from the atlas' mip levels (when it has them: see
+    /// [`crate::assets::Atlas::mipmapped`]) by their size on screen, `mip_bias` levels further
+    /// (> 0 blurrier, < 0 sharper).
+    pub mipmaps: bool,
+    pub mip_bias: f32,
+    mip_pipeline: wgpu::RenderPipeline,
+    mip_bgl: wgpu::BindGroupLayout,
+    /// Per mip level after the first: the level above's bind group and the level's view.
+    atlas_mips: Vec<(wgpu::BindGroup, wgpu::TextureView)>,
+    /// The CRT filter over every frame shown in the window (not screenshots): the frame
+    /// drawn to `post_target`, then through crt.wgsl to the window.
+    pub crt: bool,
+    crt_pipeline: wgpu::RenderPipeline,
+    crt_settings: Crt,
+    /// Supersampling: frames drawn at this many times the window's width and height (to
+    /// `post_target`), then each window pixel the average of its samples (`down_pipeline`):
+    /// no shimmering thin geometry and edges in the distance.
+    pub supersample: u32,
+    down_pipeline: wgpu::RenderPipeline,
+    /// Bloom over every frame shown in the window (not screenshots): the frame's bright parts
+    /// (`bloom_bright_pipeline`) halved in size level by level (`bloom_down_pipeline`), added
+    /// back up (`bloom_up_pipeline`) and the result added to the frame on its way to the
+    /// window.
+    pub bloom: bool,
+    bloom_settings: Bloom,
+    bloom_bright_pipeline: wgpu::RenderPipeline,
+    bloom_down_pipeline: wgpu::RenderPipeline,
+    bloom_up_pipeline: wgpu::RenderPipeline,
+    /// A black texel, bound where a pass has no bloom.
+    black: wgpu::TextureView,
+    crt_bgl: wgpu::BindGroupLayout,
+    crt_sampler: wgpu::Sampler,
+    /// The frame drawn for the CRT filter, supersampling or bloom, with the bloom's levels.
+    post_target: Option<PostTarget>,
+    /// The CRT filter's and bloom's settings ([`Renderer::set_crt`], [`Renderer::set_bloom`]).
+    crt_params: wgpu::Buffer,
+    /// The window's present mode without vsync ([`Renderer::set_vsync`]).
+    no_vsync: wgpu::PresentMode,
     pub size: (u32, u32),
 }
 
@@ -262,14 +318,17 @@ impl Renderer {
             .await
             .context("no GPU adapter")?;
         log::info!("adapter: {:?}", adapter.get_info().name);
+        // (MSAA counts other than 4 are the adapter's own)
+        let features = adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::empty(),
+                required_features: features,
                 required_limits: wgpu::Limits::default(),
                 ..Default::default()
             })
             .await?;
+        let mut no_vsync = wgpu::PresentMode::AutoVsync;
         let (surface, format) = match surface {
             Some(s) => {
                 let mut config = s.get_default_config(&adapter, size.0.max(1), size.1.max(1)).context("surface config")?;
@@ -278,6 +337,9 @@ impl Renderer {
                 // blending, depth cueing): render in that space, without sRGB conversion
                 config.format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
                 config.present_mode = wgpu::PresentMode::AutoVsync;
+                // without vsync (the app paces the frames): no tearing where the driver allows
+                // (mailbox)
+                no_vsync = [wgpu::PresentMode::Mailbox, wgpu::PresentMode::Immediate].into_iter().find(|m| caps.present_modes.contains(m)).unwrap_or(wgpu::PresentMode::AutoVsync);
                 s.configure(&device, &config);
                 let f = config.format;
                 (Some((s, config)), f)
@@ -343,70 +405,21 @@ impl Renderer {
             bind_group_layouts: &[Some(&bgl)],
             immediate_size: 0,
         });
-        let vattrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
-        let vbl = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &vattrs,
-        };
-        let mk_pipeline = |vs: &str,
-                           fs: &str,
-                           buffers: &[Option<wgpu::VertexBufferLayout>],
-                           depth: Option<(bool, wgpu::CompareFunction)>,
-                           blend: Option<wgpu::BlendState>,
-                           cull: Option<wgpu::Face>| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some(vs),
-                    compilation_options: Default::default(),
-                    buffers,
-                },
-                primitive: wgpu::PrimitiveState { cull_mode: cull, front_face: TRACK_FRONT_FACE, ..Default::default() },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH,
-                    depth_write_enabled: Some(depth.map(|d| d.0).unwrap_or(false)),
-                    depth_compare: Some(depth.map(|d| d.1).unwrap_or(wgpu::CompareFunction::Always)),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some(fs),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
+        let pipes = ScenePipelines::new(&device, &layout, &shader, format, 1);
+        let msaa_counts: Vec<u32> = [2, 4, 8, 16]
+            .into_iter()
+            .filter(|&n| {
+                let ok = |f: wgpu::TextureFormat| {
+                    if features.is_empty() {
+                        n == 4
+                    } else {
+                        adapter.get_texture_format_features(f).flags.sample_count_supported(n)
+                    }
+                };
+                ok(format) && ok(DEPTH)
             })
-        };
-        // reversed Z (1 = near, 0 = infinitely far): even precision over the whole track
-        let depth = Some((true, wgpu::CompareFunction::Greater));
-        // the track is single-sided like on the PS1 (double-sided materials are emitted twice)
-        // semi-transparent texels blend (fs_hud's premultiplied output: PS1 modes 0 and 1)
-        let blend = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
-        let track_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], depth, blend, Some(wgpu::Face::Back));
-        let world_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], depth, blend, None);
-        // background - foreground, depth-tested but not written
-        let subtract = wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::ReverseSubtract };
-        let sub_pipeline = mk_pipeline(
-            "vs_main",
-            "fs_sub",
-            &[Some(vbl.clone())],
-            Some((false, wgpu::CompareFunction::GreaterEqual)),
-            Some(wgpu::BlendState { color: subtract, alpha: subtract }),
-            None,
-        );
-        let hud_sub_pipeline = mk_pipeline("vs_main", "fs_sub", &[Some(vbl.clone())], None, Some(wgpu::BlendState { color: subtract, alpha: subtract }), None);
-        let hud_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
-        let sky_pipeline = mk_pipeline("vs_sky", "fs_sky", &[], None, None, None);
+            .collect();
+        log::info!("MSAA sample counts: {msaa_counts:?}");
         let dyn_vb = DynBuf::new(&device, "dynamic");
         let shadow_vb = DynBuf::new(&device, "shadows");
         let objects_vb = DynBuf::new(&device, "objects");
@@ -417,18 +430,166 @@ impl Renderer {
         let sky_layer_vb = DynBuf::new(&device, "sky layer");
         let glow_vb = DynBuf::new(&device, "glows");
         let glow_sub_vb = DynBuf::new(&device, "glows subtracted");
-        let glow_sub_pipeline = mk_pipeline("vs_main", "fs_sub", &[Some(vbl.clone())], Some((false, wgpu::CompareFunction::GreaterEqual)), Some(wgpu::BlendState { color: subtract, alpha: subtract }), None);
-        let glow_pipeline = mk_pipeline("vs_main", "fs_hud", &[Some(vbl.clone())], Some((false, wgpu::CompareFunction::GreaterEqual)), Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
         let sky_vb = DynBuf::new(&device, "sky");
-        Ok(Self {
+        let stats_vb = DynBuf::new(&device, "stats");
+        let stats_pipeline = mk_pipeline(&device, &layout, &shader, format, 1, "vs_main", "fs_solid", true, None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
+        let crt_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("crt"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let crt_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("crt"),
+            size: std::mem::size_of::<[[f32; 4]; 4]>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let black = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("black"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: BLOOM_FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let crt_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let crt_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("crt"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("crt.wgsl").into()),
+        });
+        let crt_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("crt"),
+            bind_group_layouts: &[Some(&crt_bgl)],
+            immediate_size: 0,
+        });
+        let mk_post = |fs: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(fs),
+                layout: Some(&crt_layout),
+                vertex: wgpu::VertexState {
+                    module: &crt_shader,
+                    entry_point: Some("vs_crt"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &crt_shader,
+                    entry_point: Some(fs),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let crt_pipeline = mk_post("fs_crt", format, None);
+        let down_pipeline = mk_post("fs_down", format, None);
+        let bloom_bright_pipeline = mk_post("fs_bloom_bright", BLOOM_FORMAT, None);
+        let bloom_down_pipeline = mk_post("fs_bloom_down", BLOOM_FORMAT, None);
+        let add = wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add };
+        let bloom_up_pipeline = mk_post("fs_bloom_up", BLOOM_FORMAT, Some(wgpu::BlendState { color: add, alpha: add }));
+        let mip_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mip"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let mip_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mip"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("mip.wgsl").into()),
+        });
+        let mip_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mip"),
+            bind_group_layouts: &[Some(&mip_bgl)],
+            immediate_size: 0,
+        });
+        let mip_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mip"),
+            layout: Some(&mip_layout),
+            vertex: wgpu::VertexState {
+                module: &mip_shader,
+                entry_point: Some("vs_mip"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &mip_shader,
+                entry_point: Some("fs_mip"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format: ATLAS_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let atlas_mips = mip_chain(&device, &mip_bgl, &atlas_tex);
+        let r = Self {
             device,
             queue,
             surface,
             format,
-            world_pipeline,
-            track_pipeline,
-            hud_pipeline,
-            hud_sub_pipeline,
+            pipes,
+            shader,
+            layout,
+            msaa: 1,
+            msaa_counts,
+            msaa_color: None,
             hud_subtract: Vec::new(),
             hud_under: Vec::new(),
             hud_under_subtract: Vec::new(),
@@ -440,14 +601,11 @@ impl Renderer {
             sky_layer_vb,
             glows: Vec::new(),
             glow_vb,
-            glow_pipeline,
             glows_sub: Vec::new(),
             glow_sub_vb,
-            glow_sub_pipeline,
             overlay_atlas: None,
             use_overlay_atlas: false,
             mid_vb,
-            sky_pipeline,
             world_globals,
             hud_globals,
             sky_globals,
@@ -457,32 +615,158 @@ impl Renderer {
             sampler,
             world_bg,
             hud_bg,
-            depth: None,
+            depth: Vec::new(),
             static_vb: None,
             dyn_vb,
             shadow_vb,
             objects_vb,
             late_vb,
-            sub_pipeline,
             hud_vb,
+            stats: Vec::new(),
+            stats_vb,
+            stats_pipeline,
+            bilinear: false,
+            crt: false,
+            crt_pipeline,
+            crt_bgl,
+            crt_sampler,
+            post_target: None,
+            crt_settings: Crt::default(),
+            supersample: 1,
+            down_pipeline,
+            bloom: false,
+            bloom_settings: Bloom::default(),
+            bloom_bright_pipeline,
+            bloom_down_pipeline,
+            bloom_up_pipeline,
+            black,
+            crt_params,
+            mipmaps: false,
+            mip_bias: 0.0,
+            mip_pipeline,
+            mip_bgl,
+            atlas_mips,
+            no_vsync,
             size,
             atlas_tex,
-        })
+        };
+        r.gen_mips();
+        Ok(r)
+    }
+
+    /// The CRT filter's settings.
+    pub fn set_crt(&mut self, c: &Crt) {
+        self.crt_settings = *c;
+    }
+
+    /// Bloom's settings.
+    pub fn set_bloom(&mut self, b: &Bloom) {
+        self.bloom_settings = *b;
+    }
+
+    /// The MSAA samples per pixel in effect: `msaa`, or the most the GPU has below it.
+    fn samples(&self) -> u32 {
+        self.msaa_counts.iter().copied().filter(|&n| n <= self.msaa).max().unwrap_or(1)
+    }
+
+    /// The multisampled frame the scene is drawn to with MSAA (kept for the next frames).
+    fn msaa_view(&mut self, (w, h): (u32, u32), samples: u32) -> wgpu::TextureView {
+        if let Some((v, tw, th, ts)) = &self.msaa_color {
+            if (*tw, *th, *ts) == (w, h, samples) {
+                return v.clone();
+            }
+        }
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("msaa"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: samples,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let v = tex.create_view(&Default::default());
+        self.msaa_color = Some((v.clone(), w, h, samples));
+        v
+    }
+
+    /// The supersampling factor in effect: `supersample`, as far as the GPU's largest
+    /// texture allows at the window's size.
+    fn scale(&self) -> u32 {
+        let max = self.device.limits().max_texture_dimension_2d;
+        self.supersample.clamp(1, (max / self.size.0.max(self.size.1).max(1)).max(1))
+    }
+
+    /// `Globals::texfilter` for the 3D scene.
+    fn texfilter(&self) -> [f32; 4] {
+        let last = if self.mipmaps { self.atlas_mips.len() as f32 } else { 0.0 };
+        [self.bilinear as u32 as f32, last, self.mip_bias, 0.0]
+    }
+
+    /// Fill the atlas' mip levels from its first (after it changed).
+    fn gen_mips(&self) {
+        self.gen_mips_in(&[]);
+    }
+
+    /// Fill the atlas' mip levels from its first where these rectangles of it (x, y, w, h)
+    /// changed (none: everywhere).
+    fn gen_mips_in(&self, rects: &[[u32; 4]]) {
+        if self.atlas_mips.is_empty() {
+            return;
+        }
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        for (l, (src, dst)) in (1..).zip(&self.atlas_mips) {
+            let size = (self.atlas_tex.width() >> l).max(1);
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mip"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: dst,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: if rects.is_empty() { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) } else { wgpu::LoadOp::Load },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_pipeline(&self.mip_pipeline);
+            rp.set_bind_group(0, src, &[]);
+            if rects.is_empty() {
+                rp.draw(0..3, 0..1);
+            }
+            for &[x, y, w, h] in rects {
+                // the level's texels the rectangle covers part of
+                let (x0, y0) = ((x >> l).min(size), (y >> l).min(size));
+                let (x1, y1) = ((x + w).div_ceil(1 << l).min(size), (y + h).div_ceil(1 << l).min(size));
+                if x1 > x0 && y1 > y0 {
+                    rp.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
+                    rp.draw(0..3, 0..1);
+                }
+            }
+        }
+        self.queue.submit([enc.finish()]);
     }
 
     /// Replace the texture atlas (e.g. when switching from the menu to a race).
     pub fn set_atlas(&mut self, atlas: &crate::assets::Atlas) {
         let (tex, [w, h, s]) = make_bind_groups(&self.device, &self.queue, &self.bgl, &self.sampler, atlas, [&self.world_globals, &self.hud_globals, &self.sky_globals]);
+        self.atlas_mips = mip_chain(&self.device, &self.mip_bgl, &tex);
         self.atlas_tex = tex;
         self.world_bg = w;
         self.hud_bg = h;
         self.sky_bg = s;
+        self.gen_mips();
     }
 
     /// Replace the atlas' pixels (same size: written into the existing texture; the front
     /// end's per-frame atlas).
     pub fn write_atlas(&mut self, atlas: &crate::assets::Atlas) {
-        if self.atlas_tex.width() != atlas.size {
+        if self.atlas_tex.width() != atlas.size || self.atlas_tex.mip_level_count() != atlas.mip_levels {
             self.set_atlas(atlas);
             return;
         }
@@ -492,6 +776,7 @@ impl Renderer {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(atlas.size * 4), rows_per_image: Some(atlas.size) },
             wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
         );
+        self.gen_mips();
     }
 
     /// Upload the 2D pass's own atlas (see [`Self::use_overlay_atlas`]).
@@ -529,6 +814,15 @@ impl Renderer {
         self.static_vb = Some((vb, ib, indices.len() as u32));
     }
 
+    /// Present at the display's refresh (the default), or as soon as a frame is ready.
+    pub fn set_vsync(&mut self, on: bool) {
+        if let Some((s, c)) = &mut self.surface {
+            c.present_mode = if on { wgpu::PresentMode::AutoVsync } else { self.no_vsync };
+            log::info!("present mode: {:?}", c.present_mode);
+            s.configure(&self.device, c);
+        }
+    }
+
     pub fn resize(&mut self, w: u32, h: u32) {
         if w == 0 || h == 0 {
             return;
@@ -541,25 +835,27 @@ impl Renderer {
         }
     }
 
-    fn depth_view(&mut self) -> wgpu::TextureView {
-        let (w, h) = self.size;
-        if let Some((v, dw, dh)) = &self.depth {
-            if *dw == w && *dh == h {
-                return v.clone();
-            }
+    /// A depth buffer of this size and samples per pixel (kept for the next frames).
+    fn depth_view(&mut self, (w, h): (u32, u32), samples: u32) -> wgpu::TextureView {
+        if let Some((v, ..)) = self.depth.iter().find(|d| (d.1, d.2, d.3) == (w, h, samples)) {
+            return v.clone();
         }
         let t = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("depth"),
             size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: samples,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
         let v = t.create_view(&Default::default());
-        self.depth = Some((v.clone(), w, h));
+        // (the scene's and the window's; the others are from before a resize)
+        if self.depth.len() >= 2 {
+            self.depth.remove(0);
+        }
+        self.depth.push((v.clone(), w, h, samples));
         v
     }
 
@@ -581,6 +877,7 @@ impl Renderer {
             },
             sky_top: p.sky_top.extend(1.0).into(),
             cam_fwd: p.cam_fwd.extend(if p.depth_cue.is_some() { 1.0 } else { 0.0 }).into(),
+            texfilter: self.texfilter(),
             beam: match &p.night_beam {
                 Some(b) => [b.right.extend(b.xs).into(), b.forward.extend(b.z0).into(), b.origin.extend(1.0).into(), [b.zs, 0.0, 0.0, 0.0]],
                 None => [[0.0; 4]; 4],
@@ -606,6 +903,9 @@ impl Renderer {
                 );
             }
         }
+        if !p.atlas_writes.is_empty() {
+            self.gen_mips_in(&p.atlas_writes.iter().map(|a| [a.x, a.y, a.w, a.h]).collect::<Vec<_>>());
+        }
         let (w, h) = (self.size.0 as f32, self.size.1 as f32);
         let hud_g = Globals {
             view_proj: Mat4::orthographic_rh(0.0, w, h, 0.0, -1.0, 1.0).to_cols_array_2d(),
@@ -614,6 +914,7 @@ impl Renderer {
             fog: [1e9, 2e9, 0.0, 0.0],
             sky_top: [0.0; 4],
             cam_fwd: [0.0; 4],
+            texfilter: [0.0; 4],
             beam: [[0.0; 4]; 4],
             night: [[0; 4]; NIGHT_WORDS],
         };
@@ -625,6 +926,7 @@ impl Renderer {
             fog: [1e9, 2e9, 0.0, 0.0],
             sky_top: [0.0; 4],
             cam_fwd: [0.0; 4],
+            texfilter: self.texfilter(),
             beam: [[0.0; 4]; 4],
             night: [[0; 4]; NIGHT_WORDS],
         };
@@ -640,15 +942,24 @@ impl Renderer {
         self.sky_layer_vb.upload(&self.device, &self.queue, &self.sky_layer);
         self.glow_vb.upload(&self.device, &self.queue, &self.glows);
         self.glow_sub_vb.upload(&self.device, &self.queue, &self.glows_sub);
-        let depth = self.depth_view();
+        // (drawn at the supersampling scale: see `present`; with MSAA, to `msaa_color` and
+        // resolved to `view` after each pass, the next one going on from the samples)
+        let k = self.scale();
+        let target = (self.size.0 * k, self.size.1 * k);
+        let samples = self.samples();
+        if self.pipes.samples != samples {
+            self.pipes = ScenePipelines::new(&self.device, &self.layout, &self.shader, self.format, samples);
+        }
+        let depth = self.depth_view(target, samples);
+        let msaa = (samples > 1).then(|| self.msaa_view(target, samples));
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: msaa.as_ref().unwrap_or(view),
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: msaa.as_ref().map(|_| view),
                     ops: wgpu::Operations { load: if pass.keep { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::BLACK) }, store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -662,12 +973,15 @@ impl Renderer {
             });
             // a view of a split screen: the 3D in its rectangle, the 2D (window coordinates)
             // clipped to it
-            let full = [0.0, 0.0, w, h];
+            // (in the target's pixels: the window's times the supersampling)
+            let k = k as f32;
+            let full = [0.0, 0.0, w * k, h * k];
             let set_vp = |rp: &mut wgpu::RenderPass, r: [f32; 4]| rp.set_viewport(r[0], r[1], r[2], r[3], 0.0, 1.0);
             let (vp3d, vp2d) = match pass.viewport {
                 Some(v) => {
+                    let v = v.map(|c| c * k);
                     let (x0, y0) = (v[0].max(0.0).floor(), v[1].max(0.0).floor());
-                    let (x1, y1) = ((v[0] + v[2]).min(w).ceil(), (v[1] + v[3]).min(h).ceil());
+                    let (x1, y1) = ((v[0] + v[2]).min(w * k).ceil(), (v[1] + v[3]).min(h * k).ceil());
                     rp.set_scissor_rect(x0 as u32, y0 as u32, (x1 - x0).max(1.0) as u32, (y1 - y0).max(1.0) as u32);
                     (v, full)
                 }
@@ -682,12 +996,12 @@ impl Renderer {
                 return enc.finish();
             }
             if !pass.no_sky {
-                rp.set_pipeline(&self.sky_pipeline);
+                rp.set_pipeline(&self.pipes.sky);
                 rp.draw(0..3, 0..1);
             }
             if !self.hud_under.is_empty() {
                 set_vp(&mut rp, vp2d);
-                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_pipeline(&self.pipes.hud);
                 let under_bg = match (&self.overlay_atlas, self.use_overlay_atlas) {
                     (Some((_, bg)), true) => bg,
                     _ => &self.hud_bg,
@@ -698,15 +1012,15 @@ impl Renderer {
                 let mut at = 0;
                 for r in self.hud_under_subtract.iter().filter(|r| r.end <= n) {
                     if r.start > at {
-                        rp.set_pipeline(&self.hud_pipeline);
+                        rp.set_pipeline(&self.pipes.hud);
                         rp.draw(at..r.start, 0..1);
                     }
-                    rp.set_pipeline(&self.hud_sub_pipeline);
+                    rp.set_pipeline(&self.pipes.hud_sub);
                     rp.draw(r.clone(), 0..1);
                     at = r.end;
                 }
                 if at < n {
-                    rp.set_pipeline(&self.hud_pipeline);
+                    rp.set_pipeline(&self.pipes.hud);
                     rp.draw(at..n, 0..1);
                 }
                 rp.set_bind_group(0, &self.world_bg, &[]);
@@ -715,7 +1029,7 @@ impl Renderer {
             // the dome, the sun over it, then the horizon band over the sun
             let dome = p.sky_dome.min(sky.len() as u32);
             if dome > 0 {
-                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_pipeline(&self.pipes.hud);
                 rp.set_bind_group(0, &self.sky_bg, &[]);
                 rp.set_vertex_buffer(0, self.sky_vb.buf.slice(..));
                 rp.draw(0..dome, 0..1);
@@ -723,7 +1037,7 @@ impl Renderer {
             }
             if !self.sky_layer.is_empty() {
                 set_vp(&mut rp, vp2d);
-                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_pipeline(&self.pipes.hud);
                 // the sky layer is always textured from the 2D pass's own atlas
                 let bg = match &self.overlay_atlas {
                     Some((_, bg)) => bg,
@@ -736,13 +1050,13 @@ impl Renderer {
                 set_vp(&mut rp, vp3d);
             }
             if (sky.len() as u32) > dome {
-                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_pipeline(&self.pipes.hud);
                 rp.set_bind_group(0, &self.sky_bg, &[]);
                 rp.set_vertex_buffer(0, self.sky_vb.buf.slice(..));
                 rp.draw(dome..sky.len() as u32, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);
             }
-            rp.set_pipeline(&self.track_pipeline);
+            rp.set_pipeline(&self.pipes.track);
             if let Some((vb, ib, n)) = &self.static_vb {
                 rp.set_vertex_buffer(0, vb.slice(..));
                 rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
@@ -760,36 +1074,36 @@ impl Renderer {
                 rp.draw(0..p.objects.len() as u32, 0..1);
             }
             if !p.shadows.is_empty() {
-                rp.set_pipeline(&self.sub_pipeline);
+                rp.set_pipeline(&self.pipes.sub);
                 rp.set_vertex_buffer(0, self.shadow_vb.buf.slice(..));
                 rp.draw(0..p.shadows.len() as u32, 0..1);
             }
-            rp.set_pipeline(&self.world_pipeline);
+            rp.set_pipeline(&self.pipes.world);
             if !dynamic.is_empty() || !self.hud_mid.is_empty() {
                 let (n, mid) = (dynamic.len() as u32, self.dyn_mid.min(dynamic.len() as u32));
                 rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
                 rp.draw(0..mid, 0..1);
                 if !self.hud_mid.is_empty() {
                     set_vp(&mut rp, vp2d);
-                    rp.set_pipeline(&self.hud_pipeline);
+                    rp.set_pipeline(&self.pipes.hud);
                     rp.set_bind_group(0, &self.hud_bg, &[]);
                     rp.set_vertex_buffer(0, self.mid_vb.buf.slice(..));
                     let n = self.hud_mid.len() as u32;
                     let mut at = 0;
                     for r in self.hud_mid_subtract.iter().filter(|r| r.end <= n) {
                         if r.start > at {
-                            rp.set_pipeline(&self.hud_pipeline);
+                            rp.set_pipeline(&self.pipes.hud);
                             rp.draw(at..r.start, 0..1);
                         }
-                        rp.set_pipeline(&self.hud_sub_pipeline);
+                        rp.set_pipeline(&self.pipes.hud_sub);
                         rp.draw(r.clone(), 0..1);
                         at = r.end;
                     }
                     if at < n {
-                        rp.set_pipeline(&self.hud_pipeline);
+                        rp.set_pipeline(&self.pipes.hud);
                         rp.draw(at..n, 0..1);
                     }
-                    rp.set_pipeline(&self.world_pipeline);
+                    rp.set_pipeline(&self.pipes.world);
                     rp.set_bind_group(0, &self.world_bg, &[]);
                     rp.set_vertex_buffer(0, self.dyn_vb.buf.slice(..));
                     set_vp(&mut rp, vp3d);
@@ -797,14 +1111,14 @@ impl Renderer {
                 rp.draw(mid..n, 0..1);
             }
             if !p.subtract_late.is_empty() {
-                rp.set_pipeline(&self.sub_pipeline);
+                rp.set_pipeline(&self.pipes.sub);
                 rp.set_vertex_buffer(0, self.late_vb.buf.slice(..));
                 rp.draw(0..p.subtract_late.len() as u32, 0..1);
             }
             set_vp(&mut rp, vp2d);
             if !self.glows.is_empty() {
                 if let Some((_, bg)) = &self.overlay_atlas {
-                    rp.set_pipeline(&self.glow_pipeline);
+                    rp.set_pipeline(&self.pipes.glow);
                     rp.set_bind_group(0, bg, &[]);
                     rp.set_vertex_buffer(0, self.glow_vb.buf.slice(..));
                     rp.draw(0..self.glows.len() as u32, 0..1);
@@ -812,7 +1126,7 @@ impl Renderer {
             }
             if !self.glows_sub.is_empty() {
                 if let Some((_, bg)) = &self.overlay_atlas {
-                    rp.set_pipeline(&self.glow_sub_pipeline);
+                    rp.set_pipeline(&self.pipes.glow_sub);
                     rp.set_bind_group(0, bg, &[]);
                     rp.set_vertex_buffer(0, self.glow_sub_vb.buf.slice(..));
                     rp.draw(0..self.glows_sub.len() as u32, 0..1);
@@ -837,20 +1151,87 @@ impl Renderer {
         let mut at = 0;
         for r in self.hud_subtract.iter().filter(|r| r.end <= hud.len() as u32) {
             if r.start > at {
-                rp.set_pipeline(&self.hud_pipeline);
+                rp.set_pipeline(&self.pipes.hud);
                 rp.draw(at..r.start, 0..1);
             }
-            rp.set_pipeline(&self.hud_sub_pipeline);
+            rp.set_pipeline(&self.pipes.hud_sub);
             rp.draw(r.clone(), 0..1);
             at = r.end;
         }
         if at < hud.len() as u32 {
-            rp.set_pipeline(&self.hud_pipeline);
+            rp.set_pipeline(&self.pipes.hud);
             rp.draw(at..hud.len() as u32, 0..1);
         }
     }
 
+    /// `text` (digits, space and the letters in [`glyph`]) as `stats`: white pixel-font
+    /// characters on a dark box at the window's top left, sized to the window.
+    pub fn set_stats_text(&mut self, text: &str) {
+        self.stats.clear();
+        if text.is_empty() {
+            return;
+        }
+        let px = (self.size.1 as f32 / 240.0).round().max(2.0);
+        let (x0, y0) = (px * 2.0, px * 2.0);
+        let mut quad = |x: f32, y: f32, w: f32, h: f32, c: [f32; 4]| {
+            let v = |x: f32, y: f32| Vertex { pos: [x, y, 0.0], uv: [0.0; 2], color: c };
+            self.stats.extend([v(x, y), v(x + w, y), v(x, y + h), v(x + w, y), v(x + w, y + h), v(x, y + h)]);
+        };
+        let n = text.chars().count() as f32;
+        quad(x0 - px, y0 - px, n * 4.0 * px + px, 7.0 * px, [0.0, 0.0, 0.0, 0.6]);
+        for (i, ch) in text.chars().enumerate() {
+            for (r, bits) in glyph(ch).iter().enumerate() {
+                for col in 0..3 {
+                    if bits & (4 >> col) != 0 {
+                        quad(x0 + (i as f32 * 4.0 + col as f32) * px, y0 + r as f32 * px, px, px, [1.0; 4]);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The `stats` pass over a finished frame.
+    fn encode_stats(&mut self, view: &wgpu::TextureView) -> Option<wgpu::CommandBuffer> {
+        if self.stats.is_empty() {
+            return None;
+        }
+        self.stats_vb.upload(&self.device, &self.queue, &self.stats);
+        let depth = self.depth_view(self.size, 1);
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        {
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("stats"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            // (hud_bg: its uniforms hold the window's pixel projection)
+            rp.set_pipeline(&self.stats_pipeline);
+            rp.set_bind_group(0, &self.hud_bg, &[]);
+            rp.set_vertex_buffer(0, self.stats_vb.buf.slice(..));
+            rp.draw(0..self.stats.len() as u32, 0..1);
+        }
+        Some(enc.finish())
+    }
+
     pub fn render(&mut self, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) {
+        self.present(|r, view| vec![r.encode(view, p, sky, dynamic, hud)]);
+    }
+
+    /// Draw a frame with `draw` and show it in the window: drawn to `post_target` when
+    /// supersampled, through the CRT filter or with bloom, then `stats` over it.
+    fn present(&mut self, draw: impl FnOnce(&mut Self, &wgpu::TextureView) -> Vec<wgpu::CommandBuffer>) {
         let Some((surface, config)) = &self.surface else { return };
         let frame = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
@@ -861,9 +1242,100 @@ impl Renderer {
             _ => return,
         };
         let view = frame.texture.create_view(&Default::default());
-        let cmd = self.encode(&view, p, sky, dynamic, hud);
-        self.queue.submit([cmd]);
+        let mut cmds = self.draw_scaled(&view, true, draw);
+        cmds.extend(self.encode_stats(&view));
+        self.queue.submit(cmds);
         self.queue.present(frame);
+    }
+
+    /// `draw` a frame to `view` (window-sized): straight there, or at the supersampling
+    /// scale to `post_target` and then scaled down or through the CRT filter, with bloom
+    /// (the window's `effects`, CRT and bloom, when they are on).
+    fn draw_scaled(&mut self, view: &wgpu::TextureView, effects: bool, draw: impl FnOnce(&mut Self, &wgpu::TextureView) -> Vec<wgpu::CommandBuffer>) -> Vec<wgpu::CommandBuffer> {
+        let (crt, bloom) = (effects && self.crt, effects && self.bloom);
+        if !crt && !bloom && self.scale() == 1 {
+            return draw(self, view);
+        }
+        let t = self.post_target();
+        let mut cmds = draw(self, &t.scene);
+        cmds.push(self.encode_post(view, &t, crt, bloom));
+        cmds
+    }
+
+    /// The frame drawn for the CRT filter, supersampling or bloom (the window's size times the
+    /// supersampling), with the bloom's levels.
+    fn post_target(&mut self) -> PostTarget {
+        let k = self.scale();
+        if let Some(t) = &self.post_target {
+            if (t.size, t.scale) == (self.size, k) {
+                return t.clone();
+            }
+        }
+        let texture = |label, (w, h): (u32, u32), format| {
+            self.device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let bind = |src: &wgpu::TextureView, bloom: &wgpu::TextureView| {
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("crt"),
+                layout: &self.crt_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.crt_sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: self.crt_params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(bloom) },
+                ],
+            })
+        };
+        let scene = texture("scene", (self.size.0 * k, self.size.1 * k), self.format);
+        // the levels from half the window's size down to about 16 pixels (or BLOOM_LEVELS)
+        let mut bloom = Vec::new();
+        let mut size = ((self.size.0 / 2).max(1), (self.size.1 / 2).max(1));
+        while bloom.len() < BLOOM_LEVELS {
+            let v = texture("bloom", size, BLOOM_FORMAT);
+            bloom.push((bind(&v, &self.black), v));
+            if size.0.min(size.1) <= 16 {
+                break;
+            }
+            size = ((size.0 / 2).max(1), (size.1 / 2).max(1));
+        }
+        let t = PostTarget { size: self.size, scale: k, bg: bind(&scene, &bloom[0].1), bg_bright: bind(&scene, &self.black), scene, bloom };
+        self.post_target = Some(t.clone());
+        t
+    }
+
+    /// The frame in `t` to `view`: its bloom (`bloom`) made, then the frame through the CRT
+    /// filter or scaled down, with the bloom added.
+    fn encode_post(&self, view: &wgpu::TextureView, t: &PostTarget, crt: bool, bloom: bool) -> wgpu::CommandBuffer {
+        let mut u = [[0.0; 4]; 4];
+        u[..3].copy_from_slice(&self.crt_settings.uniform(self.size, self.scale()));
+        if bloom {
+            // (the levels are added up: their average times the intensity)
+            u[3] = [self.bloom_settings.intensity / t.bloom.len() as f32, self.bloom_settings.threshold, 0.0, 0.0];
+        }
+        self.queue.write_buffer(&self.crt_params, 0, bytemuck::cast_slice(&u));
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        if bloom {
+            for (k, (_, v)) in t.bloom.iter().enumerate() {
+                let (pipeline, bg) = if k == 0 { (&self.bloom_bright_pipeline, &t.bg_bright) } else { (&self.bloom_down_pipeline, &t.bloom[k - 1].0) };
+                post_pass(&mut enc, v, true, pipeline, bg);
+            }
+            for k in (1..t.bloom.len()).rev() {
+                post_pass(&mut enc, &t.bloom[k - 1].1, false, &self.bloom_up_pipeline, &t.bloom[k].0);
+            }
+        }
+        post_pass(&mut enc, view, true, if crt { &self.crt_pipeline } else { &self.down_pipeline }, &t.bg);
+        enc.finish()
     }
 
     /// A split-screen frame: each view in its rectangle, then the HUD over the window
@@ -914,46 +1386,22 @@ impl Renderer {
     }
 
     pub fn render_layers(&mut self, layers: &[Layer]) {
-        let Some((surface, config)) = &self.surface else { return };
-        let frame = match surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                surface.configure(&self.device, config);
-                return;
-            }
-            _ => return,
-        };
-        let view = frame.texture.create_view(&Default::default());
-        let cmds = self.encode_layers(&view, layers);
-        self.queue.submit(cmds);
-        self.queue.present(frame);
+        self.present(|r, view| r.encode_layers(view, layers));
     }
 
     pub fn screenshot_layers(&mut self, layers: &[Layer]) -> image::RgbaImage {
         let (tex, view) = self.shot_target();
-        let cmds = self.encode_layers(&view, layers);
+        let cmds = self.draw_scaled(&view, false, |r, v| r.encode_layers(v, layers));
         self.read_back(&tex, cmds)
     }
 
     pub fn render_views(&mut self, views: &[ViewDraw], sky: &[Vertex], hud: &[Vertex]) {
-        let Some((surface, config)) = &self.surface else { return };
-        let frame = match surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                surface.configure(&self.device, config);
-                return;
-            }
-            _ => return,
-        };
-        let view = frame.texture.create_view(&Default::default());
-        let cmds = self.encode_views(&view, views, sky, hud);
-        self.queue.submit(cmds);
-        self.queue.present(frame);
+        self.present(|r, view| r.encode_views(view, views, sky, hud));
     }
 
     pub fn screenshot_views(&mut self, views: &[ViewDraw], sky: &[Vertex], hud: &[Vertex]) -> image::RgbaImage {
         let (tex, view) = self.shot_target();
-        let cmds = self.encode_views(&view, views, sky, hud);
+        let cmds = self.draw_scaled(&view, false, |r, v| r.encode_views(v, views, sky, hud));
         self.read_back(&tex, cmds)
     }
 
@@ -976,8 +1424,8 @@ impl Renderer {
     /// Render one frame offscreen and return RGBA8 pixels.
     pub fn screenshot(&mut self, p: &FrameParams, sky: &[Vertex], dynamic: &[Vertex], hud: &[Vertex]) -> image::RgbaImage {
         let (tex, view) = self.shot_target();
-        let cmd = self.encode(&view, p, sky, dynamic, hud);
-        self.read_back(&tex, vec![cmd])
+        let cmds = self.draw_scaled(&view, false, |r, v| vec![r.encode(v, p, sky, dynamic, hud)]);
+        self.read_back(&tex, cmds)
     }
 
     fn read_back(&mut self, tex: &wgpu::Texture, cmds: Vec<wgpu::CommandBuffer>) -> image::RgbaImage {
@@ -1024,20 +1472,23 @@ fn make_bind_groups(
     atlas: &crate::assets::Atlas,
     globals: [&wgpu::Buffer; 3],
 ) -> (wgpu::Texture, [wgpu::BindGroup; 3]) {
-    let tex = device.create_texture_with_data(
-        queue,
-        &wgpu::TextureDescriptor {
-            label: Some("atlas"),
-            size: wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        },
-        wgpu::util::TextureDataOrder::LayerMajor,
+    let levels = atlas.mip_levels.clamp(1, atlas.size.max(1).ilog2() + 1);
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("atlas"),
+        size: wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
+        mip_level_count: levels,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: ATLAS_FORMAT,
+        // (the mip levels are drawn: see `Renderer::gen_mips`)
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | if levels > 1 { wgpu::TextureUsages::RENDER_ATTACHMENT } else { wgpu::TextureUsages::empty() },
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
         &atlas.rgba,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(atlas.size * 4), rows_per_image: Some(atlas.size) },
+        wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
     );
     let view = tex.create_view(&Default::default());
     let groups = globals.map(|buf| {
@@ -1052,4 +1503,216 @@ fn make_bind_groups(
         })
     });
     (tex, groups)
+}
+
+/// The pipelines drawing the scene (to targets of `samples` samples per pixel).
+struct ScenePipelines {
+    samples: u32,
+    world: wgpu::RenderPipeline,
+    track: wgpu::RenderPipeline,
+    hud: wgpu::RenderPipeline,
+    /// 2D drawn subtracting.
+    hud_sub: wgpu::RenderPipeline,
+    sub: wgpu::RenderPipeline,
+    sky: wgpu::RenderPipeline,
+    glow: wgpu::RenderPipeline,
+    glow_sub: wgpu::RenderPipeline,
+}
+
+impl ScenePipelines {
+    fn new(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, format: wgpu::TextureFormat, samples: u32) -> Self {
+        let mk = |vs, fs, vertices, depth, blend, cull| mk_pipeline(device, layout, shader, format, samples, vs, fs, vertices, depth, blend, cull);
+        // reversed Z (1 = near, 0 = infinitely far): even precision over the whole track
+        let depth = Some((true, wgpu::CompareFunction::Greater));
+        // semi-transparent texels blend (fs_hud's premultiplied output: PS1 modes 0 and 1)
+        let blend = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
+        // background - foreground
+        let subtract = wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::ReverseSubtract };
+        let subtract = Some(wgpu::BlendState { color: subtract, alpha: subtract });
+        // tested against the 3D but not written
+        let tested = Some((false, wgpu::CompareFunction::GreaterEqual));
+        Self {
+            samples,
+            // the track is single-sided like on the PS1 (double-sided materials are emitted twice)
+            track: mk("vs_main", "fs_hud", true, depth, blend, Some(wgpu::Face::Back)),
+            world: mk("vs_main", "fs_hud", true, depth, blend, None),
+            sub: mk("vs_main", "fs_sub", true, tested, subtract, None),
+            hud_sub: mk("vs_main", "fs_sub", true, None, subtract, None),
+            hud: mk("vs_main", "fs_hud", true, None, blend, None),
+            sky: mk("vs_sky", "fs_sky", false, None, None, None),
+            glow_sub: mk("vs_main", "fs_sub", true, tested, subtract, None),
+            glow: mk("vs_main", "fs_hud", true, tested, blend, None),
+        }
+    }
+}
+
+/// A pipeline of shader.wgsl: `vertices` from a [`Vertex`] buffer, `depth` (write, compare;
+/// None: always passes, not written).
+#[allow(clippy::too_many_arguments)]
+fn mk_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    samples: u32,
+    vs: &str,
+    fs: &str,
+    vertices: bool,
+    depth: Option<(bool, wgpu::CompareFunction)>,
+    blend: Option<wgpu::BlendState>,
+    cull: Option<wgpu::Face>,
+) -> wgpu::RenderPipeline {
+    let attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
+    let vbl = [Some(wgpu::VertexBufferLayout { array_stride: std::mem::size_of::<Vertex>() as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &attrs })];
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: None,
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some(vs),
+            compilation_options: Default::default(),
+            buffers: if vertices { &vbl } else { &[] },
+        },
+        primitive: wgpu::PrimitiveState { cull_mode: cull, front_face: TRACK_FRONT_FACE, ..Default::default() },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH,
+            depth_write_enabled: Some(depth.map(|d| d.0).unwrap_or(false)),
+            depth_compare: Some(depth.map(|d| d.1).unwrap_or(wgpu::CompareFunction::Always)),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(fs),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// Per mip level of `tex` after the first: a bind group of the level above (for mip.wgsl)
+/// and the level's view to draw it to.
+fn mip_chain(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, tex: &wgpu::Texture) -> Vec<(wgpu::BindGroup, wgpu::TextureView)> {
+    let level = |l: u32| tex.create_view(&wgpu::TextureViewDescriptor { base_mip_level: l, mip_level_count: Some(1), ..Default::default() });
+    (1..tex.mip_level_count())
+        .map(|l| {
+            let src = level(l - 1);
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mip"),
+                layout: bgl,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src) }],
+            });
+            (bg, level(l))
+        })
+        .collect()
+}
+
+/// The CRT filter's settings (see crt.wgsl).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Crt {
+    /// Barrel distortion per axis (the edges' midpoints stay put, the corners bow out).
+    pub curvature: [f32; 2],
+    /// The aperture grille's dark stripes (1: no grille).
+    pub mask_dark: f32,
+    /// The beam's width in lines on black and on white (the scanlines' gaps).
+    pub beam_min: f32,
+    pub beam_max: f32,
+    pub gamma: f32,
+    pub brightness: f32,
+    /// The vignette's strength (0: none).
+    pub vignette: f32,
+    /// The scanlines' height in window pixels (0: by the window's height).
+    pub line_px: f32,
+}
+
+impl Default for Crt {
+    fn default() -> Self {
+        Self { curvature: [0.015, 0.02], mask_dark: 0.72, beam_min: 0.22, beam_max: 0.42, gamma: 2.2, brightness: 1.2, vignette: 0.12, line_px: 0.0 }
+    }
+}
+
+impl Crt {
+    /// crt.wgsl's `Params`, for a window of `size` and the frame drawn `scale` times that.
+    fn uniform(&self, size: (u32, u32), scale: u32) -> [[f32; 4]; 3] {
+        [
+            [self.curvature[0], self.curvature[1], self.mask_dark, self.beam_min],
+            [self.beam_max, self.gamma, self.brightness, self.vignette],
+            [self.line_px, size.0 as f32, size.1 as f32, scale as f32],
+        ]
+    }
+}
+
+/// Bloom's settings (see crt.wgsl).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bloom {
+    /// How much of the glow is added to the frame.
+    pub intensity: f32,
+    /// The brightness (0 to 1, in linear light) above which a pixel glows.
+    pub threshold: f32,
+}
+
+impl Default for Bloom {
+    fn default() -> Self {
+        Self { intensity: 0.5, threshold: 0.6 }
+    }
+}
+
+/// The frame drawn for the window's post-processing (see [`Renderer::post_target`]).
+#[derive(Clone)]
+struct PostTarget {
+    /// The window's size and the supersampling it was made for.
+    size: (u32, u32),
+    scale: u32,
+    scene: wgpu::TextureView,
+    /// `scene` bound with the bloom's first level, for the last pass.
+    bg: wgpu::BindGroup,
+    /// `scene` bound without it, for the bloom's first level.
+    bg_bright: wgpu::BindGroup,
+    /// The bloom's levels, each half the size of the one before: each one bound (to be
+    /// sampled by the next) and its view.
+    bloom: Vec<(wgpu::BindGroup, wgpu::TextureView)>,
+}
+
+/// One full-window triangle of crt.wgsl's `pipeline` to `view` (cleared to black first or
+/// drawn over), sampling what `bg` binds.
+fn post_pass(enc: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, clear: bool, pipeline: &wgpu::RenderPipeline, bg: &wgpu::BindGroup) {
+    let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("post"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations { load: if clear { wgpu::LoadOp::Clear(wgpu::Color::BLACK) } else { wgpu::LoadOp::Load }, store: wgpu::StoreOp::Store },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    rp.set_pipeline(pipeline);
+    rp.set_bind_group(0, bg, &[]);
+    rp.draw(0..3, 0..1);
+}
+
+/// A 3x5 pixel font character: five rows, bit 2 the left column (blank when not in it).
+fn glyph(c: char) -> [u8; 5] {
+    match c.to_ascii_uppercase() {
+        '0' => [7, 5, 5, 5, 7],
+        '1' => [2, 6, 2, 2, 7],
+        '2' => [7, 1, 7, 4, 7],
+        '3' => [7, 1, 3, 1, 7],
+        '4' => [5, 5, 7, 1, 1],
+        '5' => [7, 4, 7, 1, 7],
+        '6' => [7, 4, 7, 5, 7],
+        '7' => [7, 1, 1, 2, 2],
+        '8' => [7, 5, 7, 5, 7],
+        '9' => [7, 5, 7, 1, 7],
+        'F' => [7, 4, 6, 4, 4],
+        'P' => [6, 5, 6, 4, 4],
+        'S' => [3, 4, 2, 1, 6],
+        _ => [0; 5],
+    }
 }

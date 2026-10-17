@@ -9,6 +9,8 @@ struct Globals {
     sky_top: vec4<f32>,
     // camera forward axis; w = 1: `fog` holds the PS1 depth cue (DQA, DQB, H), fog_color the far colour
     cam_fwd: vec4<f32>,
+    // x = 1: bilinear texture filtering; y the last mip level sampled (0: none), z the mip bias
+    texfilter: vec4<f32>,
     // night headlight beam: right axis (w xs), forward axis (w z0), origin (w 1 = on), (zs)
     beam: array<vec4<f32>, 4>,
     // its level map (64x64 bytes), colour-index table (256x16 bytes), light table (256 words)
@@ -103,18 +105,75 @@ fn fs_hud(i: VOut) -> @location(0) vec4<f32> {
     return vec4<f32>(o.rgb, 1.0);
 }
 
+// Untextured window-pixel quads in their vertex colour (the frame-rate counter).
+@fragment
+fn fs_solid(i: VOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(i.color.rgb * i.color.a, i.color.a);
+}
+
 // PS1 semi-transparency mode 2 (background - foreground), with the blend set to subtract.
 @fragment
 fn fs_sub(i: VOut) -> @location(0) vec4<f32> {
-    let t = textureSample(atlas, samp, i.uv);
+    let t = texel(i.uv);
     if (t.a < 0.25) {
         discard;
     }
     return vec4<f32>(min(t.rgb * i.color.rgb * 2.0, vec3<f32>(1.0)), 0.0);
 }
 
+// The atlas at uv: the nearest texel, or with `g.texfilter.x` set the four nearest blended;
+// with mip levels (`g.texfilter.y`), from the level the texture's size on screen calls for
+// (filtered: blended between the two nearest levels).
+fn texel(uv: vec2<f32>) -> vec4<f32> {
+    // (the derivatives before any branch)
+    let t = uv * vec2<f32>(textureDimensions(atlas));
+    let d = max(dot(dpdx(t), dpdx(t)), dot(dpdy(t), dpdy(t)));
+    let lod = clamp(0.5 * log2(max(d, 1e-8)) + g.texfilter.z, 0.0, g.texfilter.y);
+    if (g.texfilter.x < 0.5) {
+        return textureSampleLevel(atlas, samp, uv, round(lod));
+    }
+    let l0 = floor(lod);
+    let a = texel_bilinear(uv, i32(l0));
+    let f = lod - l0;
+    if (f < 1.0 / 64.0) {
+        return a;
+    }
+    // keyed-out levels take no part, as texels in the bilinear blend
+    let b = texel_bilinear(uv, i32(l0) + 1);
+    let wa = (1.0 - f) * step(0.25, a.a);
+    let wb = f * step(0.25, b.a);
+    if (wa + wb < 0.5) {
+        return vec4<f32>(0.0);
+    }
+    return (a * wa + b * wb) / (wa + wb);
+}
+
+// The four texels of mip level `level` nearest uv blended. Colour-keyed texels (alpha 0) take
+// no part, so the cut-outs keep their colour to the edge instead of fading to black: the
+// colour is the keyed-in texels' weighted average, and the texel counts as keyed out where
+// they cover less than half of it.
+fn texel_bilinear(uv: vec2<f32>, level: i32) -> vec4<f32> {
+    let size = vec2<i32>(textureDimensions(atlas, level));
+    let p = uv * vec2<f32>(size) - 0.5;
+    let f = fract(p);
+    let i0 = clamp(vec2<i32>(floor(p)), vec2<i32>(0), size - 1);
+    let i1 = min(i0 + 1, size - 1);
+    let t00 = textureLoad(atlas, i0, level);
+    let t10 = textureLoad(atlas, vec2<i32>(i1.x, i0.y), level);
+    let t01 = textureLoad(atlas, vec2<i32>(i0.x, i1.y), level);
+    let t11 = textureLoad(atlas, i1, level);
+    let w = vec4<f32>((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y)
+        * step(vec4<f32>(0.25), vec4<f32>(t00.a, t10.a, t01.a, t11.a));
+    let cover = w.x + w.y + w.z + w.w;
+    if (cover < 0.5) {
+        return vec4<f32>(0.0);
+    }
+    // (alpha too: the STP texels' 0.5 against the opaque ones' 1)
+    return (t00 * w.x + t10 * w.y + t01 * w.z + t11 * w.w) / cover;
+}
+
 fn shade(i: VOut) -> vec4<f32> {
-    let t = textureSample(atlas, samp, i.uv);
+    let t = texel(i.uv);
     if (t.a < 0.25) {
         discard;
     }

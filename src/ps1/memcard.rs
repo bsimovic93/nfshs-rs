@@ -41,10 +41,13 @@ pub struct MemCard {
 }
 
 impl MemCard {
-    /// The card image `memcard.mcd` next to the game data directory (NFSHS_MEMCARD=FILE: another
-    /// one, such as an emulator's card); a new, formatted card when there is none yet.
+    /// The card image `memcard.mcd` next to the game data directory (the settings' `memcard`
+    /// or NFSHS_MEMCARD=FILE: another one, such as an emulator's card); a new, formatted card
+    /// when there is none yet.
     pub fn new(data_root: &Path) -> Self {
-        let path = std::env::var_os("NFSHS_MEMCARD").map(PathBuf::from).unwrap_or_else(|| {
+        let set = &crate::settings::get().memcard;
+        let set = (!set.is_empty()).then(|| PathBuf::from(set));
+        let path = std::env::var_os("NFSHS_MEMCARD").map(PathBuf::from).or(set).unwrap_or_else(|| {
             let dir = std::fs::canonicalize(data_root).ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
             dir.join("memcard.mcd")
         });

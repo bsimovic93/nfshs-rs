@@ -3,14 +3,16 @@
 use crate::assets::{Atlas, GameData};
 use crate::game::{Game, Input, RaceConfig};
 use crate::render::{FrameParams, Renderer};
+use crate::settings::Settings;
 use glam::{Mat4, Vec3};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
 enum Screen {
     /// Before the window opens, and after the game could not go on (the app then closes).
@@ -50,6 +52,15 @@ pub struct App {
     rumble: Vec<Rumble>,
     last: Instant,
     fps: (u32, Instant),
+    /// The frame-rate counter at the top left (F3 toggles it): frames counted since when.
+    counter: Option<(u32, Instant)>,
+    /// When the next frame is due (with `settings.fps`).
+    next_frame: Instant,
+    /// The settings (nfshs.ini; the function keys change them for the session).
+    settings: Settings,
+    settings_path: PathBuf,
+    /// The settings file's time when it was last read, and when that was last looked at.
+    settings_seen: (Option<SystemTime>, Instant),
     /// Start straight into a race (command-line `play` with explicit options).
     direct: Option<RaceConfigOwned>,
     /// The front end's movie being shown, and its soundtrack's voice.
@@ -78,7 +89,7 @@ impl App {
 
     /// Straight into a race (the command line's `play`).
     fn start_race(&mut self, cfg: RaceConfigOwned) {
-        let mut atlas = Atlas::new(2048);
+        let mut atlas = Atlas::race();
         let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, traffic: Vec::new() };
         match Game::load(&self.data, &mut atlas, &rc) {
             Ok(game) => self.begin_race(game, atlas),
@@ -104,7 +115,7 @@ impl App {
         let cfg = race_of(sim.snapshot());
         let rc = RaceConfig { track: cfg.track, variant: &cfg.variant, player_car: &cfg.player_car, opponents: cfg.opponents.clone(), laps: cfg.laps, traffic: Vec::new() };
         log::info!("the original starts a race: track {}{} with {}", cfg.track, cfg.variant, cfg.player_car);
-        let mut atlas = Atlas::new(2048);
+        let mut atlas = Atlas::race();
         match Game::load_with(&self.data, &mut atlas, &rc, *sim) {
             Ok(game) => self.begin_race(game, atlas),
             Err(e) => self.fail(e.context("could not load the race")),
@@ -113,6 +124,7 @@ impl App {
 
     /// Show a loaded race.
     fn begin_race(&mut self, game: Game, atlas: Atlas) {
+        log::info!("race atlas: {:.0}% used", atlas.used() * 100.0);
         if let Some(r) = &mut self.renderer {
             r.set_atlas(&atlas);
             r.set_world(&game.track.verts, &game.track.indices);
@@ -204,7 +216,7 @@ impl App {
 
     /// The game's DualShock motors on the gamepads: controller 1 the first gamepad, 2 the
     /// second (as the input), the big motor (0..255) the strong one and the small one (on or
-    /// off) the weak one. NFSHS_NO_RUMBLE=1: none.
+    /// off) the weak one. None with the settings' `rumble` off or NFSHS_NO_RUMBLE=1.
     fn update_rumble(&mut self) {
         let state = match &self.screen {
             Screen::FrontEnd(sim) => sim.frame_snapshot().rumble,
@@ -214,7 +226,9 @@ impl App {
         let Some(g) = &mut self.gilrs else { return };
         let pads: Vec<gilrs::GamepadId> = g.gamepads().map(|(id, _)| id).take(2).collect();
         self.rumble.retain(|r| pads.contains(&r.id));
-        if std::env::var_os("NFSHS_NO_RUMBLE").is_some() {
+        if !self.settings.rumble || std::env::var_os("NFSHS_NO_RUMBLE").is_some() {
+            // (dropping the effects stops them)
+            self.rumble.clear();
             return;
         }
         for (port, &id) in pads.iter().enumerate() {
@@ -240,7 +254,87 @@ impl App {
         }
     }
 
+    /// With `settings.fps`: wait until the next frame is due. Sleeps to within a couple of
+    /// milliseconds and spins the rest, as sleeps overshoot. A frame late by less than a
+    /// period keeps the schedule (the next ones make it up); later, the clock restarts rather
+    /// than rushing the following frames.
+    fn pace(&mut self) {
+        let fps = self.settings.fps;
+        if fps == 0 {
+            return;
+        }
+        let period = Duration::from_secs_f64(1.0 / fps as f64);
+        let now = Instant::now();
+        if self.next_frame > now {
+            let left = self.next_frame - now;
+            if left > Duration::from_millis(2) {
+                std::thread::sleep(left - Duration::from_millis(2));
+            }
+            while Instant::now() < self.next_frame {
+                std::hint::spin_loop();
+            }
+            self.next_frame += period;
+        } else if now - self.next_frame < period {
+            self.next_frame += period;
+        } else {
+            self.next_frame = now + period;
+        }
+    }
+
+    /// Put the settings into effect (`old`: the ones in effect before, None at start).
+    fn apply_settings(&mut self, old: Option<&Settings>) {
+        let s = &self.settings;
+        if let Some(r) = &mut self.renderer {
+            if old.is_none_or(|o| (o.fps == 0) != (s.fps == 0)) {
+                r.set_vsync(s.fps == 0);
+            }
+            r.supersample = s.supersample;
+            r.msaa = s.msaa;
+            r.bilinear = s.bilinear;
+            r.mipmaps = s.mipmaps;
+            r.mip_bias = s.mip_bias;
+            r.crt = s.crt;
+            r.set_crt(&s.crt_params);
+            r.bloom = s.bloom;
+            r.set_bloom(&s.bloom_params);
+        }
+        if let Some(w) = &self.window {
+            if old.is_some_and(|o| o.fullscreen != s.fullscreen) {
+                w.set_fullscreen(s.fullscreen.then_some(Fullscreen::Borderless(None)));
+            }
+        }
+        if old.is_none_or(|o| o.show_fps != s.show_fps) {
+            self.show_counter(s.show_fps);
+        }
+        self.next_frame = Instant::now();
+    }
+
+    fn show_counter(&mut self, on: bool) {
+        self.counter = on.then(|| (0, Instant::now()));
+        if let (false, Some(r)) = (on, &mut self.renderer) {
+            r.set_stats_text("");
+        }
+    }
+
+    /// Read the settings file again when it was saved since (looked at twice a second).
+    fn reload_settings(&mut self) {
+        if self.settings_seen.1.elapsed() < Duration::from_millis(500) {
+            return;
+        }
+        self.settings_seen.1 = Instant::now();
+        let modified = std::fs::metadata(&self.settings_path).and_then(|m| m.modified()).ok();
+        if modified == self.settings_seen.0 {
+            return;
+        }
+        self.settings_seen.0 = modified;
+        let new = Settings::load(&self.settings_path);
+        log::info!("settings: read {} again", self.settings_path.display());
+        let old = std::mem::replace(&mut self.settings, new);
+        self.apply_settings(Some(&old));
+    }
+
     fn frame(&mut self, el: &ActiveEventLoop) {
+        self.reload_settings();
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
@@ -251,6 +345,15 @@ impl App {
             if secs >= 3.0 {
                 log::info!("{:.1} fps", self.fps.0 as f32 / secs);
                 self.fps = (0, now);
+            }
+        }
+        // the counter shows each half second's frame rate
+        if let (Some((frames, since)), Some(r)) = (&mut self.counter, &mut self.renderer) {
+            *frames += 1;
+            let secs = (now - *since).as_secs_f32();
+            if secs >= 0.5 {
+                r.set_stats_text(&format!("{:.0} FPS", *frames as f32 / secs));
+                (*frames, *since) = (0, now);
             }
         }
         if let Screen::FrontEnd(_) = &self.screen {
@@ -357,13 +460,15 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes()
             .with_title("Need for Speed: High Stakes - Rust rebuild")
-            .with_inner_size(winit::dpi::LogicalSize::new(1280, 960));
+            .with_inner_size(winit::dpi::LogicalSize::new(1280, 960))
+            .with_fullscreen(self.settings.fullscreen.then_some(Fullscreen::Borderless(None)));
         let window = Arc::new(el.create_window(attrs).expect("window"));
         let size = window.inner_size();
         let atlas = Atlas::new(256);
         let r = pollster::block_on(Renderer::new(Some(window.clone()), (size.width, size.height), &atlas)).expect("renderer");
         self.renderer = Some(r);
         self.window = Some(window);
+        self.apply_settings(None);
         match crate::audio::Audio::new() {
             Ok(a) => self.audio = Some(a),
             Err(e) => log::warn!("audio disabled: {e}"),
@@ -399,10 +504,42 @@ impl ApplicationHandler for App {
                     KeyCode::Tab => k.tab = down,
                     KeyCode::F1 => k.start = down,
                     KeyCode::KeyP if down && !repeat => self.autopilot = !self.autopilot,
+                    KeyCode::F4 if down && !repeat => {
+                        self.settings.bilinear = !self.settings.bilinear;
+                        if let Some(r) = &mut self.renderer {
+                            r.bilinear = self.settings.bilinear;
+                        }
+                        log::info!("bilinear filtering {}", if self.settings.bilinear { "on" } else { "off" });
+                    }
+                    KeyCode::F3 if down && !repeat => {
+                        self.settings.show_fps = !self.settings.show_fps;
+                        self.show_counter(self.settings.show_fps);
+                    }
+                    KeyCode::F5 if down && !repeat => {
+                        if let Some(w) = &self.window {
+                            self.settings.fullscreen = w.fullscreen().is_none();
+                            w.set_fullscreen(self.settings.fullscreen.then_some(Fullscreen::Borderless(None)));
+                        }
+                    }
+                    KeyCode::F6 if down && !repeat => {
+                        self.settings.crt = !self.settings.crt;
+                        if let Some(r) = &mut self.renderer {
+                            r.crt = self.settings.crt;
+                        }
+                        log::info!("CRT filter {}", if self.settings.crt { "on" } else { "off" });
+                    }
+                    KeyCode::F7 if down && !repeat => {
+                        self.settings.bloom = !self.settings.bloom;
+                        if let Some(r) = &mut self.renderer {
+                            r.bloom = self.settings.bloom;
+                        }
+                        log::info!("bloom {}", if self.settings.bloom { "on" } else { "off" });
+                    }
                     _ => {}
                 }
             }
             WindowEvent::RedrawRequested => {
+                self.pace();
                 self.frame(el);
                 if let Some(w) = &self.window {
                     w.request_redraw();
@@ -413,7 +550,7 @@ impl ApplicationHandler for App {
     }
 }
 
-pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<()> {
+pub fn run(data: &GameData, direct: Option<RaceConfigOwned>, settings: Settings, settings_path: PathBuf) -> anyhow::Result<()> {
     let el = EventLoop::new()?;
     let mut app = App {
         data: GameData::new(&data.root),
@@ -428,6 +565,11 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>) -> anyhow::Result<(
         rumble: Vec::new(),
         last: Instant::now(),
         fps: (0, Instant::now()),
+        next_frame: Instant::now(),
+        counter: None,
+        settings_seen: (std::fs::metadata(&settings_path).and_then(|m| m.modified()).ok(), Instant::now()),
+        settings,
+        settings_path,
         direct,
         movie: None,
         movie_voice: None,

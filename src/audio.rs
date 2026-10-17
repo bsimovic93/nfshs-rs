@@ -128,8 +128,10 @@ pub struct Audio {
 impl Audio {
     pub fn new() -> anyhow::Result<Self> {
         let host = cpal::default_host();
-        // NFSHS_AUDIO_DEVICE=name: an output device other than the default (by part of its name)
-        let chosen = std::env::var("NFSHS_AUDIO_DEVICE").ok().and_then(|want| {
+        // the settings' `device` or NFSHS_AUDIO_DEVICE=name: an output device other than the
+        // default (by part of its name)
+        let set = &crate::settings::get().audio_device;
+        let chosen = std::env::var("NFSHS_AUDIO_DEVICE").ok().or_else(|| (!set.is_empty()).then(|| set.clone())).and_then(|want| {
             host.output_devices().ok()?.find(|d| d.description().is_ok_and(|n| n.name().contains(want.as_str())))
         });
         let device = chosen.or_else(|| host.default_output_device()).ok_or_else(|| anyhow::anyhow!("no audio output device"))?;

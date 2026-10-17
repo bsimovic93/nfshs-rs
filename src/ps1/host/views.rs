@@ -119,7 +119,19 @@ impl GameHost {
                 // which track chunks to draw, and how (detail level)
                 c.call_nested(SETUP_BUILD_MATRICES, &[RENDER_VIEW, 0x1F80_0000]);
                 c.call_nested(DRAWW_WORLD_SETUP_MATRIX, &[G_WORLD_MAT, 0x1F80_0014]);
+                // (no distance pop-in: the build list's draw distance, full-detail ground
+                // distance (GetRezIndex) and road lines distance, from the track's render
+                // settings at gp + 0x248, are raised for the call)
+                let settings = c.m.r32(c.r[28].wrapping_add(0x248));
+                // (squared: 920, 240 and 140)
+                let limits = [0x8C, 0x94, 0x98].map(|o| (settings + o, c.m.r32(settings + o)));
+                for (a, _) in limits {
+                    c.m.w32(a, i32::MAX as u32);
+                }
                 let n = c.call_nested(SETUP_CHUNK_BUILD_LIST, &[RENDER_VIEW]);
+                for (a, v) in limits {
+                    c.m.w32(a, v);
+                }
                 c.m.w32(CHUNK_BUILD_COUNT, n);
                 // the objects drawn in those chunks and over the track (the original's own
                 // choice: knocked down, animated, shown from this slice)
