@@ -418,12 +418,30 @@ impl Game {
         p + to_cam / d.max(1e-3) * (0.25 + d * 0.06).min(1.2).min(d * 0.5)
     }
 
+    /// A ground shadow's corners in the world. They are the newest simulation state's (x and
+    /// z relative to the car's position then, y the road's height), while the car is drawn
+    /// at the render time, about two steps behind: moved with the car from where it is in
+    /// that state to where it is drawn (`drawn`, its model origin), or on a slope at speed
+    /// they lie a step further down (or up) the hill than the road under the drawn car.
+    fn shadow_quad(&self, corners: &[[i32; 3]; 4], newest: Option<&crate::ps1::race::CarState>, drawn: Vec3) -> [Vec3; 4] {
+        let (centre, shift) = match newest {
+            Some(c) => (original::v3(c.position), drawn - original::pose(c).pos),
+            None => (drawn, Vec3::ZERO),
+        };
+        corners.map(|v| {
+            let q = original::v3(v) + shift;
+            // (the original has no depth buffer: keep the quad from sinking under the road)
+            self.over_road(Vec3::new(centre.x + q.x, q.y.max(drawn.y) + 0.03, centre.z + q.z))
+        })
+    }
+
     /// The cars' ground shadows (DrawC_ShadowPrim): the "shdw" texture on the quad
     /// Newton_CalcRealShadowCoordinates computed, coloured by the light, subtracted.
     pub(super) fn shadows(&self) -> Vec<Vertex> {
         let mut out = Vec::new();
         let Some(facets) = self.car_facets() else { return out };
-        for (r, f) in self.racers.iter().zip(facets) {
+        let snap = self.sim.snapshot();
+        for (i, (r, f)) in self.racers.iter().zip(facets).enumerate() {
             let (Some(f), Some(uv)) = (f, self.shadow_tex) else { continue };
             let Some((corners, rgb)) = f.shadow else { continue };
             let s = car_light(f.light);
@@ -431,37 +449,29 @@ impl Game {
             if corners.iter().all(|c| *c == [0; 3]) {
                 continue;
             }
-            // (the original has no depth buffer: keep the quad from sinking under the road)
-            let ground = r.car.pos.y;
-            let p = corners.map(|v| {
-                let q = Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) / 65536.0;
-                self.over_road(Vec3::new(r.car.pos.x + q.x, q.y.max(ground) + 0.03, r.car.pos.z + q.z))
-            });
+            // (an overridden facet is not the snapshot's car: placed at the drawn car as it is)
+            let newest = snap.cars.get(i).filter(|_| self.car_facets_override.is_none());
+            let p = self.shadow_quad(&corners, newest, r.car.pos);
             for k in [0, 1, 3, 0, 3, 2] {
                 out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
             }
         }
-        // the traffic's shadows (their corners are relative to the car's simulated position)
+        // the traffic's shadows, under the traffic as drawn (traffic_geometry's poses)
         if let Some(uv) = self.shadow_tex {
-            let snap = self.sim.snapshot();
+            let poses = self.sim.poses().0;
             for &(k, _) in &self.traffic {
                 let Some(f) = snap.car_facets.get(k).and_then(Option::as_ref) else { continue };
                 if f.env.is_none() || snap.cars.get(k).is_some_and(|c| c.parked) {
                     continue;
                 }
                 let Some((corners, rgb)) = f.shadow else { continue };
-                let Some(car) = snap.cars.get(k) else { continue };
+                let (Some(car), Some(pose)) = (snap.cars.get(k), poses.get(k)) else { continue };
                 if corners.iter().all(|c| *c == [0; 3]) {
                     continue;
                 }
                 let s = car_light(f.light);
                 let c = rgb.map(|k| ((s * k as u32) >> 8) as f32 / 256.0);
-                let (cx, cz) = (-(car.position[0] as f32) / 65536.0, car.position[2] as f32 / 65536.0);
-                let ground = car.position[1] as f32 / 65536.0 - car.dimension[1] as f32 / 65536.0;
-                let p = corners.map(|v| {
-                    let q = Vec3::new(-(v[0] as f32), v[1] as f32, v[2] as f32) / 65536.0;
-                    self.over_road(Vec3::new(cx + q.x, q.y.max(ground) + 0.03, cz + q.z))
-                });
+                let p = self.shadow_quad(&corners, Some(car), pose.pos);
                 for k in [0, 1, 3, 0, 3, 2] {
                     out.push(Vertex { pos: p[k].into(), uv: uv[k], color: [c[0], c[1], c[2], 1.0] });
                 }
