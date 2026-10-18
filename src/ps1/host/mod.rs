@@ -240,10 +240,13 @@ const MENU_ITEM_SIZE: u32 = 44;
 /// ZTEXT's "ONE PLAYER" and "QUIT".
 const ONE_PLAYER_TEXT: u32 = 92;
 const QUIT_TEXT: u32 = 156;
-/// `__builtin_new(size)`: how the front end allocates its menu items.
-const BUILTIN_NEW: u32 = 0x800A_48C0;
 /// What the Quit item calls when chosen: no code, the host takes the call.
 const QUIT_CALLBACK: u32 = 0x8000_F000;
+/// The Quit item itself, in the kernel's RAM below the game (unused: the BIOS is the host's).
+/// Not on the heap: the front end never frees it (it deletes its items by its own pointers),
+/// and a block left there splits the memory the race loads into (Snowy Ridge's track no
+/// longer fits).
+const QUIT_ITEM: u32 = 0x8000_F010;
 
 /// A Quit at the bottom of the game setup menu (the console game has none): a copy of its
 /// Game Options item (its icon the plain one) that shows "QUIT", goes to no menu and calls
@@ -263,10 +266,7 @@ fn add_quit_item(c: &mut Cpu) {
     if items.len() != 4 {
         return;
     }
-    let item = c.call_nested(BUILTIN_NEW, &[MENU_ITEM_SIZE]);
-    if item == 0 {
-        return;
-    }
+    let item = QUIT_ITEM;
     for i in (0..MENU_ITEM_SIZE).step_by(4) {
         let w = c.m.r32(items[2] + i);
         c.m.w32(item + i, w);
