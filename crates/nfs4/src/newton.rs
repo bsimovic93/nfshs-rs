@@ -1419,7 +1419,7 @@ const GRAVITY: i32 = 0x4800;
 /// A car not simulated sits on the road. Otherwise the ground under its wheels gives its
 /// tilt, its shadow's frame and the ground's rise (its velocity); gravity pulls it down
 /// (twice while in the air, which counts its flight time). Landing: tilted, it strikes the
-/// ground as a plane (`Collide_TestWithPlane`, recompiled), a hard enough blow counting
+/// ground as a plane (`Collide_TestWithPlane`), a hard enough blow counting
 /// at least 20 (and landing on its side, it smokes); upright, the suspensions throw it up,
 /// and the blow (twice the change in its fall) can damage it and shake the pad. On the ground it skids slower over a steep rise
 /// and follows the ground's rise (less of it at low speed); in a tunnel it can't fly up
@@ -1490,7 +1490,7 @@ pub fn apply_the_law_of_gravity(c: &mut Cpu, obj: NewtonObj) {
                     let p = obj.road_center_point().get(&mut c.m);
                     at.set(&mut c.m, p);
                     at.set_y(&mut c.m, p.y.wrapping_sub(6553));
-                    abi::call(c, nfs4rc::f_8008e498, &[obj.0, normal.0, at.0]);
+                    crate::collide::test_with_plane(c, obj, normal, at);
                     let hit = obj.collision();
                     let blow = hit.impulse(&mut c.m);
                     if 0x5_0000 < blow {

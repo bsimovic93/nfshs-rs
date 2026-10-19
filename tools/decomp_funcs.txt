@@ -116,7 +116,9 @@
 8008c9e0 CHECK_CENTER_VERTEX_WITH_DIRS_OTHER
 8008ce6c CHECK_VERTEX_WITH_DIRS
 8008d234 CHECK_VERTEX_WITH_DIRS_OTHER
+8008d5fc Collide_DoObjectFixedObjectCollision
 8008e3a4 Collide_LimitAngularVel
+8008e498 Collide_TestWithPlane
 80091e64 Collide_CheckForCollisionBetween
 80091fc4 Collide_ClearCollisionRegistry
 800921c4 Collide_CheckAccuratePointRadiusCollision
