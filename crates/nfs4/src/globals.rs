@@ -80,6 +80,8 @@ pub const LEFT_MULT: I32 = I32(0x8013_E5F4);
 pub const RIGHT_MULT: I32 = I32(0x8013_E5F8);
 /// `slippery`: the track is wet or snowy.
 pub const SLIPPERY: I32 = I32(0x8013_E5FC);
+/// `currentWallType`: the kind of barrier last hit (its sound).
+pub const CURRENT_WALL_TYPE: I32 = I32(0x8013_E5E0);
 /// `exceedRedline`: the engine is past the redline (by 500 rpm) this frame.
 pub const EXCEED_REDLINE: I32 = I32(0x8013_E5E4);
 /// `powerControl`: the engine drives the wheels (they are on the ground).

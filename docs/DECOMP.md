@@ -33,7 +33,16 @@ collisions, AI), then the front end.
 - **Each function** is registered in `nfs4::FUNCS` with an ABI entry (`abi_*`), which reads
   a0..a3 and the stack arguments and writes v0. Decompiled code calls other decompiled code
   as plain Rust, and calls code still recompiled with `abi::call(c, nfs4rc::f_XXXXXXXX,
-  &[args])`. `abi::with_stack` reserves PS1 stack space for locals passed by address.
+  &[args])` from inside an `abi::frame`.
+- **The original's stack layout.** A function that calls recompiled code or passes a local
+  by address runs in `abi::frame(c, SIZE, |c, sp| ...)` with the original's frame size (its
+  `addiu sp, sp, -SIZE`), and keeps those locals at the original's offsets from `sp`. The
+  original reads stack it never wrote: `Physics_DoBarrierCheck` turns the car with a wall
+  normal it only sets on one path, so on the other it gets whatever an earlier call left
+  there. The decompiled code has to read and leave things where the original's would be.
+  Likewise a callee that homes its register arguments (`sw a2, 48(sp)` into the caller's
+  frame) writes them there too. In a race the stack is in the scratchpad (around
+  0x1F8002AC..0x1F8003DC for the physics), and the original's frames nearly fill it.
 
 ## Porting a function
 
@@ -56,7 +65,10 @@ collisions, AI), then the front end.
 
 - **Unit tests** (`cargo test -p nfs4 --release`) compare pure functions with their recompiled
   originals on a bare CPU, over edge cases and random inputs (they need `gamedata/NFS4.EXE`
-  for its tables).
+  for its tables). **Fuzz tests** do the same for whole functions on a real race's RAM
+  (`re/boot/ram.bin`, written by `BOOT_RAM=1 nfshs boot-race`), the player's car perturbed
+  into states races rarely reach: road-side control, upside down, at the barriers, every
+  setup. Test CPUs need the game's `gp` (0x8013D83C): its small globals are gp-relative.
 - **Shadow checks**: `NFSHS_DECOMP_CHECK=all` (or a list of names; add `abort` to stop at
   the first mismatch). Every call of a checked function from recompiled code runs the
   original first from a copy of the machine, then the Rust version from the same state, and
@@ -78,8 +90,7 @@ collisions, AI), then the front end.
 |---|---|
 | EA fixed-point library | `fixedmult`, `fixeddiv`, `fixedsqrt`, `fixedsin`/`cos`, `fastintsin`/`cos`, `fixedatan`, `make64`, `divu64`, `transpose` |
 | MATHNFS.CPP | `Math_ResolveRotatedVector`, `Math_NormalizeVector` |
-| PHYSICS.CPP | the `Physics_SimCar` tree: `Physics_Real`, `CalculateCarAcceleration`, `RampCarControlValues`, `AutoShift`, `CalculateTireForces`, `CalcTractionCircleAcc`, `CalcWheelLockAcc`, `CalculateRoadGripModifiers`, `CalculateRSControlDesiredPosition`, `StopCar`, `GetTorque` |
+| PHYSICS.CPP | all 22: the `Physics_SimCar` tree (`Physics_Real`, `CalculateCarAcceleration`, `RampCarControlValues`, `AutoShift`, `CalculateTireForces`, `CalcTractionCircleAcc`, `CalcWheelLockAcc`, `CalculateRoadGripModifiers`, `CalculateRSControlDesiredPosition`, `StopCar`, `GetTorque`), the barriers (`TestForBarrierCollision`, `DoBarrierCheck`, `AttenuateVelocity`, `CorrectPostCollisionYaw`, `FixEngineRpm`, `SetCurrentWallType`), the car specs (`InitCarSpecs`, `CalculateDerivedCarSpecs`), `ResetCar`, `CheckGamedata` |
 | CARS.CPP | `Cars_DoGravityEffectsOnAcc` |
 
-Next: the rest of PHYSICS.CPP (car specs, `AttenuateVelocity`, the barrier checks), then
-NEWTON.CPP, COLLIDE.CPP and BWORLDSM.CPP.
+Next: NEWTON.CPP, COLLIDE.CPP and BWORLDSM.CPP.

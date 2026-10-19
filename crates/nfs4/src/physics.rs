@@ -5,7 +5,7 @@ use crate::abi;
 use crate::fixed::{div, fixedatan, fixeddiv, fixedmult};
 use crate::mathnfs::resolve_rotated_vector;
 use crate::globals::*;
-use crate::types::{Car, WheelAcc};
+use crate::types::{Car, Coord, Matrix, WheelAcc};
 use ps1rt::Cpu;
 
 /// Tyre types (`GameSetup_tCarData.TireType`).
@@ -356,6 +356,10 @@ fn is_driveable_lane_in_slice_range(c: &mut Cpu, slice: i32, range: i32, side: i
 /// side `RSControl` asks for (the other one when there is no lane there): the outermost
 /// driveable lane within `range` slices of `slice`, by the slice's paved width.
 pub fn calculate_rs_control_desired_position(c: &mut Cpu, car: Car, slice: i32, range: i32) -> i32 {
+    abi::frame(c, 40, |c, _| rs_control_desired_position(c, car, slice, range))
+}
+
+fn rs_control_desired_position(c: &mut Cpu, car: Car, slice: i32, range: i32) -> i32 {
     let mut side = car.rs_control(&mut c.m).wrapping_mul(AITUNE_DRIVE_SIDE.get(&mut c.m));
     let here = car.n().sim_road_info().slice(&mut c.m) as i32;
     let road_position = car.road_position(&mut c.m);
@@ -923,6 +927,13 @@ fn mul_8_8(a: i32, b: i32) -> i32 {
 /// world velocities and spin, with drag and the damping of off-road, neutral and handbrake.
 /// Cars under road-side control steer and drive themselves toward their lane.
 pub fn real(c: &mut Cpu, car: Car) {
+    abi::frame(c, 280, |c, sp| real_in_frame(c, car, sp));
+}
+
+/// [`real`] in its stack frame at `sp`, its locals where the original keeps them: the axles'
+/// wheel structures at +16 and +64, gravity at +112, the yaw at +128, the road's velocity at
+/// +144, the frame's transpose at +160 and road-side control's target at +200..+240.
+fn real_in_frame(c: &mut Cpu, car: Car, sp: u32) {
     let n = car.n();
     let acc_ch = car.linear_acc_ch();
     acc_ch.set(&mut c.m, crate::vec::Vec3::default());
@@ -957,21 +968,22 @@ pub fn real(c: &mut Cpu, car: Car) {
     // front and taking it away at the rear
     let ground = vel.map(|v| (v << 5).wrapping_neg() / 2);
     let yaw = (fixedmult(n.angular_vel().y(&mut c.m) << 5, specs.alpha_to_acc_rot_inertia(&mut c.m))).wrapping_neg() / 2;
-    let g = mat_vec(&frame, [0, -0xA_0000, 0]);
+    Coord(sp + 144).set(&mut c.m, ground.into());
+    let down = [0, -0xA_0000, 0];
+    Coord(sp + 112).set(&mut c.m, down.into());
+    let g = mat_vec(&frame, down);
     GRAVITY_CH.set(&mut c.m, g.into());
 
-    abi::with_stack(c, 2 * WheelAcc::SIZE, |c, at| {
-        let (front, rear) = (WheelAcc(at), WheelAcc(at + WheelAcc::SIZE));
-        front.vel_cap().set(&mut c.m, crate::vec::Vec3::new(ground[0].wrapping_add(yaw), ground[1], ground[2]));
-        rear.vel_cap().set(&mut c.m, crate::vec::Vec3::new(ground[0].wrapping_sub(yaw), ground[1], ground[2]));
-        ramp_car_control_values(c, car);
-        let angle = steering_angle(c, car);
-        front.set_steering_angle(&mut c.m, angle);
-        rear.set_steering_angle(&mut c.m, 0);
-        front.set_front_tire(&mut c.m, 1);
-        rear.set_front_tire(&mut c.m, 0);
-        real_on_wheels(c, car, front, rear);
-    });
+    let (front, rear) = (WheelAcc(sp + 16), WheelAcc(sp + 64));
+    front.vel_cap().set(&mut c.m, crate::vec::Vec3::new(ground[0].wrapping_add(yaw), ground[1], ground[2]));
+    rear.vel_cap().set(&mut c.m, crate::vec::Vec3::new(ground[0].wrapping_sub(yaw), ground[1], ground[2]));
+    ramp_car_control_values(c, car);
+    let angle = steering_angle(c, car);
+    front.set_steering_angle(&mut c.m, angle);
+    rear.set_steering_angle(&mut c.m, 0);
+    front.set_front_tire(&mut c.m, 1);
+    rear.set_front_tire(&mut c.m, 0);
+    real_on_wheels(c, car, sp);
 }
 
 /// `BWorldSm_TunnelFlagSm` (still recompiled): 1 where the car's road quad is in a tunnel.
@@ -1013,8 +1025,9 @@ fn steering_angle(c: &mut Cpu, car: Car) -> i32 {
     angle
 }
 
-/// The rest of [`real`], with the two axles' wheel structures.
-fn real_on_wheels(c: &mut Cpu, car: Car, front: WheelAcc, rear: WheelAcc) {
+/// The rest of [`real`], with the axles' wheel structures in place.
+fn real_on_wheels(c: &mut Cpu, car: Car, sp: u32) {
+    let (front, rear) = (WheelAcc(sp + 16), WheelAcc(sp + 64));
     let n = car.n();
     let specs = car.specs(&mut c.m);
     let control = car.control();
@@ -1125,7 +1138,9 @@ fn real_on_wheels(c: &mut Cpu, car: Car, front: WheelAcc, rear: WheelAcc) {
 
     // back into the world: accelerations, then velocities (a 32nd of them a step; the yaw a
     // 64th)
+    Coord(sp + 128).set(&mut c.m, [0, yaw, 0].into());
     let to_world = transposed(&n.shadow_mat().get(&mut c.m).m);
+    Matrix(sp + 160).set(&mut c.m, &crate::vec::Mat3 { m: to_world });
     crate::cars::do_gravity_effects_on_acc(c, car);
     let acc = mat_vec(&to_world, car.linear_acc_ch().get(&mut c.m).into());
     car.linear_acc().set(&mut c.m, acc.into());
@@ -1141,7 +1156,7 @@ fn real_on_wheels(c: &mut Cpu, car: Car, front: WheelAcc, rear: WheelAcc) {
     spin.update_z(&mut c.m, |v| v.wrapping_add(alpha[2] / 32));
 
     if car.rs_control(&mut c.m) != 0 {
-        rs_control_drive(c, car);
+        rs_control_drive(c, car, sp);
     }
 
     // drag off the throttle or sliding (unless the cheat), off-road slowing at speed, the
@@ -1174,7 +1189,7 @@ fn real_on_wheels(c: &mut Cpu, car: Car, front: WheelAcc, rear: WheelAcc) {
 
 /// Road-side control driving the car: throttle and brake toward its desired speed, steering
 /// toward its lane a few slices ahead.
-fn rs_control_drive(c: &mut Cpu, car: Car) {
+fn rs_control_drive(c: &mut Cpu, car: Car, sp: u32) {
     let n = car.n();
     let specs = car.specs(&mut c.m);
     let gear = |c: &mut Cpu| (car.control().gear(&mut c.m) as u8).max(2) as u32;
@@ -1219,6 +1234,7 @@ fn rs_control_drive(c: &mut Cpu, car: Car) {
     }
     let range = ahead.wrapping_mul(3).wrapping_abs();
     let pos = n.position().get(&mut c.m);
+    Coord(sp + 200).set(&mut c.m, pos);
     let at = |c: &mut Cpu| crate::types::TrkNewSlice(BWORLDSM_SLICES.get(&mut c.m) as u32).at(slice as u32);
     let s = at(c);
     let center = [0, 1, 2].map(|i| s.center(&mut c.m, i));
@@ -1230,12 +1246,11 @@ fn rs_control_drive(c: &mut Cpu, car: Car) {
         center[1].wrapping_add(off[1]).wrapping_sub(pos.y),
         center[2].wrapping_add(off[2]).wrapping_sub(pos.z),
     );
-    let dir = abi::with_stack(c, 12, |c, at| {
-        let v = crate::types::Coord(at);
-        v.set(&mut c.m, to);
-        crate::mathnfs::normalize_vector(c, v);
-        v.get(&mut c.m)
-    });
+    Coord(sp + 232).set(&mut c.m, off.into());
+    let target = Coord(sp + 216);
+    target.set(&mut c.m, to);
+    crate::mathnfs::normalize_vector(c, target);
+    let dir = target.get(&mut c.m);
     // steer by how far the lane is to the right
     let orient = n.orient_mat();
     let right = fixedmult(dir.x, orient.m(&mut c.m, 0))
@@ -1251,6 +1266,10 @@ pub fn abi_real(c: &mut Cpu) {
 /// `Physics_SimCar` (PHYSICS.CPP, 0x800ae1dc): a car's physics step. Upright enough it drives
 /// ([`real`]); on its side or roof the engine winds down and the car slides to a stop.
 pub fn sim_car(c: &mut Cpu, car: Car) {
+    abi::frame(c, 24, |c, _| sim_car_in_frame(c, car));
+}
+
+fn sim_car_in_frame(c: &mut Cpu, car: Car) {
     if car.n().orientation_to_ground().y(&mut c.m) >= 6553 {
         real(c, car);
         return;
@@ -1268,6 +1287,364 @@ pub fn sim_car(c: &mut Cpu, car: Car) {
 
 pub fn abi_sim_car(c: &mut Cpu) {
     sim_car(c, Car(c.r[4]));
+}
+
+/// `Physics_InitCarSpecs` (PHYSICS.CPP, 0x800a935c): the car's specifications as its data file
+/// lists them: every field of `Car_tSpecs` from `mass` to `dragFactor`, in order.
+pub fn init_car_specs(c: &mut Cpu, car: Car, file: u32) {
+    abi::frame(c, 32, |c, _| {
+        for field in 0..=0x158 / 4 {
+            let v = abi::call(c, nfs4rc::f_800bc8f8, &[file]);
+            let specs = car.specs(&mut c.m);
+            c.m.w32(specs.0 + 4 * field, v);
+        }
+    });
+}
+
+pub fn abi_init_car_specs(c: &mut Cpu) {
+    init_car_specs(c, Car(c.r[4]), c.r[5]);
+}
+
+/// `Physics_CalculateDerivedCarSpecs` (PHYSICS.CPP, 0x800a95f8): the specifications with the
+/// player's upgrades (weight transfer: quicker steering; ground effects: downforce, grip and
+/// less weight; engine mods: torque, top speed, brakes and quicker shifts), then what the
+/// physics derives from them: per gear the inverse ratios, the drive coefficients and the
+/// top speeds; the drag that balances the drive at top speed; the rotational inertias.
+/// Raceways (tracks 8 and up) get more engine braking, more rear brake and more front grip.
+pub fn calculate_derived_car_specs(c: &mut Cpu, car: Car) {
+    let specs = car.specs(&mut c.m);
+    let m = &mut c.m;
+    let redline = specs.redline(m);
+    specs.set_redline_inv(m, div(0x1_0000, redline));
+    let info = car.car_info(m);
+    if info.weight_transfer(m) == 1 {
+        specs.update_steering_ramp(m, |v| v.wrapping_add(1));
+        specs.update_max_steering_acc(m, |v| fixedmult(v, 0x1_147A));
+    }
+    if info.ground_effects(m) == 1 {
+        specs.update_steering_ramp(m, |v| v.wrapping_add(1));
+        specs.update_front_aero_down_force(m, |v| fixedmult(v, 0x1_3333));
+        specs.update_rear_aero_down_force(m, |v| fixedmult(v, 0x1_3333));
+        specs.update_mass(m, |v| fixedmult(v, 0xCCCC));
+        specs.update_lateral_grip_mult(m, |v| fixedmult(v, 0x1_1999));
+    }
+    if info.engine_mods(m) == 1 {
+        specs.update_gear_shift_delay(m, |v| v / 2);
+        specs.update_max_brake_acc(m, |v| fixedmult(v, 0x1_4000));
+        for i in 0..41 {
+            specs.update_torque_curve(m, i, |v| fixedmult(v, 0x1_2666));
+        }
+        specs.update_max_speed(m, |v| fixedmult(v, 0x1_1999));
+    }
+    let mut gear = 0;
+    while gear < specs.num_gears(m) {
+        let g = gear as u32;
+        let ratio = specs.vel_to_rpm_ratio(m, g);
+        specs.set_vel_to_rpm_ratio_inv(m, g, if ratio == 0 { 655 } else { fixeddiv(0x1_0000, ratio) });
+        let coeff = fixeddiv(specs.vel_to_rpm_ratio(m, g), specs.mass(m));
+        let coeff = fixeddiv(coeff, 0xA_0000);
+        let efficiency = specs.gear_efficiency(m, g);
+        specs.set_gear_acc_coeff(m, g, fixedmult(coeff, efficiency));
+        let top = fixedmult(specs.vel_to_rpm_ratio_inv(m, g), specs.redline(m) << 16);
+        specs.set_gear_vel_inv(m, g, fixeddiv(0x1_0000, top));
+        gear += 1;
+    }
+    // the drag: what the top gear's drive gives at top speed, by the speed cubed
+    let top_gear = (specs.num_gears(m) - 1) as u32;
+    let top_rpm = fixedmult(specs.max_speed(m), specs.vel_to_rpm_ratio(m, top_gear)) / 0x1_0000;
+    let drive = fixedmult(specs.torque_curve(m, (top_rpm / 256) as u32), specs.gear_acc_coeff(m, top_gear));
+    let top = specs.max_speed(m) / 0x1_0000;
+    specs.set_drag_coeff(m, fixeddiv(drive, top.wrapping_mul(top).wrapping_mul(top)));
+    if GAME_SETUP.track(m) >= 8 {
+        specs.update_gas_off_factor(m, |v| v.wrapping_add(9830));
+        specs.update_front_brake_ratio(m, |v| v.wrapping_sub(9830));
+        specs.update_front_grip_bias(m, |v| v.wrapping_add(327));
+    }
+    let inertia = fixedmult(0x1_0000, specs.wheel_base(m) / 2);
+    let inertia = fixedmult(inertia, 1608) << 8;
+    specs.set_alpha_to_acc_rot_inertia(m, inertia);
+    specs.set_acc_to_alpha_rot_inertia(m, fixeddiv(0x1_0000, inertia));
+    let grip = specs.lateral_grip_mult(m);
+    specs.set_lateral_grip_mult_inv(m, fixeddiv(0x1_0000, grip));
+}
+
+pub fn abi_calculate_derived_car_specs(c: &mut Cpu) {
+    calculate_derived_car_specs(c, Car(c.r[4]));
+}
+
+/// `Physics_CheckGamedata` (PHYSICS.CPP, 0x800a9b08): nothing (left over).
+pub fn check_gamedata() {}
+
+pub fn abi_check_gamedata(_: &mut Cpu) {
+    check_gamedata();
+}
+
+/// `Physics_SetCurrentWallType` (PHYSICS.CPP, 0x800a9f6c): the kind of wall hit, for its sound.
+pub fn set_current_wall_type(c: &mut Cpu, kind: i32) {
+    CURRENT_WALL_TYPE.set(&mut c.m, kind);
+}
+
+pub fn abi_set_current_wall_type(c: &mut Cpu) {
+    set_current_wall_type(c, c.r[4] as i32);
+}
+
+/// `Physics_AttenuateVelocity` (PHYSICS.CPP, 0x800a9b10): a car against the barrier whose road
+/// frame is `frame` (rows: across, up, along). It is pushed back by `push` across the road,
+/// loses its velocity into the barrier and some along it (by the impact), and can't rise off
+/// it; returns half the impact speed.
+pub fn attenuate_velocity(c: &mut Cpu, car: Car, push: i32, frame: crate::types::Matrix) -> i32 {
+    abi::frame(c, 96, |c, sp| {
+        let n = car.n();
+        let f = frame.get(&mut c.m).m;
+        let out = [mul_8_8(push, f[0]), mul_8_8(push, f[3]), mul_8_8(push, f[6]).wrapping_add(mul_8_8(0, f[7]))];
+        let pos = n.position();
+        pos.update_x(&mut c.m, |v| v.wrapping_sub(out[0]));
+        pos.update_z(&mut c.m, |v| v.wrapping_add(out[2]));
+        pos.update_y(&mut c.m, |v| v.wrapping_add(out[1]));
+        // the velocity in the barrier's frame: into it, along it
+        let vel = n.linear_vel().get(&mut c.m);
+        let dot = |r: usize| mul_8_8(vel.x, f[r]).wrapping_add(mul_8_8(vel.y, f[r + 1])).wrapping_add(mul_8_8(vel.z, f[r + 2]));
+        let into = dot(0).wrapping_neg();
+        let mut along = dot(6);
+        let impact = into.wrapping_abs() >> 1;
+        // above 5 m/s the impact takes speed off along the barrier, down to a stop
+        let loss = (impact / 256).wrapping_mul(192);
+        if along > 0 {
+            if 0x5_0000 < along {
+                along = along.wrapping_sub(loss).max(0);
+            }
+        } else if along < -0x5_0000 {
+            along = along.wrapping_add(loss).min(0);
+        }
+        let kept = [0, 0, along];
+        Coord(sp + 16).set(&mut c.m, kept.into());
+        let back = transposed(&f);
+        Matrix(sp + 32).set(&mut c.m, &crate::vec::Mat3 { m: back });
+        let world = mat_vec(&back, kept);
+        let v = n.linear_vel();
+        v.set_x(&mut c.m, world[0]);
+        v.set_z(&mut c.m, world[2]);
+        if v.y(&mut c.m) > 0 {
+            v.set_y(&mut c.m, 0);
+        }
+        let orient = n.orient_mat().get(&mut c.m).m;
+        let vel = v.get(&mut c.m);
+        car.linear_vel_ch().set(&mut c.m, mat_vec(&orient, vel.into()).into());
+        n.set_speed_xz(&mut c.m, quick_length(vel.x, vel.z));
+        impact
+    })
+}
+
+pub fn abi_attenuate_velocity(c: &mut Cpu) {
+    c.r[2] = attenuate_velocity(c, Car(c.r[4]), c.r[5] as i32, crate::types::Matrix(c.r[6])) as u32;
+}
+
+/// `Physics_CorrectPostCollisionYaw` (PHYSICS.CPP, 0x800a9fb4): after hitting a barrier with
+/// `impact` (normal `normal`), the collision's sound and impulse, and (unless it was hard and
+/// fast) a yaw turning the car along the barrier: by how much it faces into it, less when
+/// steering away at speed.
+pub fn correct_post_collision_yaw(c: &mut Cpu, car: Car, impact: i32, normal: crate::vec::Vec3) {
+    // the normal is passed in a2, a3 and on the stack; the original keeps the first two in
+    // their home slots, so the whole of it is in the caller's frame
+    Coord(c.r[29] + 8).set(&mut c.m, normal);
+    let n = car.n();
+    let hit = n.collision();
+    hit.set_impulse(&mut c.m, impact.wrapping_mul(6));
+    hit.set_other_obj(&mut c.m, crate::types::NewtonObj(0));
+    let kind = CURRENT_WALL_TYPE.get(&mut c.m) | 0x4_0000;
+    hit.set_sfx_type(&mut c.m, kind);
+    if 0xE_FFFF < impact && 0x13_FFFF < car.linear_vel_ch().z(&mut c.m) {
+        return;
+    }
+    let f = n.shadow_mat().get(&mut c.m).m;
+    let along = mat_vec(&f, normal.into());
+    let (ahead, across) = (along[2], along[0]);
+    let mut yaw = ahead.wrapping_abs().min(across.wrapping_abs()) >> 1;
+    if ahead < 0 {
+        if across < 0 {
+            yaw = yaw.wrapping_neg();
+        }
+    } else {
+        if across > 0 {
+            yaw = yaw.wrapping_neg();
+        }
+        yaw >>= 1;
+    }
+    if 0xD_6666 < car.linear_vel_ch().z(&mut c.m) {
+        let steering = car.control().steering(&mut c.m);
+        if (yaw > 0 && steering > 0) || (yaw < 0 && steering < 0) {
+            yaw >>= 2;
+        }
+    }
+    n.angular_vel().set_y(&mut c.m, yaw);
+}
+
+pub fn abi_correct_post_collision_yaw(c: &mut Cpu) {
+    let z = abi::arg(c, 4);
+    correct_post_collision_yaw(c, Car(c.r[4]), c.r[5] as i32, crate::vec::Vec3::new(c.r[6] as i32, c.r[7] as i32, z as i32));
+}
+
+/// `Physics_DoBarrierCheck` (PHYSICS.CPP, 0x800aa14c): whether the car (where it will be next
+/// step) reaches past the road's driveable edges: -1 on the left, 1 on the right, 0 not. A
+/// car in the air or tilted bounces off the barrier's plane; one on its wheels is pushed
+/// back along the road and turned along the barrier.
+///
+/// The original turns it with a normal it only sets for the bounce: on the wheels it is
+/// whatever an earlier call left at that place on the stack (an earlier bounce's normal, or
+/// in the race image `Physics_Real`'s front wheel structure), so this keeps the original's
+/// stack frame and reads and writes the normal there.
+pub fn do_barrier_check(c: &mut Cpu, car: Car) -> i32 {
+    abi::frame(c, 120, |c, sp| {
+        let n = car.n();
+        let slice = n.sim_road_info().slice(&mut c.m) as i32;
+        let at = |c: &mut Cpu| crate::types::TrkNewSlice(BWORLDSM_SLICES.get(&mut c.m) as u32).at(slice as u32);
+        let s = at(c);
+        let right = [0, 1, 2].map(|i| (s.right(&mut c.m, i) as i32) << 9);
+        Coord(sp + 40).set(&mut c.m, right.into());
+        // the car's centre next step from the slice's centre, across the road
+        let pos = n.position().get(&mut c.m);
+        let vel = n.linear_vel().get(&mut c.m);
+        let center = [0, 1, 2].map(|i| s.center(&mut c.m, i));
+        let d = [pos.x.wrapping_add(vel.x >> 5), pos.y.wrapping_add(vel.y >> 5), pos.z.wrapping_add(vel.z >> 5)];
+        let d: [i32; 3] = std::array::from_fn(|i| d[i].wrapping_sub(center[i]));
+        Coord(sp + 24).set(&mut c.m, d.into());
+        let dot = |a: [i32; 3], b: [i32; 3]| mul_8_8(a[0], b[0]).wrapping_add(mul_8_8(a[1], b[1])).wrapping_add(mul_8_8(a[2], b[2]));
+        let off = dot(right, d);
+        n.set_x_rel_road_center(&mut c.m, off);
+        // how far the car reaches across the road: its length and width by its heading
+        let o = n.orient_mat().get(&mut c.m).m;
+        let dim = n.dimension().get(&mut c.m);
+        let reach = fixedmult(dim.z, dot([o[6], o[7], o[8]], right)).wrapping_abs();
+        let reach = reach.wrapping_add(mul_8_8(dim.x, dot([o[0], o[1], o[2]], right)).wrapping_abs());
+        let allowance = car.extra_wall_collision_allowance(&mut c.m);
+        let s = at(c);
+        let mut side = 0i32;
+        let mut depth = 0i32;
+        let left = reach.wrapping_sub((s.left_drive(&mut c.m) as i32) << 8);
+        if off < left.wrapping_sub(allowance) {
+            side = -1;
+            depth = left.wrapping_sub(off);
+            CURRENT_WALL_TYPE.set(&mut c.m, 1);
+        }
+        let right_edge = ((s.right_drive(&mut c.m) as i32) << 8).wrapping_sub(reach);
+        if right_edge.wrapping_add(allowance) < off {
+            side = 1;
+            depth = off.wrapping_sub(right_edge);
+            CURRENT_WALL_TYPE.set(&mut c.m, 1);
+        }
+        if side == 0 {
+            return 0;
+        }
+        if abi::call(c, nfs4rc::f_800cbeb8, &[car.0]) != 0 {
+            abi::call(c, nfs4rc::f_800cbf64, &[0x1E_0000]);
+        }
+        // the point of contact: the car's side
+        let half = dim.x / 256;
+        let push = right.map(|r| half.wrapping_mul(r) / 256);
+        Coord(sp + 72).set(&mut c.m, push.into());
+        let contact: [i32; 3] = std::array::from_fn(|i| {
+            let p = [pos.x, pos.y, pos.z][i];
+            if side > 0 { p.wrapping_add(push[i]) } else { p.wrapping_sub(push[i]) }
+        });
+        n.collision().collision_point().set(&mut c.m, contact.into());
+        let normal = Coord(sp + 56);
+        if n.obj_altitude(&mut c.m) > 0x9999 || n.orientation_to_ground().y(&mut c.m) <= 0xE665 || n.flight_time(&mut c.m) != 0 {
+            // a bounce off the barrier's plane
+            let facing = if side < 0 { right } else { right.map(i32::wrapping_neg) };
+            normal.set(&mut c.m, facing.into());
+            abi::call(c, nfs4rc::f_8008e498, &[car.0, normal.0, n.position().0]);
+            let hit = n.collision();
+            if hit.impulse(&mut c.m) != 0 {
+                hit.set_other_obj(&mut c.m, crate::types::NewtonObj(0));
+                let kind = CURRENT_WALL_TYPE.get(&mut c.m) | 0x4_0000;
+                hit.set_sfx_type(&mut c.m, kind);
+            }
+        } else {
+            let impact = attenuate_velocity(c, car, side.wrapping_mul((depth << 1).wrapping_abs()), n.road_matrix());
+            // the normal as the stack holds it
+            let normal = normal.get(&mut c.m);
+            correct_post_collision_yaw(c, car, impact, normal);
+        }
+        side
+    })
+}
+
+pub fn abi_do_barrier_check(c: &mut Cpu) {
+    c.r[2] = do_barrier_check(c, Car(c.r[4])) as u32;
+}
+
+/// `Car_tObj.carFlags`: the car is a human player's.
+const CAR_HUMAN: i32 = 4;
+
+/// `Physics_TestForBarrierCollision` (PHYSICS.CPP, 0x800ab444): the barrier check, a hit
+/// noted on the car (`crash`, its side); a player's car gets its velocities set again.
+pub fn test_for_barrier_collision(c: &mut Cpu, car: Car) {
+    abi::frame(c, 32, |c, _| {
+        let side = do_barrier_check(c, car);
+        if side != 0 {
+            if car.car_flags(&mut c.m) & CAR_HUMAN != 0 {
+                fix_engine_rpm(c, car);
+            }
+            car.set_crash(&mut c.m, side);
+        }
+    });
+}
+
+pub fn abi_test_for_barrier_collision(c: &mut Cpu) {
+    test_for_barrier_collision(c, Car(c.r[4]));
+}
+
+/// `Physics_FixEngineRpm` (PHYSICS.CPP, 0x800ab178): after a hit, the velocity in the car's
+/// frame again (across and along) and the tyres back to rolling; a hard hit's collision is
+/// cleared. (Despite its name it leaves the engine alone.)
+pub fn fix_engine_rpm(c: &mut Cpu, car: Car) {
+    let n = car.n();
+    let f = n.shadow_mat().get(&mut c.m).m;
+    let vel = n.linear_vel().get(&mut c.m);
+    let dot = |r: usize| mul_8_8(vel.x, f[r]).wrapping_add(mul_8_8(vel.y, f[r + 1])).wrapping_add(mul_8_8(vel.z, f[r + 2]));
+    let ch = car.linear_vel_ch();
+    ch.set_x(&mut c.m, dot(0));
+    ch.set_z(&mut c.m, dot(6));
+    car.set_wheel_spin(&mut c.m, 0);
+    car.set_slide(&mut c.m, 0);
+    car.set_front_skid(&mut c.m, 0);
+    car.set_rear_skid(&mut c.m, 0);
+    let hit = n.collision();
+    if hit.collided(&mut c.m) == 2 {
+        hit.set_collided(&mut c.m, 0);
+    }
+}
+
+pub fn abi_fix_engine_rpm(c: &mut Cpu) {
+    fix_engine_rpm(c, Car(c.r[4]));
+}
+
+/// `Physics_ResetCar` (PHYSICS.CPP, 0x800ab2d0): a car put back on the road: in first (an
+/// automatic) or neutral, at rest, nothing spinning, sliding or crashed.
+pub fn reset_car(c: &mut Cpu, car: Car) {
+    let m = &mut c.m;
+    let gear = if car.car_info(m).transmission(m) == TRANSMISSION_AUTOMATIC { GEAR_FIRST } else { GEAR_NEUTRAL } as i8;
+    car.control().set_desired_gear(m, gear);
+    car.control().set_gear(m, gear);
+    let zero = crate::vec::Vec3::default();
+    for v in [car.linear_acc(), car.angular_acc(), car.linear_vel_ch(), car.angular_vel_ch()] {
+        v.set(m, zero);
+    }
+    car.set_wheel_spin(m, 0);
+    car.set_slide(m, 0);
+    car.set_front_skid(m, 0);
+    car.set_rear_skid(m, 0);
+    car.set_crash(m, 0);
+    car.set_blowout(m, 0);
+    car.control().set_hanno(m, 0);
+    for w in 0..4 {
+        car.wheel(w).set_wheel_in_air(m, 0);
+        car.wheel(w).set_rebound(m, 0);
+    }
+}
+
+pub fn abi_reset_car(c: &mut Cpu) {
+    reset_car(c, Car(c.r[4]));
 }
 
 #[cfg(test)]
@@ -1373,29 +1750,46 @@ mod tests {
         SIM_COUNTER.set(m, [400, 515, 518, 2000][pick(4) as usize]);
     }
 
-    /// `Physics_SimCar` on perturbed real race states, against its recompiled original.
-    #[test]
-    fn sim_car_fuzz() {
+    /// The car moved across the road by up to 40 m either way (the race image's road is 53 m
+    /// wide), off the ground some of the time.
+    fn toward_barriers(c: &mut Cpu, car: Car, rng: &mut Rng) {
+        let n = car.n();
+        let slice = n.sim_road_info().slice(&mut c.m) as u32;
+        let s = crate::types::TrkNewSlice(BWORLDSM_SLICES.get(&mut c.m) as u32).at(slice);
+        let across = (rng.next() % 0x50_0000) as i32 - 0x28_0000;
+        let right = [0, 1, 2].map(|i| (s.right(&mut c.m, i) as i32) << 9);
+        let pos = n.position();
+        pos.update_x(&mut c.m, |v| v.wrapping_add(fixedmult(right[0], across)));
+        pos.update_y(&mut c.m, |v| v.wrapping_add(fixedmult(right[1], across)));
+        pos.update_z(&mut c.m, |v| v.wrapping_add(fixedmult(right[2], across)));
+        n.set_flight_time(&mut c.m, (rng.next() % 4 == 0) as u16);
+        car.set_extra_wall_collision_allowance(&mut c.m, (rng.next() % 0x2_0000) as i32);
+    }
+
+    /// `port` against the recompiled `original` (both called with the player's car) on
+    /// `cases` perturbed real race states.
+    fn against_original(name: &str, cases: u32, seed: u64, more: fn(&mut Cpu, Car, &mut Rng), original: fn(&mut Cpu), port: fn(&mut Cpu, Car)) {
         let Some(ram) = race_ram() else { return };
-        let mut rng = Rng(0xC0FFEE);
+        let mut rng = Rng(seed);
         let car = Car(u32::from_le_bytes(ram[0x11_0CA0..0x11_0CA4].try_into().unwrap()));
         let mut c = cpu_with(&ram);
         let mut mismatches = 0;
-        for i in 0..20_000 {
+        for i in 0..cases {
             c.m.ram.copy_from_slice(&ram);
             perturb(&mut c, car, &mut rng);
+            more(&mut c, car, &mut rng);
             let state = c.m.ram.clone();
-            crate::test_util::run(&mut c, nfs4rc::f_800ae1dc, &[car.0]);
+            crate::test_util::run(&mut c, original, &[car.0]);
             let want = c.m.ram.clone();
             c.m.ram.copy_from_slice(&state);
-            sim_car(&mut c, car);
+            port(&mut c, car);
             // the stack below 0x801FFF00 is dead
             let dead = 0x1F_0000..0x1F_FF00;
             let diff: Vec<usize> = (0..want.len()).step_by(4).filter(|a| !dead.contains(a) && want[*a..a + 4] != c.m.ram[*a..a + 4]).collect();
             if !diff.is_empty() {
                 mismatches += 1;
                 if mismatches <= 5 {
-                    eprintln!("case {i}: {} words differ", diff.len());
+                    eprintln!("{name} case {i}: {} words differ", diff.len());
                     for &a in diff.iter().take(10) {
                         let w = |r: &[u8]| u32::from_le_bytes(r[a..a + 4].try_into().unwrap());
                         let addr = 0x8000_0000 | a as u32;
@@ -1404,6 +1798,26 @@ mod tests {
                 }
             }
         }
-        assert_eq!(mismatches, 0, "Physics_SimCar differs from the original");
+        assert_eq!(mismatches, 0, "{name} differs from the original");
+    }
+
+    /// `Physics_SimCar` on perturbed real race states.
+    #[test]
+    fn sim_car_fuzz() {
+        against_original("Physics_SimCar", 20_000, 0xC0FFEE, |_, _, _| {}, nfs4rc::f_800ae1dc, sim_car);
+    }
+
+    /// The barrier test (and through it the push back, the yaw correction and the bounce
+    /// off the barrier's plane) with the car moved toward the barriers.
+    #[test]
+    fn barrier_fuzz() {
+        against_original("Physics_TestForBarrierCollision", 20_000, 0xBA221E2, toward_barriers, nfs4rc::f_800ab444, test_for_barrier_collision);
+    }
+
+    #[test]
+    fn reset_and_specs_fuzz() {
+        against_original("Physics_ResetCar", 2_000, 7, |_, _, _| {}, nfs4rc::f_800ab2d0, reset_car);
+        against_original("Physics_CalculateDerivedCarSpecs", 2_000, 8, |_, _, _| {}, nfs4rc::f_800a95f8, calculate_derived_car_specs);
+        against_original("Physics_FixEngineRpm", 2_000, 9, |_, _, _| {}, nfs4rc::f_800ab178, fix_engine_rpm);
     }
 }

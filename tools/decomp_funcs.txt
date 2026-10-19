@@ -5,7 +5,16 @@
 # The math library (fixedmult, fixeddiv...) is decompiled too but not routed: the whole game
 # calls it, and its unit tests compare it with the original over all edge cases instead.
 
-# PHYSICS.CPP: the Physics_SimCar tree
+# PHYSICS.CPP
+800a935c Physics_InitCarSpecs
+800a95f8 Physics_CalculateDerivedCarSpecs
+800a9b08 Physics_CheckGamedata
+800a9b10 Physics_AttenuateVelocity
+800a9f6c Physics_SetCurrentWallType
+800a9fb4 Physics_CorrectPostCollisionYaw
+800aa14c Physics_DoBarrierCheck
+800ab178 Physics_FixEngineRpm
+800ab2d0 Physics_ResetCar
 800ae1dc Physics_SimCar
 800acdf8 Physics_Real
 800ab618 Physics_CalculateCarAcceleration
@@ -17,6 +26,7 @@
 800acc38 Physics_CalculateRSControlDesiredPosition
 800aa6e4 Physics_AutoShift
 800ab36c Physics_StopCar
+800ab444 Physics_TestForBarrierCollision
 800a9f78 Physics_GetTorque
 
 # CARS.CPP

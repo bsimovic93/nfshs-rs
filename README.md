@@ -22,7 +22,7 @@ from your own disc image: no emulator, and no game data in this repository.
   are the game's own, step for step.
 - **Decompiled, function by function.** `crates/nfs4` replaces the recompiled code with
   readable Rust that gives the same results to the bit, checked against the original as it
-  goes. The car handling (PHYSICS.CPP) is done. See [`docs/DECOMP.md`](docs/DECOMP.md).
+  goes. The car handling (all of PHYSICS.CPP) is done. See [`docs/DECOMP.md`](docs/DECOMP.md).
 - **The hardware, replaced.** The PS1's libraries are high-level replacements in
   `src/ps1/host/`: CD and files read from the extracted disc; the pads come from keyboard
   and gamepads, with DualShock analog and vibration; the memory card is an image file;
