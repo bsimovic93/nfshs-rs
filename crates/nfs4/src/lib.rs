@@ -93,6 +93,8 @@ pub static FUNCS: &[Func] = &[
     func(0x8008_d5fc, "Collide_DoObjectFixedObjectCollision", collide::abi_do_object_fixed_object_collision),
     func(0x8008_e3a4, "Collide_LimitAngularVel", collide::abi_limit_angular_vel),
     func(0x8008_e498, "Collide_TestWithPlane", collide::abi_test_with_plane),
+    func_ret(0x8008_f0c4, "Collide_DoObjectObjectCollision", collide::abi_do_object_object_collision),
+    func_ret(0x8009_0040, "Collide_DoActualObjectCollisionCheck", collide::abi_do_actual_object_collision_check),
     func_ret(0x8009_0c34, "Collide_TestObjectVertices", collide::abi_test_object_vertices),
     func_ret(0x8009_1e64, "Collide_CheckForCollisionBetween", collide::abi_check_for_collision_between),
     func(0x8009_1fc4, "Collide_ClearCollisionRegistry", collide::abi_clear_collision_registry),

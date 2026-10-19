@@ -199,14 +199,14 @@ const MAX_SEPARATIONS: i32 = 8;
 
 /// `Collide_CheckForCollisionBetween` (COLLIDE.CPP, 0x80091e64): whether two objects
 /// collide (a corner of one in the other: [`test_object_vertices`]); if so they are
-/// pushed apart (`Collide_DoObjectObjectCollision`) and kept off the barriers until they
+/// pushed apart ([`do_object_object_collision`]) and kept off the barriers until they
 /// are, at most [`MAX_SEPARATIONS`] times. Cars still caught (crashing at speed) after
 /// that are damaged.
 pub fn check_for_collision_between(c: &mut Cpu, a: NewtonObj, b: NewtonObj) -> i32 {
     abi::frame(c, 72, |c, sp| {
         let (at, normal) = (sp + 16, sp + 32);
         let touching = |c: &mut Cpu| test_object_vertices(c, a, b, Coord(at), Coord(normal)) != 0;
-        let separate = |c: &mut Cpu| abi::call(c, nfs4rc::f_8008f0c4, &[a.0, b.0, at, normal]) != 0;
+        let separate = |c: &mut Cpu| do_object_object_collision(c, a, b, Coord(at), Coord(normal)) != 0;
         let off_barriers = |c: &mut Cpu| {
             crate::physics::test_for_barrier_collision(c, Car(a.0));
             crate::physics::test_for_barrier_collision(c, Car(b.0));
@@ -688,7 +688,7 @@ const MOVABLE_IDS: i32 = 512;
 const MAX_PUSHES: u32 = 32;
 
 /// `Collide_TestObjectVertices` (COLLIDE.CPP, 0x80090c34): whether two objects' boxes
-/// overlap (a corner of one inside the other: `Collide_DoActualObjectCollisionCheck`, which
+/// overlap (a corner of one inside the other: [`do_actual_object_collision_check`], which
 /// leaves the contact point in `at` and the normal in `normal`), and if they do, moved apart
 /// until they don't (at most [`MAX_PUSHES`] steps). Closing fast (head on, or along the
 /// line between them) they back out along their own velocities; otherwise they are pushed
@@ -730,7 +730,7 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
             for r in 0..3 {
                 c.m.w32(BASIS_DOT_RELATIVE.0 + 4 * (3 + r) as u32, dot_8_8(Vec3::new(ob[3 * r], ob[3 * r + 1], ob[3 * r + 2]), [d.x, d.y, d.z]) as u32);
             }
-            if abi::call(c, nfs4rc::f_80090040, &[a.0, b.0, at.0, normal.0]) == 0 {
+            if do_actual_object_collision_check(c, a, b, at, normal) == 0 {
                 return moved;
             }
             if moved == 0 {
@@ -778,8 +778,7 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
                     let share_b = fixeddiv(mb, sum);
                     let away = |x: i32, k: i32| {
                         let v = x.wrapping_mul(k);
-                        let v = if v < 0 { v.wrapping_add(16383) } else { v };
-                        v
+                        if v < 0 { v.wrapping_add(16383) } else { v }
                     };
                     let (ka, kb) = (share_b / 4, share_a / 4);
                     let mut pa = [n.x, n.y, n.z].map(|x| (away(x, ka) >> 14).wrapping_neg() >> 5);
@@ -807,6 +806,290 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
 
 pub fn abi_test_object_vertices(c: &mut Cpu) {
     c.r[2] = test_object_vertices(c, NewtonObj(c.r[4]), NewtonObj(c.r[5]), Coord(c.r[6]), Coord(c.r[7])) as u32;
+}
+
+/// `findClosestSideDave`: the normal of a corner collision is the box side facing the
+/// closing velocity (closing fast) rather than the side nearest the corner.
+const FIND_CLOSEST_SIDE: I32 = I32(0x8013_DB2C);
+
+/// The six face centres and the eight corners of a box, as the tests go through them.
+const FACES: [[i32; 3]; 6] = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [-1, 0, 0], [0, -1, 0], [0, 0, -1]];
+const CORNERS: [[i32; 3]; 8] = [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1], [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]];
+
+/// `Collide_DoActualObjectCollisionCheck` (COLLIDE.CPP, 0x80090040): whether two objects'
+/// boxes overlap, the state the vertex tests need being set (`Collide_TestObjectVertices`):
+/// a face centre of either inside the other, or else a corner, leaving the point in `at`.
+/// For a face centre its face's normal is left in `normal`; for a corner the normal of a
+/// side of the box it is in: closing fast, the side most across their closing velocity,
+/// else the side the corner is nearest (turned to face the corner's object).
+pub fn do_actual_object_collision_check(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, normal: Coord) -> i32 {
+    abi::frame(c, 112, |c, sp| {
+        P_P.set(&mut c.m, at.0);
+        OBJ0.set(&mut c.m, a.0);
+        OBJ1.set(&mut c.m, b.0);
+        P_NORMAL.set(&mut c.m, normal.0);
+        for d in FACES {
+            if check_center_vertex_with_dirs(c, d) != 0 {
+                return 1;
+            }
+        }
+        for d in FACES {
+            if check_center_vertex_with_dirs_other(c, d) != 0 {
+                return 1;
+            }
+        }
+        // a corner of the second in the first's box, or of the first in the second's
+        let (boxed, other) = if CORNERS.iter().any(|&d| check_vertex_with_dirs_one(c, d) != 0) {
+            (a, false)
+        } else if CORNERS.iter().any(|&d| check_vertex_with_dirs_other(c, d) != 0) {
+            (b, true)
+        } else {
+            return 0;
+        };
+        let (va, vb) = (a.linear_vel().get(&mut c.m), b.linear_vel().get(&mut c.m));
+        let gap = |p: i32, q: i32| {
+            let d = q.wrapping_sub(p);
+            if d > 0 { d } else { p.wrapping_sub(q) }
+        };
+        FIND_CLOSEST_SIDE.set(&mut c.m, 0);
+        let fastest = gap(va.x, vb.x).max(gap(va.y, vb.y)).max(gap(va.z, vb.z));
+        if 0xF_0000 < fastest {
+            FIND_CLOSEST_SIDE.set(&mut c.m, 1);
+        }
+        let range = [X_RANGE.get(&mut c.m), Y_RANGE.get(&mut c.m), Z_RANGE.get(&mut c.m)];
+        let o = boxed.orient_mat().get(&mut c.m).m;
+        let axis = |k: usize| Vec3::new(o[3 * k], o[3 * k + 1], o[3 * k + 2]);
+        let neg = |v: Vec3| Vec3::new(v.x.wrapping_neg(), v.y.wrapping_neg(), v.z.wrapping_neg());
+        // the box's sides facing out toward the corner (out of the first's box, into the second's)
+        let outward = |k: usize| if other { range[k] < 0 } else { range[k] > 0 };
+        if FIND_CLOSEST_SIDE.get(&mut c.m) != 0 {
+            // the corner's object's velocity
+            let (v, v_at) = if other { (va, sp + 80) } else { (vb, sp + 64) };
+            Coord(v_at).set(&mut c.m, v);
+            let sides: [Vec3; 3] = std::array::from_fn(|k| if outward(k) { neg(axis(k)) } else { axis(k) });
+            for (k, s) in sides.iter().enumerate() {
+                Coord(sp + 16 + 16 * k as u32).set(&mut c.m, *s);
+            }
+            let across = sides.map(|s| dot_8_8(s, [v.x, v.y, v.z]).wrapping_abs());
+            let k = if across[1] < across[0] && across[2] < across[0] {
+                0
+            } else if across[2] < across[1] {
+                1
+            } else {
+                2
+            };
+            normal.set(&mut c.m, sides[k]);
+            return 1;
+        }
+        // the side the corner is nearest
+        let dim = boxed.dimension().get(&mut c.m);
+        let size = [dim.x, dim.y, dim.z];
+        let depth: [i32; 3] = std::array::from_fn(|k| if range[k] < 0 { size[k].wrapping_add(range[k]) } else { size[k].wrapping_sub(range[k]) });
+        let k = if depth[0] < depth[1] && depth[0] < depth[2] {
+            0
+        } else if depth[1] < depth[2] {
+            1
+        } else {
+            2
+        };
+        normal.set(&mut c.m, axis(k));
+        if outward(k) {
+            normal.set(&mut c.m, neg(axis(k)));
+        }
+        1
+    })
+}
+
+pub fn abi_do_actual_object_collision_check(c: &mut Cpu) {
+    c.r[2] = do_actual_object_collision_check(c, NewtonObj(c.r[4]), NewtonObj(c.r[5]), Coord(c.r[6]), Coord(c.r[7])) as u32;
+}
+
+fn cross_f(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3::new(
+        fixedmult(a.y, b.z).wrapping_sub(fixedmult(a.z, b.y)),
+        fixedmult(a.z, b.x).wrapping_sub(fixedmult(a.x, b.z)),
+        fixedmult(a.x, b.y).wrapping_sub(fixedmult(a.y, b.x)),
+    )
+}
+
+fn dot_f(a: Vec3, b: Vec3) -> i32 {
+    fixedmult(a.x, b.x).wrapping_add(fixedmult(a.y, b.y)).wrapping_add(fixedmult(a.z, b.z))
+}
+
+/// The damage zone of a car hit from the direction whose components along the car's
+/// axes are `across` and `ahead`: a side's middle, or a corner.
+fn side_zone(across: i32, ahead: i32) -> Option<i32> {
+    if across.wrapping_abs() < 6553 {
+        if ahead < -6553 {
+            return Some(1);
+        }
+        if ahead >= 6554 {
+            return Some(5);
+        }
+    }
+    if ahead.wrapping_abs() < 6553 {
+        if across >= 6554 {
+            return Some(7);
+        }
+        if across < -6553 {
+            return Some(3);
+        }
+    }
+    let corner = |if_right: i32, if_left: i32| {
+        if across >= 6554 {
+            Some(if_right)
+        } else if across < -6553 {
+            Some(if_left)
+        } else {
+            None
+        }
+    };
+    if ahead < -6553 {
+        corner(0, 2)
+    } else if ahead >= 6554 {
+        corner(6, 4)
+    } else {
+        None
+    }
+}
+
+/// A hard blow (over 10) to a car from the direction `from` (a unit vector from the other
+/// object): damage on the roof and on the side or corner it came from.
+fn damage_from(c: &mut Cpu, obj: NewtonObj, from: Vec3, blow: i32) {
+    if blow <= 0xA_0000 {
+        return;
+    }
+    let o = obj.orient_mat().get(&mut c.m).m;
+    let axis = |k: usize| Vec3::new(o[3 * k], o[3 * k + 1], o[3 * k + 2]);
+    let (across, up, ahead) = (dot_f(from, axis(0)), dot_f(from, axis(1)), dot_f(from, axis(2)));
+    let car = Car(obj.0);
+    let mut zone = 9;
+    if up < -0x8000 {
+        zone = 8;
+        crate::newton::add_damage_zone(c, car, blow, zone, 2);
+    }
+    if let Some(z) = side_zone(across, ahead) {
+        zone = z;
+    }
+    if zone < 8 {
+        crate::newton::add_damage_zone(c, car, blow, zone, 2);
+    }
+}
+
+/// `Collide_DoObjectObjectCollision` (COLLIDE.CPP, 0x8008f0c4): two objects colliding at
+/// `at` across `normal`. The impulse along the normal (from their closing speed at the point,
+/// through their masses and moments of inertia; damped to 0.2, or 0.25 between two flagged
+/// cars) changes their motion and spin (a flagged car's spin less for small impulses); each
+/// one's blow (its share of the momentum change, a third against a track object) is its
+/// collision, and a car is damaged where it was hit. Both are left touching (in flight) at
+/// the point midway between them. Returns whether they were closing.
+pub fn do_object_object_collision(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, normal: Coord) -> i32 {
+    // a0 and a3 kept in their home slots
+    c.m.w32(c.r[29], a.0);
+    c.m.w32(c.r[29] + 12, normal.0);
+    abi::frame(c, 184, |c, sp| {
+        let slot = |off: u32| Coord(sp + off);
+        let (jv_at, arm_a, arm_b, ra_at, rb_at, dv_at, away_at) = (slot(16), slot(32), slot(48), slot(64), slot(80), slot(96), slot(112));
+        let (p, n) = (at.get(&mut c.m), normal.get(&mut c.m));
+        let (pa, pb) = (a.position().get(&mut c.m), b.position().get(&mut c.m));
+        let ra = Vec3::new(p.x.wrapping_sub(pa.x), p.y.wrapping_sub(pa.y), p.z.wrapping_sub(pa.z));
+        ra_at.set(&mut c.m, ra);
+        let rb = Vec3::new(p.x.wrapping_sub(pb.x), p.y.wrapping_sub(pb.y), p.z.wrapping_sub(pb.z));
+        rb_at.set(&mut c.m, rb);
+        let ca = cross_f(ra, n);
+        arm_a.set(&mut c.m, ca);
+        let cb = cross_f(rb, n);
+        arm_b.set(&mut c.m, cb);
+        let (va, vb) = (a.linear_vel().get(&mut c.m), b.linear_vel().get(&mut c.m));
+        c.m.w32(sp + 128, fixedmult(va.y, n.y) as u32);
+        c.m.w32(sp + 132, fixedmult(va.z, n.z) as u32);
+        c.m.w32(sp + 136, fixedmult(vb.y, n.y) as u32);
+        let (wa, wb) = (a.angular_vel().get(&mut c.m), b.angular_vel().get(&mut c.m));
+        let spin_a = dot_f(wa, ca);
+        let spin_b = dot_f(wb, cb);
+        let closing = dot_f(vb, n).wrapping_sub(dot_f(va, n)).wrapping_sub(spin_a).wrapping_add(spin_b);
+        let turn_a = fixedmult(dot_f(ca, ca), a.mo_inertia_inv(&mut c.m)) >> 1;
+        let turn_b = fixedmult(dot_f(cb, cb), b.mo_inertia_inv(&mut c.m)) >> 1;
+        let denom = (a.mass_inv(&mut c.m) / 2).wrapping_add(b.mass_inv(&mut c.m) / 2).wrapping_add(turn_a).wrapping_add(turn_b);
+        let j = fixeddiv(closing, denom);
+        if j < 0 {
+            return 0;
+        }
+        for obj in [a, b] {
+            if Car(obj.0).car_flags(&mut c.m) & 4 != 0 && obj.collision().collided(&mut c.m) == 0 {
+                obj.collision().set_collided(&mut c.m, 2);
+            }
+        }
+        let flagged = |c: &mut Cpu, obj: NewtonObj| Car(obj.0).car_flags(&mut c.m) & 4 != 0;
+        let both = flagged(c, a) && flagged(c, b);
+        let j = fixedmult(if both { 16384 } else { 13107 }, j);
+        let jv = scaled_by(j, n);
+        jv_at.set(&mut c.m, jv);
+        // each one's blow: its share of the momentum change
+        let (va, vb) = (a.linear_vel().get(&mut c.m), b.linear_vel().get(&mut c.m));
+        let total = a.mass(&mut c.m).wrapping_add(b.mass(&mut c.m));
+        let change = fixedmult(dot_f(va, n).wrapping_sub(dot_f(vb, n)), total);
+        for obj in [a, b] {
+            let blow = fixedmult(change, obj.mass_inv(&mut c.m)).wrapping_abs();
+            obj.collision().set_impulse(&mut c.m, blow);
+        }
+        if MOVABLE_IDS <= a.obj_id(&mut c.m) || MOVABLE_IDS <= b.obj_id(&mut c.m) {
+            for obj in [a, b] {
+                obj.collision().update_impulse(&mut c.m, |v| v / 3);
+            }
+        }
+        let dv = scaled_by(a.mass_inv(&mut c.m), jv);
+        dv_at.set(&mut c.m, dv);
+        let v = a.linear_vel().get(&mut c.m);
+        a.linear_vel().set(&mut c.m, plus(v, dv));
+        a.collision().set_sfx_type(&mut c.m, 0x5_0001);
+        a.collision().set_other_obj(&mut c.m, b);
+        if a.obj_id(&mut c.m) < MOVABLE_IDS {
+            let blow = a.collision().impulse(&mut c.m);
+            let (pa, pb) = (a.position().get(&mut c.m), b.position().get(&mut c.m));
+            away_at.set(&mut c.m, Vec3::new(pa.x.wrapping_sub(pb.x), pa.y.wrapping_sub(pb.y), pa.z.wrapping_sub(pb.z)));
+            normalize_short_vector(c, away_at);
+            let from = away_at.get(&mut c.m);
+            damage_from(c, a, from, blow);
+        }
+        let dv = scaled_by(b.mass_inv(&mut c.m), jv);
+        dv_at.set(&mut c.m, dv);
+        let v = b.linear_vel().get(&mut c.m);
+        b.linear_vel().set(&mut c.m, Vec3::new(v.x.wrapping_sub(dv.x), v.y.wrapping_sub(dv.y), v.z.wrapping_sub(dv.z)));
+        b.collision().set_sfx_type(&mut c.m, 0x5_0001);
+        b.collision().set_other_obj(&mut c.m, a);
+        if b.obj_id(&mut c.m) < MOVABLE_IDS {
+            let blow = b.collision().impulse(&mut c.m);
+            // (the direction as left by the first; unset if that was a track object)
+            let u = away_at.get(&mut c.m);
+            let from = Vec3::new(u.x.wrapping_neg(), u.y.wrapping_neg(), u.z.wrapping_neg());
+            away_at.set(&mut c.m, from);
+            damage_from(c, b, from, blow);
+        }
+        // the spins
+        for (obj, r, sign) in [(a, ra, 1), (b, rb, -1)] {
+            let t = cross_f(r, jv);
+            dv_at.set(&mut c.m, t);
+            let inv = obj.mo_inertia_inv(&mut c.m);
+            let k = if flagged(c, obj) && j <= 0x3F_FFFF { inv.wrapping_mul(3) / 4 } else { inv };
+            let t = scaled_by(k, t);
+            dv_at.set(&mut c.m, t);
+            let w = obj.angular_vel().get(&mut c.m);
+            let w = if sign > 0 { plus(w, t) } else { Vec3::new(w.x.wrapping_sub(t.x), w.y.wrapping_sub(t.y), w.z.wrapping_sub(t.z)) };
+            obj.angular_vel().set(&mut c.m, w);
+        }
+        a.update_flight_time(&mut c.m, |t| t.wrapping_add(1));
+        b.update_flight_time(&mut c.m, |t| t.wrapping_add(1));
+        let (pa, pb) = (a.position().get(&mut c.m), b.position().get(&mut c.m));
+        let mid = Vec3::new(pa.x.wrapping_add(pb.x) / 2, pa.y.wrapping_add(pb.y) / 2, pa.z.wrapping_add(pb.z) / 2);
+        b.collision().collision_point().set(&mut c.m, mid);
+        a.collision().collision_point().set(&mut c.m, mid);
+        1
+    })
+}
+
+pub fn abi_do_object_object_collision(c: &mut Cpu) {
+    c.r[2] = do_object_object_collision(c, NewtonObj(c.r[4]), NewtonObj(c.r[5]), Coord(c.r[6]), Coord(c.r[7])) as u32;
 }
 
 #[cfg(test)]

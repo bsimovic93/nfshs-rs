@@ -94,6 +94,9 @@ collisions, AI), then the front end.
 | BWORLDSM.CPP | all 28 (the slice and quad searches, road normals and their cache, edges, light, tunnels) |
 | PHYSICS.CPP | all 22: the `Physics_SimCar` tree (`Physics_Real`, `CalculateCarAcceleration`, `RampCarControlValues`, `AutoShift`, `CalculateTireForces`, `CalcTractionCircleAcc`, `CalcWheelLockAcc`, `CalculateRoadGripModifiers`, `CalculateRSControlDesiredPosition`, `StopCar`, `GetTorque`), the barriers (`TestForBarrierCollision`, `DoBarrierCheck`, `AttenuateVelocity`, `CorrectPostCollisionYaw`, `FixEngineRpm`, `SetCurrentWallType`), the car specs (`InitCarSpecs`, `CalculateDerivedCarSpecs`), `ResetCar`, `CheckGamedata` |
 | NEWTON.CPP | all 32: the ground under the wheels (`FindGroundElevationAndNormal` and its fast, general and rough forms), gravity and landing (`ApplyTheLawOfGravity`), the road's edges and bad quads (`TestForUndrivableSurfaces`, `DoPostBarrierCollisionHandling`, `GenerateVector`, `CheckForBadQuad`), the road position and geometry, the simulation level by distance (`CalcDistToClosestPlayerCar`, with its `SetSp` stack swap), rotation (`QDUpdateRot64Hz`/`32Hz`, `OptzRotxform`), shadows, damage (`AddDamageZone`), spike belts, the object setup (`InitBaseNewtonObj`, `SetInitialSlicePositionOrientationEtc`) |
+| COLLIDE.CPP | all 14: the per-frame entry (`CheckMeForCollisions`: track objects, road edges, the registry), object against object (`CheckForCollisionBetween`, `TestObjectVertices`, `DoActualObjectCollisionCheck`, the `CHECK_*VERTEX_WITH_DIRS*` tests, `DoObjectObjectCollision`), against a plane or a fixed object (`TestWithPlane`, `DoObjectFixedObjectCollision`), `LimitAngularVel`, `CheckAccuratePointRadiusCollision`, `ClearCollisionRegistry` |
 | CARS.CPP | `Cars_DoGravityEffectsOnAcc` |
 
-Next: COLLIDE.CPP.
+The races seldom bring cars together, so COLLIDE.CPP is covered mostly by fuzz tests (`cargo test -p nfs4 collide`): two cars of the race RAM put against each other, closing fast or slow, one sometimes a track object, compared with the original.
+
+Next: the race logic, the AI and the front end.
