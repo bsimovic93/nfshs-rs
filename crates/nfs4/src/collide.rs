@@ -3,6 +3,7 @@
 
 use crate::abi;
 use crate::globals::*;
+use crate::mathnfs::normalize_short_vector;
 use crate::fixed::{fixeddiv, fixedmult};
 use crate::types::{Car, Coord, NewtonObj, TrkNewSlice};
 use crate::vec::Vec3;
@@ -197,14 +198,14 @@ pub fn abi_check_accurate_point_radius_collision(c: &mut Cpu) {
 const MAX_SEPARATIONS: i32 = 8;
 
 /// `Collide_CheckForCollisionBetween` (COLLIDE.CPP, 0x80091e64): whether two objects
-/// collide (a corner of one in the other: `Collide_TestObjectVertices`); if so they are
+/// collide (a corner of one in the other: [`test_object_vertices`]); if so they are
 /// pushed apart (`Collide_DoObjectObjectCollision`) and kept off the barriers until they
 /// are, at most [`MAX_SEPARATIONS`] times. Cars still caught (crashing at speed) after
 /// that are damaged.
 pub fn check_for_collision_between(c: &mut Cpu, a: NewtonObj, b: NewtonObj) -> i32 {
     abi::frame(c, 72, |c, sp| {
         let (at, normal) = (sp + 16, sp + 32);
-        let touching = |c: &mut Cpu| abi::call(c, nfs4rc::f_80090c34, &[a.0, b.0, at, normal]) != 0;
+        let touching = |c: &mut Cpu| test_object_vertices(c, a, b, Coord(at), Coord(normal)) != 0;
         let separate = |c: &mut Cpu| abi::call(c, nfs4rc::f_8008f0c4, &[a.0, b.0, at, normal]) != 0;
         let off_barriers = |c: &mut Cpu| {
             crate::physics::test_for_barrier_collision(c, Car(a.0));
@@ -511,6 +512,303 @@ pub fn abi_test_with_plane(c: &mut Cpu) {
     test_with_plane(c, NewtonObj(c.r[4]), Coord(c.r[5]), Coord(c.r[6]));
 }
 
+/// The angular velocities of two objects in the collision response's units, or back.
+fn scale_spins(c: &mut Cpu, objs: [NewtonObj; 2], k: i32) {
+    for obj in objs {
+        let w = obj.angular_vel();
+        w.update_x(&mut c.m, |v| fixedmult(k, v));
+        w.update_y(&mut c.m, |v| fixedmult(k, v));
+        w.update_z(&mut c.m, |v| fixedmult(k, v));
+    }
+}
+
+/// Results of `Object_CheckCollisionResults`: a solid object, one knocked over (making a
+/// noise only at speed), and one knocked over any way.
+const HIT_SOLID: u32 = 1;
+const HIT_KNOCKED: u32 = 2;
+const HIT_KNOCKED_ANY: u32 = u32::MAX;
+
+/// `Collide_CheckMeForCollisions` (COLLIDE.CPP, 0x800923bc): one object's collisions this
+/// frame. A roughly simulated object only keeps off the barriers. Otherwise, unless its
+/// collisions are disabled for a while: on a surface with track objects (flag 0x40) each
+/// object near enough (its closest point, then accurately) is hit (the `Object_*` functions,
+/// still recompiled, say how): a solid one is a wall it bounces off, one knocked over makes
+/// a noise and shakes the pad. Then the road's edges (flag 0x80) and, in the air, the
+/// barriers; each registered object whose box it overlaps is collided with (their spins in
+/// the response's units meanwhile), and it is registered.
+pub fn check_me_for_collisions(c: &mut Cpu, obj: NewtonObj) {
+    abi::frame(c, 176, |c, sp| {
+        if obj.active(&mut c.m) == 0 {
+            return;
+        }
+        let car = Car(obj.0);
+        if obj.sim_optz(&mut c.m) != 0 {
+            crate::physics::test_for_barrier_collision(c, car);
+            return;
+        }
+        let hit = obj.collision();
+        let t = hit.disable_collision_timer(&mut c.m);
+        if t > 0 {
+            hit.set_disable_collision_timer(&mut c.m, t - 1);
+        }
+        let (list, at, points, normal, from, count, radius, npoints) = (sp + 16, sp + 32, sp + 48, sp + 88, sp + 104, sp + 120, sp + 124, sp + 128);
+        if hit.disable_collision_timer(&mut c.m) == 0 && obj.ground_surface_type(&mut c.m) & 0x40 != 0 {
+            abi::call(c, nfs4rc::f_800a5870, &[obj.sim_road_info().0, list, count]);
+            let mut i = 0u32;
+            while (i as i32) < c.m.r32(count) as i32 {
+                let (mut nearest, mut best) = (0xA_0000, -1i32);
+                c.m.w32(npoints, 1);
+                abi::call(c, nfs4rc::f_800a5b5c, &[list, i, at, radius]);
+                abi::call(c, nfs4rc::f_800a5c68, &[list, i, npoints, points]);
+                let mut k = 0;
+                while k < c.m.r32(npoints) as i32 {
+                    let d = crate::mathnfs::dist_xz(c, Coord(points + 12 * k as u32), obj.position());
+                    let reach = (c.m.r32(radius) as i32).wrapping_add(obj.dimension_radius(&mut c.m));
+                    if d < reach && d < nearest {
+                        nearest = d;
+                        best = k;
+                    }
+                    k += 1;
+                }
+                let r = c.m.r32(radius) as i32;
+                if best >= 0 && check_accurate_point_radius_collision(c, obj, Coord(points + 12 * best as u32), r) != 0 {
+                    let result = abi::call(c, nfs4rc::f_800a5e68, &[list, i, obj.0]);
+                    if result != 0 {
+                        abi::call(c, nfs4rc::f_800a5b5c, &[list, i, at, radius]);
+                    }
+                    match result {
+                        HIT_SOLID => {
+                            let r = c.m.r32(radius) as i32;
+                            solid_object_hit(c, obj, Coord(at), Coord(normal), Coord(from), r);
+                        }
+                        HIT_KNOCKED if 0x2_0000 < obj.speed_xz(&mut c.m) => knocked_over(c, obj, 0x6_0006),
+                        HIT_KNOCKED_ANY => knocked_over(c, obj, 0x6_0005),
+                        _ => {}
+                    }
+                }
+                i += 1;
+            }
+        }
+        if obj.ground_surface_type(&mut c.m) & 0x80 != 0 {
+            crate::newton::test_for_undrivable_surfaces(c, obj);
+        }
+        if obj.flight_time(&mut c.m) != 0 {
+            crate::physics::test_for_barrier_collision(c, car);
+        }
+        if hit.disable_collision_timer(&mut c.m) != 0 {
+            return;
+        }
+        let n = NUM_REGISTERED.get(&mut c.m);
+        c.m.w32(REGISTRY.wrapping_add((n as u32) << 2), obj.0);
+        let mut i = 0;
+        while i < NUM_REGISTERED.get(&mut c.m) {
+            let other = NewtonObj(c.m.r32(REGISTRY + 4 * i as u32));
+            let reach = obj.dimension_radius(&mut c.m).wrapping_add(other.dimension_radius(&mut c.m));
+            let (p, q) = (obj.position().get(&mut c.m), other.position().get(&mut c.m));
+            let gap = |a: i32, b: i32| {
+                let d = a.wrapping_sub(b);
+                if d > 0 { d } else { b.wrapping_sub(a) }
+            };
+            if gap(p.z, q.z) < reach && gap(p.x, q.x) < reach && gap(p.y, q.y) < reach {
+                scale_spins(c, [obj, other], TO_RADIANS);
+                check_for_collision_between(c, obj, other);
+                scale_spins(c, [obj, other], FROM_RADIANS);
+                limit_angular_vel(c, obj);
+                limit_angular_vel(c, other);
+            }
+            i += 1;
+        }
+        let n = NUM_REGISTERED.get(&mut c.m);
+        NUM_REGISTERED.set(&mut c.m, n.wrapping_add(1));
+    });
+}
+
+/// A solid track object at `at` (of `radius`) hit: a wall facing the object across the
+/// ground, through the edge of the track object nearest it, bounced off; the blow by the
+/// speed (none, and slipping, when slow).
+fn solid_object_hit(c: &mut Cpu, obj: NewtonObj, at: Coord, normal: Coord, from: Coord, radius: i32) {
+    let (p, q) = (obj.position().get(&mut c.m), at.get(&mut c.m));
+    normal.set_y(&mut c.m, 0);
+    normal.set_x(&mut c.m, p.x.wrapping_sub(q.x));
+    normal.set_z(&mut c.m, p.z.wrapping_sub(q.z));
+    normalize_short_vector(c, normal);
+    let n = normal.get(&mut c.m);
+    let r = radius / 256;
+    let edge = |x: i32| r.wrapping_mul(x) / 256;
+    from.set(&mut c.m, Vec3::new(edge(n.x).wrapping_add(q.x), edge(n.y).wrapping_add(q.y), edge(n.z).wrapping_add(q.z)));
+    let speed = obj.speed_xz(&mut c.m);
+    let blow = if 0x28_0000 < speed {
+        (speed << 1).min(0x96_0000)
+    } else if 0x19_0000 < speed {
+        speed.max(0x1E_0000)
+    } else {
+        FRICTION_LESS.set(&mut c.m, 1);
+        0
+    };
+    test_with_plane(c, obj, normal, from);
+    FRICTION_LESS.set(&mut c.m, 0);
+    let n = normal.get(&mut c.m);
+    crate::newton::do_post_barrier_collision_handling(c, obj, n);
+    let hit = obj.collision();
+    hit.set_impulse(&mut c.m, blow);
+    hit.set_collided(&mut c.m, 1);
+    hit.set_other_obj(&mut c.m, NewtonObj(0));
+    if blow != 0 {
+        hit.set_sfx_type(&mut c.m, 0x5_0001);
+        let p = obj.position().get(&mut c.m);
+        hit.collision_point().set(&mut c.m, p);
+    }
+}
+
+/// A track object knocked over: its noise (`sfx`) and a blow that shakes the pad.
+fn knocked_over(c: &mut Cpu, obj: NewtonObj, sfx: i32) {
+    let hit = obj.collision();
+    hit.set_impulse(&mut c.m, 0xF_0000);
+    hit.set_sfx_type(&mut c.m, sfx);
+    hit.set_other_obj(&mut c.m, NewtonObj(0));
+    let p = obj.position().get(&mut c.m);
+    hit.collision_point().set(&mut c.m, p);
+    if abi::call(c, nfs4rc::f_800cbeb8, &[obj.0]) != 0 {
+        abi::call(c, nfs4rc::f_800cbf5c, &[obj.0]);
+    }
+}
+
+pub fn abi_check_me_for_collisions(c: &mut Cpu) {
+    check_me_for_collisions(c, NewtonObj(c.r[4]));
+}
+
+/// `basisDots`: the first object's axes dotted with the second's (`[3 * r + k]`: its row r
+/// with the other's row k).
+const BASIS_DOTS: u32 = 0x8013_F310;
+
+/// The objects that can be pushed (the others, from ID 512, are track objects).
+const MOVABLE_IDS: i32 = 512;
+
+/// How many times `Collide_TestObjectVertices` moves two objects apart, at most.
+const MAX_PUSHES: u32 = 32;
+
+/// `Collide_TestObjectVertices` (COLLIDE.CPP, 0x80090c34): whether two objects' boxes
+/// overlap (a corner of one inside the other: `Collide_DoActualObjectCollisionCheck`, which
+/// leaves the contact point in `at` and the normal in `normal`), and if they do, moved apart
+/// until they don't (at most [`MAX_PUSHES`] steps). Closing fast (head on, or along the
+/// line between them) they back out along their own velocities; otherwise they are pushed
+/// apart along that line, each by the other's share of their mass (half as far against a
+/// track object). Every step is the first's.
+pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, normal: Coord) -> i32 {
+    // a2 and a3 kept in their home slots
+    c.m.w32(c.r[29] + 8, at.0);
+    c.m.w32(c.r[29] + 12, normal.0);
+    abi::frame(c, 176, |c, sp| {
+        let slot = |off: u32| Coord(sp + off);
+        let (push_a, push_b, apart, closing, dir, unit_closing, unit_apart) = (slot(16), slot(32), slot(48), slot(64), slot(80), slot(96), slot(112));
+        let (oa, ob) = (a.orient_mat().get(&mut c.m).m, b.orient_mat().get(&mut c.m).m);
+        let row = |o: &[i32; 9], r: usize| [o[3 * r], o[3 * r + 1], o[3 * r + 2]];
+        for r in 0..3 {
+            for k in 0..3 {
+                let d = row(&ob, k);
+                let v = dot_8_8(Vec3::new(oa[3 * r], oa[3 * r + 1], oa[3 * r + 2]), d);
+                c.m.w32(BASIS_DOTS + 4 * (3 * r + k) as u32, v as u32);
+            }
+        }
+        let (da, db) = (a.dimension().get(&mut c.m), b.dimension().get(&mut c.m));
+        let (sa, sb) = ([da.x, da.y, da.z], [db.x, db.y, db.z]);
+        for i in 0..9u32 {
+            let d = c.m.r32(BASIS_DOTS + 4 * i) as i32;
+            c.m.w32(SCALED_BASIS_DOTS.0 + 4 * i, mul_8_8(d, sb[(i % 3) as usize]) as u32);
+            c.m.w32(SCALED_BASIS_DOTS_OTHER.0 + 4 * i, mul_8_8(d, sa[(i / 3) as usize]) as u32);
+        }
+        c.m.w32(sp + 128, closing.0);
+        let mut moved = 0;
+        for _ in 0..MAX_PUSHES {
+            let (p, q) = (a.position().get(&mut c.m), b.position().get(&mut c.m));
+            let d = Vec3::new(q.x.wrapping_sub(p.x), q.y.wrapping_sub(p.y), q.z.wrapping_sub(p.z));
+            apart.set(&mut c.m, d);
+            let (oa, ob) = (a.orient_mat().get(&mut c.m).m, b.orient_mat().get(&mut c.m).m);
+            for r in 0..3 {
+                c.m.w32(BASIS_DOT_RELATIVE.0 + 4 * r as u32, dot_8_8(Vec3::new(oa[3 * r], oa[3 * r + 1], oa[3 * r + 2]), [d.x, d.y, d.z]) as u32);
+            }
+            for r in 0..3 {
+                c.m.w32(BASIS_DOT_RELATIVE.0 + 4 * (3 + r) as u32, dot_8_8(Vec3::new(ob[3 * r], ob[3 * r + 1], ob[3 * r + 2]), [d.x, d.y, d.z]) as u32);
+            }
+            if abi::call(c, nfs4rc::f_80090040, &[a.0, b.0, at.0, normal.0]) == 0 {
+                return moved;
+            }
+            if moved == 0 {
+                let (va, vb) = (a.linear_vel().get(&mut c.m), b.linear_vel().get(&mut c.m));
+                let rv = Vec3::new(va.x.wrapping_sub(vb.x), va.y.wrapping_sub(vb.y), va.z.wrapping_sub(vb.z));
+                closing.set(&mut c.m, rv);
+                let sq = |v: i32| (v / 256).wrapping_mul(v / 256);
+                let mut back = None;
+                if 0xE10_0000 < sq(rv.x).wrapping_add(sq(rv.z)) {
+                    let head_on = if sq(d.x).wrapping_add(sq(d.z)) < 3276 {
+                        true
+                    } else {
+                        unit_closing.set(&mut c.m, rv);
+                        crate::mathnfs::normalize_vector(c, unit_closing);
+                        unit_apart.set(&mut c.m, d);
+                        normalize_short_vector(c, unit_apart);
+                        let (u, w) = (unit_closing.get(&mut c.m), unit_apart.get(&mut c.m));
+                        0xD999 < dot_8_8(u, [w.x, w.y, w.z])
+                    };
+                    if head_on {
+                        let rv_at = Coord(c.m.r32(sp + 128));
+                        let half = crate::mathnfs::vector_length(c, rv_at) / 2;
+                        back = Some(if half != 0 { fixeddiv(0x8000, half) } else { 0x1_0000 });
+                    }
+                }
+                if let Some(k) = back {
+                    // back out along their velocities (track objects stay)
+                    let k = k.wrapping_neg();
+                    for (obj, to) in [(a, push_a), (b, push_b)] {
+                        let v = if obj.obj_id(&mut c.m) < MOVABLE_IDS {
+                            let lv = obj.linear_vel().get(&mut c.m);
+                            Vec3::new(fixedmult(k, lv.x) >> 5, fixedmult(k, lv.y) >> 5, fixedmult(k, lv.z) >> 5)
+                        } else {
+                            Vec3::default()
+                        };
+                        to.set(&mut c.m, v);
+                    }
+                } else {
+                    dir.set(&mut c.m, d);
+                    normalize_short_vector(c, dir);
+                    let n = dir.get(&mut c.m);
+                    let (ma, mb) = (a.mass(&mut c.m), b.mass(&mut c.m));
+                    let sum = ma.wrapping_add(mb);
+                    let share_a = fixeddiv(ma, sum);
+                    let share_b = fixeddiv(mb, sum);
+                    let away = |x: i32, k: i32| {
+                        let v = x.wrapping_mul(k);
+                        let v = if v < 0 { v.wrapping_add(16383) } else { v };
+                        v
+                    };
+                    let (ka, kb) = (share_b / 4, share_a / 4);
+                    let mut pa = [n.x, n.y, n.z].map(|x| (away(x, ka) >> 14).wrapping_neg() >> 5);
+                    let mut pb = [n.x, n.y, n.z].map(|x| away(x, kb) >> 19);
+                    if MOVABLE_IDS <= a.obj_id(&mut c.m) {
+                        pb = pb.map(|v| v / 2);
+                    }
+                    push_b.set(&mut c.m, pb.into());
+                    if MOVABLE_IDS <= b.obj_id(&mut c.m) {
+                        pa = pa.map(|v| v / 2);
+                    }
+                    push_a.set(&mut c.m, pa.into());
+                }
+                moved = 1;
+            }
+            let (pa, pb) = (push_a.get(&mut c.m), push_b.get(&mut c.m));
+            let p = a.position().get(&mut c.m);
+            a.position().set(&mut c.m, plus(p, pa));
+            let q = b.position().get(&mut c.m);
+            b.position().set(&mut c.m, plus(q, pb));
+        }
+        moved
+    })
+}
+
+pub fn abi_test_object_vertices(c: &mut Cpu) {
+    c.r[2] = test_object_vertices(c, NewtonObj(c.r[4]), NewtonObj(c.r[5]), Coord(c.r[6]), Coord(c.r[7])) as u32;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,8 +837,13 @@ mod tests {
             t[6 + i] = fixedmult(s, o[i]).wrapping_add(fixedmult(k, o[6 + i]));
         }
         b.orient_mat().set(m, &crate::vec::Mat3 { m: t });
+        // now and then closing fast (head on), and the second a track object
+        let fast = if pick(4) == 0 { 0x100_0000 } else { 0x10_0000 };
+        if pick(8) == 0 {
+            b.set_obj_id(m, 512 + pick(64));
+        }
         for obj in [a, b] {
-            obj.linear_vel().set(m, Vec3::new(pick(0x10_0000) - 0x8_0000, pick(0x4_0000) - 0x2_0000, pick(0x10_0000) - 0x8_0000));
+            obj.linear_vel().set(m, Vec3::new(pick(fast as u32) - fast / 2, pick(0x4_0000) - 0x2_0000, pick(fast as u32) - fast / 2));
             obj.angular_vel().set(m, Vec3::new(pick(0x4_0000) - 0x2_0000, pick(0x4_0000) - 0x2_0000, pick(0x4_0000) - 0x2_0000));
             obj.set_speed_xz(m, pick(0x20_0000));
             Car(obj.0).set_crash(m, pick(2));
@@ -636,6 +939,27 @@ mod tests {
         };
         against_original("Collide_DoObjectFixedObjectCollision", 20_000, 0xF1BED, tipped, nfs4rc::f_8008d5fc, |a, _| vec![a.0, PLANE_POINT, HIT_VEL, PLANE_NORMAL], |c, a, _| {
             do_object_fixed_object_collision(c, a, Coord(PLANE_POINT), Coord(HIT_VEL), Coord(PLANE_NORMAL));
+            None
+        });
+    }
+
+    /// The first car's collisions with the second registered against it (or with nothing,
+    /// or its collisions disabled), on a surface with track objects or road edges or both.
+    #[test]
+    fn check_me_fuzz() {
+        let registered = |c: &mut Cpu, a: NewtonObj, rng: &mut Rng| {
+            let m = &mut c.m;
+            let b = NewtonObj(m.r32(0x8011_0CA4));
+            m.w32(REGISTRY, b.0);
+            NUM_REGISTERED.set(m, (rng.next() % 2) as i32);
+            a.collision().set_disable_collision_timer(m, [0, 0, 0, 1, 2][(rng.next() % 5) as usize]);
+            a.set_sim_optz(m, (rng.next() % 8 == 0) as u8);
+            a.set_flight_time(m, (rng.next() % 4 == 0) as u16);
+            let flags = [0, 0x40, 0x80, 0xC0][(rng.next() % 4) as usize];
+            a.update_ground_surface_type(m, |s| s & !0xC0 | flags);
+        };
+        against_original("Collide_CheckMeForCollisions", 20_000, 0xC4EC, registered, nfs4rc::f_800923bc, |a, _| vec![a.0], |c, a, _| {
+            check_me_for_collisions(c, a);
             None
         });
     }
