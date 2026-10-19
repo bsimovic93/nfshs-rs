@@ -3,7 +3,7 @@
 
 use crate::abi;
 use crate::fixed::{div, fixedatan, fixeddiv, fixedmult};
-use crate::mathnfs::resolve_rotated_vector;
+use crate::mathnfs::{quick_length, resolve_rotated_vector};
 use crate::globals::*;
 use crate::types::{Car, Coord, Matrix, WheelAcc};
 use ps1rt::Cpu;
@@ -12,12 +12,6 @@ use ps1rt::Cpu;
 const TIRE_RACING: i32 = 1;
 const TIRE_RAIN: i32 = 2;
 
-/// The length of (x, z) as the physics estimates it: the longer side and a quarter of the
-/// shorter.
-fn quick_length(x: i32, z: i32) -> i32 {
-    let (x, z) = (x.wrapping_abs(), z.wrapping_abs());
-    if z < x { x.wrapping_add(z >> 2) } else { z.wrapping_add(x >> 2) }
-}
 
 /// The tyre's grip loss when sliding: its tyre type's divisor, wet or dry.
 fn grip_loss(c: &mut Cpu, car: Car) -> i32 {
@@ -1650,29 +1644,7 @@ pub fn abi_reset_car(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::Rng;
-    use ps1rt::Mem;
-
-    /// A race's RAM (`BOOT_RAM=1 nfshs boot-race ...` writes it), or None.
-    fn race_ram() -> Option<Vec<u8>> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../re/boot/ram.bin");
-        let ram = std::fs::read(&path).ok();
-        if ram.is_none() {
-            eprintln!("{} not found (BOOT_RAM=1 nfshs boot-race): skipped", path.display());
-        }
-        ram
-    }
-
-    fn cpu_with(ram: &[u8]) -> Cpu {
-        let mut m = Mem::default();
-        m.ram.copy_from_slice(ram);
-        let mut c = Cpu::new(m);
-        c.dispatch = nfs4rc::dispatch;
-        c.dispatch_at = nfs4rc::dispatch_at;
-        c.r[28] = crate::test_util::GP;
-        c.r[29] = 0x801F_FF00;
-        c
-    }
+    use crate::test_util::{Rng, cpu_with, race_ram, ram_diff, report};
 
     /// Shake the player's car into the states races rarely reach: road-side control, upside
     /// down or airborne, any controls and gear, damage, every car setup and cheat.
@@ -1783,18 +1755,11 @@ mod tests {
             let want = c.m.ram.clone();
             c.m.ram.copy_from_slice(&state);
             port(&mut c, car);
-            // the stack below 0x801FFF00 is dead
-            let dead = 0x1F_0000..0x1F_FF00;
-            let diff: Vec<usize> = (0..want.len()).step_by(4).filter(|a| !dead.contains(a) && want[*a..a + 4] != c.m.ram[*a..a + 4]).collect();
+            let diff = ram_diff(&want, &c.m.ram);
             if !diff.is_empty() {
                 mismatches += 1;
                 if mismatches <= 5 {
-                    eprintln!("{name} case {i}: {} words differ", diff.len());
-                    for &a in diff.iter().take(10) {
-                        let w = |r: &[u8]| u32::from_le_bytes(r[a..a + 4].try_into().unwrap());
-                        let addr = 0x8000_0000 | a as u32;
-                        eprintln!("  {addr:#010x} {}: expected {:#x} got {:#x}", crate::check::describe_in(&want, addr), w(&want), w(&c.m.ram));
-                    }
+                    report(name, i, &want, &c.m.ram, &diff);
                 }
             }
         }

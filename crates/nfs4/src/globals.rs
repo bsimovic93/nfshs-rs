@@ -29,6 +29,10 @@ impl U32 {
     pub fn set(self, m: &mut Mem, v: u32) {
         m.w32(self.0, v)
     }
+    pub fn update(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) {
+        let v = f(self.get(m));
+        self.set(m, v)
+    }
 }
 
 /// An `int[]` global.
@@ -58,6 +62,8 @@ impl U8s {
 pub const SQRT_SLOPES: u32 = 0x8012_4858;
 /// The quarter-wave sine table of `fastintsin` (257 entries, 16.16).
 pub const SINE_TABLE: u32 = 0x8013_8754;
+/// `atantbl`: the arctangent table of `intatan` (bytes, 1024ths of a turn).
+pub const ATAN_BYTES: u32 = 0x8013_7FD8;
 /// The arctangent table of `fixedatan` (257 entries over the first octant).
 pub const ATAN_TABLE: u32 = 0x8013_8B58;
 
@@ -108,6 +114,23 @@ pub const SIM_COUNTER: I32 = I32(0x8011_F368);
 
 /// `AITune_driveSide`: which side of the road traffic keeps to (1 right, -1 left).
 pub const AITUNE_DRIVE_SIDE: I32 = I32(0x8013_D8E4);
+/// `gMaxFindQuadSliceIterations`: how many slices around the quad search tries.
+pub const MAX_FIND_QUAD_SLICE_ITERATIONS: I32 = I32(0x8013_DAC8);
+/// The slices the quad search tries next, relative to the last (+1, -1, +2, -2...).
+pub const SLICE_SEARCH_STEPS: I32s = I32s(0x8011_0340, 8);
+/// `BWSM_NormalCache`: road normals and forwards per quad (16 `tNormalCacheEntry`), and
+/// `BWSM_NormalCacheSysTime`, the clock its entries' last use is kept by.
+pub const NORMAL_CACHE: u32 = 0x8011_0370;
+pub const NORMAL_CACHE_TIME: U32 = U32(0x8013_DACC);
+/// `GlobalSimQuad`: the road surface where a quad has no sim quad.
+pub const GLOBAL_SIM_QUAD: u32 = 0x8013_DAB0;
+/// `corrPt`: `FindClosestQuad`'s point walked toward the road.
+pub const CORR_PT: crate::types::Coord = crate::types::Coord(0x8013_F2CC);
+/// `Track_chunkList` (`Chunk *`), `Chunk_chunkCenters` (`coorddef *`), `Chunk_lightTable`
+/// (colours).
+pub const TRACK_CHUNK_LIST: I32 = I32(0x8013_E79C);
+pub const CHUNK_CENTERS: I32 = I32(0x8013_DB10);
+pub const CHUNK_LIGHT_TABLE: I32 = I32(0x8013_DB0C);
 /// `gNumSlices`: how many slices the track has.
 pub const NUM_SLICES: I32 = I32(0x8013_DABC);
 /// `BWorldSm_slices`: the track's slices (`Trk_NewSlice *`).

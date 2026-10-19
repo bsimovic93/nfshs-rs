@@ -88,9 +88,11 @@ collisions, AI), then the front end.
 
 | Source file | Decompiled |
 |---|---|
-| EA fixed-point library | `fixedmult`, `fixeddiv`, `fixedsqrt`, `fixedsin`/`cos`, `fastintsin`/`cos`, `fixedatan`, `make64`, `divu64`, `transpose` |
-| MATHNFS.CPP | `Math_ResolveRotatedVector`, `Math_NormalizeVector` |
+| EA fixed-point library | `fixedmult`, `fixeddiv`, `fixedsqrt`, `fixedinverse`, `fixedsin`/`cos`, `fixedsincos`, `fastintsin`/`cos`, `intsincos`, `fixedatan`, `intatan`, `fixedxformx`/`y`/`z`, `crossproduct`, `make64`, `divu64`, `transpose` (not yet: `reorthogonalize`) |
+| MATHNFS.CPP | all 10 |
+| BWORLD.CPP | `xzsquaredist32` |
+| BWORLDSM.CPP | all 28 (the slice and quad searches, road normals and their cache, edges, light, tunnels) |
 | PHYSICS.CPP | all 22: the `Physics_SimCar` tree (`Physics_Real`, `CalculateCarAcceleration`, `RampCarControlValues`, `AutoShift`, `CalculateTireForces`, `CalcTractionCircleAcc`, `CalcWheelLockAcc`, `CalculateRoadGripModifiers`, `CalculateRSControlDesiredPosition`, `StopCar`, `GetTorque`), the barriers (`TestForBarrierCollision`, `DoBarrierCheck`, `AttenuateVelocity`, `CorrectPostCollisionYaw`, `FixEngineRpm`, `SetCurrentWallType`), the car specs (`InitCarSpecs`, `CalculateDerivedCarSpecs`), `ResetCar`, `CheckGamedata` |
 | CARS.CPP | `Cars_DoGravityEffectsOnAcc` |
 
-Next: NEWTON.CPP, COLLIDE.CPP and BWORLDSM.CPP.
+Next: NEWTON.CPP and COLLIDE.CPP.

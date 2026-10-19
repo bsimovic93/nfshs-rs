@@ -33,5 +33,46 @@
 800867a8 Cars_DoGravityEffectsOnAcc
 
 # MATHNFS.CPP
+8009dea8 Math_DistXZ
+8009defc Math_Dist3D
+8009df8c Math_BetterDist
 8009e0ec Math_ResolveRotatedVector
+8009e1b0 Math_VectorLength
+8009e34c Math_VectorLength2
 8009e4e0 Math_NormalizeVector
+8009e698 Math_NormalizeShortVector
+8009e744 Math_QDNormalizeVector
+8009e850 Math_fasttransmult
+
+# BWORLD.CPP
+8007df6c xzsquaredist32
+
+# BWORLDSM.CPP
+8007f334 BWorldSm_Init
+8007f36c BWorldSm_Restart
+8007f38c BWorldSm_DeInit
+8007f394 FindAbsClosestSliceCrude
+8007f438 BWorldSm_FindClosestSlice
+8007f4d4 RawFindClosestSlice
+8007f788 BWorldSm_SetSlice
+8007f7dc GetStmQuadPts
+8007f904 SetStrip
+8007f9bc GetFirstStmQuadPts
+8007fa58 BWorld_SetSimSlice
+8007fab8 BworldSm_UpdateSimQuad
+8007fb40 BworldSm_IsSimQuadValid
+8007fb70 RawFindClosestQuad
+8008031c FindClosestQuad
+800804e8 BWorldSm_FindClosestQuadRez
+800806b4 BWorldSm_FindClosestQuadMaxIterations
+800806d4 PointDirection
+8008074c BWorldSm_FindEdgeOff
+80080868 BWorldSm_QuadLight
+800809f8 BWorldSm_TunnelFlagSm
+80080a50 NormalCache_AddEntry
+80080b0c NormalCache_FindEntry
+80080bd0 NormalCache_Init
+80080c0c Check_Rot
+80080f44 BWorldSm_UNormal
+80080f6c BWorldSm_UForward
+80080f94 BWorldSm_FindClosestTriangleRez

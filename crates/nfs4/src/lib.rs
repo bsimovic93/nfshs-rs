@@ -18,6 +18,8 @@
 //! - `NFSHS_DECOMP_STATS=1`: calls and checks per function when a game thread ends.
 
 pub mod abi;
+pub mod bworld;
+pub mod bworldsm;
 pub mod cars;
 pub mod check;
 pub mod fixed;
@@ -52,9 +54,46 @@ const fn func_ret(addr: u32, name: &'static str, run: fn(&mut Cpu)) -> Func {
 
 /// Every decompiled function the game is routed to, by address.
 pub static FUNCS: &[Func] = &[
+    func_ret(0x8007_df6c, "xzsquaredist32", bworld::abi_xzsquaredist32),
+    func_ret(0x8007_f334, "BWorldSm_Init", bworldsm::abi_init),
+    func(0x8007_f36c, "BWorldSm_Restart", bworldsm::abi_restart),
+    func(0x8007_f38c, "BWorldSm_DeInit", bworldsm::abi_deinit),
+    func(0x8007_f394, "FindAbsClosestSliceCrude", bworldsm::abi_find_abs_closest_slice_crude),
+    func_ret(0x8007_f438, "BWorldSm_FindClosestSlice", bworldsm::abi_find_closest_slice),
+    func(0x8007_f4d4, "RawFindClosestSlice", bworldsm::abi_raw_find_closest_slice),
+    func(0x8007_f788, "BWorldSm_SetSlice", bworldsm::abi_set_slice),
+    func(0x8007_f7dc, "GetStmQuadPts", bworldsm::abi_get_stm_quad_pts),
+    func(0x8007_f904, "SetStrip", bworldsm::abi_set_strip),
+    func(0x8007_f9bc, "GetFirstStmQuadPts", bworldsm::abi_get_first_stm_quad_pts),
+    func(0x8007_fa58, "BWorld_SetSimSlice", bworldsm::abi_set_sim_slice),
+    func(0x8007_fab8, "BworldSm_UpdateSimQuad", bworldsm::abi_update_sim_quad),
+    func_ret(0x8007_fb40, "BworldSm_IsSimQuadValid", bworldsm::abi_is_sim_quad_valid),
+    func_ret(0x8007_fb70, "RawFindClosestQuad", bworldsm::abi_raw_find_closest_quad),
+    func_ret(0x8008_031c, "FindClosestQuad", bworldsm::abi_find_closest_quad),
+    func_ret(0x8008_04e8, "BWorldSm_FindClosestQuadRez", bworldsm::abi_find_closest_quad_rez),
+    func_ret(0x8008_06b4, "BWorldSm_FindClosestQuadMaxIterations", bworldsm::abi_find_closest_quad_max_iterations),
+    func_ret(0x8008_06d4, "PointDirection", bworldsm::abi_point_direction),
+    func_ret(0x8008_074c, "BWorldSm_FindEdgeOff", bworldsm::abi_find_edge_off),
+    func_ret(0x8008_0868, "BWorldSm_QuadLight", bworldsm::abi_quad_light),
+    func_ret(0x8008_09f8, "BWorldSm_TunnelFlagSm", bworldsm::abi_tunnel_flag_sm),
+    func(0x8008_0a50, "NormalCache_AddEntry", bworldsm::abi_normal_cache_add_entry),
+    func_ret(0x8008_0b0c, "NormalCache_FindEntry", bworldsm::abi_normal_cache_find_entry),
+    func(0x8008_0bd0, "NormalCache_Init", bworldsm::abi_normal_cache_init),
+    func(0x8008_0c0c, "Check_Rot", bworldsm::abi_check_rot),
+    func_ret(0x8008_0f44, "BWorldSm_UNormal", bworldsm::abi_u_normal),
+    func_ret(0x8008_0f6c, "BWorldSm_UForward", bworldsm::abi_u_forward),
+    func_ret(0x8008_0f94, "BWorldSm_FindClosestTriangleRez", bworldsm::abi_find_closest_triangle_rez),
     func(0x8008_67a8, "Cars_DoGravityEffectsOnAcc", cars::abi_do_gravity_effects_on_acc),
+    func_ret(0x8009_dea8, "Math_DistXZ", mathnfs::abi_dist_xz),
+    func_ret(0x8009_defc, "Math_Dist3D", mathnfs::abi_dist_3d),
+    func_ret(0x8009_df8c, "Math_BetterDist", mathnfs::abi_better_dist),
     func(0x8009_e0ec, "Math_ResolveRotatedVector", mathnfs::abi_resolve_rotated_vector),
+    func_ret(0x8009_e1b0, "Math_VectorLength", mathnfs::abi_vector_length),
+    func_ret(0x8009_e34c, "Math_VectorLength2", mathnfs::abi_vector_length2),
     func(0x8009_e4e0, "Math_NormalizeVector", mathnfs::abi_normalize_vector),
+    func(0x8009_e698, "Math_NormalizeShortVector", mathnfs::abi_normalize_short_vector),
+    func(0x8009_e744, "Math_QDNormalizeVector", mathnfs::abi_qd_normalize_vector),
+    func(0x8009_e850, "Math_fasttransmult", mathnfs::abi_fasttransmult),
     func(0x800a_935c, "Physics_InitCarSpecs", physics::abi_init_car_specs),
     func(0x800a_95f8, "Physics_CalculateDerivedCarSpecs", physics::abi_calculate_derived_car_specs),
     func(0x800a_9b08, "Physics_CheckGamedata", physics::abi_check_gamedata),
@@ -266,6 +305,43 @@ pub(crate) mod test_util {
                 2 => (x & 0xFF) - 0x80,
                 _ => x,
             }
+        }
+    }
+
+    /// A race's RAM (`BOOT_RAM=1 nfshs boot-race ...` writes it), or None.
+    pub fn race_ram() -> Option<Vec<u8>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../re/boot/ram.bin");
+        let ram = std::fs::read(&path).ok();
+        if ram.is_none() {
+            eprintln!("{} not found (BOOT_RAM=1 nfshs boot-race): skipped", path.display());
+        }
+        ram
+    }
+
+    pub fn cpu_with(ram: &[u8]) -> Cpu {
+        let mut m = Mem::default();
+        m.ram.copy_from_slice(ram);
+        let mut c = Cpu::new(m);
+        c.dispatch = nfs4rc::dispatch;
+        c.dispatch_at = nfs4rc::dispatch_at;
+        c.r[28] = GP;
+        c.r[29] = 0x801F_FF00;
+        c
+    }
+
+    /// The words where two RAM images differ, but for the dead stack below 0x801FFF00.
+    pub fn ram_diff(want: &[u8], got: &[u8]) -> Vec<usize> {
+        let dead = 0x1F_0000..0x1F_FF00;
+        (0..want.len()).step_by(4).filter(|a| !dead.contains(a) && want[*a..a + 4] != got[*a..a + 4]).collect()
+    }
+
+    /// Print the first differing words of a failed case.
+    pub fn report(name: &str, case: u32, want: &[u8], got: &[u8], diff: &[usize]) {
+        eprintln!("{name} case {case}: {} words differ", diff.len());
+        for &a in diff.iter().take(10) {
+            let w = |r: &[u8]| u32::from_le_bytes(r[a..a + 4].try_into().unwrap());
+            let addr = 0x8000_0000 | a as u32;
+            eprintln!("  {addr:#010x} {}: expected {:#x} got {:#x}", crate::check::describe_in(want, addr), w(want), w(got));
         }
     }
 }

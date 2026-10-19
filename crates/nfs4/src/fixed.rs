@@ -173,6 +173,103 @@ pub fn transpose(m: &mut Mem, src: u32, dst: u32) {
     }
 }
 
+/// `fixedinverse` (0x800edd48): 1 / `a` in 16.16, rounded (0xFFFFFFFF / |a|, the sign put back).
+pub fn fixedinverse(a: i32) -> i32 {
+    let sign = a >> 31;
+    let d = ((a ^ sign).wrapping_sub(sign)) as u32;
+    // divu by 0: the quotient all ones, the remainder the dividend
+    let (q, r) = if d == 0 { (u32::MAX, u32::MAX) } else { (u32::MAX / d, u32::MAX % d) };
+    let half = ((d as i32) >> 1) as u32;
+    let v = q.wrapping_add((half < r) as u32) as i32;
+    (v ^ sign).wrapping_sub(sign)
+}
+
+/// `intatan` (0x800e6724): the angle of (x, y) in 1024ths of a turn, from the byte table of
+/// the first octant (`atantbl`).
+pub fn intatan(m: &mut Mem, y: i32, x: i32) -> i32 {
+    let (mut lo, mut hi) = (y, x);
+    let mut flip = false;
+    let mut base = 0;
+    if hi < 0 {
+        hi = hi.wrapping_neg();
+        flip = true;
+        base = 512;
+    }
+    if lo < 0 {
+        lo = lo.wrapping_neg();
+        flip = !flip;
+        base = -base;
+    }
+    if hi < lo {
+        (lo, hi) = (hi, lo);
+        base += if flip { -256 } else { 256 };
+        flip = !flip;
+    }
+    let a = if lo == hi {
+        128
+    } else {
+        // lo / hi in 1/256ths, rounded
+        let i = if lo as u32 & 0xFF80_0000 != 0 {
+            let (l, h) = make64(lo, 32);
+            let q = divu64(l, h, hi as u32);
+            (q >> 24) + ((q >> 23) & 1)
+        } else {
+            ((lo as u32) << 8).wrapping_add((hi >> 1) as u32) / hi as u32
+        };
+        m.r8(globals::ATAN_BYTES + i) as i32
+    };
+    if flip { base - a } else { base + a }
+}
+
+/// `intsincos` (0x800eb718): the sine and cosine of a 1024-step angle.
+pub fn intsincos(m: &mut Mem, a: i32) -> (i32, i32) {
+    (fastintsin(m, a), fastintcos(m, a))
+}
+
+/// `fixedsincos` (0x800f3fcc): the sine and cosine of a full-turn angle (0x10000), interpolated
+/// between the table's steps (rounding the cosine its own way, unlike [`fixedcos`]).
+pub fn fixedsincos(m: &mut Mem, a: i32) -> (i32, i32) {
+    let (s, c) = intsincos(m, a >> 6);
+    let frac = (a & 63).wrapping_mul(411_774) >> 9;
+    (s.wrapping_add((c >> 2).wrapping_mul(frac) >> 21), c.wrapping_sub((s >> 2).wrapping_mul(frac) >> 21))
+}
+
+/// `fixedxformx` (0x800eb508): `out` = the rotation by `angle` about x.
+pub fn fixedxformx(m: &mut Mem, out: u32, angle: i32) {
+    let (s, c) = fixedsincos(m, angle);
+    write_matrix(m, out, [0x1_0000, 0, 0, 0, c, s, 0, s.wrapping_neg(), c]);
+}
+
+/// `fixedxformy` (0x800eb56c): about y.
+pub fn fixedxformy(m: &mut Mem, out: u32, angle: i32) {
+    let (s, c) = fixedsincos(m, angle);
+    write_matrix(m, out, [c, 0, s.wrapping_neg(), 0, 0x1_0000, 0, s, 0, c]);
+}
+
+/// `fixedxformz` (0x800eb5d0): about z.
+pub fn fixedxformz(m: &mut Mem, out: u32, angle: i32) {
+    let (s, c) = fixedsincos(m, angle);
+    write_matrix(m, out, [c, s, 0, s.wrapping_neg(), c, 0, 0, 0, 0x1_0000]);
+}
+
+fn write_matrix(m: &mut Mem, at: u32, v: [i32; 9]) {
+    for (i, e) in v.into_iter().enumerate() {
+        m.w32(at + 4 * i as u32, e as u32);
+    }
+}
+
+/// `crossproduct` (0x800eb440): `out` = `a` x `b`, written a component at a time as the
+/// original does (`out` may be one of them).
+pub fn crossproduct(m: &mut Mem, a: u32, b: u32, out: u32) {
+    let r = |m: &mut Mem, p: u32, i: u32| m.r32(p + 4 * i) as i32;
+    let x = fixedmult(r(m, a, 1), r(m, b, 2)).wrapping_sub(fixedmult(r(m, a, 2), r(m, b, 1)));
+    m.w32(out, x as u32);
+    let y = fixedmult(r(m, a, 2), r(m, b, 0)).wrapping_sub(fixedmult(r(m, a, 0), r(m, b, 2)));
+    m.w32(out + 4, y as u32);
+    let z = fixedmult(r(m, a, 0), r(m, b, 1)).wrapping_sub(fixedmult(r(m, a, 1), r(m, b, 0)));
+    m.w32(out + 8, z as u32);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +351,56 @@ mod tests {
             transpose(&mut c.m, a, dst);
             let got: Vec<u32> = (0..9).map(|i| c.m.r32(dst + 4 * i)).collect();
             assert_eq!(got, want);
+        }
+    }
+    #[test]
+    fn inverse_atan_sincos() {
+        let Some(mut c) = cpu() else { return };
+        let mut rng = Rng(41);
+        for (y, x) in pairs(50_000) {
+            assert_eq!(fixedinverse(y), run(&mut c, nfs4rc::f_800edd48, &[y as u32]) as i32, "fixedinverse({y:#x})");
+            assert_eq!(intatan(&mut c.m, y, x), run(&mut c, nfs4rc::f_800e6724, &[y as u32, x as u32]) as i32, "intatan({y:#x}, {x:#x})");
+            let (s, k) = (crate::test_util::SCRATCH, crate::test_util::SCRATCH + 4);
+            run(&mut c, nfs4rc::f_800f3fcc, &[y as u32, s, k]);
+            assert_eq!(fixedsincos(&mut c.m, y), (c.m.r32(s) as i32, c.m.r32(k) as i32), "fixedsincos({y:#x})");
+            run(&mut c, nfs4rc::f_800eb718, &[(y & 0xFFFF) as u32, s, k]);
+            assert_eq!(intsincos(&mut c.m, y & 0xFFFF), (c.m.r32(s) as i32, c.m.r32(k) as i32), "intsincos({y:#x})");
+        }
+        let at = crate::test_util::SCRATCH + 0x100;
+        for _ in 0..20_000 {
+            let a = rng.any();
+            for (f, port) in [(nfs4rc::f_800eb508 as fn(&mut ps1rt::Cpu), fixedxformx as fn(&mut Mem, u32, i32)), (nfs4rc::f_800eb56c, fixedxformy), (nfs4rc::f_800eb5d0, fixedxformz)] {
+                run(&mut c, f, &[at, a as u32]);
+                let want: Vec<u32> = (0..9).map(|i| c.m.r32(at + 4 * i)).collect();
+                for i in 0..9 {
+                    c.m.w32(at + 4 * i, 0xDEAD);
+                }
+                port(&mut c.m, at, a);
+                assert_eq!((0..9).map(|i| c.m.r32(at + 4 * i)).collect::<Vec<_>>(), want, "fixedxform({a:#x})");
+            }
+        }
+    }
+
+    #[test]
+    fn cross() {
+        let Some(mut c) = cpu() else { return };
+        let mut rng = Rng(42);
+        let (a, b, o) = (crate::test_util::SCRATCH, crate::test_util::SCRATCH + 12, crate::test_util::SCRATCH + 24);
+        for k in 0..30_000 {
+            let v: Vec<u32> = (0..6).map(|_| rng.any() as u32).collect();
+            // the output separate, or the same as an input
+            let out = [o, a, b][k % 3];
+            let set = |c: &mut ps1rt::Cpu| {
+                for (i, &e) in v.iter().enumerate() {
+                    c.m.w32(a + 4 * i as u32, e);
+                }
+            };
+            set(&mut c);
+            run(&mut c, nfs4rc::f_800eb440, &[a, b, out]);
+            let want: Vec<u32> = (0..3).map(|i| c.m.r32(out + 4 * i)).collect();
+            set(&mut c);
+            crossproduct(&mut c.m, a, b, out);
+            assert_eq!((0..3).map(|i| c.m.r32(out + 4 * i)).collect::<Vec<_>>(), want);
         }
     }
 }
