@@ -393,7 +393,20 @@ except FileNotFoundError:
     pass
 
 
+# Functions decompiled to Rust (crates/nfs4): calls to them ask `c.decomp` first and run the
+# recompiled original when it declines (it stays generated: the fallback and the reference).
+DECOMP_SET = set()
+try:
+    for _l in open('decomp_funcs.txt'):
+        if _l.strip() and not _l.startswith('#'):
+            DECOMP_SET.add(int(_l.split()[0], 16))
+except FileNotFoundError:
+    pass
+
+
 def call_expr(t, known):
+    if t in known and t in DECOMP_SET and t not in HOOK_SET:
+        return f'if !(c.decomp)(c, {t:#x}) {{ f_{t:08x}(c); }}'
     return f'f_{t:08x}(c);' if t in known and t not in HOOK_SET else f'c.call({t:#x});'
 
 

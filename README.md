@@ -20,6 +20,9 @@ from your own disc image: no emulator, and no game data in this repository.
   executable) and run on a small PS1 runtime (`crates/ps1rt`: CPU state, GTE, memory).
   Menus, game modes, car physics, AI, traffic, police, damage, the camera and the HUD logic
   are the game's own, step for step.
+- **Decompiled, function by function.** `crates/nfs4` replaces the recompiled code with
+  readable Rust that gives the same results to the bit, checked against the original as it
+  goes. The car handling (PHYSICS.CPP) is done. See [`docs/DECOMP.md`](docs/DECOMP.md).
 - **The hardware, replaced.** The PS1's libraries are high-level replacements in
   `src/ps1/host/`: CD and files read from the extracted disc; the pads come from keyboard
   and gamepads, with DualShock analog and vibration; the memory card is an image file;
@@ -146,6 +149,8 @@ nfshs export-car CODE|all [DIR]     a car's models (glTF, paints as material var
                                     (PNG), engine sounds (WAV) and original files in one folder
                                     (default export/CODE; codes as for --car, e.g. BMWM, CBMW, TAXI)
 nfshs verify-decompress <files>     codecs against re/dec/*.bin
+nfshs decomp-check [race options]   the decompiled code (crates/nfs4) against the recompiled
+                                    original over a race, RAM compared every frame
 ```
 
 `tools/` holds the reverse-engineering helpers: the recompiler, disassemblers, and DuckStation

@@ -218,6 +218,9 @@ pub struct Cpu {
     pub dispatch: fn(&mut Cpu, u32) -> bool,
     /// Resume at an arbitrary address inside recompiled code (cross-function fall-through).
     pub dispatch_at: fn(&mut Cpu, u32) -> bool,
+    /// The decompiled replacement of a function (the `nfs4` crate): recompiled calls to the
+    /// functions in tools/decomp_funcs.txt ask it first. Returns false to run the original.
+    pub decomp: fn(&mut Cpu, u32) -> bool,
     /// Replacements consulted while the host itself is running (its nested calls cannot
     /// re-enter it): return true when handled. Results can be left in `capture`.
     pub inner_hook: Option<fn(&mut Cpu, u32) -> bool>,
@@ -231,7 +234,7 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(m: Mem) -> Self {
-        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, irq_callbacks: [0; 11], dma_callbacks: [0; 7], in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, since_host: 0, max_since_host: 0, spin_limit: 0, recent: [(0, 0); 16], recent_at: 0, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false, inner_hook: None, deferred: Vec::new(), capture: Vec::new(), rand_seed: 0 }
+        Self { r: [0; 32], hi: 0, lo: 0, cop0: [0; 32], gte_regs: [0; 64], gte_commands: 0, timer_handlers: Vec::new(), pending_ticks: 0, irq_callbacks: [0; 11], dma_callbacks: [0; 7], in_irq: false, cont: 0, interpreted: 0, ticks: 0, tick_limit: u64::MAX, since_host: 0, max_since_host: 0, spin_limit: 0, recent: [(0, 0); 16], recent_at: 0, m, host: None, calls: 0, trace: false, stack: Vec::with_capacity(64), dispatch: |_, _| false, dispatch_at: |_, _| false, decomp: |_, _| false, inner_hook: None, deferred: Vec::new(), capture: Vec::new(), rand_seed: 0 }
     }
     #[inline]
     pub fn mult(&mut self, a: u32, b: u32) {

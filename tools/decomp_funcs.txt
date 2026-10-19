@@ -1,0 +1,27 @@
+# Retail NFS4.EXE functions decompiled to Rust (crates/nfs4). tools/recomp.py makes the
+# recompiled calls to them ask Cpu::decomp first; the originals stay generated as the fallback
+# and the reference the shadow checks compare against. Format: address name
+#
+# The math library (fixedmult, fixeddiv...) is decompiled too but not routed: the whole game
+# calls it, and its unit tests compare it with the original over all edge cases instead.
+
+# PHYSICS.CPP: the Physics_SimCar tree
+800ae1dc Physics_SimCar
+800acdf8 Physics_Real
+800ab618 Physics_CalculateCarAcceleration
+800aa9a0 Physics_RampCarControlValues
+800ac6d0 Physics_CalculateTireForces
+800ac32c Physics_CalcTractionCircleAcc
+800ac130 Physics_CalcWheelLockAcc
+800ab49c Physics_CalculateRoadGripModifiers
+800acc38 Physics_CalculateRSControlDesiredPosition
+800aa6e4 Physics_AutoShift
+800ab36c Physics_StopCar
+800a9f78 Physics_GetTorque
+
+# CARS.CPP
+800867a8 Cars_DoGravityEffectsOnAcc
+
+# MATHNFS.CPP
+8009e0ec Math_ResolveRotatedVector
+8009e4e0 Math_NormalizeVector

@@ -1230,6 +1230,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nfs4"
+version = "0.1.0"
+dependencies = [
+ "nfs4rc",
+ "ps1rt",
+]
+
+[[package]]
 name = "nfs4rc"
 version = "0.1.0"
 dependencies = [
@@ -1248,6 +1256,7 @@ dependencies = [
  "glam",
  "image",
  "log",
+ "nfs4",
  "nfs4rc",
  "pollster",
  "ps1rt",

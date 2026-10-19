@@ -14,6 +14,8 @@ pub fn new_cpu(m: Mem) -> Cpu {
     let mut c = Cpu::new(m);
     c.dispatch = nfs4rc::dispatch;
     c.dispatch_at = nfs4rc::dispatch_at;
+    // the decompiled functions take their originals' place (crates/nfs4)
+    nfs4::install(&mut c);
     // the sound hardware the original's driver programs; interrupts enabled (COP0 SR IEc and
     // IM2) as the BIOS leaves them
     c.m.bus = Some(Box::new(spu::Spu::default()));

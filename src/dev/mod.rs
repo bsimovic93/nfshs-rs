@@ -1,6 +1,7 @@
 //! Developer commands: headless runs and screenshots, comparisons with DuckStation
 //! captures, asset viewers and codec checks (`nfshs <command> ...`).
 
+mod decomp;
 mod export;
 mod headless;
 pub mod refcmp;
@@ -13,7 +14,7 @@ use std::path::Path;
 pub use headless::{front_end_play, screenshot};
 
 /// The commands [`run`] knows.
-pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car", "export-car"];
+pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car", "export-car", "decomp-check"];
 
 /// Run developer command `cmd` (`args` as on the command line); false if there is none.
 pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::RaceConfig) -> Result<bool> {
@@ -139,7 +140,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             // (x cross, s square, c circle, t triangle, l/r/u/d pad, 1-4 L1/R1/L2/R2, - none;
             // a: an analog pad (DualShock), L/R: its left stick fully left/right);
             // GS_SET="hexoff=value,..." pokes GameSetup words.
-            use ps1::race::{FrameInput, RaceSetup, RaceThread, pad};
+            use ps1::race::{FrameInput, RaceSetup, RaceThread};
             let mut cars = vec![car.to_string()];
             cars.extend(cfg.opponents.iter().cloned());
             let setup = RaceSetup { track, variant: variant.to_string(), cars, laps: laps as u32 };
@@ -183,30 +184,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             };
             let script = std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "8:-,3:x".into());
             let mut stage = sim.last.countdown;
-            for st in script.split(',').filter(|s| !s.is_empty()) {
-                let (secs, b) = st.split_once(':').unwrap_or((st, "-"));
-                let secs: f32 = secs.parse()?;
-                let mut buttons = 0u16;
-                let lx = if b.contains('L') { 0x00 } else if b.contains('R') { 0xFF } else { 0x80 };
-                let sticks = b.contains(['a', 'L', 'R']).then_some([0x80, 0x80, lx, 0x80]);
-                for ch in b.chars() {
-                    buttons |= match ch {
-                        'x' => pad::CROSS,
-                        's' => pad::SQUARE,
-                        'c' => pad::CIRCLE,
-                        't' => pad::TRIANGLE,
-                        'l' => pad::LEFT,
-                        'r' => pad::RIGHT,
-                        'u' => pad::UP,
-                        'd' => pad::DOWN,
-                        '1' => pad::L1,
-                        '2' => pad::R1,
-                        '3' => pad::L2,
-                        '4' => pad::R2,
-                        'p' => pad::START,
-                        _ => 0,
-                    };
-                }
+            for (st, (secs, buttons, sticks)) in script.split(',').filter(|s| !s.is_empty()).zip(script_steps(&script)?) {
                 let t = std::time::Instant::now();
                 let tick0 = sim.last.ticks;
                 let trace = std::env::var_os("BOOT_TRACE").is_some();
@@ -242,6 +220,17 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                 std::fs::write("re/boot/ram.bin", s.ram.as_deref().unwrap_or_default())?;
                 println!("RAM written to re/boot/ram.bin");
             }
+        }
+        "decomp-check" => {
+            // decomp-check [--track N --variant V --car C --opponents A,B --laps N] [--same]:
+            // the race BOOT_SCRIPT drives (as boot-race) run with the recompiled originals and
+            // with the decompiled code (crates/nfs4) side by side, the RAM compared after every
+            // frame; --same runs the recompiled code in both (they must agree too)
+            let mut cars = vec![car.to_string()];
+            cars.extend(cfg.opponents.iter().cloned());
+            let setup = ps1::race::RaceSetup { track, variant: variant.to_string(), cars, laps: laps as u32 };
+            let script = std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "8:-,3:x".into());
+            decomp::check(data.root.clone(), &setup, &script_steps(&script)?, args.iter().any(|a| a == "--same"))?;
         }
         "boot-main" => {
             // boot-main: run the original main (front end, then races) headless, for exploring
@@ -475,6 +464,40 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
 }
 
 /// Pack every shape of a PSH (or every PSH inside a VIV) onto a sheet PNG.
+/// A `BOOT_SCRIPT`: "secs:buttons,..." with x cross, s square, c circle, t triangle, l/r/u/d the
+/// pad, 1-4 L1/R1/L2/R2, p start, - none; a an analog pad (DualShock), L/R its left stick
+/// fully left/right. Per step: seconds, buttons, sticks.
+fn script_steps(script: &str) -> Result<Vec<(f32, u16, Option<[u8; 4]>)>> {
+    use ps1::race::pad;
+    let mut out = Vec::new();
+    for st in script.split(',').filter(|s| !s.is_empty()) {
+        let (secs, b) = st.split_once(':').unwrap_or((st, "-"));
+        let lx = if b.contains('L') { 0x00 } else if b.contains('R') { 0xFF } else { 0x80 };
+        let sticks = b.contains(['a', 'L', 'R']).then_some([0x80, 0x80, lx, 0x80]);
+        let buttons = b.chars().fold(0u16, |buttons, ch| {
+            buttons
+                | match ch {
+                    'x' => pad::CROSS,
+                    's' => pad::SQUARE,
+                    'c' => pad::CIRCLE,
+                    't' => pad::TRIANGLE,
+                    'l' => pad::LEFT,
+                    'r' => pad::RIGHT,
+                    'u' => pad::UP,
+                    'd' => pad::DOWN,
+                    '1' => pad::L1,
+                    '2' => pad::R1,
+                    '3' => pad::L2,
+                    '4' => pad::R2,
+                    'p' => pad::START,
+                    _ => 0,
+                }
+        });
+        out.push((secs.parse()?, buttons, sticks));
+    }
+    Ok(out)
+}
+
 fn dump_psh(src: &Path, out: &Path) -> Result<()> {
     let d = std::fs::read(src)?;
     let mut pshs = Vec::new();

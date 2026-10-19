@@ -10,6 +10,8 @@ original. Run them from this folder (they import each other: `mips`, `ds`, `reco
 | `recomp.py` | Static recompiler: `NFS4.EXE`'s MIPS functions to Rust (`crates/nfs4rc`). `python recomp.py ../crates/nfs4rc/src --all` |
 | `hle_funcs.txt` | Functions replaced on the host side (`src/ps1/host/`): calls to them reach the host. |
 | `hook_funcs.txt` | Recompiled functions always called through `Cpu::call`, so the host can observe them. |
+| `decomp_funcs.txt` | Functions decompiled to Rust (`crates/nfs4`): their calls ask `Cpu::decomp` first. See [`docs/DECOMP.md`](../docs/DECOMP.md). |
+| `gentypes.py` | Typed views of the game's structures for the decompiled code (`crates/nfs4/src/types.rs`), from `re/nfs4_types.h`. |
 
 ## Reading the original
 
@@ -23,6 +25,7 @@ original. Run them from this folder (they import each other: `mips`, `ds`, `reco
 | `mipsemu.py` | Tiny MIPS interpreter running self-contained routines (the codecs' ground truth, `re/dec`). |
 | `psxexe2elf.py` | Wraps the PS-X EXE in an ELF so disassemblers map it at its load address. |
 | `snsym.py`, `symmatch.py` | Read the 1999 development build's symbols and carry the names over to the retail executable (`re/*.tsv`). |
+| `globmatch.py` | The same for the global variables (`re/retail_globals.tsv`), lining up the data each matched function references. |
 
 ## The original, running (DuckStation)
 

@@ -1,0 +1,9 @@
+[package]
+name = "nfs4"
+version = "0.1.0"
+edition = "2024"
+description = "NFS4.EXE (SLUS-00826) decompiled to Rust, replacing the recompiled code function by function"
+
+[dependencies]
+ps1rt = { path = "../ps1rt" }
+nfs4rc = { path = "../nfs4rc" }
