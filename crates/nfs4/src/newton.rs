@@ -216,6 +216,7 @@ pub fn abi_find_ground_elevation_and_normal_fast(c: &mut Cpu) {
 /// put back (and its road found again).
 pub fn limit_cars_to_drivable_dist(c: &mut Cpu, car: Car) {
     abi::frame(c, 24, |c, _| {
+        abi::leave_prologue(c, 0x800a_a14c, Some(0x800a_18c4), &[(16, car.0)]);
         if crate::physics::do_barrier_check(c, car) != 0 {
             let hit = car.n().collision();
             hit.set_impulse(&mut c.m, 0);

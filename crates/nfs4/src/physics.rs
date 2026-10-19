@@ -1508,7 +1508,8 @@ pub fn do_barrier_check(c: &mut Cpu, car: Car) -> i32 {
         // how far the car reaches across the road: its length and width by its heading
         let o = n.orient_mat().get(&mut c.m).m;
         let dim = n.dimension().get(&mut c.m);
-        let reach = fixedmult(dim.z, dot([o[6], o[7], o[8]], right)).wrapping_abs();
+        let along = dot([o[6], o[7], o[8]], right);
+        let reach = fixedmult(dim.z, along).wrapping_abs();
         let reach = reach.wrapping_add(mul_8_8(dim.x, dot([o[0], o[1], o[2]], right)).wrapping_abs());
         let allowance = car.extra_wall_collision_allowance(&mut c.m);
         let s = at(c);
@@ -1546,7 +1547,8 @@ pub fn do_barrier_check(c: &mut Cpu, car: Car) -> i32 {
             // a bounce off the barrier's plane
             let facing = if side < 0 { right } else { right.map(i32::wrapping_neg) };
             normal.set(&mut c.m, facing.into());
-            abi::call(c, nfs4rc::f_8008e498, &[car.0, normal.0, n.position().0]);
+            let saved = [along as u32, car.0, off as u32, side as u32, depth as u32, slice as u32];
+            abi::call_from(c, nfs4rc::f_8008e498, &[car.0, normal.0, n.position().0], 0x800a_a65c, &saved); // Collide_TestWithPlane
             let hit = n.collision();
             if hit.impulse(&mut c.m) != 0 {
                 hit.set_other_obj(&mut c.m, crate::types::NewtonObj(0));
@@ -1554,9 +1556,14 @@ pub fn do_barrier_check(c: &mut Cpu, car: Car) -> i32 {
                 hit.set_sfx_type(&mut c.m, kind);
             }
         } else {
+            // the callees' prologues save this function's s0..s3 (and their return
+            // addresses) in their frames, where a skid mark's colour later picks up a byte
+            let saved = [(16, along as u32), (17, car.0), (18, off as u32), (19, side as u32), (20, depth as u32), (21, slice as u32)];
+            abi::leave_prologue(c, 0x800a_9b10, Some(0x800a_a6a0), &saved);
             let impact = attenuate_velocity(c, car, side.wrapping_mul((depth << 1).wrapping_abs()), n.road_matrix());
             // the normal as the stack holds it
             let normal = normal.get(&mut c.m);
+            abi::leave_prologue(c, 0x800a_9fb4, Some(0x800a_a6bc), &saved);
             correct_post_collision_yaw(c, car, impact, normal);
         }
         side
@@ -1574,6 +1581,7 @@ const CAR_HUMAN: i32 = 4;
 /// noted on the car (`crash`, its side); a player's car gets its velocities set again.
 pub fn test_for_barrier_collision(c: &mut Cpu, car: Car) {
     abi::frame(c, 32, |c, _| {
+        abi::leave_prologue(c, 0x800a_a14c, Some(0x800a_b45c), &[(16, car.0)]);
         let side = do_barrier_check(c, car);
         if side != 0 {
             if car.car_flags(&mut c.m) & CAR_HUMAN != 0 {
@@ -1777,6 +1785,52 @@ mod tests {
     #[test]
     fn barrier_fuzz() {
         against_original("Physics_TestForBarrierCollision", 20_000, 0xBA221E2, toward_barriers, nfs4rc::f_800ab444, test_for_barrier_collision);
+    }
+
+    /// The barrier test entered from recompiled code leaves the stack (on the scratchpad, as in
+    /// a race) as the original does, the registers its callees save included: a skid mark's
+    /// colour later takes a byte of `Physics_CorrectPostCollisionYaw`'s saved return address.
+    #[test]
+    fn barrier_stack_fuzz() {
+        let Some(ram) = race_ram() else { return };
+        let mut rng = Rng(0x5747);
+        let car = Car(u32::from_le_bytes(ram[0x11_0CA0..0x11_0CA4].try_into().unwrap()));
+        let mut c = cpu_with(&ram);
+        // under Collide_CheckMeForCollisions' frame, in the 32 Hz schedule
+        let top = 0x1F80_03DC - 176;
+        let enter = |c: &mut Cpu| {
+            c.m.scratch = [0xAB; 0x400];
+            for r in 16..24 {
+                c.r[r] = 0x8000_0000 | r as u32;
+            }
+            c.r[29] = top;
+            c.r[4] = car.0;
+            c.r[31] = 0x8009_2400;
+        };
+        let mut mismatches = 0;
+        for i in 0..3000 {
+            c.m.ram.copy_from_slice(&ram);
+            perturb(&mut c, car, &mut rng);
+            toward_barriers(&mut c, car, &mut rng);
+            let state = c.m.ram.clone();
+            enter(&mut c);
+            nfs4rc::f_800ab444(&mut c);
+            let want = c.m.scratch;
+            c.m.ram.copy_from_slice(&state);
+            enter(&mut c);
+            crate::decomp(&mut c, 0x800a_b444);
+            let differ: Vec<usize> = (0..0x400).step_by(4).filter(|&w| want[w..w + 4] != c.m.scratch[w..w + 4]).collect();
+            if !differ.is_empty() {
+                mismatches += 1;
+                if mismatches <= 5 {
+                    let word = |s: &[u8], w: usize| u32::from_le_bytes(s[w..w + 4].try_into().unwrap());
+                    for &w in differ.iter().take(8) {
+                        eprintln!("case {i}: {:#x}: expected {:#010x} got {:#010x}", 0x1F80_0000 + w, word(&want, w), word(&c.m.scratch, w));
+                    }
+                }
+            }
+        }
+        assert_eq!(mismatches, 0, "the barrier test leaves the stack otherwise than the original");
     }
 
     #[test]

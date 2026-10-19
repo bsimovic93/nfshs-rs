@@ -181,3 +181,34 @@ pub const W_SAVE_PTR: U32 = U32(0x8013_EB18);
 pub const DUMMY_NORMAL: u32 = 0x8013_F3E0;
 /// `dummy.133`: where `Newton_SetInitialSlicePositionOrientationEtc` has the ground's normal put.
 pub const DUMMY_NORMAL_INIT: u32 = 0x8013_F3F0;
+
+// CARS.CPP, STATS.CPP, SIM.CPP, COPSPEAK.CPP
+
+/// `Cars_gRaceCarList`, `Cars_gAIRaceCarList`: the cars racing, and those of them the AI
+/// drives (`Car_tObj *[9]`), with `Cars_gNumRaceCars`, `Cars_gNumAIRaceCars`.
+pub const RACE_CARS: u32 = 0x8011_0CC4;
+pub const AI_RACE_CARS: u32 = 0x8011_0D30;
+pub const NUM_RACE_CARS: I32 = I32(0x8013_DAEC);
+pub const NUM_AI_RACE_CARS: I32 = I32(0x8013_DAF8);
+/// `Cars_topSpeedCap`: the top speed of the cars with a capped one, by car type (`int[22]`).
+pub const TOP_SPEED_CAP: u32 = 0x8011_0AEC;
+/// `Stats_racePosition`: the cars in race order (`Stats_tPosition[6]`).
+pub const RACE_POSITION: u32 = 0x8011_F398;
+/// `simVar.endSimGame`: the race is over.
+pub const SIM_END_GAME: I32 = I32(0x8011_F380);
+/// `CopSpeak_gQueuePlay`, `CopSpeak_gQueueHead`: the police radio's queue (the next to play,
+/// the end); `CopSpeak_gSpchHandle`: what plays (-1 nothing).
+pub const COPSPEAK_QUEUE_PLAY: I32 = I32(0x8013_E3A0);
+pub const COPSPEAK_QUEUE_HEAD: I32 = I32(0x8013_E39C);
+pub const COPSPEAK_SPCH_HANDLE: I32 = I32(0x8013_E3A4);
+/// `Cars_gList`: every car (`Car_tObj *[9]`), with `Cars_gNumCars`; `Cars_gNumAICars`.
+pub const CARS_LIST: u32 = 0x8011_0CA0;
+pub const NUM_CARS: I32 = I32(0x8013_DAE8);
+pub const NUM_AI_CARS: I32 = I32(0x8013_DAF0);
+/// `Cars_gSortedList`: the cars by the slice they are on; `Cars_gTotalSortedList`: by the
+/// slices they have driven.
+pub const SORTED_LIST: u32 = 0x8011_0DC0;
+pub const TOTAL_SORTED_LIST: u32 = 0x8011_0DE4;
+/// `SceneLoaded`: the accident scene's objects are on the track; `accidentSlice`: where.
+pub const SCENE_LOADED: I32 = I32(0x8013_DA4C);
+pub const ACCIDENT_SLICE: I32 = I32(0x8013_DB08);

@@ -65,6 +65,19 @@
 
 # CARS.CPP
 800867a8 Cars_DoGravityEffectsOnAcc
+800869b0 Cars_SetAudioCalls
+8008755c Cars_DoExtraCarCollisionProcessing
+8008a184 Cars_FindTotalSlice
+8008a1f0 Car_DoSkiddingStuff
+8008a300 Car_DoPostCollisionStuff
+8008b654 Cars_FindCurrentLap
+8008b70c Cars_CalculateRoadSpan
+8008b954 Cars_CalculateRoadPosition
+8008b974 Cars_CalcVelDownRoad
+8008ba10 Cars_Randomize
+8008ba88 Cars_ManageBureaucracy
+8008bc50 Cars_CheckForAccidentScenes
+8008bd18 Cars_SortCars
 
 # MATHNFS.CPP
 8009dea8 Math_DistXZ
@@ -126,3 +139,12 @@
 80091fc4 Collide_ClearCollisionRegistry
 800921c4 Collide_CheckAccuratePointRadiusCollision
 800923bc Collide_CheckMeForCollisions
+
+# STATS.CPP
+800b8c2c Stats_DoPlayerGlue
+800b8de8 Stats_ClearPosition
+800b8e28 Stats_GetPosition
+800b8e7c Stats_GetNumOpponents
+800b8ed0 Stats_TrackStats
+800b92d8 Stats_ExtrapolateOpponentTimes
+800b9a80 Stats_TrackEndGame

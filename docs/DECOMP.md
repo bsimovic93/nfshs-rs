@@ -43,6 +43,16 @@ collisions, AI), then the front end.
   Likewise a callee that homes its register arguments (`sw a2, 48(sp)` into the caller's
   frame) writes them there too. In a race the stack is in the scratchpad (around
   0x1F8002AC..0x1F8003DC for the physics), and the original's frames nearly fill it.
+- **Saved registers.** The original's prologues save the caller's s-registers and the return
+  address in their frames, and those leftovers are read too: `TrgSfx_AddSkidmark` builds a
+  skid mark's colour on the stack without its fourth byte, which then comes from
+  `Physics_CorrectPostCollisionYaw`'s saved return address. The ports keep no registers, so
+  `nfs4::decomp` replays the original's prologue stores (read from the EXE) on every call from
+  recompiled code, whose registers hold what the original's would. Where a port calls a
+  decompiled function and the leftovers matter, it does the same with `abi::leave_prologue`,
+  giving the s-registers and return address the original caller would have; a recompiled
+  callee gets them with `abi::call_from`. `physics::tests::barrier_stack_fuzz` compares the
+  whole scratchpad stack after the barrier test.
 
 ## Porting a function
 
@@ -95,8 +105,11 @@ collisions, AI), then the front end.
 | PHYSICS.CPP | all 22: the `Physics_SimCar` tree (`Physics_Real`, `CalculateCarAcceleration`, `RampCarControlValues`, `AutoShift`, `CalculateTireForces`, `CalcTractionCircleAcc`, `CalcWheelLockAcc`, `CalculateRoadGripModifiers`, `CalculateRSControlDesiredPosition`, `StopCar`, `GetTorque`), the barriers (`TestForBarrierCollision`, `DoBarrierCheck`, `AttenuateVelocity`, `CorrectPostCollisionYaw`, `FixEngineRpm`, `SetCurrentWallType`), the car specs (`InitCarSpecs`, `CalculateDerivedCarSpecs`), `ResetCar`, `CheckGamedata` |
 | NEWTON.CPP | all 32: the ground under the wheels (`FindGroundElevationAndNormal` and its fast, general and rough forms), gravity and landing (`ApplyTheLawOfGravity`), the road's edges and bad quads (`TestForUndrivableSurfaces`, `DoPostBarrierCollisionHandling`, `GenerateVector`, `CheckForBadQuad`), the road position and geometry, the simulation level by distance (`CalcDistToClosestPlayerCar`, with its `SetSp` stack swap), rotation (`QDUpdateRot64Hz`/`32Hz`, `OptzRotxform`), shadows, damage (`AddDamageZone`), spike belts, the object setup (`InitBaseNewtonObj`, `SetInitialSlicePositionOrientationEtc`) |
 | COLLIDE.CPP | all 14: the per-frame entry (`CheckMeForCollisions`: track objects, road edges, the registry), object against object (`CheckForCollisionBetween`, `TestObjectVertices`, `DoActualObjectCollisionCheck`, the `CHECK_*VERTEX_WITH_DIRS*` tests, `DoObjectObjectCollision`), against a plane or a fixed object (`TestWithPlane`, `DoObjectFixedObjectCollision`), `LimitAngularVel`, `CheckAccuratePointRadiusCollision`, `ClearCollisionRegistry` |
-| CARS.CPP | `Cars_DoGravityEffectsOnAcc` |
+| CARS.CPP | the per-tick bookkeeping (`ManageBureaucracy`: the road span and position, the speed down the road, the way a human faces, `FindCurrentLap`, `FindTotalSlice`, `SortCars`, `Randomize`), `CheckForAccidentScenes`, after the collisions (`Car_DoPostCollisionStuff`: the body's pitch and roll; `DoExtraCarCollisionProcessing`: blowouts, the player's reset, sparks, parts falling off, crash smoke and sounds, the reset timer; `Car_DoSkiddingStuff`; `SetAudioCalls`), `DoGravityEffectsOnAcc` (not yet: `Car_TireSkiddingStuff`, `AddCarSfx`, `ResetCollidedCars`, the set-up and clean-up) |
+| STATS.CPP | all 7: laps, lap times and top speeds (`TrackStats`), the race order (`ClearPosition`, `GetPosition`, `GetNumOpponents`), the catch-up glue (`DoPlayerGlue`), the checkpoint gaps and the race's end (`TrackEndGame`), the final standings (`ExtrapolateOpponentTimes`) |
 
 The races seldom bring cars together, so COLLIDE.CPP is covered mostly by fuzz tests (`cargo test -p nfs4 collide`): two cars of the race RAM put against each other, closing fast or slow, one sometimes a track object, compared with the original.
 
-Next: the race logic, the AI and the front end.
+The race logic's fuzz tests (`cargo test -p nfs4 stats`, `cars`) shuffle the standings, laps, setups (one human or two, reversed tracks, time trials) and collisions (each kind of hit, damage, blowouts, cars on their roofs) on the race RAM. `nfshs decomp-check --laps 1` with `BOOT_SCRIPT="8:-,150:x"` (9480 frames) runs the whole race decompiled with the same RAM after every frame.
+
+Next: the rest of the race logic (`Car_TireSkiddingStuff`, `Cars_AddCarSfx`, `Cars_ResetCollidedCars`, CONTROL.CPP, the schedules and SIM.CPP's loop, the set-up), the AI and the front end.

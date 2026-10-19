@@ -28,6 +28,7 @@ pub mod globals;
 pub mod mathnfs;
 pub mod newton;
 pub mod physics;
+pub mod stats;
 pub mod types;
 pub mod vec;
 
@@ -86,6 +87,19 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8008_0f6c, "BWorldSm_UForward", bworldsm::abi_u_forward),
     func_ret(0x8008_0f94, "BWorldSm_FindClosestTriangleRez", bworldsm::abi_find_closest_triangle_rez),
     func(0x8008_67a8, "Cars_DoGravityEffectsOnAcc", cars::abi_do_gravity_effects_on_acc),
+    func(0x8008_69b0, "Cars_SetAudioCalls", cars::abi_set_audio_calls),
+    func(0x8008_755c, "Cars_DoExtraCarCollisionProcessing", cars::abi_do_extra_car_collision_processing),
+    func(0x8008_a184, "Cars_FindTotalSlice", cars::abi_find_total_slice),
+    func(0x8008_a1f0, "Car_DoSkiddingStuff", cars::abi_do_skidding_stuff),
+    func(0x8008_a300, "Car_DoPostCollisionStuff", cars::abi_do_post_collision_stuff),
+    func(0x8008_b654, "Cars_FindCurrentLap", cars::abi_find_current_lap),
+    func_ret(0x8008_b70c, "Cars_CalculateRoadSpan", cars::abi_calculate_road_span),
+    func_ret(0x8008_b954, "Cars_CalculateRoadPosition", cars::abi_calculate_road_position),
+    func_ret(0x8008_b974, "Cars_CalcVelDownRoad", cars::abi_calc_vel_down_road),
+    func(0x8008_ba10, "Cars_Randomize", cars::abi_randomize),
+    func(0x8008_ba88, "Cars_ManageBureaucracy", cars::abi_manage_bureaucracy),
+    func(0x8008_bc50, "Cars_CheckForAccidentScenes", cars::abi_check_for_accident_scenes),
+    func(0x8008_bd18, "Cars_SortCars", cars::abi_sort_cars),
     func_ret(0x8008_c560, "CHECK_CENTER_VERTEX_WITH_DIRS", collide::abi_check_center_vertex_with_dirs),
     func_ret(0x8008_c9e0, "CHECK_CENTER_VERTEX_WITH_DIRS_OTHER", collide::abi_check_center_vertex_with_dirs_other),
     func_ret(0x8008_ce6c, "CHECK_VERTEX_WITH_DIRS", collide::abi_check_vertex_with_dirs),
@@ -164,6 +178,13 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x800a_cc38, "Physics_CalculateRSControlDesiredPosition", physics::abi_calculate_rs_control_desired_position),
     func(0x800a_cdf8, "Physics_Real", physics::abi_real),
     func(0x800a_e1dc, "Physics_SimCar", physics::abi_sim_car),
+    func(0x800b_8c2c, "Stats_DoPlayerGlue", stats::abi_do_player_glue),
+    func(0x800b_8de8, "Stats_ClearPosition", stats::abi_clear_position),
+    func_ret(0x800b_8e28, "Stats_GetPosition", stats::abi_get_position),
+    func_ret(0x800b_8e7c, "Stats_GetNumOpponents", stats::abi_get_num_opponents),
+    func(0x800b_8ed0, "Stats_TrackStats", stats::abi_track_stats),
+    func(0x800b_92d8, "Stats_ExtrapolateOpponentTimes", stats::abi_extrapolate_opponent_times),
+    func(0x800b_9a80, "Stats_TrackEndGame", stats::abi_track_end_game),
 ];
 
 /// The index of the function at `addr` in [`FUNCS`].
@@ -282,6 +303,8 @@ pub fn decomp(c: &mut Cpu, addr: u32) -> bool {
         return false;
     }
     count(i, |s| s.calls += 1);
+    // the registers hold the caller's values, as the original's would
+    abi::leave_prologue(c, FUNCS[i].addr, None, &[]);
     if check::wanted(i) {
         check::run(c, i);
     } else {
@@ -381,6 +404,43 @@ pub(crate) mod test_util {
     pub fn ram_diff(want: &[u8], got: &[u8]) -> Vec<usize> {
         let dead = 0x1F_0000..0x1F_FF00;
         (0..want.len()).step_by(4).filter(|a| !dead.contains(a) && want[*a..a + 4] != got[*a..a + 4]).collect()
+    }
+
+    /// `port` against the recompiled `original` (`args` its arguments) on the race's RAM as
+    /// `shuffle` changes it: RAM, the rand() state and the result (when `port` returns one)
+    /// must be the same. The port runs with the decompiled code routed, the original without.
+    pub fn against_original(name: &str, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng), original: fn(&mut Cpu), args: &dyn Fn(&mut Cpu) -> Vec<u32>, port: fn(&mut Cpu, &[u32]) -> Option<u32>) {
+        let Some(ram) = race_ram() else { return };
+        let mut rng = Rng(seed);
+        let mut c = cpu_with(&ram);
+        let plain = c.decomp;
+        let (mut mismatches, mut busy) = (0, 0);
+        for i in 0..cases {
+            c.m.ram.copy_from_slice(&ram);
+            shuffle(&mut c, &mut rng);
+            let a = args(&mut c);
+            let seed = rng.next() as u32;
+            let state = c.m.ram.clone();
+            c.rand_seed = seed;
+            c.decomp = plain;
+            let want_v = run(&mut c, original, &a);
+            let (want, want_seed) = (c.m.ram.clone(), c.rand_seed);
+            c.m.ram.copy_from_slice(&state);
+            c.rand_seed = seed;
+            c.decomp = crate::decomp;
+            let got_v = port(&mut c, &a);
+            busy += !ram_diff(&state, &want).is_empty() as u32;
+            let diff = ram_diff(&want, &c.m.ram);
+            if !diff.is_empty() || got_v.is_some_and(|v| v != want_v) || c.rand_seed != want_seed {
+                mismatches += 1;
+                if mismatches <= 5 {
+                    eprintln!("{name} case {i}: returned {got_v:x?}, the original {want_v:#x}; rand state {:#x}, the original {want_seed:#x}", c.rand_seed);
+                    report(name, i, &want, &c.m.ram, &diff);
+                }
+            }
+        }
+        eprintln!("{name}: {busy} of {cases} cases changed RAM");
+        assert_eq!(mismatches, 0, "{name} differs from the original");
     }
 
     /// Print the first differing words of a failed case.
