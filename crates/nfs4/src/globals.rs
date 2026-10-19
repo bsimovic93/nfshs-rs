@@ -45,6 +45,16 @@ impl I32s {
     }
 }
 
+/// A `short[]` global.
+#[derive(Clone, Copy, Debug)]
+pub struct I16s(pub u32, pub u32);
+impl I16s {
+    pub fn get(self, m: &mut Mem, i: u32) -> i16 {
+        debug_assert!(i < self.1);
+        m.r16(self.0 + 2 * i) as i16
+    }
+}
+
 /// A `uchar[]` global.
 #[derive(Clone, Copy, Debug)]
 pub struct U8s(pub u32, pub u32);
@@ -151,3 +161,23 @@ pub const HUMAN_RACE_CARS: u32 = 0x8011_0D0C;
 pub const NUM_HUMAN_RACE_CARS: I32 = I32(0x8013_DAF4);
 /// `AIInit_forceHumanHandBrake`.
 pub const FORCE_HUMAN_HAND_BRAKE: I32 = I32(0x8013_D874);
+
+// NEWTON.CPP, AICOP.CPP
+
+/// `divTable`: 1 / y for road normals near level (by (1 - y) in 1/128ths).
+pub const DIV_TABLE: I32s = I32s(0x8011_52D4, 50);
+/// `fudgeTable`: the bumps of rough ground.
+pub const FUDGE_TABLE: I16s = I16s(0x8011_539C, 32);
+/// `AICop_spikeBelt`: the police's spike belt.
+pub const SPIKE_BELT: crate::types::AICopSpikeBelt = crate::types::AICopSpikeBelt(0x8010_E1A8);
+
+/// `swap`: the wheel that takes each wheel's tyre compression (the same wheel).
+pub const WHEEL_SWAP: u32 = 0x8011_53DC;
+/// `stackSpeedUpEnbabledFlag`: the race runs on the scratchpad stack.
+pub const STACK_SPEED_UP_ENABLED: I32 = I32(0x8013_EB04);
+/// `gWSavePtr`: the stack pointer `SetSp` swapped out.
+pub const W_SAVE_PTR: U32 = U32(0x8013_EB18);
+/// `dummy.124`: where `Newton_CalcDistToClosestPlayerCar` has the ground's normal put.
+pub const DUMMY_NORMAL: u32 = 0x8013_F3E0;
+/// `dummy.133`: where `Newton_SetInitialSlicePositionOrientationEtc` has the ground's normal put.
+pub const DUMMY_NORMAL_INIT: u32 = 0x8013_F3F0;

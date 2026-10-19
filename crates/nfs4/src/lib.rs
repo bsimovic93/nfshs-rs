@@ -25,6 +25,7 @@ pub mod check;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
+pub mod newton;
 pub mod physics;
 pub mod types;
 pub mod vec;
@@ -94,6 +95,34 @@ pub static FUNCS: &[Func] = &[
     func(0x8009_e698, "Math_NormalizeShortVector", mathnfs::abi_normalize_short_vector),
     func(0x8009_e744, "Math_QDNormalizeVector", mathnfs::abi_qd_normalize_vector),
     func(0x8009_e850, "Math_fasttransmult", mathnfs::abi_fasttransmult),
+    func(0x8009_fa38, "Newton_AddDamageZone", newton::abi_add_damage_zone),
+    func_ret(0x800a_0210, "Newton_FindClosestQuad", newton::abi_find_closest_quad),
+    func_ret(0x800a_023c, "Newton_CalculateSliceYaw", newton::abi_calculate_slice_yaw),
+    func(0x800a_02ac, "Newton_UpdateRoadGeometry", newton::abi_update_road_geometry),
+    func_ret(0x800a_063c, "Newton_FindGroundElevationGeneral", newton::abi_find_ground_elevation_general),
+    func_ret(0x800a_0798, "Newton_FindGroundElevationRough", newton::abi_find_ground_elevation_rough),
+    func_ret(0x800a_096c, "Newton_FindGroundElevationAndNormalFast", newton::abi_find_ground_elevation_and_normal_fast),
+    func_ret(0x800a_0a8c, "Newton_FindGroundElevationAndNormal", newton::abi_find_ground_elevation_and_normal),
+    func(0x800a_18b0, "Newton_LimitCarsToDrivableDist", newton::abi_limit_cars_to_drivable_dist),
+    func_ret(0x800a_18f4, "Newton_CalcPerpenHeightOfLowestPointFromGround", newton::abi_calc_perpen_height_of_lowest_point_from_ground),
+    func_ret(0x800a_1c78, "Newton_CalcPerpenHeightOfCenterPointFromGround", newton::abi_calc_perpen_height_of_center_point_from_ground),
+    func(0x800a_1d54, "Newton_CalcDistToClosestPlayerCar", newton::abi_calc_dist_to_closest_player_car),
+    func(0x800a_2074, "Newton_UpdateRoadInfo", newton::abi_update_road_info),
+    func(0x800a_2100, "Newton_CopyRoadMatrixToOrientMat", newton::abi_copy_road_matrix_to_orient_mat),
+    func(0x800a_21d4, "Newton_CopyRoadMatrixToShadowMat", newton::abi_copy_road_matrix_to_shadow_mat),
+    func(0x800a_22a8, "Newton_SetInitialSlicePositionOrientationEtc", newton::abi_set_initial_slice_position_orientation_etc),
+    func(0x800a_26f4, "Newton_InitBaseNewtonObj", newton::abi_init_base_newton_obj),
+    func(0x800a_2974, "Newton_QDUpdateVel", newton::abi_qd_update_vel),
+    func_ret(0x800a_2a58, "Newton_OptzRotxform", newton::abi_optz_rotxform),
+    func(0x800a_2bf4, "Newton_QDUpdateRot64Hz", newton::abi_qd_update_rot_64hz),
+    func(0x800a_2d04, "Newton_QDUpdateRot32Hz", newton::abi_qd_update_rot_32hz),
+    func(0x800a_3538, "Newton_CheckForSpikeBelts", newton::abi_check_for_spike_belts),
+    func(0x800a_35fc, "Newton_DoPostBarrierCollisionHandling", newton::abi_do_post_barrier_collision_handling),
+    func(0x800a_37a4, "Newton_GenerateVector", newton::abi_generate_vector),
+    func_ret(0x800a_3930, "Netwon_CheckForBadQuad", newton::abi_check_for_bad_quad),
+    func(0x800a_4140, "Newton_LimitAngularVelocity", newton::abi_limit_angular_velocity),
+    func_ret(0x800a_46c4, "Newton_CalculateRoadPositionFromSliceAndPosition", newton::abi_calculate_road_position_from_slice_and_position),
+    func_ret(0x800a_47b8, "Newton_CalculateRoadPosition", newton::abi_calculate_road_position),
     func(0x800a_935c, "Physics_InitCarSpecs", physics::abi_init_car_specs),
     func(0x800a_95f8, "Physics_CalculateDerivedCarSpecs", physics::abi_calculate_derived_car_specs),
     func(0x800a_9b08, "Physics_CheckGamedata", physics::abi_check_gamedata),

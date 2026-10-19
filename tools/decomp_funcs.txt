@@ -5,6 +5,36 @@
 # The math library (fixedmult, fixeddiv...) is decompiled too but not routed: the whole game
 # calls it, and its unit tests compare it with the original over all edge cases instead.
 
+# NEWTON.CPP
+8009fa38 Newton_AddDamageZone
+800a0210 Newton_FindClosestQuad
+800a023c Newton_CalculateSliceYaw
+800a02ac Newton_UpdateRoadGeometry
+800a063c Newton_FindGroundElevationGeneral
+800a0798 Newton_FindGroundElevationRough
+800a096c Newton_FindGroundElevationAndNormalFast
+800a0a8c Newton_FindGroundElevationAndNormal
+800a18b0 Newton_LimitCarsToDrivableDist
+800a18f4 Newton_CalcPerpenHeightOfLowestPointFromGround
+800a1c78 Newton_CalcPerpenHeightOfCenterPointFromGround
+800a1d54 Newton_CalcDistToClosestPlayerCar
+800a2074 Newton_UpdateRoadInfo
+800a2100 Newton_CopyRoadMatrixToOrientMat
+800a21d4 Newton_CopyRoadMatrixToShadowMat
+800a22a8 Newton_SetInitialSlicePositionOrientationEtc
+800a26f4 Newton_InitBaseNewtonObj
+800a2a58 Newton_OptzRotxform
+800a2974 Newton_QDUpdateVel
+800a2bf4 Newton_QDUpdateRot64Hz
+800a2d04 Newton_QDUpdateRot32Hz
+800a3538 Newton_CheckForSpikeBelts
+800a35fc Newton_DoPostBarrierCollisionHandling
+800a37a4 Newton_GenerateVector
+800a3930 Netwon_CheckForBadQuad
+800a4140 Newton_LimitAngularVelocity
+800a46c4 Newton_CalculateRoadPositionFromSliceAndPosition
+800a47b8 Newton_CalculateRoadPosition
+
 # PHYSICS.CPP
 800a935c Physics_InitCarSpecs
 800a95f8 Physics_CalculateDerivedCarSpecs

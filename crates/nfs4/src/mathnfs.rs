@@ -27,7 +27,7 @@ pub fn quick_length(x: i32, z: i32) -> i32 {
 }
 
 /// The longer of two magnitudes and a quarter of the shorter (taken as they are).
-fn longer_and_quarter(x: i32, z: i32) -> i32 {
+pub fn longer_and_quarter(x: i32, z: i32) -> i32 {
     if z < x { x.wrapping_add(z >> 2) } else { z.wrapping_add(x >> 2) }
 }
 

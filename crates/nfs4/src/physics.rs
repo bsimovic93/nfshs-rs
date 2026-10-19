@@ -675,7 +675,7 @@ const SGGE_GRIP: i32 = 8;
 const GEAR_NEUTRAL: i32 = 1;
 
 /// The `fastRandom` macro: the next of the game's quick random numbers (16 bits).
-fn fast_random(c: &mut Cpu) -> u32 {
+pub fn fast_random(c: &mut Cpu) -> u32 {
     let t = FAST_RANDOM.get(&mut c.m).wrapping_mul(RAND_SEED.get(&mut c.m));
     RAND_TEMP.set(&mut c.m, t);
     FAST_RANDOM.set(&mut c.m, t & 0xFFFF);
@@ -904,7 +904,7 @@ fn mat_vec(m: &[i32; 9], v: [i32; 3]) -> [i32; 3] {
     std::array::from_fn(|r| fixedmult(v[0], m[3 * r]).wrapping_add(fixedmult(v[1], m[3 * r + 1])).wrapping_add(fixedmult(v[2], m[3 * r + 2])))
 }
 
-fn transposed(m: &[i32; 9]) -> [i32; 9] {
+pub fn transposed_matrix(m: &[i32; 9]) -> [i32; 9] {
     std::array::from_fn(|i| m[3 * (i % 3) + i / 3])
 }
 
@@ -1133,7 +1133,7 @@ fn real_on_wheels(c: &mut Cpu, car: Car, sp: u32) {
     // back into the world: accelerations, then velocities (a 32nd of them a step; the yaw a
     // 64th)
     Coord(sp + 128).set(&mut c.m, [0, yaw, 0].into());
-    let to_world = transposed(&n.shadow_mat().get(&mut c.m).m);
+    let to_world = transposed_matrix(&n.shadow_mat().get(&mut c.m).m);
     Matrix(sp + 160).set(&mut c.m, &crate::vec::Mat3 { m: to_world });
     crate::cars::do_gravity_effects_on_acc(c, car);
     let acc = mat_vec(&to_world, car.linear_acc_ch().get(&mut c.m).into());
@@ -1412,7 +1412,7 @@ pub fn attenuate_velocity(c: &mut Cpu, car: Car, push: i32, frame: crate::types:
         }
         let kept = [0, 0, along];
         Coord(sp + 16).set(&mut c.m, kept.into());
-        let back = transposed(&f);
+        let back = transposed_matrix(&f);
         Matrix(sp + 32).set(&mut c.m, &crate::vec::Mat3 { m: back });
         let world = mat_vec(&back, kept);
         let v = n.linear_vel();

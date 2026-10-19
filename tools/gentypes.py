@@ -17,7 +17,7 @@ HEADER = '../re/nfs4_types.h'
 OUT = sys.argv[1] if len(sys.argv) > 1 else '../crates/nfs4/src/types.rs'
 
 # The structures the ported code uses; whatever they hold by value comes with them.
-ROOTS = ['Car_tObj', 'Physics_tWheelAccStruct', 'Car_tSpecs', 'Udff_tInfo', 'BWorldSm_Pos', 'Trk_NewSlice', 'GameSetup_tData', 'Chunk', 'Trk_NewStrip', 'Trk_NewSimSlice', 'Trk_NewSimQuad', 'tNormalCacheEntry',
+ROOTS = ['Car_tObj', 'Physics_tWheelAccStruct', 'Car_tSpecs', 'Udff_tInfo', 'BWorldSm_Pos', 'Trk_NewSlice', 'GameSetup_tData', 'Chunk', 'Trk_NewStrip', 'Trk_NewSimSlice', 'Trk_NewSimQuad', 'tNormalCacheEntry', 'AICop_spikeBelt_t',
          'GameSetup_tCarData']
 
 # Rust names for some structures (others: underscores and the `_t` type prefix dropped).
