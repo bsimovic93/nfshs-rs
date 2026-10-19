@@ -394,7 +394,7 @@ fn raw_find_closest_quad_in_frame(c: &mut Cpu, pt: Coord, pos: BWorldSmPos, sp: 
         let quads = |c: &mut Cpu| pos.sim_slice(&mut c.m).quad_count(&mut c.m) as i32;
         // up the slice
         let mut best = i32::MAX;
-        while pos.quad(&mut c.m) as i32 <= quads(c) - 1 {
+        while (pos.quad(&mut c.m) as i32) < quads(c) {
             get_first_stm_quad_pts(c, pos, vertices);
             if inside_quad16(&mut c.m, pos, x, z) && is_sim_quad_valid(c, pos) {
                 return found(c);

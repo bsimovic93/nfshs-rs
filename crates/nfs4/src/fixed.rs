@@ -178,7 +178,7 @@ pub fn fixedinverse(a: i32) -> i32 {
     let sign = a >> 31;
     let d = ((a ^ sign).wrapping_sub(sign)) as u32;
     // divu by 0: the quotient all ones, the remainder the dividend
-    let (q, r) = if d == 0 { (u32::MAX, u32::MAX) } else { (u32::MAX / d, u32::MAX % d) };
+    let (q, r) = u32::MAX.checked_div(d).map_or((u32::MAX, u32::MAX), |q| (q, u32::MAX % d));
     let half = ((d as i32) >> 1) as u32;
     let v = q.wrapping_add((half < r) as u32) as i32;
     (v ^ sign).wrapping_sub(sign)
