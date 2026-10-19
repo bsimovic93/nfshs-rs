@@ -27,11 +27,15 @@
 800a2974 Newton_QDUpdateVel
 800a2bf4 Newton_QDUpdateRot64Hz
 800a2d04 Newton_QDUpdateRot32Hz
+800a2e24 Newton_CalculateGroundShadowMatrix
+800a3198 Newton_CalcRealShadowCoordinates
 800a3538 Newton_CheckForSpikeBelts
 800a35fc Newton_DoPostBarrierCollisionHandling
 800a37a4 Newton_GenerateVector
 800a3930 Netwon_CheckForBadQuad
+800a3990 Newton_TestForUndrivableSurfaces
 800a4140 Newton_LimitAngularVelocity
+800a41d8 Newton_ApplyTheLawOfGravity
 800a46c4 Newton_CalculateRoadPositionFromSliceAndPosition
 800a47b8 Newton_CalculateRoadPosition
 
@@ -106,3 +110,13 @@
 80080f44 BWorldSm_UNormal
 80080f6c BWorldSm_UForward
 80080f94 BWorldSm_FindClosestTriangleRez
+
+# COLLIDE.CPP
+8008c560 CHECK_CENTER_VERTEX_WITH_DIRS
+8008c9e0 CHECK_CENTER_VERTEX_WITH_DIRS_OTHER
+8008ce6c CHECK_VERTEX_WITH_DIRS
+8008d234 CHECK_VERTEX_WITH_DIRS_OTHER
+8008e3a4 Collide_LimitAngularVel
+80091e64 Collide_CheckForCollisionBetween
+80091fc4 Collide_ClearCollisionRegistry
+800921c4 Collide_CheckAccuratePointRadiusCollision

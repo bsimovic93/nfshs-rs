@@ -93,6 +93,7 @@ collisions, AI), then the front end.
 | BWORLD.CPP | `xzsquaredist32` |
 | BWORLDSM.CPP | all 28 (the slice and quad searches, road normals and their cache, edges, light, tunnels) |
 | PHYSICS.CPP | all 22: the `Physics_SimCar` tree (`Physics_Real`, `CalculateCarAcceleration`, `RampCarControlValues`, `AutoShift`, `CalculateTireForces`, `CalcTractionCircleAcc`, `CalcWheelLockAcc`, `CalculateRoadGripModifiers`, `CalculateRSControlDesiredPosition`, `StopCar`, `GetTorque`), the barriers (`TestForBarrierCollision`, `DoBarrierCheck`, `AttenuateVelocity`, `CorrectPostCollisionYaw`, `FixEngineRpm`, `SetCurrentWallType`), the car specs (`InitCarSpecs`, `CalculateDerivedCarSpecs`), `ResetCar`, `CheckGamedata` |
+| NEWTON.CPP | all 32: the ground under the wheels (`FindGroundElevationAndNormal` and its fast, general and rough forms), gravity and landing (`ApplyTheLawOfGravity`), the road's edges and bad quads (`TestForUndrivableSurfaces`, `DoPostBarrierCollisionHandling`, `GenerateVector`, `CheckForBadQuad`), the road position and geometry, the simulation level by distance (`CalcDistToClosestPlayerCar`, with its `SetSp` stack swap), rotation (`QDUpdateRot64Hz`/`32Hz`, `OptzRotxform`), shadows, damage (`AddDamageZone`), spike belts, the object setup (`InitBaseNewtonObj`, `SetInitialSlicePositionOrientationEtc`) |
 | CARS.CPP | `Cars_DoGravityEffectsOnAcc` |
 
-Next: NEWTON.CPP and COLLIDE.CPP.
+Next: COLLIDE.CPP.

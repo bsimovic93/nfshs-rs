@@ -904,7 +904,7 @@ fn find_ground_in_frame(c: &mut Cpu, car: Car, normal_out: Coord, sp: u32) -> i3
         n.angular_vel().set(&mut c.m, xform(&back, w));
     }
     // the car's height above the ground (in the first second from the road's centre)
-    let from = if (SIM_COUNTER.get(&mut c.m) as i32) < 64 { n.road_center_point() } else { sum };
+    let from = if SIM_COUNTER.get(&mut c.m) < 64 { n.road_center_point() } else { sum };
     let alt = calc_perpen_height_of_center_point_from_ground(c, n, normal_out, from);
     n.set_obj_altitude(&mut c.m, alt);
     sum.y(&mut c.m)
@@ -1297,4 +1297,406 @@ pub fn qd_update_rot_32hz(c: &mut Cpu, obj: NewtonObj) {
 
 pub fn abi_qd_update_rot_32hz(c: &mut Cpu) {
     qd_update_rot_32hz(c, NewtonObj(c.r[4]));
+}
+
+/// `a` x `b` (fixed point).
+fn cross(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3::new(
+        fixedmult(a.y, b.z).wrapping_sub(fixedmult(a.z, b.y)),
+        fixedmult(a.z, b.x).wrapping_sub(fixedmult(a.x, b.z)),
+        fixedmult(a.x, b.y).wrapping_sub(fixedmult(a.y, b.x)),
+    )
+}
+
+/// `Newton_CalculateGroundShadowMatrix` (NEWTON.CPP, 0x800a2e24): the frame the object's
+/// shadow is drawn in: up along the ground's `normal`, turned to the object's heading. A
+/// nearly upright object (`up`, its frame's height, over 0.9) not flagged 4 takes its own
+/// frame. Otherwise right is found from the object's forward axis while that is not
+/// along the normal (the object leaning past 45 degrees), else forward from its right axis.
+pub fn calculate_ground_shadow_matrix(c: &mut Cpu, obj: NewtonObj, normal: Coord, up: i32) {
+    abi::frame(c, 32, |c, _| {
+        let shadow = obj.shadow_mat();
+        let (right, ground, ahead) = (Coord(shadow.0), Coord(shadow.0 + 12), Coord(shadow.0 + 24));
+        let n = normal.get(&mut c.m);
+        let car = obj_car(obj);
+        if car.car_flags(&mut c.m) & 4 == 0 && 0xE666 < up {
+            let o = obj.orient_mat().get(&mut c.m);
+            shadow.set(&mut c.m, &o);
+            ground.set(&mut c.m, n);
+            return;
+        }
+        ground.set(&mut c.m, n);
+        let o = obj.orient_mat().get(&mut c.m).m;
+        // (the original tests the dot product as a double, against 0.5)
+        let along = up <= 32767 && {
+            let d = mul_8_8(o[0], n.x).wrapping_add(mul_8_8(o[1], n.y)).wrapping_add(mul_8_8(o[2], n.z));
+            d.wrapping_abs() > 0
+        };
+        if along {
+            right.set(&mut c.m, cross(n, Vec3::new(o[6], o[7], o[8])));
+            normalize_short_vector(c, right);
+            let r = right.get(&mut c.m);
+            ahead.set(&mut c.m, cross(r, n));
+            normalize_short_vector(c, ahead);
+        } else {
+            ahead.set(&mut c.m, cross(Vec3::new(o[0], o[1], o[2]), n));
+            normalize_short_vector(c, ahead);
+            let f = ahead.get(&mut c.m);
+            right.set(&mut c.m, cross(n, f));
+            normalize_short_vector(c, right);
+        }
+    });
+}
+
+pub fn abi_calculate_ground_shadow_matrix(c: &mut Cpu) {
+    calculate_ground_shadow_matrix(c, NewtonObj(c.r[4]), Coord(c.r[5]), c.r[6] as i32);
+}
+
+/// `Newton_CalcRealShadowCoordinates` (NEWTON.CPP, 0x800a3198): the corners of a car's
+/// shadow (its footprint and a margin, wider at the front for car type 20), on the ground
+/// under it (below its underside on the road while upright, else at the ground's height),
+/// each at its wheel's height carried on by the car's fall since it was last updated, at
+/// `time`.
+pub fn calc_real_shadow_coordinates(c: &mut Cpu, car: Car, time: i32) {
+    abi::frame(c, 144, |c, sp| {
+        let n = car.n();
+        let at = |off: u32| Coord(sp + off);
+        let since = time.wrapping_sub(n.last_updated(&mut c.m));
+        let dim = n.dimension().get(&mut c.m);
+        at(112).set(&mut c.m, dim);
+        let half = Vec3::new(dim.x.wrapping_add(3276), dim.y, dim.z.wrapping_add(3276));
+        at(112).set_x(&mut c.m, half.x);
+        at(112).set_z(&mut c.m, half.z);
+        let o = n.orient_mat().get(&mut c.m).m;
+        let along = |k: i32, row: usize| Vec3::new(fixedmult(k, o[3 * row]), fixedmult(k, o[3 * row + 1]), fixedmult(k, o[3 * row + 2]));
+        let ahead = along(half.z, 2);
+        at(16).set(&mut c.m, ahead);
+        let across = along(half.x, 0);
+        at(32).set(&mut c.m, across);
+        let front = if car.render().current_car_type(&mut c.m) == 20 {
+            along((half.x.wrapping_mul(3) << 6) >> 8, 0)
+        } else {
+            across
+        };
+        at(48).set(&mut c.m, front);
+        let centre = if 0xE666 < n.orientation_to_ground().y(&mut c.m) {
+            let down = half.y.wrapping_neg().wrapping_sub(n.obj_altitude(&mut c.m));
+            let r = n.road_matrix().get(&mut c.m).m;
+            let off = Vec3::new(fixedmult(down, r[3]), fixedmult(down, r[4]), fixedmult(down, r[5]));
+            at(96).set(&mut c.m, off);
+            add(n.position().get(&mut c.m), off)
+        } else {
+            let mut p = n.position().get(&mut c.m);
+            p.y = n.ground_elevation(&mut c.m);
+            p
+        };
+        at(64).set(&mut c.m, centre);
+        let fore = add(centre, ahead);
+        at(80).set(&mut c.m, fore);
+        n.shadow_coord(0).set(&mut c.m, sub(fore, front));
+        n.shadow_coord(1).set(&mut c.m, add(fore, front));
+        let aft = sub(centre, ahead);
+        at(80).set(&mut c.m, aft);
+        n.shadow_coord(2).set(&mut c.m, sub(aft, across));
+        n.shadow_coord(3).set(&mut c.m, add(aft, across));
+        for i in 0..4 {
+            let y = car.wheel(i).current_pos().y(&mut c.m);
+            let fall = (n.linear_vel().y(&mut c.m) / 64).wrapping_mul(since);
+            n.shadow_coord(i).set_y(&mut c.m, y.wrapping_add(fall));
+        }
+    });
+}
+
+pub fn abi_calc_real_shadow_coordinates(c: &mut Cpu) {
+    calc_real_shadow_coordinates(c, Car(c.r[4]), c.r[5] as i32);
+}
+
+/// Gravity per tick (before the object's `gravityMult`).
+const GRAVITY: i32 = 0x4800;
+
+/// `Newton_ApplyTheLawOfGravity` (NEWTON.CPP, 0x800a41d8): an active object's fall and its
+/// meeting with the ground, for the ticks due to it (asked of 0x800b6e90, still recompiled).
+/// A car not simulated sits on the road. Otherwise the ground under its wheels gives its
+/// tilt, its shadow's frame and the ground's rise (its velocity); gravity pulls it down
+/// (twice while in the air, which counts its flight time). Landing: tilted, it strikes the
+/// ground as a plane (`Collide_TestWithPlane`, recompiled), a hard enough blow counting
+/// at least 20 (and landing on its side, it smokes); upright, the suspensions throw it up,
+/// and the blow (twice the change in its fall) can damage it and shake the pad. On the ground it skids slower over a steep rise
+/// and follows the ground's rise (less of it at low speed); in a tunnel it can't fly up
+/// into the roof.
+pub fn apply_the_law_of_gravity(c: &mut Cpu, obj: NewtonObj) {
+    abi::frame(c, 128, |c, sp| {
+        if obj.active(&mut c.m) == 0 {
+            return;
+        }
+        let car = obj_car(obj);
+        let (rate, ticks) = (sp + 80, sp + 84);
+        let keep = car.force_no_sim_optz(&mut c.m) as u32;
+        let (dist, id) = (obj.dist_to_player(&mut c.m) as u32, obj.obj_id(&mut c.m) as u32);
+        let due = abi::call(c, nfs4rc::f_800b6e90, &[1, 3, dist, id, rate, ticks, sp + 88, keep]);
+        if due == 0 {
+            return;
+        }
+        let normal = Coord(sp + 32);
+        if 2 <= obj.sim_optz(&mut c.m) {
+            obj.linear_vel().set_y(&mut c.m, 0);
+            obj.set_flight_time(&mut c.m, 0);
+            let h = find_ground_elevation_and_normal_fast(c, car, normal);
+            let y = h.wrapping_add(obj.dimension().y(&mut c.m));
+            obj.position().set_y(&mut c.m, y);
+            return;
+        }
+        let h = find_ground_elevation_and_normal(c, car, normal);
+        let ticks_n = c.m.r32(ticks) as i32;
+        let n = normal.get(&mut c.m);
+        let shadow_up = Coord(sp + 48);
+        shadow_up.set(&mut c.m, n);
+        let was = obj.ground_elevation(&mut c.m);
+        obj.set_ground_elevation(&mut c.m, h);
+        let rise = h.wrapping_sub(was).wrapping_mul(c.m.r32(rate) as i32);
+        let alt = obj.obj_altitude(&mut c.m);
+        let pull = |c: &mut Cpu| {
+            let g = fixedmult(ticks_n.wrapping_mul(GRAVITY), obj.gravity_mult(&mut c.m));
+            obj.linear_vel().update_y(&mut c.m, |v| v.wrapping_sub(g));
+        };
+        pull(c);
+        let o = obj.orient_mat().get(&mut c.m).m;
+        let upright = fixedmult(o[3], n.x).wrapping_add(fixedmult(o[4], n.y)).wrapping_add(fixedmult(o[5], n.z));
+        obj.orientation_to_ground().set_y(&mut c.m, upright);
+        calculate_ground_shadow_matrix(c, obj, shadow_up, upright);
+        let v = obj.linear_vel().get(&mut c.m);
+        obj.set_speed_xz(&mut c.m, crate::mathnfs::better_dist(v.x.wrapping_abs(), v.z.wrapping_abs()));
+        let modifier = obj.road_gravity_modifier(&mut c.m);
+        let ground_vel = obj.ground_vel(&mut c.m);
+        obj.set_road_gravity_modifier(&mut c.m, modifier.wrapping_mul(7).wrapping_add(rise.wrapping_sub(ground_vel)) / 8);
+        obj.set_ground_vel(&mut c.m, rise);
+        let mut alt = alt;
+        if 13107 <= alt {
+            // in the air
+            obj.set_road_gravity_modifier(&mut c.m, 0);
+            obj.update_flight_time(&mut c.m, |t| t.wrapping_add(ticks_n as u16));
+            pull(c);
+        } else {
+            if obj.flight_time(&mut c.m) == 0 {
+                check_for_spike_belts(c, car);
+            } else {
+                // landing
+                if car.car_flags(&mut c.m) & 4 != 0 {
+                    crate::physics::fix_engine_rpm(c, car);
+                }
+                let change = rise.wrapping_sub(obj.linear_vel().y(&mut c.m));
+                if obj.orientation_to_ground().y(&mut c.m) <= 0xB333 {
+                    let at = Coord(sp + 64);
+                    let p = obj.road_center_point().get(&mut c.m);
+                    at.set(&mut c.m, p);
+                    at.set_y(&mut c.m, p.y.wrapping_sub(6553));
+                    abi::call(c, nfs4rc::f_8008e498, &[obj.0, normal.0, at.0]);
+                    let hit = obj.collision();
+                    let blow = hit.impulse(&mut c.m);
+                    if 0x5_0000 < blow {
+                        hit.set_impulse(&mut c.m, blow.max(0x14_0000));
+                    }
+                    if obj.orientation_to_ground().y(&mut c.m) < 13107 {
+                        car.collision().set_smoking(&mut c.m, 1);
+                    }
+                } else {
+                    let push = (0..4).fold(0i32, |s, i| s.wrapping_add(car.wheel(i).wheel_acc(&mut c.m)));
+                    if push > 0 {
+                        obj.linear_vel().set_y(&mut c.m, rise.wrapping_add(push.wrapping_mul(3) / 4));
+                        let hit = obj.collision();
+                        hit.set_impulse(&mut c.m, change << 1);
+                        obj.set_flight_time(&mut c.m, 0);
+                        obj.position().update_y(&mut c.m, |y| y.wrapping_sub(alt));
+                        alt = 3276;
+                        obj.set_obj_altitude(&mut c.m, alt);
+                        let blow = hit.impulse(&mut c.m);
+                        if 0x14_0000 < blow {
+                            hit.set_sfx_type(&mut c.m, 0x1_0000);
+                            hit.set_other_obj(&mut c.m, NewtonObj(0));
+                            let p = obj.position().get(&mut c.m);
+                            hit.collision_point().set(&mut c.m, p);
+                            add_damage_zone(c, car, blow, 9, 0);
+                        }
+                        if abi::call(c, nfs4rc::f_800cbeb8, &[car.0]) != 0 {
+                            let blow = hit.impulse(&mut c.m);
+                            abi::call(c, nfs4rc::f_800cbf64, &[blow as u32]);
+                        }
+                    }
+                }
+                limit_angular_velocity(c, obj);
+            }
+            if alt < 2621 {
+                // on the ground
+                obj.set_obj_altitude(&mut c.m, 0);
+                obj.position().update_y(&mut c.m, |y| y.wrapping_sub(alt));
+                if car.car_flags(&mut c.m) & 0x400 == 0 && 0xE666 < obj.orientation_to_ground().y(&mut c.m) {
+                    obj.set_flight_time(&mut c.m, 0);
+                }
+                if 0x5_FFFF < rise {
+                    let k = if 0xC_0000 < rise { 0xFFBE } else { 0xFFDF };
+                    obj.linear_vel().update_x(&mut c.m, |v| fixedmult(v, k));
+                    obj.linear_vel().update_z(&mut c.m, |v| fixedmult(v, k));
+                }
+                let speed = obj.speed_xz(&mut c.m);
+                let follow = if speed <= 0x4_FFFF { rise / 4 } else if speed <= 0x9_FFFF { rise / 2 } else { rise };
+                obj.linear_vel().set_y(&mut c.m, follow);
+            }
+        }
+        let now = SIM_COUNTER.get(&mut c.m);
+        obj.set_last_updated(&mut c.m, now);
+        let tunnel = abi::call(c, nfs4rc::f_800809f8, &[obj.sim_road_info().0]);
+        if tunnel != 0 {
+            let vy = obj.linear_vel().y(&mut c.m);
+            if vy > 0 && 0x8_0000 < obj.position().y(&mut c.m).wrapping_sub(obj.road_center_point().y(&mut c.m)) {
+                obj.linear_vel().set_y(&mut c.m, vy.wrapping_neg());
+            }
+        }
+    });
+}
+
+pub fn abi_apply_the_law_of_gravity(c: &mut Cpu) {
+    apply_the_law_of_gravity(c, NewtonObj(c.r[4]));
+}
+
+/// `testSimRoadInfo` and `newtestSimRoadInfo`: the road positions
+/// `Newton_TestForUndrivableSurfaces` searches with.
+const TEST_ROAD: BWorldSmPos = BWorldSmPos(0x8011_53EC);
+const NEW_TEST_ROAD: BWorldSmPos = BWorldSmPos(0x8011_5470);
+
+fn copy_road_pos(m: &mut Mem, from: BWorldSmPos, to: BWorldSmPos) {
+    for k in 0..BWorldSmPos::SIZE / 4 {
+        let v = m.r32(from.0 + 4 * k);
+        m.w32(to.0 + 4 * k, v);
+    }
+}
+
+/// The damage zone a wheel's side of the car takes in a wall.
+const WHEEL_ZONES: [i32; 4] = [0, 2, 6, 4];
+
+/// `Newton_TestForUndrivableSurfaces` (NEWTON.CPP, 0x800a3990): whether a wheel (a little
+/// ahead along the car's velocity when fast) is off the road's edge or on a quad it
+/// can't drive on; the first that is makes the car bounce off a wall facing it. The wall's
+/// normal comes from the road's edge, or the quad's edges the wheel crossed (checked by
+/// stepping over each in turn), or else points from the quad's middle back to the road's
+/// centre (or the car); then the car bounces, its collision is handled (and the AI told)
+/// and a hard enough blow damages its side.
+pub fn test_for_undrivable_surfaces(c: &mut Cpu, obj: NewtonObj) {
+    abi::frame(c, 176, |c, sp| {
+        let at = |off: u32| Coord(sp + off);
+        let (wall, centre, ahead, wheel_pt, step, quad_mid, corner) = (at(16), at(32), at(64), at(80), at(96), at(48), at(112));
+        let car = obj_car(obj);
+        let road = obj.sim_road_info();
+        wall.set(&mut c.m, Vec3::default());
+        c.m.w32(sp + 128, 0);
+        let rc = obj.road_center_point().get(&mut c.m);
+        centre.set(&mut c.m, rc);
+        ahead.set(&mut c.m, Vec3::default());
+        copy_road_pos(&mut c.m, road, TEST_ROAD);
+        if 0x28_0000 < obj.speed_xz(&mut c.m) {
+            let v = obj.linear_vel().get(&mut c.m);
+            let lead = |x: i32| x.wrapping_mul(5) / 256;
+            ahead.set(&mut c.m, Vec3::new(lead(v.x), lead(v.y), lead(v.z)));
+        }
+        // the average of the test position's quad corners (or the slice's centre)
+        let quad_middle = |c: &mut Cpu| {
+            quad_mid.set(&mut c.m, Vec3::default());
+            for i in 0..4 {
+                let p = if TEST_ROAD.sim_quad(&mut c.m).0 != 0 {
+                    TEST_ROAD.quad_pts(i).get(&mut c.m)
+                } else {
+                    let s = TEST_ROAD.slice(&mut c.m) as i32;
+                    center(&mut c.m, s)
+                };
+                corner.set(&mut c.m, p);
+                let sum = add(quad_mid.get(&mut c.m), p);
+                quad_mid.set(&mut c.m, sum);
+            }
+            let s = quad_mid.get(&mut c.m);
+            let mid = Vec3::new(s.x / 4, s.y / 4, s.z / 4);
+            quad_mid.set(&mut c.m, mid);
+            mid
+        };
+        // a step from the wheel along the wall's normal so far, onto a fresh copy of the test
+        // position: whether the wheel is still on a bad quad there
+        let step_still_bad = |c: &mut Cpu, wheel: i32| {
+            let (p, w) = (step.get(&mut c.m), wall.get(&mut c.m));
+            step.set(&mut c.m, add(p, w));
+            find_closest_quad_rez(c, step, NEW_TEST_ROAD, 1);
+            check_for_bad_quad(c, car, NEW_TEST_ROAD, wheel)
+        };
+        for i in 0..4u32 {
+            let wheel = car.wheel(i);
+            let p = add(wheel.current_pos().get(&mut c.m), ahead.get(&mut c.m));
+            wheel_pt.set(&mut c.m, p);
+            find_closest_quad_rez(c, wheel_pt, TEST_ROAD, 1);
+            let off = TEST_ROAD.off_edge(&mut c.m) as i32;
+            if off != 0 {
+                generate_vector(c, off, wall, road);
+                wall.set_y(&mut c.m, 0);
+                normalize_short_vector(c, wall);
+            } else {
+                if !check_for_bad_quad(c, car, TEST_ROAD, i as i32) {
+                    continue;
+                }
+                copy_road_pos(&mut c.m, TEST_ROAD, NEW_TEST_ROAD);
+                step.set(&mut c.m, p);
+                let edges = crate::bworldsm::find_edge_off(c, wheel_pt, road, TEST_ROAD, sp + 128);
+                match edges {
+                    1 | 2 | 4 | 8 => generate_vector(c, edges, wall, road),
+                    0 | 12 => {
+                        let v = obj.linear_vel().get(&mut c.m);
+                        wall.set(&mut c.m, Vec3::new(v.x.wrapping_neg(), v.y.wrapping_neg(), v.z.wrapping_neg()));
+                    }
+                    _ => {}
+                }
+                if edges & 3 != 0 {
+                    if edges & 1 != 0 {
+                        generate_vector(c, 1, wall, road);
+                    } else if edges & 2 != 0 {
+                        generate_vector(c, 2, wall, road);
+                    }
+                    if step_still_bad(c, i as i32) {
+                        let to_mid = if edges & 0xC != 0 {
+                            if edges & 4 != 0 {
+                                generate_vector(c, 4, wall, road);
+                            } else if edges & 8 != 0 {
+                                generate_vector(c, 8, wall, road);
+                            }
+                            copy_road_pos(&mut c.m, TEST_ROAD, NEW_TEST_ROAD);
+                            step.set(&mut c.m, p);
+                            // back towards the road's centre, past both edges
+                            step_still_bad(c, i as i32).then_some(rc)
+                        } else {
+                            // back towards the car
+                            Some(obj.position().get(&mut c.m))
+                        };
+                        if let Some(to) = to_mid {
+                            let mid = quad_middle(c);
+                            wall.set(&mut c.m, Vec3::new(to.x.wrapping_sub(mid.x), 0, to.z.wrapping_sub(mid.z)));
+                        }
+                    }
+                }
+                wall.set_y(&mut c.m, 0);
+                normalize_short_vector(c, wall);
+            }
+            // a wall: bounce off it
+            let w = wall.get(&mut c.m);
+            do_post_barrier_collision_handling(c, obj, w);
+            let p = wheel.current_pos().get(&mut c.m);
+            obj.collision().collision_point().set(&mut c.m, p);
+            abi::call(c, nfs4rc::f_8006d120, &[car.0]);
+            if car.car_flags(&mut c.m) & 4 != 0 {
+                crate::physics::fix_engine_rpm(c, car);
+            }
+            let blow = obj.collision().impulse(&mut c.m);
+            if 0xA_0000 < blow {
+                add_damage_zone(c, car, blow, WHEEL_ZONES[i as usize], 1);
+            }
+            return;
+        }
+    });
+}
+
+pub fn abi_test_for_undrivable_surfaces(c: &mut Cpu) {
+    test_for_undrivable_surfaces(c, NewtonObj(c.r[4]));
 }

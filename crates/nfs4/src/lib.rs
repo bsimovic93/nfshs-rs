@@ -21,6 +21,7 @@ pub mod abi;
 pub mod bworld;
 pub mod bworldsm;
 pub mod cars;
+pub mod collide;
 pub mod check;
 pub mod fixed;
 pub mod globals;
@@ -85,6 +86,14 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8008_0f6c, "BWorldSm_UForward", bworldsm::abi_u_forward),
     func_ret(0x8008_0f94, "BWorldSm_FindClosestTriangleRez", bworldsm::abi_find_closest_triangle_rez),
     func(0x8008_67a8, "Cars_DoGravityEffectsOnAcc", cars::abi_do_gravity_effects_on_acc),
+    func_ret(0x8008_c560, "CHECK_CENTER_VERTEX_WITH_DIRS", collide::abi_check_center_vertex_with_dirs),
+    func_ret(0x8008_c9e0, "CHECK_CENTER_VERTEX_WITH_DIRS_OTHER", collide::abi_check_center_vertex_with_dirs_other),
+    func_ret(0x8008_ce6c, "CHECK_VERTEX_WITH_DIRS", collide::abi_check_vertex_with_dirs),
+    func_ret(0x8008_d234, "CHECK_VERTEX_WITH_DIRS_OTHER", collide::abi_check_vertex_with_dirs_other),
+    func(0x8008_e3a4, "Collide_LimitAngularVel", collide::abi_limit_angular_vel),
+    func_ret(0x8009_1e64, "Collide_CheckForCollisionBetween", collide::abi_check_for_collision_between),
+    func(0x8009_1fc4, "Collide_ClearCollisionRegistry", collide::abi_clear_collision_registry),
+    func_ret(0x8009_21c4, "Collide_CheckAccuratePointRadiusCollision", collide::abi_check_accurate_point_radius_collision),
     func_ret(0x8009_dea8, "Math_DistXZ", mathnfs::abi_dist_xz),
     func_ret(0x8009_defc, "Math_Dist3D", mathnfs::abi_dist_3d),
     func_ret(0x8009_df8c, "Math_BetterDist", mathnfs::abi_better_dist),
@@ -116,11 +125,15 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x800a_2a58, "Newton_OptzRotxform", newton::abi_optz_rotxform),
     func(0x800a_2bf4, "Newton_QDUpdateRot64Hz", newton::abi_qd_update_rot_64hz),
     func(0x800a_2d04, "Newton_QDUpdateRot32Hz", newton::abi_qd_update_rot_32hz),
+    func(0x800a_2e24, "Newton_CalculateGroundShadowMatrix", newton::abi_calculate_ground_shadow_matrix),
+    func(0x800a_3198, "Newton_CalcRealShadowCoordinates", newton::abi_calc_real_shadow_coordinates),
     func(0x800a_3538, "Newton_CheckForSpikeBelts", newton::abi_check_for_spike_belts),
     func(0x800a_35fc, "Newton_DoPostBarrierCollisionHandling", newton::abi_do_post_barrier_collision_handling),
     func(0x800a_37a4, "Newton_GenerateVector", newton::abi_generate_vector),
     func_ret(0x800a_3930, "Netwon_CheckForBadQuad", newton::abi_check_for_bad_quad),
+    func(0x800a_3990, "Newton_TestForUndrivableSurfaces", newton::abi_test_for_undrivable_surfaces),
     func(0x800a_4140, "Newton_LimitAngularVelocity", newton::abi_limit_angular_velocity),
+    func(0x800a_41d8, "Newton_ApplyTheLawOfGravity", newton::abi_apply_the_law_of_gravity),
     func_ret(0x800a_46c4, "Newton_CalculateRoadPositionFromSliceAndPosition", newton::abi_calculate_road_position_from_slice_and_position),
     func_ret(0x800a_47b8, "Newton_CalculateRoadPosition", newton::abi_calculate_road_position),
     func(0x800a_935c, "Physics_InitCarSpecs", physics::abi_init_car_specs),
