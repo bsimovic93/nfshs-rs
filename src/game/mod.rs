@@ -128,6 +128,9 @@ pub struct Game {
     /// Per light glow (and the sun) as last drawn: how far the PS1 put it from the light's
     /// exact projection (PS1 pixels, smoothed) and the simulated frame it was seen in.
     glow_offsets: std::cell::RefCell<std::collections::HashMap<GlowKey, (Vec2, u32)>>,
+    /// Where the sun was drawn this frame for the original's lens flare to be tested (its
+    /// centre in window pixels and a PS1 pixel's size there), see [`Game::sun_probe`].
+    sun_probe: std::cell::Cell<Option<([f32; 2], [f32; 2])>>,
     /// The track's reflection map page (atlas rectangle) and the atlas' size.
     reflections: Option<assets::Rect>,
     atlas_size: f32,
@@ -279,6 +282,7 @@ impl Game {
             shadow_tex,
             skid_tex,
             glow_offsets: Default::default(),
+            sun_probe: Default::default(),
             reflections,
             atlas_size: atlas.size as f32,
             cam_up: Vec3::Y,

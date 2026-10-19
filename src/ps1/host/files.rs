@@ -108,6 +108,9 @@ impl GameHost {
         if upper.starts_with("ZFECARS") && upper.ends_with(".CAR") {
             add_paints(&mut data);
         }
+        if upper.starts_with("ZTEXT.") {
+            super::options::add_words(&mut data);
+        }
         Some(data)
     }
 

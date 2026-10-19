@@ -1,5 +1,6 @@
 //! The player's settings: nfshs.ini, read at start and again whenever it is saved while the
-//! game runs. Written with every setting and its default when there is none.
+//! game runs. Written with every setting and its default when there is none, and the game
+//! options' graphics screen writes its choices into it.
 
 use crate::render::{Bloom, Crt};
 use std::path::{Path, PathBuf};
@@ -11,8 +12,13 @@ const DEFAULT_INI: &str = r#"; Need for Speed: High Stakes - settings
 ; Delete it to get the defaults back. ; or # start a comment.
 
 [display]
-; start in fullscreen (F5 toggles it)
-fullscreen = false
+; windowed, borderless (full screen at the desktop's resolution) or fullscreen (full screen at
+; the resolution below, when the display has it; else borderless). F5 toggles the window.
+; Also in the game options' graphics screen, as are the resolution, antialiasing, texture
+; filter, CRT filter and bloom: choosing them there writes them here.
+mode = windowed
+; the window's size, or the full screen's resolution (width x height in pixels)
+resolution = 1280x960
 ; hold this frame rate without vsync (e.g. 30, 60, 144, 240); 0: vsync at the display's refresh
 fps = 0
 ; the frame-rate counter at the top left (F3 toggles it)
@@ -78,13 +84,18 @@ device =
 [game]
 ; the memory card image (empty: memcard.mcd next to the game data folder); a DuckStation card works as is
 memcard =
+; save the game to the memory card by itself (after a race, on leaving the game options and on
+; quitting) instead of asking; it is loaded from the card at start either way
+autosave = true
 ; keep the save's locked tracks and cars (false: everything unlocked)
 locked = false
 "#;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
-    pub fullscreen: bool,
+    pub window_mode: WindowMode,
+    /// The window's size, or the full screen's resolution, in pixels.
+    pub resolution: (u32, u32),
     /// The frame rate held to without vsync (0: vsync).
     pub fps: u32,
     pub show_fps: bool,
@@ -104,7 +115,46 @@ pub struct Settings {
     pub audio_device: String,
     pub memcard: String,
     pub locked: bool,
+    pub autosave: bool,
 }
+
+/// How the game is shown (`[display] mode`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowMode {
+    Windowed,
+    /// Full screen at the desktop's resolution.
+    Borderless,
+    /// Full screen at [`Settings::resolution`] (the display switched to it).
+    Fullscreen,
+}
+
+impl WindowMode {
+    pub const ALL: [WindowMode; 3] = [WindowMode::Windowed, WindowMode::Borderless, WindowMode::Fullscreen];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            WindowMode::Windowed => "windowed",
+            WindowMode::Borderless => "borderless",
+            WindowMode::Fullscreen => "fullscreen",
+        }
+    }
+}
+
+/// The resolutions the game options' graphics screen offers (any other can be set in the file).
+pub const RESOLUTIONS: [(u32, u32); 12] = [
+    (1024, 768),
+    (1280, 720),
+    (1280, 960),
+    (1366, 768),
+    (1600, 900),
+    (1600, 1200),
+    (1920, 1080),
+    (1920, 1200),
+    (2560, 1080),
+    (2560, 1440),
+    (3440, 1440),
+    (3840, 2160),
+];
 
 /// The gamepad's layout (`[input] controls`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,7 +168,8 @@ pub enum Controls {
 impl Default for Settings {
     fn default() -> Self {
         let mut s = Self {
-            fullscreen: false,
+            window_mode: WindowMode::Windowed,
+            resolution: (1280, 960),
             fps: 0,
             show_fps: true,
             msaa: 1,
@@ -135,6 +186,7 @@ impl Default for Settings {
             audio_device: String::new(),
             memcard: String::new(),
             locked: false,
+            autosave: true,
         };
         s.apply(DEFAULT_INI, Path::new("(defaults)"));
         s
@@ -177,7 +229,22 @@ impl Settings {
             let key = key.trim().to_ascii_lowercase();
             let value = value.trim();
             let ok = match (section.as_str(), key.as_str()) {
-                ("display", "fullscreen") => set_bool(&mut self.fullscreen, value),
+                ("display", "mode") => WindowMode::ALL.into_iter().find(|m| m.name().eq_ignore_ascii_case(value)).map(|m| self.window_mode = m).is_some(),
+                // (before `mode`: true is borderless)
+                ("display", "fullscreen") => {
+                    let mut on = false;
+                    set_bool(&mut on, value) && {
+                        self.window_mode = if on { WindowMode::Borderless } else { WindowMode::Windowed };
+                        true
+                    }
+                }
+                ("display", "resolution") => value
+                    .to_ascii_lowercase()
+                    .split_once('x')
+                    .and_then(|(w, h)| Some((w.trim().parse().ok()?, h.trim().parse().ok()?)))
+                    .filter(|&(w, h): &(u32, u32)| (320..=16384).contains(&w) && (240..=16384).contains(&h))
+                    .map(|r| self.resolution = r)
+                    .is_some(),
                 ("display", "fps") => value.parse().ok().filter(|f| *f == 0 || (10..=1000).contains(f)).map(|f| self.fps = f).is_some(),
                 ("display", "show_fps") => set_bool(&mut self.show_fps, value),
                 ("display", "antialiasing") => match value.to_ascii_lowercase().as_str() {
@@ -233,6 +300,7 @@ impl Settings {
                     true
                 }
                 ("game", "locked") => set_bool(&mut self.locked, value),
+                ("game", "autosave") => set_bool(&mut self.autosave, value),
                 _ => {
                     warn("unknown setting");
                     continue;
@@ -243,6 +311,87 @@ impl Settings {
             }
         }
     }
+}
+
+impl Settings {
+    /// Write what the game options' graphics screen sets into the settings file at `path`
+    /// (the rest of it, comments too, stays as it is).
+    pub fn save_graphics(&self, path: &Path) -> std::io::Result<()> {
+        let on_off = |b: bool| if b { "true" } else { "false" };
+        let (w, h) = self.resolution;
+        let res = format!("{w}x{h}");
+        let aa = match self.msaa {
+            1 => "off".to_string(),
+            n => format!("msaa{n}"),
+        };
+        set_in_file(
+            path,
+            &[
+                // (`fullscreen` is the older name for the mode)
+                ("display", &["mode", "fullscreen"], self.window_mode.name()),
+                ("display", &["resolution"], &res),
+                ("display", &["antialiasing"], &aa),
+                ("textures", &["filter"], if self.bilinear { "bilinear" } else { "nearest" }),
+                ("crt", &["enabled"], on_off(self.crt)),
+                ("bloom", &["enabled"], on_off(self.bloom)),
+            ],
+        )
+    }
+}
+
+/// Set keys in the ini file at `path` (the defaults' file if there is none): each entry's
+/// section, its key (and older names for it, whose line it takes) and value. A key the file
+/// lacks goes after the last setting of its section, or into a new section at the end.
+fn set_in_file(path: &Path, entries: &[(&str, &[&str], &str)]) -> std::io::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_INI.to_string(),
+        Err(e) => return Err(e),
+    };
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let section_of = |lines: &[String], at: usize| {
+        lines[..=at].iter().rev().find_map(|l| l.trim().strip_prefix('[').and_then(|l| l.strip_suffix(']')).map(|s| s.trim().to_ascii_lowercase())).unwrap_or_default()
+    };
+    let key_of = |line: &str| {
+        let l = line.trim();
+        (!l.starts_with(';') && !l.starts_with('#')).then(|| l.split_once('=').map(|(k, _)| k.trim().to_ascii_lowercase())).flatten()
+    };
+    for &(section, keys, value) in entries {
+        let new = format!("{} = {value}", keys[0]);
+        let mut done = false;
+        let mut k = 0;
+        while k < lines.len() {
+            if key_of(&lines[k]).is_some_and(|key| keys.contains(&key.as_str())) && section_of(&lines, k) == section {
+                if done {
+                    // (an older name's line besides the key's own)
+                    lines.remove(k);
+                    continue;
+                }
+                lines[k] = new.clone();
+                done = true;
+            }
+            k += 1;
+        }
+        if done {
+            continue;
+        }
+        let header = lines.iter().position(|l| l.trim().strip_prefix('[').and_then(|l| l.strip_suffix(']')).is_some_and(|s| s.trim().eq_ignore_ascii_case(section)));
+        match header {
+            Some(h) => {
+                let end = lines[h + 1..].iter().position(|l| l.trim().starts_with('[')).map_or(lines.len(), |p| h + 1 + p);
+                let last = (h + 1..end).rev().find(|&i| key_of(&lines[i]).is_some()).unwrap_or(h);
+                lines.insert(last + 1, new);
+            }
+            None => {
+                lines.push(String::new());
+                lines.push(format!("[{section}]"));
+                lines.push(new);
+            }
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    std::fs::write(path, out)
 }
 
 fn set_bool(v: &mut bool, s: &str) -> bool {
@@ -288,4 +437,34 @@ pub fn init(s: Settings) {
 /// The settings read at start (the defaults if none were), for what only takes them then.
 pub fn get() -> &'static Settings {
     SETTINGS.get_or_init(Settings::default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn graphics_written_back() {
+        let dir = std::env::temp_dir().join(format!("nfshs-settings-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("nfshs.ini");
+        // an older file: `fullscreen` for the mode, no resolution, no [bloom]
+        std::fs::write(&path, "[display]\n; full screen?\nfullscreen = true\nfps = 144\n\n[textures]\nfilter = nearest\n\n[crt]\nenabled = false\n").unwrap();
+        let mut s = Settings::load(&path);
+        assert_eq!((s.window_mode, s.fps), (WindowMode::Borderless, 144));
+        s.window_mode = WindowMode::Fullscreen;
+        s.resolution = (1920, 1080);
+        s.msaa = 8;
+        s.bilinear = true;
+        s.crt = true;
+        s.bloom = true;
+        s.save_graphics(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("; full screen?\nmode = fullscreen\nfps = 144\nresolution = 1920x1080\nantialiasing = msaa8\n"), "{text}");
+        assert!(!text.contains("fullscreen = "), "{text}");
+        assert!(text.contains("[bloom]\nenabled = true"), "{text}");
+        let again = Settings::load(&path);
+        assert_eq!(again, s);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

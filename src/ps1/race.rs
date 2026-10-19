@@ -758,6 +758,9 @@ pub struct Snapshot {
     pub overlay: Vec<super::host::OverlayCmd>,
     /// The race's sky layer (the sun's flare) as recorded.
     pub sky_overlay: Vec<super::host::OverlayCmd>,
+    /// The sun's lens flare, drawn over the world, when the original drew it this frame
+    /// (it then also tested the sun: see `host::sun`).
+    pub lens_flare: Option<Vec<super::host::LensPiece>>,
     /// See [`super::host::GameHost::weather`].
     pub weather: Vec<super::host::OverlayCmd>,
     /// Light glows with their world anchors (see `host::Glow`).
@@ -935,6 +938,7 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         objects: info.objects.clone(),
         overlay: info.overlay.clone(),
         sky_overlay: info.sky_overlay.clone(),
+        lens_flare: info.lens_flare.clone(),
         weather: info.weather.clone(),
         glows: info.glows.clone(),
         paused: c.m.r32(addr::SIM_PAUSED) != 0,
@@ -1051,11 +1055,12 @@ impl RaceThread {
                     drawn = None;
                 } else if !s.paused {
                     if !s.views.is_empty() || !s.overlay.is_empty() {
-                        drawn = Some(Snapshot { overlay: s.overlay.clone(), sky_overlay: s.sky_overlay.clone(), weather: s.weather.clone(), glows: s.glows.clone(), views: s.views.clone(), ..Default::default() });
+                        drawn = Some(Snapshot { overlay: s.overlay.clone(), sky_overlay: s.sky_overlay.clone(), lens_flare: s.lens_flare.clone(), weather: s.weather.clone(), glows: s.glows.clone(), views: s.views.clone(), ..Default::default() });
                     } else if let Some(d) = &drawn {
                         s.held = true;
                         s.overlay = d.overlay.clone();
                         s.sky_overlay = d.sky_overlay.clone();
+                        s.lens_flare = d.lens_flare.clone();
                         s.weather = d.weather.clone();
                         s.glows = d.glows.clone();
                         s.views = d.views.clone();

@@ -12,6 +12,7 @@ impl GameHost {
             // the HUD views' ordering tables)
             0x800C_C7F0 | 0x800D_4E9C | 0x800D_8690 | 0x800D_9ABC | 0x800D_3558 if self.mode == Mode::Race && !Self::paused(c) => return None,
             0x800C_C7F0 if self.mode == Mode::FrontEnd => {
+                self.note_fe_text(c, a0, a1 as i32, a2 as i32);
                 self.font_quads(c, a0, a1 as i32, a2 as i32);
                 0
             }
@@ -232,14 +233,18 @@ impl GameHost {
                     }
                     c.r[4] = 0x8013_F0F8;
                     c.r[5] = 0x1F80_0000;
-                    let saved = std::mem::take(&mut self.overlay);
-                    self.prim_offset = [0, 0];
-                    self.capture_prims(c, FLARE_SUN);
-                    let sun = std::mem::replace(&mut self.overlay, saved);
+                    let (sun, lens) = self.record_sun(c);
                     if std::env::var_os("NFSHS_SUNLOG").is_some() {
                         for q in &sun {
                             eprintln!("sun {}", format!("{q:?}").chars().take(220).collect::<String>());
                         }
+                        for p in lens.iter().flatten() {
+                            eprintln!("lens x{:.2} {}", p.shift, format!("{:?}", p.cmds).chars().take(220).collect::<String>());
+                        }
+                    }
+                    // (one view: a split screen has no lens flare)
+                    if lens.is_some() {
+                        self.lens_flare = lens;
                     }
                     view_sky = sun.clone();
                     self.sky_overlay.extend(sun);

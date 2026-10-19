@@ -15,7 +15,9 @@ mod frame;
 mod game;
 mod gpu;
 mod objects;
+mod options;
 mod overlay;
+mod sun;
 mod system;
 mod views;
 
@@ -23,7 +25,9 @@ pub use cars::{CarEnv, CarFacet, Glow};
 pub use files::{file_log, opened_variant};
 pub use frame::{FrameDriver, FrameInfo, Mode, Pad, ViewCapture};
 pub use objects::ObjectDraw;
+pub use options::{request_close, show_graphics, take_graphics_choice};
 pub use overlay::{OverlayCmd, QuadTex};
+pub use sun::{LensPiece, SUN_VISIBLE};
 
 use cars::{glare_marker, record_car_facet, smoke_marker};
 use overlay::rect_pts;
@@ -85,6 +89,9 @@ pub struct GameHost {
     /// it this frame, recorded.
     weather: Vec<OverlayCmd>,
     last_sky: Vec<OverlayCmd>,
+    /// This frame's lens flare (see [`sun`]), and the last one (kept while paused).
+    lens_flare: Option<Vec<LensPiece>>,
+    last_lens: Option<Vec<LensPiece>>,
     /// The race cars' light halos (DrawC_PrimHalo's primitives), drawn over the 3D.
     car_glows: Vec<Glow>,
     /// The track lights' glares (BWorld_BuildGlareEffects' primitives), over the 3D.
@@ -109,6 +116,8 @@ pub struct GameHost {
     pub from_main: bool,
     /// The game setup menu's Quit (see `add_quit_item`) was chosen: the app closes.
     pub quit: bool,
+    /// The game options' screen as the rebuild has it, and the saves the host makes.
+    options: options::Options,
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     pub rcnt: u32,
@@ -427,6 +436,8 @@ impl GameHost {
             sky_overlay: Vec::new(),
             weather: Vec::new(),
             last_sky: Vec::new(),
+            lens_flare: None,
+            last_lens: None,
             showroom_shadow: Vec::new(),
             car_glows: Vec::new(),
             track_glows: Vec::new(),
@@ -439,6 +450,7 @@ impl GameHost {
             draw_envs: HashMap::new(),
             from_main: false,
             quit: false,
+            options: Default::default(),
             rcnt: 0,
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
@@ -673,8 +685,12 @@ impl Host for GameHost {
                 None => {}
             }
         }
+        let writes = self.memcard.writes;
         if let Some(ret) = self.memcard.call(c, addr) {
             c.r[2] = ret;
+            if self.memcard.writes != writes {
+                self.card_written(c);
+            }
             return true;
         }
         let ret = self

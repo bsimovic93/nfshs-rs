@@ -273,44 +273,22 @@ impl GameHost {
     /// FontUpsideDownBlit (the menu's reflection in the showroom floor): flipped opaque quads
     /// in its own CLUT and colour.
     pub(super) fn font_quads(&mut self, c: &mut Cpu, text: u32, x: i32, y: i32) {
-        let upside_down = match c.m.r32(FONT_BLITTER) {
-            FONT_UPSIDE_DOWN_BLIT => true,
-            FONT_BLIT => false,
-            b => {
-                log::warn!("front-end text with an unknown blitter {b:#x}");
-                false
-            }
-        };
-        let table = c.m.r32(0x8013_6F14);
-        let count = c.m.r32(0x8013_6F04);
-        let shape = c.m.r32(0x8013_6F18);
-        if table == 0 || shape == 0 {
-            return;
-        }
-        let pos = c.m.r32(shape + 12);
-        let (fx, fy) = ((pos & 0xFFF) as u16, ((pos >> 16) & 0xFFF) as u16);
-        let tpage = (fx / 64) | ((fy / 256) << 4);
-        let (clut, colour) = if upside_down {
-            (c.m.r16(0x8013_EB4C), c.m.r32(0x8013_EB44) & 0xFF_FFFF)
-        } else {
-            (c.m.r16(FONT_CURRENT_CLUT), c.m.r32(0x8013_D83C + 4872) & 0xFF_FFFF)
-        };
-        let space = c.m.r8(FONT_SPACE) as i32;
-        let code = |c: &mut Cpu, a: u32| c.m.r8(a) as u16 | (c.m.r8(a + 1) as u16) << 8;
+        let Some(font) = FeFont::current(c) else { return };
+        let text: Vec<u8> = (0..256).map(|i| c.m.r8(text + i)).take_while(|&b| b != 0).collect();
+        self.fe_text(c, &font, &text, x, y);
+    }
+
+    /// `text` at (x, y) in a front-end font, as Font_TextXY draws it.
+    pub(super) fn fe_text(&mut self, c: &mut Cpu, font: &FeFont, text: &[u8], x: i32, y: i32) {
+        let FeFont { tpage, fy, clut, colour, upside_down, .. } = *font;
         let mut x = x;
-        for i in 0..256 {
-            let ch = c.m.r8(text + i) as u16;
-            if ch == 0 {
-                break;
-            }
+        for &ch in text {
             if ch < 33 {
-                x += space;
+                x += font.space;
                 continue;
             }
-            let k = ch as u32 - 32;
-            let direct = table + 11 * k;
-            let g = if k < count && code(c, direct) == ch { Some(direct) } else { (0..count).map(|k| table + 11 * k).find(|&a| code(c, a) == ch) };
-            let Some(g) = g else { continue };
+            let Some(g) = font.glyph(c, ch) else { continue };
+            let code = |c: &mut Cpu, a: u32| c.m.r8(a) as u16 | (c.m.r8(a + 1) as u16) << 8;
             let (w, h) = (c.m.r8(g + 2) as i32, c.m.r8(g + 3) as i32);
             let (u, v) = (code(c, g + 4) as i32, code(c, g + 6) as i32);
             let (adv, dx, dy) = (c.m.r8(g + 8) as i8 as i32, c.m.r8(g + 9) as i8 as i32, c.m.r8(g + 10) as i8 as i32);
@@ -365,6 +343,12 @@ impl GameHost {
 
     /// Record the GPU packets built in the primitive buffer from `start` to `end`.
     pub(super) fn record_packets(&mut self, c: &mut Cpu, start: u32, end: u32) {
+        self.record_marked(c, start, end, &[]);
+    }
+
+    /// [`Self::record_packets`], and where each of `marks` (ascending buffer addresses)
+    /// starts among the commands: the overlay's length at the first packet at or after it.
+    pub(super) fn record_marked(&mut self, c: &mut Cpu, start: u32, end: u32, marks: &[u32]) -> Vec<usize> {
         let mut packets = Vec::new();
         let mut p = start;
         while p < end && end - p < 0x10_0000 {
@@ -390,13 +374,19 @@ impl GameHost {
             }
             modes[i] = mode;
         }
+        let mut at = Vec::with_capacity(marks.len());
         for (i, &(p, len)) in packets.iter().enumerate() {
+            while marks.get(at.len()).is_some_and(|&m| m <= p) {
+                at.push(self.overlay.len());
+            }
             self.draw_mode = modes[i];
             if c.m.r32(p + 4) >> 24 != 0xE1 {
                 self.parse_prim(c, p + 4, len);
             }
         }
+        at.resize(marks.len(), self.overlay.len());
         self.draw_mode = entry_mode;
+        at
     }
 
     /// Points moved by the recorded view's drawing offset.
@@ -514,5 +504,62 @@ impl GameHost {
                 }
             }
         }
+    }
+}
+
+/// A front-end font as Font_TextXY finds it set up: its glyph table (11 bytes a glyph: the
+/// character, width, height, u, v, advance, x and y offsets) and its picture's place in VRAM,
+/// the CLUT and colour drawn in and the space's width.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct FeFont {
+    table: u32,
+    count: u32,
+    tpage: u16,
+    fy: u16,
+    clut: u16,
+    colour: u32,
+    space: i32,
+    upside_down: bool,
+}
+
+impl FeFont {
+    /// The font Font_TextXY draws in now (with the CLUT and colour set for it).
+    pub(super) fn current(c: &mut Cpu) -> Option<Self> {
+        let upside_down = match c.m.r32(FONT_BLITTER) {
+            FONT_UPSIDE_DOWN_BLIT => true,
+            FONT_BLIT => false,
+            b => {
+                log::warn!("front-end text with an unknown blitter {b:#x}");
+                false
+            }
+        };
+        let (table, count, shape) = (c.m.r32(0x8013_6F14), c.m.r32(0x8013_6F04), c.m.r32(0x8013_6F18));
+        if table == 0 || shape == 0 {
+            return None;
+        }
+        let pos = c.m.r32(shape + 12);
+        let (fx, fy) = ((pos & 0xFFF) as u16, ((pos >> 16) & 0xFFF) as u16);
+        let (clut, colour) = if upside_down {
+            (c.m.r16(0x8013_EB4C), c.m.r32(0x8013_EB44) & 0xFF_FFFF)
+        } else {
+            (c.m.r16(FONT_CURRENT_CLUT), c.m.r32(0x8013_D83C + 4872) & 0xFF_FFFF)
+        };
+        Some(Self { table, count, tpage: (fx / 64) | ((fy / 256) << 4), fy, clut, colour, space: c.m.r8(FONT_SPACE) as i32, upside_down })
+    }
+
+    /// Character `ch`'s glyph (its table entry; not a space's): None when the font lacks it.
+    fn glyph(&self, c: &mut Cpu, ch: u8) -> Option<u32> {
+        let code = |c: &mut Cpu, a: u32| c.m.r8(a) as u16 | (c.m.r8(a + 1) as u16) << 8;
+        let k = ch as u32 - 32;
+        let direct = self.table + 11 * k;
+        if k < self.count && code(c, direct) == ch as u16 {
+            return Some(direct);
+        }
+        (0..self.count).map(|k| self.table + 11 * k).find(|&a| code(c, a) == ch as u16)
+    }
+
+    /// How far `text` takes the pen.
+    pub(super) fn width(&self, c: &mut Cpu, text: &[u8]) -> i32 {
+        text.iter().map(|&ch| if ch < 33 { self.space } else { self.glyph(c, ch).map_or(0, |g| c.m.r8(g + 8) as i8 as i32) }).sum()
     }
 }

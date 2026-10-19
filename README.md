@@ -42,8 +42,9 @@ Formats and findings are in [`docs/FORMATS.md`](docs/FORMATS.md); the diagnostic
 Everything a player of the original sees, with these known gaps (see the end of this file):
 
 - **Front end**: the original menus, showroom (turning cars, light halos, shadow), the track
-  select's spinning 3D track video, trophies, two-player car select, options and memory card
-  screens. FMV (STR video with XA audio) plays. Every track and car is unlocked
+  select's spinning 3D track video, trophies, two-player car select and options, where a
+  Graphics screen (window mode, resolution, texture filter, CRT filter, bloom, antialiasing)
+  takes the Memory Card screen's place. FMV (STR video with XA audio) plays. Every track and car is unlocked
   (`NFSHS_LOCKED=1` keeps the save's progress instead).
 - **Races**: all tracks and conditions (day, night, wet, snow, weather) and the game's modes
   as its own code runs them. Test drive, single race, Hot Pursuit (police, liveries) and
@@ -57,7 +58,10 @@ Everything a player of the original sees, with these known gaps (see the end of 
   steering, as unramped as on the PS1) and its motors drive the gamepad's rumble. A second
   gamepad is player 2. Gamepads can be plugged in or pulled out mid-race.
 - **Memory card**: a raw 128 KiB `.mcd` image, the same format as DuckStation's, so saves
-  move between the two.
+  move between the two. The game loads it at start and saves to it by itself: back at the
+  main menu after a race or from the game options, and on quitting (Quit, or closing the
+  window in the menus). `autosave = false` in `nfshs.ini` brings the original's question
+  after a race back.
 
 ## Build & run
 
@@ -108,11 +112,11 @@ Menus:
 | Square | Tab | X |
 | Start | F1 | Start |
 
-`P` toggles a test autopilot in races, `F3` the frame-rate counter, `F4` bilinear texture filtering, `F5` fullscreen, `F6` a CRT screen filter and `F7` bloom (for the session; `nfshs.ini` sets how the game starts).
+`P` toggles a test autopilot in races, `F3` the frame-rate counter, `F4` bilinear texture filtering, `F5` fullscreen, `F6` a CRT screen filter and `F7` bloom (for the session; `nfshs.ini` sets how the game starts, and the game options' Graphics screen writes its choices there).
 
 ### Settings (nfshs.ini)
 
-`nfshs.ini` holds the player's settings, each with a comment: the display (fullscreen, a frame rate held without vsync, the frame-rate counter, antialiasing and supersampling), the textures (nearest or bilinear filtering, mipmaps and their bias), the CRT filter and its look (curvature, aperture grille, scanlines, gamma, brightness, vignette), bloom (its intensity and threshold), gamepad vibration, the audio device, the memory card and locked tracks and cars. It is read from the current directory or next to the executable, else beside the game data folder (where it is written with the defaults when there is none; `--config FILE` for another). The game reads it again whenever it is saved, so the settings can be tried while playing. Deleting it brings the defaults back.
+`nfshs.ini` holds the player's settings, each with a comment: the display (windowed, borderless or fullscreen, the resolution, a frame rate held without vsync, the frame-rate counter, antialiasing and supersampling), the textures (nearest or bilinear filtering, mipmaps and their bias), the CRT filter and its look (curvature, aperture grille, scanlines, gamma, brightness, vignette), bloom (its intensity and threshold), gamepad vibration, the audio device, the memory card, autosaving and locked tracks and cars. It is read from the current directory or next to the executable, else beside the game data folder (where it is written with the defaults when there is none; `--config FILE` for another). The game reads it again whenever it is saved, so the settings can be tried while playing. Deleting it brings the defaults back.
 
 ### Settings (environment variables)
 
@@ -149,8 +153,8 @@ Symbol maps (retail ↔ development build) are in `re/*.tsv`.
 
 ## Not done yet
 
-- Options beyond the original's: key remapping, video settings (resolution, window mode,
-  frame cap, filtering), audio sliders.
+- Options beyond the original's: key remapping, more video settings (frame cap,
+  supersampling), audio sliders.
 - PC improvements planned in `TODO.txt` (higher-quality UI and textures, custom music,
   mods).
 - Car label textures show a faint outline at high resolution (the textures' own edge

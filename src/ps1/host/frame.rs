@@ -37,6 +37,8 @@ pub struct FrameInfo {
     pub overlay: Vec<OverlayCmd>,
     /// 2D drawn over the sky and under the world (the sun's flare), as recorded.
     pub sky_overlay: Vec<OverlayCmd>,
+    /// The sun's lens flare over the world, when the original drew it (see [`super::sun`]).
+    pub lens_flare: Option<Vec<LensPiece>>,
     /// See [`GameHost::weather`].
     pub weather: Vec<OverlayCmd>,
     /// Light glows (track lights, car lights) with the world point each belongs to.
@@ -124,6 +126,7 @@ impl GameHost {
                 }),
                 font_palettes: Vec::new(),
                 sky_overlay: Vec::new(),
+                lens_flare: None,
                 weather: Vec::new(),
                 glows: Vec::new(),
                 views: Vec::new(),
@@ -182,6 +185,8 @@ impl GameHost {
         if self.mode == Mode::FrontEnd {
             unlock_everything(c);
             add_quit_item(c);
+            self.options_frame(c);
+            self.autosave_notice(c);
         }
         // top of the original main loop: game frames are locked to 60 Hz fields
         if !self.clock.is_multiple_of(FIELD) || self.clock == self.frame.last_top {
@@ -209,6 +214,14 @@ impl GameHost {
                 } else {
                     self.last_sky = self.sky_overlay.clone();
                     std::mem::take(&mut self.sky_overlay)
+                }
+            },
+            lens_flare: {
+                if self.mode == Mode::Race && Self::paused(c) && self.lens_flare.is_none() {
+                    self.last_lens.clone()
+                } else {
+                    self.last_lens = self.lens_flare.clone();
+                    self.lens_flare.take()
                 }
             },
             overlay: {

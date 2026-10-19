@@ -40,7 +40,7 @@ the others take the value shown. Player-facing settings are in the README.
 |---|---|
 | `NFSHS_HUDLOG=1\|2` | The commands recorded from each HUD view (2: each command). |
 | `NFSHS_HUD_DEBUG=1` | Texels the HUD port cannot find. |
-| `NFSHS_SUNLOG=1` | The sun's flare primitives. |
+| `NFSHS_SUNLOG=1` | The sun's primitives, its lens flare's pieces (and how far each follows the sun), and the visibility test: where the sun is tested, what the renderer saw, what the game read back. |
 | `NFSHS_SMOKELOG=1`, `NFSHS_WEATHERLOG=1` | The smoke puffs and the weather's primitives. |
 | `NFSHS_NOSMOKE=1` | Smoke puffs not drawn. |
 | `NFSHS_SKIDLOG=1` | Tyre marks: how many, how many near, which slices. |

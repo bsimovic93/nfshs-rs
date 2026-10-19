@@ -3,7 +3,7 @@
 use crate::assets::{Atlas, GameData};
 use crate::game::{Game, Input, RaceConfig};
 use crate::render::{FrameParams, Renderer};
-use crate::settings::{Controls, Settings};
+use crate::settings::{Controls, Settings, WindowMode};
 use glam::{Mat4, Vec3};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,6 +68,8 @@ pub struct App {
     movie_voice: Option<crate::audio::VoiceId>,
     /// The front end's showroom car model.
     showroom: Option<crate::game::fe::Showroom>,
+    /// The window was closed (in the front end): when, while the game saves before it quits.
+    closing: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -280,15 +282,54 @@ impl App {
             r.bloom = s.bloom;
             r.set_bloom(&s.bloom_params);
         }
-        if let Some(w) = &self.window {
-            if old.is_some_and(|o| o.fullscreen != s.fullscreen) {
-                w.set_fullscreen(s.fullscreen.then_some(Fullscreen::Borderless(None)));
-            }
+        if old.is_some_and(|o| o.window_mode != s.window_mode || o.resolution != s.resolution) {
+            self.apply_window();
         }
         if old.is_none_or(|o| o.show_fps != s.show_fps) {
             self.show_counter(s.show_fps);
         }
         self.next_frame = Instant::now();
+    }
+
+    /// The window as the settings have it: windowed at the resolution, full screen at the
+    /// desktop's, or full screen at the resolution (the display's mode of that size with the
+    /// highest refresh rate; at the desktop's when it has none).
+    fn apply_window(&self) {
+        let Some(w) = &self.window else { return };
+        let (rw, rh) = self.settings.resolution;
+        match self.settings.window_mode {
+            WindowMode::Windowed => {
+                w.set_fullscreen(None);
+                let _ = w.request_inner_size(winit::dpi::PhysicalSize::new(rw, rh));
+            }
+            WindowMode::Borderless => w.set_fullscreen(Some(Fullscreen::Borderless(None))),
+            WindowMode::Fullscreen => {
+                let mode = w.current_monitor().and_then(|m| {
+                    m.video_modes().filter(|v| v.size() == winit::dpi::PhysicalSize::new(rw, rh)).max_by_key(|v| (v.refresh_rate_millihertz(), v.bit_depth()))
+                });
+                if mode.is_none() {
+                    log::warn!("the display has no {rw}x{rh} mode: full screen at its own resolution");
+                }
+                w.set_fullscreen(Some(mode.map_or(Fullscreen::Borderless(None), Fullscreen::Exclusive)));
+            }
+        }
+    }
+
+    /// The settings to the game options' graphics screen, and what the player chose there
+    /// into effect and into the settings file.
+    fn sync_graphics(&mut self) {
+        crate::ps1::host::show_graphics(&self.settings);
+        let mut new = self.settings.clone();
+        if !crate::ps1::host::take_graphics_choice(&mut new) || new == self.settings {
+            return;
+        }
+        let old = std::mem::replace(&mut self.settings, new);
+        self.apply_settings(Some(&old));
+        match self.settings.save_graphics(&self.settings_path) {
+            // (not read back: the function keys' changes for the session stay)
+            Ok(()) => self.settings_seen.0 = std::fs::metadata(&self.settings_path).and_then(|m| m.modified()).ok(),
+            Err(e) => log::warn!("settings: could not write {}: {e}", self.settings_path.display()),
+        }
     }
 
     fn show_counter(&mut self, on: bool) {
@@ -317,6 +358,12 @@ impl App {
 
     fn frame(&mut self, el: &ActiveEventLoop) {
         self.reload_settings();
+        self.sync_graphics();
+        // closing, the game is given a moment to save first
+        if self.closing.is_some_and(|t| t.elapsed() > Duration::from_secs(3)) {
+            el.exit();
+            return;
+        }
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
@@ -440,16 +487,20 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
+        let (rw, rh) = self.settings.resolution;
         let attrs = Window::default_attributes()
             .with_title("Need for Speed: High Stakes - Rust rebuild")
-            .with_inner_size(winit::dpi::LogicalSize::new(1280, 960))
-            .with_fullscreen(self.settings.fullscreen.then_some(Fullscreen::Borderless(None)));
+            .with_inner_size(winit::dpi::PhysicalSize::new(rw, rh))
+            .with_fullscreen((self.settings.window_mode == WindowMode::Borderless).then_some(Fullscreen::Borderless(None)));
         let window = Arc::new(el.create_window(attrs).expect("window"));
         let size = window.inner_size();
         let atlas = Atlas::new(256);
         let r = pollster::block_on(Renderer::new(Some(window.clone()), (size.width, size.height), &atlas)).expect("renderer");
         self.renderer = Some(r);
         self.window = Some(window);
+        if self.settings.window_mode == WindowMode::Fullscreen {
+            self.apply_window();
+        }
         self.apply_settings(None);
         match crate::audio::Audio::new() {
             Ok(a) => self.audio = Some(a),
@@ -464,7 +515,16 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::CloseRequested => {
+                // in the front end the game saves first (when autosaving) and then quits; a
+                // second close does not wait
+                if matches!(self.screen, Screen::FrontEnd(_)) && self.settings.autosave && self.closing.is_none() {
+                    crate::ps1::host::request_close();
+                    self.closing = Some(Instant::now());
+                } else {
+                    el.exit();
+                }
+            }
             WindowEvent::Resized(s) => {
                 if let Some(r) = &mut self.renderer {
                     r.resize(s.width, s.height);
@@ -498,10 +558,11 @@ impl ApplicationHandler for App {
                         self.show_counter(self.settings.show_fps);
                     }
                     KeyCode::F5 if down && !repeat => {
-                        if let Some(w) = &self.window {
-                            self.settings.fullscreen = w.fullscreen().is_none();
-                            w.set_fullscreen(self.settings.fullscreen.then_some(Fullscreen::Borderless(None)));
-                        }
+                        self.settings.window_mode = match self.settings.window_mode {
+                            WindowMode::Windowed => WindowMode::Borderless,
+                            _ => WindowMode::Windowed,
+                        };
+                        self.apply_window();
                     }
                     KeyCode::F6 if down && !repeat => {
                         self.settings.crt = !self.settings.crt;
@@ -556,6 +617,7 @@ pub fn run(data: &GameData, direct: Option<RaceConfigOwned>, settings: Settings,
         movie: None,
         movie_voice: None,
         showroom: None,
+        closing: None,
     };
     el.run_app(&mut app)?;
     match app.error.take() {
@@ -726,6 +788,23 @@ pub fn draw_race(r: &mut Renderer, game: &mut Game, w: f32, h: f32, shot: bool) 
 
 /// A race's 2D: the HUD the original drew (recorded, with its own atlas), or the host's port.
 pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::assets::Vertex> {
+    // the sun as the renderer last saw it, for the original's lens flare (its 25 points
+    // tested a frame or two behind, like the PS1 reading back its last frame)
+    if let Some(bits) = r.sun_visible() {
+        if std::env::var_os("NFSHS_SUNLOG").is_some() {
+            eprintln!("sun seen: {bits:025b}");
+        }
+        crate::ps1::host::SUN_VISIBLE.store(bits, std::sync::atomic::Ordering::Relaxed);
+    }
+    let hud = race_hud_2d(r, game, w, h);
+    r.sun_probe = game.sun_probe();
+    if std::env::var_os("NFSHS_SUNLOG").is_some() {
+        eprintln!("sun probe {:?} ({w}x{h})", r.sun_probe);
+    }
+    hud
+}
+
+fn race_hud_2d(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::assets::Vertex> {
     match game.hud_frame(w, h) {
         Some((f, sky, glows, glows_sub)) if !game.paused() => {
             r.write_overlay_atlas(&f.atlas);
@@ -759,6 +838,7 @@ pub fn race_hud(r: &mut Renderer, game: &Game, w: f32, h: f32) -> Vec<crate::ass
 
 /// Draw a front-end scene (2D, and the showroom car in 3D between its layers).
 pub fn draw_front_end(r: &mut Renderer, scene: crate::game::fe::FeScene, shot: bool) -> Option<image::RgbaImage> {
+    r.sun_probe = None;
     r.write_atlas(&scene.atlas);
     r.use_overlay_atlas = false;
     r.sky_layer = Vec::new();

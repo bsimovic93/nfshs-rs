@@ -6,6 +6,8 @@ use glam::{Mat4, Vec3, Vec4};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+mod sun;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Globals {
@@ -231,6 +233,10 @@ pub struct Renderer {
     /// Glows subtracted (PS1 mode 2: the smoke's dark puffs), tested like `glows`.
     pub glows_sub: Vec<Vertex>,
     glow_sub_vb: DynBuf,
+    /// Where the sun is tested for the original's lens flare (see [`sun`]): its centre in
+    /// window pixels and the PS1 pixel's size there; None: not tested.
+    pub sun_probe: Option<([f32; 2], [f32; 2])>,
+    sun: sun::SunProbe,
     /// The 2D pass's own atlas (a race's HUD recorded from the original, textured from its
     /// VRAM), when set.
     overlay_atlas: Option<(wgpu::Texture, wgpu::BindGroup)>,
@@ -430,6 +436,7 @@ impl Renderer {
         let sky_layer_vb = DynBuf::new(&device, "sky layer");
         let glow_vb = DynBuf::new(&device, "glows");
         let glow_sub_vb = DynBuf::new(&device, "glows subtracted");
+        let sun = sun::SunProbe::new(&device);
         let sky_vb = DynBuf::new(&device, "sky");
         let stats_vb = DynBuf::new(&device, "stats");
         let stats_pipeline = mk_pipeline(&device, &layout, &shader, format, 1, "vs_main", "fs_solid", true, None, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), None);
@@ -603,6 +610,8 @@ impl Renderer {
             glow_vb,
             glows_sub: Vec::new(),
             glow_sub_vb,
+            sun_probe: None,
+            sun,
             overlay_atlas: None,
             use_overlay_atlas: false,
             mid_vb,
@@ -942,6 +951,15 @@ impl Renderer {
         self.sky_layer_vb.upload(&self.device, &self.queue, &self.sky_layer);
         self.glow_vb.upload(&self.device, &self.queue, &self.glows);
         self.glow_sub_vb.upload(&self.device, &self.queue, &self.glows_sub);
+        // the sun tested once the world is drawn (one view: a split screen has no lens flare)
+        let probe = match self.sun_probe {
+            Some((centre, cell)) if !pass.no_world && pass.viewport.is_none() => Some(sun::SunProbe::quads(centre, cell, self.scale() as f32)),
+            _ => None,
+        };
+        if let Some(q) = &probe {
+            self.sun.vb.upload(&self.device, &self.queue, q);
+        }
+        let queries = if probe.is_some() { self.sun.begin().cloned() } else { None };
         // (drawn at the supersampling scale: see `present`; with MSAA, to `msaa_color` and
         // resolved to `view` after each pass, the next one going on from the samples)
         let k = self.scale();
@@ -968,7 +986,7 @@ impl Renderer {
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
-                occlusion_query_set: None,
+                occlusion_query_set: queries.as_ref(),
                 multiview_mask: None,
             });
             // a view of a split screen: the 3D in its rectangle, the 2D (window coordinates)
@@ -1116,6 +1134,16 @@ impl Renderer {
                 rp.draw(0..p.subtract_late.len() as u32, 0..1);
             }
             set_vp(&mut rp, vp2d);
+            if queries.is_some() {
+                rp.set_pipeline(&self.pipes.sun_probe);
+                rp.set_bind_group(0, &self.hud_bg, &[]);
+                rp.set_vertex_buffer(0, self.sun.vb.buf.slice(..));
+                for i in 0..sun::POINTS {
+                    rp.begin_occlusion_query(i);
+                    rp.draw(6 * i..6 * i + 6, 0..1);
+                    rp.end_occlusion_query();
+                }
+            }
             if !self.glows.is_empty() {
                 if let Some((_, bg)) = &self.overlay_atlas {
                     rp.set_pipeline(&self.pipes.glow);
@@ -1134,7 +1162,16 @@ impl Renderer {
             }
             self.draw_hud(&mut rp, hud);
         }
+        if queries.is_some() {
+            self.sun.finish(&mut enc);
+        }
         enc.finish()
+    }
+
+    /// The newest result of the sun's test (see [`sun`]): bit `5 * row + column` set where
+    /// the world leaves the sun uncovered.
+    pub fn sun_visible(&mut self) -> Option<u32> {
+        self.sun.take(&self.device)
     }
 
     /// The 2D over everything: runs of normal blending between the subtracting ranges.
@@ -1517,6 +1554,8 @@ struct ScenePipelines {
     sky: wgpu::RenderPipeline,
     glow: wgpu::RenderPipeline,
     glow_sub: wgpu::RenderPipeline,
+    /// The sun's visibility test (see [`sun`]).
+    sun_probe: wgpu::RenderPipeline,
 }
 
 impl ScenePipelines {
@@ -1542,6 +1581,7 @@ impl ScenePipelines {
             sky: mk("vs_sky", "fs_sky", false, None, None, None),
             glow_sub: mk("vs_main", "fs_sub", true, tested, subtract, None),
             glow: mk("vs_main", "fs_hud", true, tested, blend, None),
+            sun_probe: sun::pipeline(device, layout, shader, format, samples),
         }
     }
 }

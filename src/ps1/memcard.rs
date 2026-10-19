@@ -38,6 +38,12 @@ pub struct MemCard {
     /// The asynchronous command (Exist, Accept, ReadFile, WriteFile) waiting for MemCardSync,
     /// and its result: it completes at once.
     pending: Option<(u32, u32)>,
+    /// Creating a file that is there already gives it (as big as asked) to be written over,
+    /// so the game does not ask whether to overwrite its save (autosaving: the settings'
+    /// `autosave`).
+    overwrite: bool,
+    /// Files written (MemCardWriteFile done and the card saved).
+    pub writes: u32,
 }
 
 impl MemCard {
@@ -51,7 +57,7 @@ impl MemCard {
             let dir = std::fs::canonicalize(data_root).ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
             dir.join("memcard.mcd")
         });
-        Self::at(path)
+        Self { overwrite: crate::settings::get().autosave, ..Self::at(path) }
     }
 
     /// The card image at `path`.
@@ -65,7 +71,7 @@ impl MemCard {
             Err(_) => formatted(),
         };
         log::info!("memory card {}", path.display());
-        Self { path, image, pending: None }
+        Self { path, image, pending: None, overwrite: false, writes: 0 }
     }
 
     fn save(&self) -> bool {
@@ -195,7 +201,10 @@ impl MemCard {
                 let mut buf = vec![0; arg(c, 0) as usize];
                 c.m.read_bytes(a2, &mut buf);
                 let result = match self.find(&name).filter(|_| slot1) {
-                    Some(first) if self.access(first, a3 as usize, &mut buf, false) && self.save() => ERR_NONE,
+                    Some(first) if self.access(first, a3 as usize, &mut buf, false) && self.save() => {
+                        self.writes += 1;
+                        ERR_NONE
+                    }
                     _ => ERR_FILE_NOT_EXIST,
                 };
                 self.pending = Some((FUNC_WRITE_FILE, result));
@@ -241,9 +250,12 @@ impl MemCard {
                 // MemCardCreateFile(chan, name, blocks)
                 let name = c.m.cstr(a1);
                 let blocks = (a2 as usize).max(1);
+                let there = self.find(&name);
                 if !slot1 {
                     ERR_CARD_NOT_EXIST
-                } else if self.find(&name).is_some() {
+                } else if self.overwrite && there.is_some_and(|first| self.chain(first).len() >= blocks) {
+                    ERR_NONE
+                } else if there.is_some() {
                     ERR_ALREADY_EXIST
                 } else {
                     let free: Vec<usize> = (1..16).filter(|&b| self.state(b) & 0xF0 == FREE).take(blocks).collect();

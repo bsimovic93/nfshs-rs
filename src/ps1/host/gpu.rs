@@ -43,6 +43,9 @@ impl GameHost {
             0x800E_E44C => {
                 // StoreImage(rect, data)
                 let (x, y, w, h) = Self::rect(c, a0);
+                if self.sun_pixels(c, a1, w, h) {
+                    return Some(0);
+                }
                 let mut p = a1;
                 for yy in y..y + h {
                     for xx in x..x + w {

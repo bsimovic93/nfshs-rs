@@ -9,6 +9,9 @@ pub(super) type GlowKey = ([i32; 3], u32, [i32; 2]);
 
 /// The world anchor standing for the sun in [`Game::glow_offsets`].
 const SUN_KEY: [i32; 3] = [i32::MIN; 3];
+/// The lens flare's depth among the glows: nearer than anything (the original puts it in its
+/// ordering table's nearest entry).
+const LENS_DEPTH: f32 = 0.9999;
 
 /// The centre of the quads among `cmds` (PS1 screen pixels).
 fn quads_centre<'a>(cmds: impl IntoIterator<Item = &'a crate::ps1::host::OverlayCmd>) -> Option<Vec2> {
@@ -118,6 +121,7 @@ impl Game {
         };
         // the sun as seen by this frame's camera: its flare moved from where the original's
         // camera saw the sun's direction to where this one does (the sky is drawn with it)
+        let mut sun_moved = None;
         if let (Some(orig_vp), Some(cam)) = (orig, sim.sim_camera()) {
             let dir = Vec3::new(-(s.sun_dir[0] as f32), s.sun_dir[1] as f32, s.sun_dir[2] as f32).normalize_or_zero() * 500.0;
             if let (Some((p_now, _)), Some((p_orig, _))) = (to_px(now, self.cam_pos + dir), to_px(orig_vp, cam.pos + dir)) {
@@ -128,6 +132,7 @@ impl Game {
                     v.pos[0] += d.x;
                     v.pos[1] += d.y;
                 }
+                sun_moved = Some((d, centre));
             }
         }
         for g in &s.glows {
@@ -205,8 +210,33 @@ impl Game {
                 if is_sub(i) { glows_sub.push(v) } else { glows.push(v) }
             }
         }
+        // the lens flare over the world, each piece following the sun as the original placed
+        // it (mirrored through the screen's centre), and where the sun (the white quad the
+        // original measures the flare by, drawn first) is tested
+        self.sun_probe.set(None);
+        if let (Some(lens), Some((d, centre))) = (&s.lens_flare, sun_moved) {
+            if let Some(c) = centre {
+                self.sun_probe.set(Some(((origin + c * scale + d).into(), scale.into())));
+            }
+            for p in lens {
+                let f = fe::FeFrame::build_in(atlas, &moved(&p.cmds), vram, screen, w, h);
+                atlas = f.atlas;
+                let is_sub = |i: usize| f.subtract.iter().any(|r| r.contains(&(i as u32)));
+                for (i, v) in f.vertices.iter().enumerate() {
+                    let v = Vertex { pos: [v.pos[0] + d.x * p.shift, v.pos[1] + d.y * p.shift, 1.0 - 2.0 * LENS_DEPTH], ..*v };
+                    if is_sub(i) { glows_sub.push(v) } else { glows.push(v) }
+                }
+            }
+        }
         offsets.retain(|k, _| k.2 != view_at || seen.contains(k));
         Some((atlas, sky.vertices, glows, glows_sub))
+    }
+
+    /// Where the sun is to be tested for the original's lens flare (see
+    /// [`crate::ps1::host::SUN_VISIBLE`]): its centre in window pixels and a PS1 pixel's size
+    /// there, when the flare was drawn this frame (set by the 2D's layers).
+    pub fn sun_probe(&self) -> Option<([f32; 2], [f32; 2])> {
+        self.sun_probe.get()
     }
 
     /// The view-projection of a camera the original computed (as `frame_params` builds it).

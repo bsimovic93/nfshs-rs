@@ -203,9 +203,22 @@ impl GameHost {
                 return None;
             }
             QUIT_CALLBACK => {
-                // the game setup menu's Quit (see `add_quit_item`)
-                self.quit = true;
+                // the game setup menu's Quit (see `add_quit_item`), after a save when
+                // autosaving
+                self.quit_with_save(c);
                 0
+            }
+            0x8002_C49C if crate::settings::get().autosave => {
+                // AskTheUserToSaveTheGame (leaving a race's screens): autosaving, the answer is
+                // no (to the main menu, not the memory card screen), where the game is saved
+                0
+            }
+            options::MESSAGE_DRAW if self.mode == Mode::FrontEnd && self.skip_saving_message(c, a0) => 0,
+            options::PLAY_FE_SFX_VOL if self.mode == Mode::FrontEnd && self.skip_saving_sound(c) => 0,
+            0x8001_3894 if self.mode == Mode::FrontEnd => {
+                // the front end's frame (tFEApplication): a save due is made before it
+                self.options_before_frame(c);
+                return None;
             }
             0x8002_7B38 => {
                 // Front_Menu: the front end runs (also its post-race screens, before
@@ -227,6 +240,7 @@ impl GameHost {
                     self.loading.clear();
                 }
                 self.mode = Mode::Race;
+                self.options.raced = true;
                 return None;
             }
             _ => return None,
