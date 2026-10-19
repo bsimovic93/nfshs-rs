@@ -1,6 +1,7 @@
 //! Developer commands: headless runs and screenshots, comparisons with DuckStation
 //! captures, asset viewers and codec checks (`nfshs <command> ...`).
 
+mod export;
 mod headless;
 pub mod refcmp;
 pub mod soft;
@@ -12,7 +13,7 @@ use std::path::Path;
 pub use headless::{front_end_play, screenshot};
 
 /// The commands [`run`] knows.
-pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car"];
+pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car", "export-car"];
 
 /// Run developer command `cmd` (`args` as on the command line); false if there is none.
 pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::RaceConfig) -> Result<bool> {
@@ -458,6 +459,16 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             println!("largest free block: {:#x}", ps1::race::call(&mut cpu, 0x800E_5E70, &[])?);
         }
         "dump-car" => dump_car(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(String::as_str))?,
+        // export-car CODE|all [OUTDIR]: a car's models (glTF), textures (PNG), sounds (WAV)
+        // and original files in one folder (export/CODE, or export/<code>/ for each with "all")
+        "export-car" => {
+            let code = args.get(2).context("export-car CODE|all [OUTDIR]")?;
+            let out = args.get(3).map(std::path::PathBuf::from).unwrap_or_else(|| match code.eq_ignore_ascii_case("all") {
+                true => "export".into(),
+                false => Path::new("export").join(code.to_ascii_uppercase()),
+            });
+            export::export_car(data, code, &out)?;
+        }
         _ => return Ok(false),
     }
     Ok(true)

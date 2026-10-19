@@ -724,7 +724,7 @@ const PLATE_TEXTURES: [(u8, u8); 21] = [
 
 /// The car's texture names by a GEO polygon's texture number (CarIO's table): each is a
 /// shape of the car's PSH files, placed at its own VRAM position.
-const CAR_TEXTURES: [&str; 51] = [
+pub const CAR_TEXTURES: [&str; 51] = [
     "frnt", "rear", "side", "top1", "top2", "dHiF", "dHiR", "dHiS", "dTp1", "dTop", "dLoF", "dLoR", "dLoS", "wndw", "ftdm", "splr", "ext2", "ext3",
     "ext4", "whl ", "ext1", "botm", "whlI", "tred", "bROf", "bSOf", "rvOf", "sFOf", "sROf", "ltOf", "bROn", "bSOn", "shdw", "sFOn", "sROn",
     "ltOn", "dcl1", "dcl2", "dcl3", "dcl4", "dcl5", "dcl6", "ins0", "ins1", "ins2", "ins3", "ins4", "ins5", "ins6", "ins7", "ins8",
@@ -775,10 +775,8 @@ fn placement_transform(pl: &grp::Placement) -> Placement {
 }
 
 /// Load a car as the race does (R3DCar_ReadInCarData / CarIO_ReadInCarTextureData): the
-/// player's car from `ZZZ<code>H.VIV`, the others from `ZZZ<code>S.VIV`. The PSH files hold
-/// the texture pages: the interior and underside ("i") on a page of their own, the body's
-/// light ("l", colours 0..7) or dark ("d", colours 8..15) set, then "g". `colour` is the
-/// paint as [`crate::ps1::race::CarState::colour`] packs it.
+/// player's car from `ZZZ<code>H.VIV`, the others from `ZZZ<code>S.VIV`, textured as
+/// [`car_pages`] paints them (`colour` as [`crate::ps1::race::CarState::colour`] packs it).
 pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, night: bool, plate: Option<&str>, colour: u8) -> Result<CarModel> {
     let name = format!("ZZZ{code}{}.VIV", if player { "H" } else { "S" });
     // (police cars: the livery the game loaded for this track, e.g. CBMW -> ZZZGBMWS.VIV)
@@ -790,14 +788,72 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
     )?;
     let (_, geo) = viv.find_suffix(".geo").context("car viv has no .geo")?;
     let geo = Geo::parse(geo)?;
-    // two 256x256 pages; which page and shape each texture name is on
+    // night driving changes nothing in the textures
+    let _ = night;
+    let (pages, page_of) = car_pages(data, &viv, code, plate, colour)?;
+    let rects = [atlas.add(256, 256, &pages[0].rgba), atlas.add(256, 256, &pages[1].rgba)];
+    let mut parts = Vec::with_capacity(geo.parts.len());
+    for (pi, part) in geo.parts.iter().enumerate() {
+        let off = Vec3::new(part.position[0] as f32, part.position[1] as f32, part.position[2] as f32) / 65536.0;
+        // wheels: discs 47/48, front tyres 49..52, rear wheels 53..56 (left, right)
+        let wheel = match pi {
+            47 | 49 | 51 => Some(0),
+            48 | 50 | 52 => Some(1),
+            53 | 55 => Some(2),
+            54 | 56 => Some(3),
+            _ => None,
+        };
+        let hub = if wheel.is_some() { ps1_to_world(off) } else { Vec3::ZERO };
+        let mut verts = Vec::new();
+        let mut env = matches!(pi, 0 | 8 | 10 | 41 | 42 | 45 | 46).then(|| (Vec::new(), Vec::new()));
+        let mut env_vertices = Vec::new();
+        let tris: Vec<CarTri> = part.polys.iter().map(|p| CarTri { texture: p.texture, flags: p.flags as u16 | (p.flags2 as u16) << 8, uv: p.uv }).collect();
+        for poly in &part.polys {
+            if let Some((normals, flags)) = &mut env {
+                flags.push((poly.flags as u16 | (poly.flags2 as u16) << 8) & 0xFFF);
+                env_vertices.extend(poly.v.map(|v| v as u16));
+                for k in 0..3 {
+                    let n = part.normals.get(poly.v[k] as usize).copied().unwrap_or([0; 3]);
+                    normals.push(n.map(|c| c >> 6));
+                }
+            }
+            let tex = CAR_TEXTURES.get(poly.texture as usize).copied().unwrap_or("");
+            let rect = rects[page_of.get(tex).copied().unwrap_or(0)];
+            for k in 0..3 {
+                let v = part.verts.get(poly.v[k] as usize).copied().unwrap_or([0; 3]);
+                let p = ps1_to_world(off + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 256.0) - hub;
+                let t = Vec2::new(poly.uv[k][0] as f32 + 0.5, poly.uv[k][1] as f32 + 0.5);
+                // DrawC_Prim: flags bit 0 makes the polygon semi-transparent (its STP texels
+                // blend: the windows)
+                let a = if poly.flags & 1 != 0 { 0.5 } else { 1.0 };
+                verts.push(Vertex { pos: p.into(), uv: atlas.uv(rect, t), color: [0.5, 0.5, 0.5, a] });
+            }
+        }
+        let subtract = part.polys.iter().all(|p| CAR_TEXTURES.get(p.texture as usize) == Some(&"shdw")) && !part.polys.is_empty();
+        parts.push(CarPart { verts, env, env_vertices, geo_vertices: part.verts.len(), tris, wheel, hub, subtract });
+    }
+    let mut max = Vec3::ZERO;
+    for p in parts.iter().filter(|p| p.wheel.is_none()) {
+        for v in &p.verts {
+            max = max.max(Vec3::from(v.pos).abs());
+        }
+    }
+    let texture_page = CAR_TEXTURES.iter().map(|n| page_of.get(*n).map(|&p| p as u8)).collect();
+    Ok(CarModel { parts, half_extents: max, texture_page, page_rects: rects, atlas_size: atlas.size as f32, texture_subs: Vec::new(), part_modes: Vec::new() })
+}
+
+/// A car's two 256x256 texture pages as CarIO_ReadInCarTextureData lays them out from the PSH
+/// files of its VIV: the interior and underside ("i") on page 1, on page 0 the model's own
+/// file, the body's light ("l", colours 0..7) or dark ("d", colours 8..15) set, then "g";
+/// painted with `colour` (as [`crate::ps1::race::CarState::colour`] packs it), with the
+/// number plate `plate` when given. Also which page each shape is on, by name.
+pub fn car_pages(data: &GameData, viv: &Viv, code: &str, plate: Option<&str>, colour: u8) -> Result<([crate::formats::psh::Atlas; 2], std::collections::HashMap<String, usize>)> {
     let mut pages = [crate::formats::psh::Atlas::new(256), crate::formats::psh::Atlas::new(256)];
     let mut page_of: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     // R3DCar_Instantiate3DCar: the body's second texture file is "d" for colours 8..15 and
     // "l" for 0..7, then "g"; each painted with palette row (colour & 7) + 8 when the car's
     // flag for it is set (Car_tObj+0x8B3: bit 0 for the "l"/"d" sheet, bit 1 for the
-    // others); night driving changes nothing here
-    let _ = night;
+    // others)
     let skip = if colour & 8 != 0 { ['l'] } else { ['d'] };
     let row = |flag: u8| (colour & 7) as usize + if colour >> 4 & flag != 0 { 8 } else { 0 };
     let mut files: Vec<(char, Psh)> = Vec::new();
@@ -894,55 +950,7 @@ pub fn load_car(data: &GameData, atlas: &mut Atlas, code: &str, player: bool, ni
             }
         }
     }
-    let rects = [atlas.add(256, 256, &pages[0].rgba), atlas.add(256, 256, &pages[1].rgba)];
-    let mut parts = Vec::with_capacity(geo.parts.len());
-    for (pi, part) in geo.parts.iter().enumerate() {
-        let off = Vec3::new(part.position[0] as f32, part.position[1] as f32, part.position[2] as f32) / 65536.0;
-        // wheels: discs 47/48, front tyres 49..52, rear wheels 53..56 (left, right)
-        let wheel = match pi {
-            47 | 49 | 51 => Some(0),
-            48 | 50 | 52 => Some(1),
-            53 | 55 => Some(2),
-            54 | 56 => Some(3),
-            _ => None,
-        };
-        let hub = if wheel.is_some() { ps1_to_world(off) } else { Vec3::ZERO };
-        let mut verts = Vec::new();
-        let mut env = matches!(pi, 0 | 8 | 10 | 41 | 42 | 45 | 46).then(|| (Vec::new(), Vec::new()));
-        let mut env_vertices = Vec::new();
-        let tris: Vec<CarTri> = part.polys.iter().map(|p| CarTri { texture: p.texture, flags: p.flags as u16 | (p.flags2 as u16) << 8, uv: p.uv }).collect();
-        for poly in &part.polys {
-            if let Some((normals, flags)) = &mut env {
-                flags.push((poly.flags as u16 | (poly.flags2 as u16) << 8) & 0xFFF);
-                env_vertices.extend(poly.v.map(|v| v as u16));
-                for k in 0..3 {
-                    let n = part.normals.get(poly.v[k] as usize).copied().unwrap_or([0; 3]);
-                    normals.push(n.map(|c| c >> 6));
-                }
-            }
-            let tex = CAR_TEXTURES.get(poly.texture as usize).copied().unwrap_or("");
-            let rect = rects[page_of.get(tex).copied().unwrap_or(0)];
-            for k in 0..3 {
-                let v = part.verts.get(poly.v[k] as usize).copied().unwrap_or([0; 3]);
-                let p = ps1_to_world(off + Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 256.0) - hub;
-                let t = Vec2::new(poly.uv[k][0] as f32 + 0.5, poly.uv[k][1] as f32 + 0.5);
-                // DrawC_Prim: flags bit 0 makes the polygon semi-transparent (its STP texels
-                // blend: the windows)
-                let a = if poly.flags & 1 != 0 { 0.5 } else { 1.0 };
-                verts.push(Vertex { pos: p.into(), uv: atlas.uv(rect, t), color: [0.5, 0.5, 0.5, a] });
-            }
-        }
-        let subtract = part.polys.iter().all(|p| CAR_TEXTURES.get(p.texture as usize) == Some(&"shdw")) && !part.polys.is_empty();
-        parts.push(CarPart { verts, env, env_vertices, geo_vertices: part.verts.len(), tris, wheel, hub, subtract });
-    }
-    let mut max = Vec3::ZERO;
-    for p in parts.iter().filter(|p| p.wheel.is_none()) {
-        for v in &p.verts {
-            max = max.max(Vec3::from(v.pos).abs());
-        }
-    }
-    let texture_page = CAR_TEXTURES.iter().map(|n| page_of.get(*n).map(|&p| p as u8)).collect();
-    Ok(CarModel { parts, half_extents: max, texture_page, page_rects: rects, atlas_size: atlas.size as f32, texture_subs: Vec::new(), part_modes: Vec::new() })
+    Ok((pages, page_of))
 }
 
 impl CarModel {

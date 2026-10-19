@@ -193,13 +193,16 @@ pub fn decode_stream(d: &[u8]) -> Result<Sample> {
     Ok(Sample { rate, channels: channels as u32, pcm, loop_start: None, loop_end: None })
 }
 
-/// Write PCM to a WAV file (debug tooling).
+/// Write PCM to a WAV file, its loop (if any) in a `smpl` chunk.
 pub fn write_wav(path: &std::path::Path, s: &Sample) -> std::io::Result<()> {
     let mut out = Vec::with_capacity(44 + s.pcm.len() * 2);
     let data_len = (s.pcm.len() * 2) as u32;
     let ch = s.channels.max(1);
+    let frames = s.pcm.len() as u32 / ch;
+    // (the loop end is exclusive, the smpl chunk's inclusive)
+    let looped = s.loop_start.map(|ls| (ls as u32, s.loop_end.map_or(frames, |le| le as u32).min(frames))).filter(|&(ls, le)| ls < le);
     out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(&(36 + data_len + if looped.is_some() { 68 } else { 0 }).to_le_bytes());
     out.extend_from_slice(b"WAVEfmt ");
     out.extend_from_slice(&16u32.to_le_bytes());
     out.extend_from_slice(&1u16.to_le_bytes());
@@ -212,6 +215,15 @@ pub fn write_wav(path: &std::path::Path, s: &Sample) -> std::io::Result<()> {
     out.extend_from_slice(&data_len.to_le_bytes());
     for v in &s.pcm {
         out.extend_from_slice(&v.to_le_bytes());
+    }
+    if let Some((ls, le)) = looped {
+        out.extend_from_slice(b"smpl");
+        out.extend_from_slice(&60u32.to_le_bytes());
+        // manufacturer, product, sample period (ns), MIDI note 60, pitch fraction, SMPTE format
+        // and offset, one loop, no extra data; the loop: id, forward, start, end, fraction, endless
+        for v in [0, 0, 1_000_000_000 / s.rate.max(1), 60, 0, 0, 0, 1, 0, 0, 0, ls, le - 1, 0, 0] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
     }
     std::fs::write(path, out)
 }

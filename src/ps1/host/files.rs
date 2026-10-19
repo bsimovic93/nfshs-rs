@@ -67,11 +67,8 @@ const EXTRA_PAINTS: &[(&str, u8)] = &[
 /// most). Only a model's first entry, the stock car; a later one is its police car, whose one
 /// paint is its livery. The new paint goes last, so saved choices keep their places.
 fn add_paints(d: &mut [u8]) {
-    const SIZE: usize = 204;
-    let n = if d.len() >= 4 { crate::formats::u32le(d, 0) as usize } else { 0 };
     for &(code, paint) in EXTRA_PAINTS {
-        let model = format!("z{code}1");
-        let Some(e) = (0..n).map(|i| 4 + i * SIZE).take_while(|e| e + SIZE <= d.len()).find(|&e| d[e + 8..e + 16].split(|&b| b == 0).next() == Some(model.as_bytes())) else { continue };
+        let Some(e) = stock_entry(d, code) else { continue };
         let count = (d[e + 172] + d[e + 173]) as usize;
         if count >= 16 || d[e + 175..e + 175 + count].contains(&paint) {
             continue;
@@ -79,6 +76,24 @@ fn add_paints(d: &mut [u8]) {
         d[e + 175 + count] = paint;
         d[e + if paint < 8 { 172 } else { 173 }] += 1;
     }
+}
+
+/// Where a car list's first entry for `code` (its stock car) starts.
+fn stock_entry(d: &[u8], code: &str) -> Option<usize> {
+    const SIZE: usize = 204;
+    let n = if d.len() >= 4 { crate::formats::u32le(d, 0) as usize } else { 0 };
+    let model = format!("z{code}1");
+    (0..n).map(|i| 4 + i * SIZE).take_while(|e| e + SIZE <= d.len()).find(|&e| d[e + 8..e + 16].split(|&b| b == 0).next() == Some(model.as_bytes()))
+}
+
+/// The paints the car select offers for `code` (with [`EXTRA_PAINTS`]) by a car list
+/// (`ZFECARS.CAR`), in its order; empty when the list has no such car.
+pub fn car_paints(list: &[u8], code: &str) -> Vec<u8> {
+    let mut d = list.to_vec();
+    add_paints(&mut d);
+    let Some(e) = stock_entry(&d, &code.to_ascii_uppercase()) else { return Vec::new() };
+    let count = ((d[e + 172] + d[e + 173]) as usize).min(16);
+    d[e + 175..e + 175 + count].to_vec()
 }
 
 impl GameHost {

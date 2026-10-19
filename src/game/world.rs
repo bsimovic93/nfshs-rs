@@ -148,15 +148,7 @@ impl Game {
                     continue;
                 }
                 let tm = match part.wheel {
-                    Some(w) => {
-                        // the original: front wheels turned by wheelRot[0] and steered, rear by
-                        // wheelRot[1] (R3DCar_InsertCarFacet)
-                        let (rot, steer) = r.car.wheel_pose;
-                        let (turn, steer) = (rot[(w >= 2) as usize], -steer);
-                        let steer = if w < 2 { steer } else { 0.0 };
-                        let spin = Quat::from_rotation_x(turn);
-                        model * Mat4::from_rotation_translation(Quat::from_rotation_y(steer) * spin, part.hub)
-                    }
+                    Some(w) => model * wheel_transform(w, part.hub, r.car.wheel_pose),
                     None => model,
                 };
                 // parts sorted in front of their surroundings (negative bias) are drawn a little
@@ -362,7 +354,10 @@ impl Game {
                     continue;
                 }
                 let _ = pi;
-                let tm = if part.wheel.is_some() { model * Mat4::from_translation(part.hub) } else { model };
+                let tm = match part.wheel {
+                    Some(w) => model * wheel_transform(w, part.hub, (pose.wheel_rot, pose.wheel_steer)),
+                    None => model,
+                };
                 for (t, tri) in part.verts.as_chunks::<3>().0.iter().enumerate() {
                     let w = [0, 1, 2].map(|k| tm.transform_point3(Vec3::from(tri[k].pos)));
                     if !front_facing(self.cam_pos, w) {
@@ -521,6 +516,14 @@ impl Game {
         }
         out
     }
+}
+
+/// Wheel `w`'s placement in its car's model space: the original turns the front wheels by
+/// wheelRot[0] and steers them, the rear by wheelRot[1] (R3DCar_InsertCarFacet).
+fn wheel_transform(w: usize, hub: Vec3, (rot, steer): ([f32; 2], f32)) -> Mat4 {
+    let steer = if w < 2 { -steer } else { 0.0 };
+    let spin = Quat::from_rotation_x(rot[(w >= 2) as usize]);
+    Mat4::from_rotation_translation(Quat::from_rotation_y(steer) * spin, hub)
 }
 
 /// A car's flat lighting level from the track light (R3DCar_InsertCarFacetII: the average

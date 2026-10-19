@@ -142,6 +142,9 @@ nfshs boot-race --track N --car C   headless original race, car states per step
                                     (BOOT_SCRIPT="8:-,3:x")
 nfshs ref-compare DIR               render a DuckStation RAM capture as this engine would
 nfshs dump-psh | dump-car | dump-track | dump-audio | dump-movie   asset viewers
+nfshs export-car CODE|all [DIR]     a car's models (glTF, paints as material variants), textures
+                                    (PNG), engine sounds (WAV) and original files in one folder
+                                    (default export/CODE; codes as for --car, e.g. BMWM, CBMW, TAXI)
 nfshs verify-decompress <files>     codecs against re/dec/*.bin
 ```
 

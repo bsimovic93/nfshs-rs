@@ -22,7 +22,7 @@ mod system;
 mod views;
 
 pub use cars::{CarEnv, CarFacet, Glow};
-pub use files::{file_log, opened_variant};
+pub use files::{car_paints, file_log, opened_variant};
 pub use frame::{FrameDriver, FrameInfo, Mode, Pad, ViewCapture};
 pub use objects::ObjectDraw;
 pub use options::{request_close, show_graphics, take_graphics_choice};

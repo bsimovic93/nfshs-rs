@@ -36,6 +36,8 @@ pub struct GeoPart {
 
 pub struct Geo {
     pub parts: Vec<GeoPart>,
+    /// The traffic cars' layout ([`Geo::parse_packed`]).
+    pub packed: bool,
 }
 
 impl Geo {
@@ -105,7 +107,7 @@ impl Geo {
             }
             parts.push(part);
         }
-        Ok(Self { parts })
+        Ok(Self { parts, packed: false })
     }
 
     /// The traffic cars' layout: no pointers, the parts one after another from 0x24C, each a
@@ -143,6 +145,6 @@ impl Geo {
             o = end;
         }
         parts.resize(PART_COUNT, GeoPart::default());
-        Self { parts }
+        Self { parts, packed: true }
     }
 }
