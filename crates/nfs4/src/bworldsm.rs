@@ -95,19 +95,24 @@ pub fn abi_find_abs_closest_slice_crude(c: &mut Cpu) {
 /// from the one found last (from scratch when that is more than 128 m off); whether it
 /// changed.
 pub fn find_closest_slice(c: &mut Cpu, pt: Coord, pos: BWorldSmPos) -> i32 {
-    let last = pos.slice(&mut c.m);
-    let at = Coord(slice_at(&mut c.m, last as i32).0);
-    if 0x80_0000 < dist_xz(c, at, pt) {
-        find_abs_closest_slice_crude(c, pt, pos);
-    }
-    raw_find_closest_slice(c, pt, pos);
-    let changed = (pos.slice(&mut c.m) != last) as i8;
-    pos.set_quad_changed(&mut c.m, changed);
-    pos.set_slice_changed(&mut c.m, changed);
-    let slice = pos.slice(&mut c.m);
-    let chunk = slice_at(&mut c.m, slice as i32).chunk_index(&mut c.m);
-    pos.set_chunk(&mut c.m, chunk);
-    changed as i32
+    abi::frame(c, 32, |c, _| {
+        // s0 the position, s1 the point, s2 the slice it was on
+        let mut r = abi::Saved::of(c);
+        let last = pos.slice(&mut c.m);
+        (r.0[0], r.0[1], r.0[2]) = (pos.0, pt.0, last as i32 as u32);
+        let at = Coord(slice_at(&mut c.m, last as i32).0);
+        if 0x80_0000 < dist_xz(c, at, pt) {
+            r.enter(c, 0x8007_f394, 0x8007_f484, |c| find_abs_closest_slice_crude(c, pt, pos));
+        }
+        raw_find_closest_slice(c, pt, pos);
+        let changed = (pos.slice(&mut c.m) != last) as i8;
+        pos.set_quad_changed(&mut c.m, changed);
+        pos.set_slice_changed(&mut c.m, changed);
+        let slice = pos.slice(&mut c.m);
+        let chunk = slice_at(&mut c.m, slice as i32).chunk_index(&mut c.m);
+        pos.set_chunk(&mut c.m, chunk);
+        changed as i32
+    })
 }
 
 pub fn abi_find_closest_slice(c: &mut Cpu) {
@@ -382,7 +387,17 @@ fn raw_find_closest_quad_in_frame(c: &mut Cpu, pt: Coord, pos: BWorldSmPos, sp: 
         c.m.w16(sp + 20, z as u16);
         let (x, z) = (x as i32, z as i32);
         let vertices = group_data(pos_chunk(&mut c.m, pos).vertex_buf(&mut c.m));
-        get_first_stm_quad_pts(c, pos, vertices);
+        // `GetFirstStmQuadPts` as the original calls it: s0 the position, s1 the best
+        // distance, s2 the vertices, s3 the iteration, s4 the chunk's centre, s5 the start, s6
+        // how far it moved, s7 the first edge, fp the point
+        macro_rules! first {
+            ($s1:expr, $ra:expr) => {{
+                let regs = [pos.0, $s1 as u32, vertices, iteration as u32, center.0, start as i32 as u32, moved as u32, first_edge as i32 as u32, pt.0];
+                abi::Saved(regs).enter(c, 0x8007_f9bc, $ra, |c| get_first_stm_quad_pts(c, pos, vertices));
+            }};
+        }
+        // (the best distance half set: its low half comes in a delay slot later)
+        first!(0x7FFF_0000u32, 0x8007_fd1c);
         update_sim_quad(c, pos);
 
         let found = |c: &mut Cpu| {
@@ -395,7 +410,7 @@ fn raw_find_closest_quad_in_frame(c: &mut Cpu, pt: Coord, pos: BWorldSmPos, sp: 
         // up the slice
         let mut best = i32::MAX;
         while (pos.quad(&mut c.m) as i32) < quads(c) {
-            get_first_stm_quad_pts(c, pos, vertices);
+            first!(best, 0x8007_fd38);
             if inside_quad16(&mut c.m, pos, x, z) && is_sim_quad_valid(c, pos) {
                 return found(c);
             }
@@ -420,10 +435,10 @@ fn raw_find_closest_quad_in_frame(c: &mut Cpu, pt: Coord, pos: BWorldSmPos, sp: 
         if pos.quad(&mut c.m) < 0 {
             pos.set_quad(&mut c.m, 0);
         }
-        get_first_stm_quad_pts(c, pos, vertices);
+        first!(best, 0x8007_fffc);
         update_sim_quad(c, pos);
         while pos.quad(&mut c.m) >= 0 {
-            get_first_stm_quad_pts(c, pos, vertices);
+            first!(best, 0x8008_000c);
             if inside_quad16(&mut c.m, pos, x, z) && is_sim_quad_valid(c, pos) {
                 return found(c);
             }
@@ -483,39 +498,49 @@ pub fn abi_raw_find_closest_quad(c: &mut Cpu) {
 /// road's edge, the edge quad; with none found, a point moved toward the slice's centre (a
 /// 32nd at a time, ten times at most, `corrPt`). Whether the slice changed (and the quad).
 pub fn find_closest_quad(c: &mut Cpu, pt: Coord, pos: BWorldSmPos) -> i32 {
-    let (last_slice, last_quad) = (pos.slice(&mut c.m), pos.quad(&mut c.m));
-    find_closest_slice(c, pt, pos);
-    let slice = pos.slice(&mut c.m);
-    if raw_find_closest_quad(c, pt, pos) == 0 {
-        let edge = pos.off_edge(&mut c.m);
-        if edge != 0 {
-            pos.set_slice(&mut c.m, slice);
-            set_sim_slice(c, pos);
-            let quad = if pos.off_edge(&mut c.m) == 1 { 0 } else { pos.sim_slice(&mut c.m).quad_count(&mut c.m) as i32 - 1 };
-            pos.set_quad(&mut c.m, quad as i8);
-            update_sim_quad(c, pos);
-            pos.set_rez(&mut c.m, 2);
-            set_strip(c, pos);
-            let center = Coord(CHUNK_CENTERS.get(&mut c.m) as u32 + 12 * pos.chunk(&mut c.m) as u32);
-            get_stm_quad_pts(c, pos, center);
+    abi::frame(c, 48, |c, _| {
+        // s0 the position, s1 the slice found (then the tries), s2 the point (then corrPt),
+        // s4 and s5 the slice and quad it was on
+        let mut r = abi::Saved::of(c);
+        let (last_slice, last_quad) = (pos.slice(&mut c.m), pos.quad(&mut c.m));
+        (r.0[0], r.0[2], r.0[4], r.0[5]) = (pos.0, pt.0, last_slice as i32 as u32, last_quad as i32 as u32);
+        r.enter(c, 0x8007_f438, 0x8008_0350, |c| find_closest_slice(c, pt, pos));
+        let slice = pos.slice(&mut c.m);
+        r.0[1] = slice as i32 as u32;
+        if r.enter(c, 0x8007_fb70, 0x8008_0360, |c| raw_find_closest_quad(c, pt, pos)) == 0 {
+            let edge = pos.off_edge(&mut c.m);
+            if edge != 0 {
+                pos.set_slice(&mut c.m, slice);
+                set_sim_slice(c, pos);
+                let quad = if pos.off_edge(&mut c.m) == 1 { 0 } else { pos.sim_slice(&mut c.m).quad_count(&mut c.m) as i32 - 1 };
+                pos.set_quad(&mut c.m, quad as i8);
+                update_sim_quad(c, pos);
+                pos.set_rez(&mut c.m, 2);
+                set_strip(c, pos);
+                let center = Coord(CHUNK_CENTERS.get(&mut c.m) as u32 + 12 * pos.chunk(&mut c.m) as u32);
+                get_stm_quad_pts(c, pos, center);
+            }
+            let p = pt.get(&mut c.m);
+            CORR_PT.set(&mut c.m, p);
+            let mut tries = 0;
+            // (corrPt's address made as 0x80140000 - 3380)
+            (r.0[2], r.0[3]) = (CORR_PT.0, CORR_PT.0.wrapping_add(0x8000) & 0xFFFF_0000);
+            while pos.sim_quad(&mut c.m).0 == 0 && tries < 10 {
+                let s = pos_slice(&mut c.m, pos);
+                let (cx, cz) = (s.center(&mut c.m, 0), s.center(&mut c.m, 2));
+                CORR_PT.update_x(&mut c.m, |v| v.wrapping_add(cx.wrapping_sub(v) >> 5));
+                CORR_PT.update_z(&mut c.m, |v| v.wrapping_add(cz.wrapping_sub(v) >> 5));
+                r.0[1] = tries as u32;
+                r.enter(c, 0x8007_fb70, 0x8008_0484, |c| raw_find_closest_quad(c, CORR_PT, pos));
+                tries += 1;
+            }
         }
-        let p = pt.get(&mut c.m);
-        CORR_PT.set(&mut c.m, p);
-        let mut tries = 0;
-        while pos.sim_quad(&mut c.m).0 == 0 && tries < 10 {
-            let s = pos_slice(&mut c.m, pos);
-            let (cx, cz) = (s.center(&mut c.m, 0), s.center(&mut c.m, 2));
-            CORR_PT.update_x(&mut c.m, |v| v.wrapping_add(cx.wrapping_sub(v) >> 5));
-            CORR_PT.update_z(&mut c.m, |v| v.wrapping_add(cz.wrapping_sub(v) >> 5));
-            raw_find_closest_quad(c, CORR_PT, pos);
-            tries += 1;
-        }
-    }
-    let slice_changed = (last_slice != pos.slice(&mut c.m)) as i8;
-    pos.set_slice_changed(&mut c.m, slice_changed);
-    let quad_changed = last_quad != pos.quad(&mut c.m) || slice_changed != 0;
-    pos.set_quad_changed(&mut c.m, quad_changed as i8);
-    pos.slice_changed(&mut c.m) as i32
+        let slice_changed = (last_slice != pos.slice(&mut c.m)) as i8;
+        pos.set_slice_changed(&mut c.m, slice_changed);
+        let quad_changed = last_quad != pos.quad(&mut c.m) || slice_changed != 0;
+        pos.set_quad_changed(&mut c.m, quad_changed as i8);
+        pos.slice_changed(&mut c.m) as i32
+    })
 }
 
 pub fn abi_find_closest_quad(c: &mut Cpu) {
@@ -526,31 +551,48 @@ pub fn abi_find_closest_quad(c: &mut Cpu) {
 /// resolution `rez`: 0 the slice only; otherwise the quad, unless it is still in the quad
 /// found last.
 pub fn find_closest_quad_rez(c: &mut Cpu, pt: Coord, pos: BWorldSmPos, rez: i32) -> i32 {
-    pos.set_triangle_flag(&mut c.m, 3);
-    if rez == 0 {
-        pos.set_last_rez_requested(&mut c.m, 1);
-        pos.set_rez(&mut c.m, 1);
-        pos.set_sim_slice(&mut c.m, TrkNewSimSlice(0));
-        pos.set_sim_quad(&mut c.m, TrkNewSimQuad(0));
-        pos.set_quad(&mut c.m, -1);
-        pos.set_triangle_flag(&mut c.m, 0);
-        return find_closest_slice(c, pt, pos);
-    }
-    pos.set_last_rez_requested(&mut c.m, 2);
-    if pos.sim_quad(&mut c.m).0 != 0 && inside_quad(&mut c.m, pos, pt) {
-        pos.set_quad_changed(&mut c.m, 0);
-        pos.set_slice_changed(&mut c.m, 0);
-        return 0;
-    }
-    find_closest_quad(c, pt, pos)
+    abi::frame(c, 40, |c, _| {
+        // s1 the position, s2 the point, s0 the last side of the quad reckoned, s3 inside it
+        let mut r = abi::Saved::of(c);
+        (r.0[1], r.0[2]) = (pos.0, pt.0);
+        pos.set_triangle_flag(&mut c.m, 3);
+        if rez == 0 {
+            pos.set_last_rez_requested(&mut c.m, 1);
+            pos.set_rez(&mut c.m, 1);
+            pos.set_sim_slice(&mut c.m, TrkNewSimSlice(0));
+            pos.set_sim_quad(&mut c.m, TrkNewSimQuad(0));
+            pos.set_quad(&mut c.m, -1);
+            pos.set_triangle_flag(&mut c.m, 0);
+            return r.enter(c, 0x8007_f438, 0x8008_0698, |c| find_closest_slice(c, pt, pos));
+        }
+        pos.set_last_rez_requested(&mut c.m, 2);
+        if pos.sim_quad(&mut c.m).0 != 0 {
+            let (inside, side) = quad_sides(&mut c.m, pos, pt);
+            (r.0[0], r.0[3]) = (side as u32, 0);
+            if inside {
+                pos.set_quad_changed(&mut c.m, 0);
+                pos.set_slice_changed(&mut c.m, 0);
+                return 0;
+            }
+        }
+        r.enter(c, 0x8008_031c, 0x8008_0664, |c| find_closest_quad(c, pt, pos))
+    })
 }
 
-/// Whether `pt` is inside `pos`'s quad at full precision (the last edge counting as inside).
-fn inside_quad(m: &mut Mem, pos: BWorldSmPos, pt: Coord) -> bool {
+/// Whether `pt` is inside `pos`'s quad at full precision (the last edge counting as inside),
+/// and the last side reckoned (the original keeps it in s0).
+fn quad_sides(m: &mut Mem, pos: BWorldSmPos, pt: Coord) -> (bool, i32) {
     let p = pt.get(m);
     let q: [Vec3; 4] = std::array::from_fn(|i| pos.quad_pts(i as u32).get(m));
     let side = |a: Vec3, b: Vec3| fixedmult(a.x.wrapping_sub(b.x), p.z.wrapping_sub(b.z)).wrapping_sub(fixedmult(p.x.wrapping_sub(b.x), a.z.wrapping_sub(b.z)));
-    side(q[1], q[2]) <= 0 && side(q[0], q[1]) <= 0 && side(q[2], q[3]) <= 0 && side(q[3], q[0]) < 1
+    for (a, b) in [(1, 2), (0, 1), (2, 3)] {
+        let s = side(q[a], q[b]);
+        if s > 0 {
+            return (false, s);
+        }
+    }
+    let s = side(q[3], q[0]);
+    (s < 1, s)
 }
 
 pub fn abi_find_closest_quad_rez(c: &mut Cpu) {
@@ -745,6 +787,9 @@ pub fn abi_normal_cache_init(c: &mut Cpu) {
 /// the normal kept from pointing straight up.
 pub fn check_rot(c: &mut Cpu, pos: BWorldSmPos) {
     abi::frame(c, 64, |c, sp| {
+        // s0 the position; s1 and s2 its normal and forward
+        let mut r = abi::Saved::of(c);
+        r.0[0] = pos.0;
         let tri = pos.triangle_flag(&mut c.m);
         if pos.sim_rot_flag(&mut c.m) != tri as i16 && !normal_cache_find_entry(c, pos) {
             let q: [Vec3; 4] = std::array::from_fn(|i| pos.quad_pts(i as u32).get(&mut c.m));
@@ -761,12 +806,14 @@ pub fn check_rot(c: &mut Cpu, pos: BWorldSmPos) {
             f.set(&mut c.m, forward.into());
             a.set(&mut c.m, across.into());
             pos.forward().set(&mut c.m, forward.into());
-            crossproduct(&mut c.m, f.0, a.0, pos.normal().0);
-            normalize_vector(c, pos.normal());
+            (r.0[1], r.0[2]) = (pos.normal().0, pos.forward().0);
+            // (crossproduct's frame left as the original's)
+            r.enter(c, 0x800e_b440, 0x8008_0ee8, |c| crossproduct(&mut c.m, f.0, a.0, pos.normal().0));
+            r.enter(c, 0x8009_e4e0, 0x8008_0ef0, |c| normalize_vector(c, pos.normal()));
             if pos.normal().y(&mut c.m) > 0xFFFF {
                 pos.normal().set_y(&mut c.m, 0xFFF9);
             }
-            normalize_vector(c, pos.forward());
+            r.enter(c, 0x8009_e4e0, 0x8008_0f10, |c| normalize_vector(c, pos.forward()));
             normal_cache_add_entry(c, pos);
         }
         let tri = pos.triangle_flag(&mut c.m);
@@ -780,7 +827,11 @@ pub fn abi_check_rot(c: &mut Cpu) {
 
 /// `BWorldSm_UNormal` (BWORLDSM.CPP, 0x80080f44): `pos`'s road normal (up from the road).
 pub fn u_normal(c: &mut Cpu, pos: BWorldSmPos) -> Coord {
-    abi::frame(c, 24, |c, _| check_rot(c, pos));
+    abi::frame(c, 24, |c, _| {
+        let mut r = abi::Saved::of(c);
+        r.0[0] = pos.0;
+        r.enter(c, 0x8008_0c0c, 0x8008_0f58, |c| check_rot(c, pos));
+    });
     pos.normal()
 }
 
@@ -790,7 +841,11 @@ pub fn abi_u_normal(c: &mut Cpu) {
 
 /// `BWorldSm_UForward` (BWORLDSM.CPP, 0x80080f6c): `pos`'s road forward.
 pub fn u_forward(c: &mut Cpu, pos: BWorldSmPos) -> Coord {
-    abi::frame(c, 24, |c, _| check_rot(c, pos));
+    abi::frame(c, 24, |c, _| {
+        let mut r = abi::Saved::of(c);
+        r.0[0] = pos.0;
+        r.enter(c, 0x8008_0c0c, 0x8008_0f80, |c| check_rot(c, pos));
+    });
     pos.forward()
 }
 
@@ -802,7 +857,9 @@ pub fn abi_u_forward(c: &mut Cpu) {
 /// which of the quad's triangles `pt` is in (1 or 2, across its diagonal from corner 0 to 2).
 pub fn find_closest_triangle_rez(c: &mut Cpu, pt: Coord, pos: BWorldSmPos, rez: i32) -> i32 {
     abi::frame(c, 32, |c, _| {
-        let r = find_closest_quad_rez(c, pt, pos, rez);
+        let mut regs = abi::Saved::of(c);
+        (regs.0[0], regs.0[1]) = (pt.0, pos.0);
+        let r = regs.enter(c, 0x8008_04e8, 0x8008_0fb4, |c| find_closest_quad_rez(c, pt, pos, rez));
         if pos.sim_quad(&mut c.m).0 != 0 {
             let side = point_direction(c, pos.quad_pts(2), pos.quad_pts(0), pt);
             pos.set_triangle_flag(&mut c.m, if side > 0 { 1 } else { 2 });

@@ -30,7 +30,10 @@ const SURFACE_NONE: i32 = 14;
 
 /// `Newton_FindClosestQuad` (NEWTON.CPP, 0x800a0210): the road quad under the object.
 pub fn find_closest_quad(c: &mut Cpu, obj: NewtonObj) -> i32 {
-    abi::frame(c, 24, |c, _| find_closest_quad_rez(c, obj.position(), obj.sim_road_info(), 1))
+    abi::frame(c, 24, |c, _| {
+        let r = abi::Saved::of(c);
+        r.enter(c, 0x8008_04e8, 0x800a_022c, |c| find_closest_quad_rez(c, obj.position(), obj.sim_road_info(), 1))
+    })
 }
 
 pub fn abi_find_closest_quad(c: &mut Cpu) {
@@ -64,53 +67,66 @@ pub fn abi_calculate_slice_yaw(c: &mut Cpu) {
 /// centre point (the quad's middle, or the slice's centre), its frame (from the quad's
 /// normal and forward; the slice's own in low detail, `simOptz` 2 and up) and heading.
 pub fn update_road_geometry(c: &mut Cpu, obj: NewtonObj) {
-    if obj.active(&mut c.m) == 0 {
-        return;
-    }
-    let road = obj.sim_road_info();
-    let slice = road.slice(&mut c.m) as i32;
-    let detailed = obj.sim_optz(&mut c.m) < 2;
-    let point = obj.road_center_point();
-    if detailed {
-        point.set(&mut c.m, Vec3::default());
-        for i in 0..4 {
-            let p = if road.sim_quad(&mut c.m).0 != 0 { road.quad_pts(i).get(&mut c.m) } else { center(&mut c.m, slice) };
-            point.update_x(&mut c.m, |v| v.wrapping_add(p.x));
-            point.update_y(&mut c.m, |v| v.wrapping_add(p.y));
-            point.update_z(&mut c.m, |v| v.wrapping_add(p.z));
+    abi::frame(c, 72, |c, sp| {
+        if obj.active(&mut c.m) == 0 {
+            return;
         }
-        point.update_x(&mut c.m, |v| v / 4);
-        point.update_y(&mut c.m, |v| v / 4);
-        point.update_z(&mut c.m, |v| v / 4);
-    } else {
-        let p = if road.sim_quad(&mut c.m).0 != 0 { road.quad_pts(0).get(&mut c.m) } else { center(&mut c.m, slice) };
-        point.set(&mut c.m, p);
-    }
-    let frame = obj.road_matrix();
-    if detailed {
-        if road.quad_changed(&mut c.m) != 0 {
-            // up: the road's normal; ahead: its forward; across: up x ahead
-            let n = u_normal(c, road).get(&mut c.m);
-            set_row(&mut c.m, frame, 1, n);
-            let f = u_forward(c, road).get(&mut c.m);
-            set_row(&mut c.m, frame, 2, f);
-            let across = Vec3::new(
-                fixedmult(n.y, f.z).wrapping_sub(fixedmult(n.z, f.y)),
-                fixedmult(n.z, f.x).wrapping_sub(fixedmult(n.x, f.z)),
-                fixedmult(n.x, f.y).wrapping_sub(fixedmult(n.y, f.x)),
-            );
-            set_row(&mut c.m, frame, 0, across);
+        // s6 the object, fp the slice; s0 the road position, then with s1..s5 and s7 the
+        // normal, the forward and the products of their cross product
+        let mut r = abi::Saved::of(c);
+        let road = obj.sim_road_info();
+        let slice = road.slice(&mut c.m) as i32;
+        (r.0[6], r.0[8]) = (obj.0, slice as u32);
+        let detailed = obj.sim_optz(&mut c.m) < 2;
+        let point = obj.road_center_point();
+        if detailed {
+            point.set(&mut c.m, Vec3::default());
+            for i in 0..4 {
+                let p = if road.sim_quad(&mut c.m).0 != 0 { road.quad_pts(i).get(&mut c.m) } else { center(&mut c.m, slice) };
+                Coord(sp + 16).set(&mut c.m, p);
+                point.update_x(&mut c.m, |v| v.wrapping_add(p.x));
+                point.update_y(&mut c.m, |v| v.wrapping_add(p.y));
+                point.update_z(&mut c.m, |v| v.wrapping_add(p.z));
+            }
+            point.update_x(&mut c.m, |v| v / 4);
+            point.update_y(&mut c.m, |v| v / 4);
+            point.update_z(&mut c.m, |v| v / 4);
+        } else {
+            let p = if road.sim_quad(&mut c.m).0 != 0 { road.quad_pts(0).get(&mut c.m) } else { center(&mut c.m, slice) };
+            point.set(&mut c.m, p);
         }
-    } else {
-        let s = slice_at(&mut c.m, slice);
-        let v = |m: &mut Mem, off: u32| Vec3::new((m.r8(s.0 + off) as i8 as i32) << 9, (m.r8(s.0 + off + 1) as i8 as i32) << 9, (m.r8(s.0 + off + 2) as i8 as i32) << 9);
-        let (right, normal, forward) = (v(&mut c.m, 18), v(&mut c.m, 12), v(&mut c.m, 15));
-        set_row(&mut c.m, frame, 0, right);
-        set_row(&mut c.m, frame, 1, normal);
-        set_row(&mut c.m, frame, 2, forward);
-    }
-    let yaw = slice_yaw(c, slice);
-    obj.set_road_yaw(&mut c.m, yaw);
+        let frame = obj.road_matrix();
+        if detailed {
+            r.0[0] = road.0;
+            if road.quad_changed(&mut c.m) != 0 {
+                // up: the road's normal; ahead: its forward; across: up x ahead
+                let n = r.enter(c, 0x8008_0f44, 0x800a_0474, |c| u_normal(c, road)).get(&mut c.m);
+                set_row(&mut c.m, frame, 1, n);
+                let f = r.enter(c, 0x8008_0f6c, 0x800a_0494, |c| u_forward(c, road)).get(&mut c.m);
+                set_row(&mut c.m, frame, 2, f);
+                let across = Vec3::new(
+                    fixedmult(n.y, f.z).wrapping_sub(fixedmult(n.z, f.y)),
+                    fixedmult(n.z, f.x).wrapping_sub(fixedmult(n.x, f.z)),
+                    fixedmult(n.x, f.y).wrapping_sub(fixedmult(n.y, f.x)),
+                );
+                set_row(&mut c.m, frame, 0, across);
+                r.0[..6].copy_from_slice(&[n.z as u32, f.y as u32, n.x as u32, f.z as u32, f.x as u32, n.y as u32]);
+                r.0[7] = fixedmult(n.x, f.y) as u32;
+            }
+        } else {
+            let s = slice_at(&mut c.m, slice);
+            let v = |m: &mut Mem, off: u32| Vec3::new((m.r8(s.0 + off) as i8 as i32) << 9, (m.r8(s.0 + off + 1) as i8 as i32) << 9, (m.r8(s.0 + off + 2) as i8 as i32) << 9);
+            let (right, normal, forward) = (v(&mut c.m, 18), v(&mut c.m, 12), v(&mut c.m, 15));
+            set_row(&mut c.m, frame, 0, right);
+            set_row(&mut c.m, frame, 1, normal);
+            set_row(&mut c.m, frame, 2, forward);
+        }
+        // (intatan as the original calls it: its frame is left on the stack)
+        let next = next_slice(&mut c.m, slice);
+        let (a, b) = (center(&mut c.m, slice), center(&mut c.m, next));
+        let yaw = r.call(c, nfs4rc::f_800e6724, &[b.x.wrapping_sub(a.x) as u32, b.z.wrapping_sub(a.z) as u32], 0x800a_0608) as i32;
+        obj.set_road_yaw(&mut c.m, yaw);
+    })
 }
 
 fn set_row(m: &mut Mem, frame: Matrix, row: u32, v: Vec3) {
@@ -216,13 +232,14 @@ pub fn abi_find_ground_elevation_and_normal_fast(c: &mut Cpu) {
 /// put back (and its road found again).
 pub fn limit_cars_to_drivable_dist(c: &mut Cpu, car: Car) {
     abi::frame(c, 24, |c, _| {
-        abi::leave_prologue(c, 0x800a_a14c, Some(0x800a_18c4), &[(16, car.0)]);
-        if crate::physics::do_barrier_check(c, car) != 0 {
+        let mut r = abi::Saved::of(c);
+        r.0[0] = car.0;
+        if r.enter(c, 0x800a_a14c, 0x800a_18c4, |c| crate::physics::do_barrier_check(c, car)) != 0 {
             let hit = car.n().collision();
             hit.set_impulse(&mut c.m, 0);
             hit.set_other_obj(&mut c.m, NewtonObj(0));
-            find_closest_quad(c, car.n());
-            update_road_geometry(c, car.n());
+            r.enter(c, 0x800a_0210, 0x800a_18dc, |c| find_closest_quad(c, car.n()));
+            r.enter(c, 0x800a_02ac, 0x800a_18e4, |c| update_road_geometry(c, car.n()));
         }
     });
 }
@@ -235,11 +252,14 @@ pub fn abi_limit_cars_to_drivable_dist(c: &mut Cpu) {
 /// object's underside is above the plane through `point` with `normal`: its centre's
 /// height less half its height (upright or upside down) or width (on its side).
 pub fn calc_perpen_height_of_center_point_from_ground(c: &mut Cpu, obj: NewtonObj, normal: Coord, point: Coord) -> i32 {
-    let (p, q, n) = (obj.position().get(&mut c.m), point.get(&mut c.m), normal.get(&mut c.m));
-    let d = Vec3::new(p.x.wrapping_sub(q.x), p.y.wrapping_sub(q.y), p.z.wrapping_sub(q.z));
-    let h = fixedmult(n.x, d.x).wrapping_add(fixedmult(n.y, d.y)).wrapping_add(fixedmult(n.z, d.z));
-    let dim = obj.dimension();
-    if 0xB333 < obj.orientation_to_ground().y(&mut c.m).wrapping_abs() { h.wrapping_sub(dim.y(&mut c.m)) } else { h.wrapping_sub(dim.x(&mut c.m)) }
+    abi::frame(c, 48, |c, sp| {
+        let (p, q, n) = (obj.position().get(&mut c.m), point.get(&mut c.m), normal.get(&mut c.m));
+        let d = Vec3::new(p.x.wrapping_sub(q.x), p.y.wrapping_sub(q.y), p.z.wrapping_sub(q.z));
+        Coord(sp + 16).set(&mut c.m, d);
+        let h = fixedmult(n.x, d.x).wrapping_add(fixedmult(n.y, d.y)).wrapping_add(fixedmult(n.z, d.z));
+        let dim = obj.dimension();
+        if 0xB333 < obj.orientation_to_ground().y(&mut c.m).wrapping_abs() { h.wrapping_sub(dim.y(&mut c.m)) } else { h.wrapping_sub(dim.x(&mut c.m)) }
+    })
 }
 
 pub fn abi_calc_perpen_height_of_center_point_from_ground(c: &mut Cpu) {
@@ -254,10 +274,12 @@ pub fn update_road_info(c: &mut Cpu, obj: NewtonObj) {
         if obj.active(&mut c.m) == 0 {
             return;
         }
-        calc_dist_to_closest_player_car(c, obj);
-        find_closest_quad(c, obj);
+        let mut r = abi::Saved::of(c);
+        r.0[0] = obj.0;
+        r.enter(c, 0x800a_1d54, 0x800a_209c, |c| calc_dist_to_closest_player_car(c, obj));
+        r.enter(c, 0x800a_0210, 0x800a_20a4, |c| find_closest_quad(c, obj));
         if obj.sim_road_info().quad_changed(&mut c.m) != 0 {
-            update_road_geometry(c, obj);
+            r.enter(c, 0x800a_02ac, 0x800a_20bc, |c| update_road_geometry(c, obj));
         }
         if obj.sim_optz(&mut c.m) == 0 {
             let q = obj.sim_road_info().sim_quad(&mut c.m);
@@ -720,6 +742,11 @@ fn find_ground_in_frame(c: &mut Cpu, car: Car, normal_out: Coord, sp: u32) -> i3
         c.m.w32(road.0 + 4 * k, v);
     }
 
+    // the original's registers: s4 the car, fp the normal; per wheel s3 the wheel (in 48s),
+    // s1 and s2 its points, s0 the road position, s6 the wheel's height, then the road's
+    // normal's y, then its origin's; s5 and s7 the rebounding and hanging wheels
+    let mut r = abi::Saved::of(c);
+    (r.0[4], r.0[8], r.0[5], r.0[7]) = (car.0, normal_out.0, 0, 0);
     let up = Vec3::new(0, 0x1_0000, 0);
     let (normal, origin, sum) = (at(NORMAL), at(ORIGIN), at(SUM));
     for i in 0..4u32 {
@@ -728,8 +755,10 @@ fn find_ground_in_frame(c: &mut Cpu, car: Car, normal_out: Coord, sp: u32) -> i3
         let wp = w.get(&mut c.m);
         g.set(&mut c.m, wp);
         wheel.set_actual_height(&mut c.m, wp.y);
-        crate::bworldsm::find_closest_triangle_rez(c, w, road, 1);
-        let rn = u_normal(c, road).get(&mut c.m);
+        (r.0[0], r.0[1], r.0[2], r.0[3], r.0[6]) = (road.0, w.0, g.0, car.0 + 48 * i, wp.y as u32);
+        r.enter(c, 0x8008_0f94, 0x800a_0d18, |c| crate::bworldsm::find_closest_triangle_rez(c, w, road, 1));
+        let rn = r.enter(c, 0x8008_0f44, 0x800a_0d20, |c| u_normal(c, road)).get(&mut c.m);
+        r.0[6] = rn.y as u32;
         normal.set(&mut c.m, rn);
         let q = road.sim_quad(&mut c.m);
         let surface = if q.0 == 0 { SURFACE_NONE } else { q.surface(&mut c.m) as i32 };
@@ -751,7 +780,12 @@ fn find_ground_in_frame(c: &mut Cpu, car: Car, normal_out: Coord, sp: u32) -> i3
                 center(&mut c.m, s)
             };
             origin.set(&mut c.m, from);
-            let y = if (kind as u32).wrapping_sub(2) < 2 { find_ground_elevation_rough(c, w, normal, origin) } else { find_ground_elevation_general(c, w, normal, origin) };
+            r.0[6] = from.y as u32;
+            let y = if (kind as u32).wrapping_sub(2) < 2 {
+                r.enter(c, 0x800a_0798, 0x800a_0e2c, |c| find_ground_elevation_rough(c, w, normal, origin))
+            } else {
+                r.enter(c, 0x800a_063c, 0x800a_0e40, |c| find_ground_elevation_general(c, w, normal, origin))
+            };
             g.set_y(&mut c.m, y);
             wheel.set_actual_height(&mut c.m, y);
             if 0x2_0000 < y.wrapping_sub(wp.y) {
@@ -855,20 +889,24 @@ fn find_ground_in_frame(c: &mut Cpu, car: Car, normal_out: Coord, sp: u32) -> i3
         let d = sub(a, b);
         Vec3::new(d.x >> 1, d.y >> 1, d.z >> 1)
     };
+    // (the loops' ends: the wheels' offsets in 12s, `swap`, the wheels' indices)
+    (r.0[0], r.0[1], r.0[2], r.0[3], r.0[5], r.0[7]) = (48, WHEEL_SWAP + 16, 4, 4, rebounding as u32, hanging as u32);
     let forward = at(FORWARD);
     forward.set(&mut c.m, half(add(g[0], g[1]), add(g[2], g[3])));
-    normalize_short_vector(c, forward);
+    r.enter(c, 0x8009_e698, 0x800a_1370, |c| normalize_short_vector(c, forward));
     let right = at(NORMAL);
     right.set(&mut c.m, half(add(g[1], g[3]), add(g[0], g[2])));
-    normalize_short_vector(c, right);
-    let (f, r) = (forward.get(&mut c.m), right.get(&mut c.m));
+    r.enter(c, 0x8009_e698, 0x800a_13e4, |c| normalize_short_vector(c, right));
+    let (f, rt) = (forward.get(&mut c.m), right.get(&mut c.m));
     let ground_up = at(ORIGIN);
+    let gz = fixedmult(f.x, rt.y).wrapping_sub(fixedmult(f.y, rt.x));
     ground_up.set(&mut c.m, Vec3::new(
-        fixedmult(f.y, r.z).wrapping_sub(fixedmult(f.z, r.y)),
-        fixedmult(f.z, r.x).wrapping_sub(fixedmult(f.x, r.z)),
-        fixedmult(f.x, r.y).wrapping_sub(fixedmult(f.y, r.x)),
+        fixedmult(f.y, rt.z).wrapping_sub(fixedmult(f.z, rt.y)),
+        fixedmult(f.z, rt.x).wrapping_sub(fixedmult(f.x, rt.z)),
+        gz,
     ));
-    normalize_short_vector(c, ground_up);
+    r.0[0] = gz as u32;
+    r.enter(c, 0x8009_e698, 0x800a_145c, |c| normalize_short_vector(c, ground_up));
     let gu = ground_up.get(&mut c.m);
     if gu.y >= 0 {
         normal_out.set(&mut c.m, gu);
@@ -902,11 +940,14 @@ fn find_ground_in_frame(c: &mut Cpu, car: Car, normal_out: Coord, sp: u32) -> i3
         let back = crate::physics::transposed_matrix(&o);
         Matrix(sp + BACK).set(&mut c.m, &crate::vec::Mat3 { m: back });
         let w = ch.get(&mut c.m);
-        n.angular_vel().set(&mut c.m, xform(&back, w));
+        let spin = xform(&back, w);
+        n.angular_vel().set(&mut c.m, spin);
+        (r.0[0], r.0[1]) = (spin.z as u32, fixedmult(w.y, back[7]) as u32);
     }
+    r.0[7] = hanging as u32;
     // the car's height above the ground (in the first second from the road's centre)
     let from = if SIM_COUNTER.get(&mut c.m) < 64 { n.road_center_point() } else { sum };
-    let alt = calc_perpen_height_of_center_point_from_ground(c, n, normal_out, from);
+    let alt = r.enter(c, 0x800a_1c78, 0x800a_1878, |c| calc_perpen_height_of_center_point_from_ground(c, n, normal_out, from));
     n.set_obj_altitude(&mut c.m, alt);
     sum.y(&mut c.m)
 }
@@ -1009,11 +1050,12 @@ pub fn calc_dist_to_closest_player_car(c: &mut Cpu, obj: NewtonObj) {
         // (with this function's s0..s2: the object, NO_SIM_DIST, hidden)
         let mut r = abi::Saved::of(c);
         r.0[..3].copy_from_slice(&[obj.0, NO_SIM_DIST as u32, hidden as u32]);
+        // (and the same for the calls after)
         r.enter(c, 0x8008_74e8, 0x800a_1f98, |c| crate::cars::set_car_up_for_hi_rez_sim(c, car));
-        find_closest_quad(c, obj);
-        update_road_geometry(c, obj);
-        limit_cars_to_drivable_dist(c, car);
-        let height = find_ground_off_scratchpad(c, car, Coord(DUMMY_NORMAL));
+        r.enter(c, 0x800a_0210, 0x800a_1fa0, |c| find_closest_quad(c, obj));
+        r.enter(c, 0x800a_02ac, 0x800a_1fa8, |c| update_road_geometry(c, obj));
+        r.enter(c, 0x800a_18b0, 0x800a_1fb0, |c| limit_cars_to_drivable_dist(c, car));
+        let height = find_ground_off_scratchpad(c, car, Coord(DUMMY_NORMAL), &r, [0x800a_202c, 0x800a_1ff4]);
         obj.set_ground_elevation(&mut c.m, height);
         obj.set_ground_surface_type(&mut c.m, 1);
         obj.set_drive_surface_type(&mut c.m, 1);
@@ -1032,10 +1074,12 @@ pub fn abi_calc_dist_to_closest_player_car(c: &mut Cpu) {
 
 /// The ground under a car found with its wheels (`Newton_FindGroundElevationAndNormal`, its
 /// normal into `normal`), on the saved stack when the race runs on the scratchpad one (as
-/// `SetSp` swaps them).
-fn find_ground_off_scratchpad(c: &mut Cpu, car: Car, normal: Coord) -> i32 {
+/// `SetSp` swaps them); called with the caller's registers `r`, returning to `ra[0]` (or
+/// `ra[1]` on the other stack).
+fn find_ground_off_scratchpad(c: &mut Cpu, car: Car, normal: Coord, r: &abi::Saved, ra: [u32; 2]) -> i32 {
+    let find = |c: &mut Cpu, ra| r.enter(c, 0x800a_0a8c, ra, |c| find_ground_elevation_and_normal(c, car, normal));
     if STACK_SPEED_UP_ENABLED.get(&mut c.m) == 0 {
-        return find_ground_elevation_and_normal(c, car, normal);
+        return find(c, ra[0]);
     }
     let swap_sp = |c: &mut Cpu| {
         let sp = c.r[29];
@@ -1044,7 +1088,7 @@ fn find_ground_off_scratchpad(c: &mut Cpu, car: Car, normal: Coord) -> i32 {
     };
     swap_sp(c);
     STACK_SPEED_UP_ENABLED.set(&mut c.m, 0);
-    let height = find_ground_elevation_and_normal(c, car, normal);
+    let height = find(c, ra[1]);
     swap_sp(c);
     STACK_SPEED_UP_ENABLED.set(&mut c.m, 1);
     height
@@ -1058,6 +1102,11 @@ fn find_ground_off_scratchpad(c: &mut Cpu, car: Car, normal: Coord) -> i32 {
 pub fn set_initial_slice_position_orientation_etc(c: &mut Cpu, obj: NewtonObj, slice: i32, offset: Coord, forward: i32) {
     abi::frame(c, 120, |c, sp| {
         let backward = (forward != 1) as i32;
+        // s4 the object, s6 the slice (s3 its offset in the slices, then its address), s2 the
+        // offset, s5 backward; s0 the road's matrix, then the world offset's z (s1 the middle
+        // of its sum), then 1
+        let mut r = abi::Saved::of(c);
+        (r.0[2], r.0[3], r.0[4], r.0[5], r.0[6]) = (offset.0, (slice as u32) << 5, obj.0, backward as u32, slice as u32);
         crate::bworldsm::set_slice(c, slice, obj.sim_road_info());
         obj.set_total_slice(&mut c.m, slice as u16);
         // the road's frame from the slice's (signed byte) axes
@@ -1069,8 +1118,9 @@ pub fn set_initial_slice_position_orientation_etc(c: &mut Cpu, obj: NewtonObj, s
             road.set_m(&mut c.m, 3 + k, (u as i32) << 9);
             road.set_m(&mut c.m, 6 + k, (f as i32) << 9);
         }
-        for row in 0..3 {
-            normalize_short_vector(c, Coord(road.0 + 12 * row));
+        r.0[0] = road.0;
+        for (row, ra) in [0x800a_2394, 0x800a_239c, 0x800a_23a4].into_iter().enumerate() {
+            r.enter(c, 0x8009_e698, ra, |c| normalize_short_vector(c, Coord(road.0 + 12 * row as u32)));
         }
         let back = sp + 32;
         crate::fixed::transpose(&mut c.m, road.0, back);
@@ -1080,16 +1130,19 @@ pub fn set_initial_slice_position_orientation_etc(c: &mut Cpu, obj: NewtonObj, s
         let (o, t) = (offset.get(&mut c.m), Matrix(back).get(&mut c.m).m);
         let world = xform(&t, o);
         Coord(sp + 16).set(&mut c.m, world);
+        (r.0[0], r.0[1]) = (world.z as u32, fixedmult(o.y, t[7]) as u32);
+        r.0[3] = slice_at(&mut c.m, slice).0;
         let mid = center(&mut c.m, slice);
         obj.position().set(&mut c.m, add(world, mid));
         let car = obj_car(obj);
         let optz = if car.car_flags(&mut c.m) & 4 != 0 { 0 } else { 2 };
         obj.set_sim_optz(&mut c.m, optz);
-        find_closest_quad(c, obj);
-        update_road_info(c, obj);
-        update_road_geometry(c, obj);
+        r.enter(c, 0x800a_0210, 0x800a_24e4, |c| find_closest_quad(c, obj));
+        r.enter(c, 0x800a_2074, 0x800a_24ec, |c| update_road_info(c, obj));
+        r.enter(c, 0x800a_02ac, 0x800a_24f4, |c| update_road_geometry(c, obj));
         copy_road_matrix_to_orient_mat(c, obj, backward);
         copy_road_matrix_to_shadow_mat(c, obj, backward);
+        r.0[0] = 1;
         match obj.sim_optz(&mut c.m) {
             2 => {
                 let y = slice_at(&mut c.m, slice).center(&mut c.m, 1);
@@ -1112,7 +1165,7 @@ pub fn set_initial_slice_position_orientation_etc(c: &mut Cpu, obj: NewtonObj, s
                 obj.set_ground_elevation(&mut c.m, sum / 4);
             }
             _ => {
-                let height = find_ground_off_scratchpad(c, car, Coord(DUMMY_NORMAL_INIT));
+                let height = find_ground_off_scratchpad(c, car, Coord(DUMMY_NORMAL_INIT), &r, [0x800a_2654, 0x800a_2620]);
                 obj.set_ground_elevation(&mut c.m, height);
                 let y = height.wrapping_add(obj.dimension().y(&mut c.m));
                 obj.position().set_y(&mut c.m, y);
@@ -1703,4 +1756,28 @@ pub fn test_for_undrivable_surfaces(c: &mut Cpu, obj: NewtonObj) {
 
 pub fn abi_test_for_undrivable_surfaces(c: &mut Cpu) {
     test_for_undrivable_surfaces(c, NewtonObj(c.r[4]));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cars::tests::{car, stranded};
+    use crate::test_util::{Rng, SCRATCH, same_stack};
+
+    /// A car put on the road anywhere: any slice, across the road (off it too), either way.
+    fn placed(c: &mut Cpu, rng: &mut Rng) -> Vec<u32> {
+        let mut pick = |n: u32| (rng.next() % n as u64) as i32;
+        let slices = NUM_SLICES.get(&mut c.m);
+        let at = Coord(SCRATCH);
+        at.set(&mut c.m, crate::vec::Vec3::new(pick(0x40_0000) - 0x20_0000, 0, 0));
+        let car = car(c, pick(3) as u32);
+        vec![car, pick(slices as u32) as u32, at.0, [1, -1, 0][pick(3) as usize] as u32]
+    }
+
+    /// Putting a car on the road leaves the stack as the original (on the main stack: it can
+    /// come back round to put the car on the road again, deeper than the scratchpad goes).
+    #[test]
+    fn set_initial_stack_fuzz() {
+        same_stack("Newton_SetInitialSlicePositionOrientationEtc", 0x800a_22a8, nfs4rc::f_800a22a8, 0x8008_744c, 0x801F_FE00, 2000, 0x5E71, stranded, &placed);
+    }
 }

@@ -1161,14 +1161,14 @@ pub fn abi_sort_cars(c: &mut Cpu) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::test_util::{Rng, against_original};
 
     /// The race's cars moved about: on any slice (near the start line more often), with laps
     /// and laps unwound, having crossed slices or not, facing and moving any way, slowly or
     /// not, human or not, active or not; the lists in any order; the track reversed or not.
-    fn shuffle(c: &mut Cpu, rng: &mut Rng) {
+    pub(crate) fn shuffle(c: &mut Cpu, rng: &mut Rng) {
         let m = &mut c.m;
         let mut pick = |n: u32| (rng.next() % n as u64) as i32;
         let slices = NUM_SLICES.get(m);
@@ -1212,7 +1212,7 @@ mod tests {
         SIM_COUNTER.set(m, pick(100_000));
     }
 
-    fn car(c: &mut Cpu, i: u32) -> u32 {
+    pub(crate) fn car(c: &mut Cpu, i: u32) -> u32 {
         c.m.r32(CARS_LIST + 4 * i)
     }
 
@@ -1258,7 +1258,7 @@ mod tests {
     /// A car of the race after a collision: hit by something (the road, a wall, a car; hard
     /// or not; with another car or not), damaged, a tyre blown, the player resetting, on its
     /// side or roof, scraping, smoking, in the air, far off; as the human or not.
-    fn crash(c: &mut Cpu, rng: &mut Rng) {
+    pub(crate) fn crash(c: &mut Cpu, rng: &mut Rng) {
         shuffle(c, rng);
         let m = &mut c.m;
         let mut pick = |n: u32| (rng.next() % n as u64) as i32;
@@ -1337,7 +1337,7 @@ mod tests {
     /// beyond 10), thrown sideways, sliding fast along; near a player or far, on the ground or
     /// in the air; each wheel in the air or on any surface (leafy, wet); old marks going on or
     /// ended; rain or not, any tyres; the helicopter and the big vehicles; leaves on the track.
-    fn skidding(c: &mut Cpu, rng: &mut Rng) {
+    pub(crate) fn skidding(c: &mut Cpu, rng: &mut Rng) {
         crash(c, rng);
         let m = &mut c.m;
         let mut pick = |n: u32| (rng.next() % n as u64) as i32;
@@ -1418,78 +1418,33 @@ mod tests {
         }
     }
 
-    /// The function at `addr` entered from recompiled code (returning to `ra`) on a car of
-    /// `shuffle`'s RAM leaves the stack (on the scratchpad, as in a race) as the original does,
-    /// the registers its callees save included, and the same RAM.
-    fn same_stack(name: &str, addr: u32, original: fn(&mut Cpu), ra: u32, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng)) {
-        let Some(ram) = crate::test_util::race_ram() else { return };
-        let mut rng = Rng(seed);
-        let mut c = crate::test_util::cpu_with(&ram);
-        let top = 0x1F80_03DC - 32;
-        let mut mismatches = 0;
-        for i in 0..cases {
-            c.m.ram.copy_from_slice(&ram);
-            shuffle(&mut c, &mut rng);
-            let car = car(&mut c, (rng.next() % 3) as u32);
-            let fill = rng.next() as u8;
-            let state = c.m.ram.clone();
-            let enter = |c: &mut Cpu| {
-                c.m.scratch = [fill; 0x400];
-                for r in (16..24).chain([30]) {
-                    c.r[r] = 0x8000_0000 | r as u32;
-                }
-                c.r[29] = top;
-                c.r[4] = car;
-                c.r[31] = ra;
-            };
-            enter(&mut c);
-            original(&mut c);
-            let want = (c.m.scratch, c.m.ram.clone());
-            c.m.ram.copy_from_slice(&state);
-            enter(&mut c);
-            crate::decomp(&mut c, addr);
-            let differ: Vec<usize> = (0..0x400).step_by(4).filter(|&w| want.0[w..w + 4] != c.m.scratch[w..w + 4]).collect();
-            let ram = crate::test_util::ram_diff(&want.1, &c.m.ram);
-            if !differ.is_empty() || !ram.is_empty() {
-                mismatches += 1;
-                if mismatches <= 5 {
-                    let word = |s: &[u8], w: usize| u32::from_le_bytes(s[w..w + 4].try_into().unwrap());
-                    for &w in differ.iter().take(8) {
-                        eprintln!("{name} case {i}: {:#x}: expected {:#010x} got {:#010x}", 0x1F80_0000 + w, word(&want.0, w), word(&c.m.scratch, w));
-                    }
-                    crate::test_util::report(name, i, &want.1, &c.m.ram, &ram);
-                }
-            }
-        }
-        assert_eq!(mismatches, 0, "{name} leaves the stack otherwise than the original");
+    /// [`crate::test_util::same_stack`] on one of the race's first three cars.
+    #[allow(clippy::too_many_arguments)]
+    fn same_stack(name: &str, addr: u32, original: fn(&mut Cpu), ra: u32, top: u32, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng)) {
+        crate::test_util::same_stack(name, addr, original, ra, top, cases, seed, shuffle, &|c, rng| vec![car(c, (rng.next() % 3) as u32)]);
     }
 
     /// The skids leave the stack as the original: the skid marks' colours take a byte the
     /// stack held before.
     #[test]
     fn skid_stack_fuzz() {
-        same_stack("Car_DoSkiddingStuff", 0x8008_a1f0, nfs4rc::f_8008a1f0, 0x8008_a3ac, 3000, 0x57AC, skidding);
+        same_stack("Car_DoSkiddingStuff", 0x8008_a1f0, nfs4rc::f_8008a1f0, 0x8008_a3ac, crate::test_util::SCRATCH_TOP, 3000, 0x57AC, skidding);
     }
 
     /// The collisions' aftermath (the cars put back on the road) leaves the stack and RAM as
-    /// the original. Not yet: under `Newton_SetInitialSlicePositionOrientationEtc`, the NEWTON
-    /// and BWORLDSM ports leave less on the stack than the originals (`RawFindClosestQuad`
-    /// and `Check_Rot` call Rust without the callees' prologue stores...), and in a few cases
-    /// the original then reads that stack: it works on a road position at address 0 and
-    /// changes the normal cache, `corrPt` and the car's wheels where the port doesn't. With
-    /// that function recompiled, this passes.
+    /// the original (on the main stack: putting a car on the road can come back round to do it
+    /// again, deeper than the scratchpad goes).
     #[test]
-    #[ignore = "the NEWTON/BWORLDSM ports under SetInitialSlicePositionOrientationEtc leave less on the stack, which the original reads"]
     fn reset_stack_fuzz() {
-        same_stack("Cars_DoExtraCarCollisionProcessing", 0x8008_755c, nfs4rc::f_8008755c, 0x8008_a3a4, 3000, 0xE5AC, stranded);
-        same_stack("Cars_SetCarUpForHiRezSim", 0x8008_74e8, nfs4rc::f_800874e8, 0x800a_1f98, 1000, 0x5E7C, stranded);
+        same_stack("Cars_DoExtraCarCollisionProcessing", 0x8008_755c, nfs4rc::f_8008755c, 0x8008_a3a4, 0x801F_FE00, 3000, 0xE5AC, stranded);
+        same_stack("Cars_SetCarUpForHiRezSim", 0x8008_74e8, nfs4rc::f_800874e8, 0x800a_1f98, 0x801F_FE00, 1000, 0x5E7C, stranded);
     }
 
     /// The race's cars to be put back on the road: crashed (as [`crash`]), tilted, spinning,
     /// off the road or in the air or not, going either way, any grid place and width, the
     /// road off its surface sometimes, near an accident scene (at either end of the track
     /// too), traffic on either side, simulated fully, roughly or not.
-    fn stranded(c: &mut Cpu, rng: &mut Rng) {
+    pub(crate) fn stranded(c: &mut Cpu, rng: &mut Rng) {
         crash(c, rng);
         let m = &mut c.m;
         let mut pick = |n: u32| (rng.next() % n as u64) as i32;

@@ -448,6 +448,101 @@ pub(crate) mod test_util {
         assert_eq!(mismatches, 0, "{name} differs from the original");
     }
 
+    /// The scratchpad stack's top under a race's frames, for [`same_stack`].
+    pub const SCRATCH_TOP: u32 = 0x1F80_03DC - 32;
+    /// The dead stack in main RAM [`same_stack`] compares too.
+    const DEAD: std::ops::Range<usize> = 0x1F_0000..0x1F_FF00;
+
+    /// The function at `addr` entered from recompiled code (returning to `ra`, `args` in
+    /// a0..a3, the stack at `top`: [`SCRATCH_TOP`] as in a race, or in main RAM for deep calls)
+    /// on `shuffle`'s RAM leaves the stack (the scratchpad and main RAM's dead stack, filled
+    /// with a random byte first) as the recompiled `original` does, the registers its callees
+    /// save included, and the same RAM.
+    #[allow(clippy::too_many_arguments)]
+    pub fn same_stack(name: &str, addr: u32, original: fn(&mut Cpu), ra: u32, top: u32, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng), args: &dyn Fn(&mut Cpu, &mut Rng) -> Vec<u32>) {
+        let Some(ram) = race_ram() else { return };
+        let mut rng = Rng(seed);
+        let mut c = cpu_with(&ram);
+        let plain = c.decomp;
+        let mut mismatches = 0;
+        for i in 0..cases {
+            c.m.ram.copy_from_slice(&ram);
+            shuffle(&mut c, &mut rng);
+            let a = args(&mut c, &mut rng);
+            let fill = rng.next() as u8;
+            let state = c.m.ram.clone();
+            let enter = |c: &mut Cpu| {
+                c.m.scratch = [fill; 0x400];
+                c.m.ram[DEAD].fill(fill);
+                for r in (16..24).chain([30]) {
+                    c.r[r] = 0x8000_0000 | r as u32;
+                }
+                c.r[29] = top;
+                c.r[4..4 + a.len()].copy_from_slice(&a);
+                c.r[31] = ra;
+            };
+            enter(&mut c);
+            let who = std::env::var("STACK_WHO").is_ok();
+            if who {
+                TRACE.with(|t| t.borrow_mut().clear());
+                c.decomp = trace;
+            }
+            original(&mut c);
+            c.decomp = plain;
+            let want = (c.m.scratch, c.m.ram.clone());
+            c.m.ram.copy_from_slice(&state);
+            enter(&mut c);
+            crate::decomp(&mut c, addr);
+            // (stack words by address)
+            let word_at = |scratch: &[u8], ram: &[u8], at: u32| -> u32 {
+                let (s, o) = if (0x1F80_0000..0x1F80_0400).contains(&at) { (scratch, (at - 0x1F80_0000) as usize) } else { (ram, (at & 0x1F_FFFF) as usize) };
+                u32::from_le_bytes(s[o..o + 4].try_into().unwrap())
+            };
+            let stack = (0..0x400u32).step_by(4).map(|w| 0x1F80_0000 + w).chain(DEAD.step_by(4).map(|a| 0x8000_0000 | a as u32));
+            let differ: Vec<u32> = stack.filter(|&at| word_at(&want.0, &want.1, at) != word_at(&c.m.scratch, &c.m.ram, at)).collect();
+            let ram = ram_diff(&want.1, &c.m.ram);
+            if !differ.is_empty() || !ram.is_empty() {
+                mismatches += 1;
+                if mismatches <= 5 {
+                    eprintln!("{name} case {i}: {} stack words differ", differ.len());
+                    for &at in differ.iter().take(if who { 64 } else { 12 }) {
+                        let by = if who { owner(&mut c, at) } else { String::new() };
+                        let (w, g) = (word_at(&want.0, &want.1, at), word_at(&c.m.scratch, &c.m.ram, at));
+                        eprintln!("  {at:#x}: expected {w:#010x} got {g:#010x} {by}");
+                    }
+                    report(name, i, &want.1, &c.m.ram, &ram);
+                }
+            }
+        }
+        assert_eq!(mismatches, 0, "{name} leaves the stack otherwise than the original");
+    }
+
+    thread_local! {
+        /// The routed calls the original made in a [`same_stack`] case (`STACK_WHO`): the
+        /// function and its stack pointer on entry.
+        static TRACE: std::cell::RefCell<Vec<(u32, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn trace(c: &mut Cpu, addr: u32) -> bool {
+        TRACE.with(|t| t.borrow_mut().push((addr, c.r[29])));
+        false
+    }
+
+    /// The last traced function whose frame held the stack word at `at`, and where in it.
+    fn owner(c: &mut Cpu, at: u32) -> String {
+        TRACE.with(|t| {
+            for &(f, sp) in t.borrow().iter().rev() {
+                let w = c.m.r32(f);
+                let size = if w >> 16 == 0x27BD { (w as u16 as i16 as i32).unsigned_abs() } else { 0 };
+                if at < sp && at >= sp - size {
+                    let name = crate::find(f).map_or("?", |i| crate::FUNCS[i].name);
+                    return format!("{name}+{}", at - (sp - size));
+                }
+            }
+            "-".into()
+        })
+    }
+
     /// Print the first differing words of a failed case.
     pub fn report(name: &str, case: u32, want: &[u8], got: &[u8], diff: &[usize]) {
         eprintln!("{name} case {case}: {} words differ", diff.len());

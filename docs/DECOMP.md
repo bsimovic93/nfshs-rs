@@ -54,10 +54,15 @@ collisions, AI), then the front end.
   callee gets them with `abi::call_from`. A port that calls out a lot keeps an `abi::Saved`, the
   original's s-registers and fp as it sets them, and calls through it (`Saved::call`, `Saved::enter`). `physics::tests::barrier_stack_fuzz` compares the
   whole scratchpad stack after the barrier test.
-  Not all ports do this yet: under `Newton_SetInitialSlicePositionOrientationEtc` (putting a
-  car back on the road) the NEWTON and BWORLDSM ports leave less on the stack, and the
-  original reads it there (`cars::tests::reset_stack_fuzz`, ignored until that is fixed, shows
-  the RAM going different ways in a few cases).
+  A port leaves its frame as the original's when it returns: its locals at the original's
+  offsets, its callees' frames below (the library's too: `intatan` is called recompiled for its
+  frame, `crossproduct`'s prologue left with `Saved::enter`), each entered with the original's
+  registers and return address.
+- **Checking the stack**: `test_util::same_stack` enters a port from recompiled code on a
+  stack filled with a random byte (the scratchpad, or main RAM for calls that nest deeper than
+  the scratchpad holds) and compares every stack word and the RAM with the original's.
+  `STACK_WHO=1` names, for each differing word, the routed function whose frame last held it
+  and the offset in it (a saved register, a local, a callee's homed argument).
 
 ## Porting a function
 
@@ -115,6 +120,6 @@ collisions, AI), then the front end.
 
 The races seldom bring cars together, so COLLIDE.CPP is covered mostly by fuzz tests (`cargo test -p nfs4 collide`): two cars of the race RAM put against each other, closing fast or slow, one sometimes a track object, compared with the original.
 
-The race logic's fuzz tests (`cargo test -p nfs4 stats`, `cars`) shuffle the standings, laps, setups (one human or two, reversed tracks, time trials), collisions (each kind of hit, damage, blowouts, cars on their roofs) and skids (either axle's, each wheel's surface, rain, leaves, the big vehicles) on the race RAM; `cars::tests::skid_stack_fuzz` compares the scratchpad stack the skids leave, where the skid marks' colours come from. `nfshs decomp-check --laps 1` with `BOOT_SCRIPT="8:-,150:x"` (9480 frames) runs the whole race decompiled with the same RAM after every frame.
+The race logic's fuzz tests (`cargo test -p nfs4 stats`, `cars`) shuffle the standings, laps, setups (one human or two, reversed tracks, time trials), collisions (each kind of hit, damage, blowouts, cars on their roofs) and skids (either axle's, each wheel's surface, rain, leaves, the big vehicles) on the race RAM; `cars::tests::skid_stack_fuzz` and `reset_stack_fuzz` compare the stack the skids and the resets leave (the skid marks' colours come from it), and `newton::tests::set_initial_stack_fuzz` that of putting a car on the road (the NEWTON and BWORLDSM functions under it). `nfshs decomp-check --laps 1` with `BOOT_SCRIPT="8:-,150:x"` (9480 frames) runs the whole race decompiled with the same RAM after every frame.
 
 Next: the rest of the race logic (CONTROL.CPP, the schedules and SIM.CPP's loop, the set-up), the AI and the front end.
