@@ -205,30 +205,36 @@ const MAX_SEPARATIONS: i32 = 8;
 pub fn check_for_collision_between(c: &mut Cpu, a: NewtonObj, b: NewtonObj) -> i32 {
     abi::frame(c, 72, |c, sp| {
         let (at, normal) = (sp + 16, sp + 32);
-        let touching = |c: &mut Cpu| test_object_vertices(c, a, b, Coord(at), Coord(normal)) != 0;
-        let separate = |c: &mut Cpu| do_object_object_collision(c, a, b, Coord(at), Coord(normal)) != 0;
-        let off_barriers = |c: &mut Cpu| {
-            crate::physics::test_for_barrier_collision(c, Car(a.0));
-            crate::physics::test_for_barrier_collision(c, Car(b.0));
+        // s1 and s2 the objects, s3 the normal, s0 the separations left, s4 0xF0000
+        let mut r = abi::Saved::of(c);
+        (r.0[1], r.0[2], r.0[3]) = (a.0, b.0, normal);
+        let touching = |c: &mut Cpu, r: &abi::Saved, ra| r.enter(c, 0x8009_0c34, ra, |c| test_object_vertices(c, a, b, Coord(at), Coord(normal))) != 0;
+        let separate = |c: &mut Cpu, r: &abi::Saved, ra| r.enter(c, 0x8008_f0c4, ra, |c| do_object_object_collision(c, a, b, Coord(at), Coord(normal))) != 0;
+        let off_barriers = |c: &mut Cpu, r: &abi::Saved, ra: [u32; 2]| {
+            r.enter(c, 0x800a_b444, ra[0], |c| crate::physics::test_for_barrier_collision(c, Car(a.0)));
+            r.enter(c, 0x800a_b444, ra[1], |c| crate::physics::test_for_barrier_collision(c, Car(b.0)));
         };
         a.collision().set_impulse(&mut c.m, 0);
         b.collision().set_impulse(&mut c.m, 0);
-        if !touching(c) {
+        if !touching(c, &r, 0x8009_1ea0) {
             return 0;
         }
-        separate(c);
-        off_barriers(c);
+        separate(c, &r, 0x8009_1ec0);
+        r.0[0] = MAX_SEPARATIONS as u32;
+        off_barriers(c, &r, [0x8009_1ecc, 0x8009_1ed4]);
+        r.0[4] = 0xF_0000;
         let mut left = MAX_SEPARATIONS;
-        while touching(c) && left > 0 {
+        while touching(c, &r, 0x8009_1eec) && left > 0 {
             left -= 1;
-            if !separate(c) {
+            r.0[0] = left as u32;
+            if !separate(c, &r, 0x8009_1f10) {
                 break;
             }
-            off_barriers(c);
+            off_barriers(c, &r, [0x8009_1f20, 0x8009_1f28]);
             if left == 0 {
-                for obj in [a, b] {
+                for (obj, ra) in [(a, 0x8009_1f64), (b, 0x8009_1f9c)] {
                     if Car(obj.0).crash(&mut c.m) != 0 && 0xF_0000 < obj.speed_xz(&mut c.m) {
-                        crate::newton::add_damage_zone(c, Car(obj.0), 0x64_0000, 8, 2);
+                        r.enter(c, 0x8009_fa38, ra, |c| crate::newton::add_damage_zone(c, Car(obj.0), 0x64_0000, 8, 2));
                     }
                 }
             }
@@ -699,6 +705,11 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
     c.m.w32(c.r[29] + 8, at.0);
     c.m.w32(c.r[29] + 12, normal.0);
     abi::frame(c, 176, |c, sp| {
+        // s3 and s2 the objects, s0 whether they moved; from the pushes on fp 32, s5 the step,
+        // s4 and s6 basisDotRelative and its upper half, s7 a leftover (the last scaled dot,
+        // then the first push's gap or closing velocity); s1 the backing-out factor
+        let mut r = abi::Saved::of(c);
+        (r.0[0], r.0[2], r.0[3]) = (0, b.0, a.0);
         let slot = |off: u32| Coord(sp + off);
         let (push_a, push_b, apart, closing, dir, unit_closing, unit_apart) = (slot(16), slot(32), slot(48), slot(64), slot(80), slot(96), slot(112));
         let (oa, ob) = (a.orient_mat().get(&mut c.m).m, b.orient_mat().get(&mut c.m).m);
@@ -718,8 +729,11 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
             c.m.w32(SCALED_BASIS_DOTS_OTHER.0 + 4 * i, mul_8_8(d, sa[(i / 3) as usize]) as u32);
         }
         c.m.w32(sp + 128, closing.0);
+        (r.0[4], r.0[6], r.0[8]) = (BASIS_DOT_RELATIVE.0, 0x8014_0000, MAX_PUSHES);
+        r.0[7] = c.m.r32(SCALED_BASIS_DOTS_OTHER.0 + 32);
         let mut moved = 0;
-        for _ in 0..MAX_PUSHES {
+        for i in 0..MAX_PUSHES {
+            r.0[5] = i;
             let (p, q) = (a.position().get(&mut c.m), b.position().get(&mut c.m));
             let d = Vec3::new(q.x.wrapping_sub(p.x), q.y.wrapping_sub(p.y), q.z.wrapping_sub(p.z));
             apart.set(&mut c.m, d);
@@ -730,30 +744,38 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
             for r in 0..3 {
                 c.m.w32(BASIS_DOT_RELATIVE.0 + 4 * (3 + r) as u32, dot_8_8(Vec3::new(ob[3 * r], ob[3 * r + 1], ob[3 * r + 2]), [d.x, d.y, d.z]) as u32);
             }
-            if do_actual_object_collision_check(c, a, b, at, normal) == 0 {
+            if r.enter(c, 0x8009_0040, 0x8009_18f0, |c| do_actual_object_collision_check(c, a, b, at, normal)) == 0 {
                 return moved;
             }
             if moved == 0 {
+                r.0[0] = 0;
+                r.0[1] = 0;
                 let (va, vb) = (a.linear_vel().get(&mut c.m), b.linear_vel().get(&mut c.m));
                 let rv = Vec3::new(va.x.wrapping_sub(vb.x), va.y.wrapping_sub(vb.y), va.z.wrapping_sub(vb.z));
                 closing.set(&mut c.m, rv);
                 let sq = |v: i32| (v / 256).wrapping_mul(v / 256);
                 let mut back = None;
                 if 0xE10_0000 < sq(rv.x).wrapping_add(sq(rv.z)) {
+                    // (head on: near, or closing along the line between them; the length's
+                    // call sites differ)
                     let head_on = if sq(d.x).wrapping_add(sq(d.z)) < 3276 {
-                        true
+                        Some(0x8009_19d4)
                     } else {
                         unit_closing.set(&mut c.m, rv);
-                        crate::mathnfs::normalize_vector(c, unit_closing);
+                        r.0[7] = rv.x as u32;
+                        r.enter(c, 0x8009_e4e0, 0x8009_1a10, |c| crate::mathnfs::normalize_vector(c, unit_closing));
                         unit_apart.set(&mut c.m, d);
-                        normalize_short_vector(c, unit_apart);
+                        r.0[7] = d.x as u32;
+                        r.enter(c, 0x8009_e698, 0x8009_1a30, |c| normalize_short_vector(c, unit_apart));
                         let (u, w) = (unit_closing.get(&mut c.m), unit_apart.get(&mut c.m));
-                        0xD999 < dot_8_8(u, [w.x, w.y, w.z])
+                        (0xD999 < dot_8_8(u, [w.x, w.y, w.z])).then_some(0x8009_1ae4)
                     };
-                    if head_on {
+                    if let Some(ra) = head_on {
                         let rv_at = Coord(c.m.r32(sp + 128));
-                        let half = crate::mathnfs::vector_length(c, rv_at) / 2;
-                        back = Some(if half != 0 { fixeddiv(0x8000, half) } else { 0x1_0000 });
+                        let half = r.enter(c, 0x8009_e1b0, ra, |c| crate::mathnfs::vector_length(c, rv_at)) / 2;
+                        let k = if half != 0 { fixeddiv(0x8000, half) } else { 0x1_0000 };
+                        r.0[1] = k as u32;
+                        back = Some(k);
                     }
                 }
                 if let Some(k) = back {
@@ -770,7 +792,8 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
                     }
                 } else {
                     dir.set(&mut c.m, d);
-                    normalize_short_vector(c, dir);
+                    r.0[7] = d.x as u32;
+                    r.enter(c, 0x8009_e698, 0x8009_1c1c, |c| normalize_short_vector(c, dir));
                     let n = dir.get(&mut c.m);
                     let (ma, mb) = (a.mass(&mut c.m), b.mass(&mut c.m));
                     let sum = ma.wrapping_add(mb);
@@ -793,6 +816,7 @@ pub fn test_object_vertices(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, 
                     push_a.set(&mut c.m, pa.into());
                 }
                 moved = 1;
+                r.0[0] = 1;
             }
             let (pa, pb) = (push_a.get(&mut c.m), push_b.get(&mut c.m));
             let p = a.position().get(&mut c.m);
@@ -824,6 +848,7 @@ const CORNERS: [[i32; 3]; 8] = [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1], 
 /// else the side the corner is nearest (turned to face the corner's object).
 pub fn do_actual_object_collision_check(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: Coord, normal: Coord) -> i32 {
     abi::frame(c, 112, |c, sp| {
+        // (s1, s2 the objects, s0 the normal: its callees are leaves)
         P_P.set(&mut c.m, at.0);
         OBJ0.set(&mut c.m, a.0);
         OBJ1.set(&mut c.m, b.0);
@@ -954,25 +979,30 @@ fn side_zone(across: i32, ahead: i32) -> Option<i32> {
 }
 
 /// A hard blow (over 10) to a car from the direction `from` (a unit vector from the other
-/// object): damage on the roof and on the side or corner it came from.
-fn damage_from(c: &mut Cpu, obj: NewtonObj, from: Vec3, blow: i32) {
+/// object): damage on the roof and on the side or corner it came from. `r` is
+/// `Collide_DoObjectObjectCollision`'s registers (the dot products go in s0, s1, s3, a
+/// product in s2, the zone in s4), `ra` its two call sites.
+fn damage_from(c: &mut Cpu, obj: NewtonObj, from: Vec3, blow: i32, r: &mut abi::Saved, ra: [u32; 2]) {
     if blow <= 0xA_0000 {
         return;
     }
     let o = obj.orient_mat().get(&mut c.m).m;
     let axis = |k: usize| Vec3::new(o[3 * k], o[3 * k + 1], o[3 * k + 2]);
     let (across, up, ahead) = (dot_f(from, axis(0)), dot_f(from, axis(1)), dot_f(from, axis(2)));
+    (r.0[0], r.0[1], r.0[2], r.0[3]) = (ahead as u32, (up < -0x8000) as u32, fixedmult(from.y, o[7]) as u32, across as u32);
     let car = Car(obj.0);
     let mut zone = 9;
     if up < -0x8000 {
         zone = 8;
-        crate::newton::add_damage_zone(c, car, blow, zone, 2);
+        r.0[4] = zone as u32;
+        r.enter(c, 0x8009_fa38, ra[0], |c| crate::newton::add_damage_zone(c, car, blow, zone, 2));
     }
     if let Some(z) = side_zone(across, ahead) {
         zone = z;
     }
+    r.0[4] = zone as u32;
     if zone < 8 {
-        crate::newton::add_damage_zone(c, car, blow, zone, 2);
+        r.enter(c, 0x8009_fa38, ra[1], |c| crate::newton::add_damage_zone(c, car, blow, zone, 2));
     }
 }
 
@@ -988,6 +1018,10 @@ pub fn do_object_object_collision(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: C
     c.m.w32(c.r[29], a.0);
     c.m.w32(c.r[29] + 12, normal.0);
     abi::frame(c, 184, |c, sp| {
+        // fp the second object; s6 the impulse, s7 a product of the closing speed, the rest
+        // as set for the blows (see below)
+        let mut r = abi::Saved::of(c);
+        r.0[8] = b.0;
         let slot = |off: u32| Coord(sp + off);
         let (jv_at, arm_a, arm_b, ra_at, rb_at, dv_at, away_at) = (slot(16), slot(32), slot(48), slot(64), slot(80), slot(96), slot(112));
         let (p, n) = (at.get(&mut c.m), normal.get(&mut c.m));
@@ -1023,12 +1057,14 @@ pub fn do_object_object_collision(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: C
         let flagged = |c: &mut Cpu, obj: NewtonObj| Car(obj.0).car_flags(&mut c.m) & 4 != 0;
         let both = flagged(c, a) && flagged(c, b);
         let j = fixedmult(if both { 16384 } else { 13107 }, j);
+        (r.0[6], r.0[7]) = (j as u32, fixedmult(vb.z, n.z) as u32);
         let jv = scaled_by(j, n);
         jv_at.set(&mut c.m, jv);
         // each one's blow: its share of the momentum change
         let (va, vb) = (a.linear_vel().get(&mut c.m), b.linear_vel().get(&mut c.m));
         let total = a.mass(&mut c.m).wrapping_add(b.mass(&mut c.m));
         let change = fixedmult(dot_f(va, n).wrapping_sub(dot_f(vb, n)), total);
+        (r.0[0], r.0[1], r.0[2], r.0[3]) = (change as u32, dot_f(va, n) as u32, fixedmult(vb.y, n.y) as u32, fixedmult(va.z, n.z) as u32);
         for obj in [a, b] {
             let blow = fixedmult(change, obj.mass_inv(&mut c.m)).wrapping_abs();
             obj.collision().set_impulse(&mut c.m, blow);
@@ -1048,9 +1084,10 @@ pub fn do_object_object_collision(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: C
             let blow = a.collision().impulse(&mut c.m);
             let (pa, pb) = (a.position().get(&mut c.m), b.position().get(&mut c.m));
             away_at.set(&mut c.m, Vec3::new(pa.x.wrapping_sub(pb.x), pa.y.wrapping_sub(pb.y), pa.z.wrapping_sub(pb.z)));
-            normalize_short_vector(c, away_at);
+            (r.0[4], r.0[5]) = (9, blow as u32);
+            r.enter(c, 0x8009_e698, 0x8008_f80c, |c| normalize_short_vector(c, away_at));
             let from = away_at.get(&mut c.m);
-            damage_from(c, a, from, blow);
+            damage_from(c, a, from, blow, &mut r, [0x8008_f900, 0x8008_f9e4]);
         }
         let dv = scaled_by(b.mass_inv(&mut c.m), jv);
         dv_at.set(&mut c.m, dv);
@@ -1064,7 +1101,8 @@ pub fn do_object_object_collision(c: &mut Cpu, a: NewtonObj, b: NewtonObj, at: C
             let u = away_at.get(&mut c.m);
             let from = Vec3::new(u.x.wrapping_neg(), u.y.wrapping_neg(), u.z.wrapping_neg());
             away_at.set(&mut c.m, from);
-            damage_from(c, b, from, blow);
+            (r.0[4], r.0[5]) = (9, blow as u32);
+            damage_from(c, b, from, blow, &mut r, [0x8008_fb68, 0x8008_fc4c]);
         }
         // the spins
         for (obj, r, sign) in [(a, ra, 1), (b, rb, -1)] {
@@ -1179,6 +1217,20 @@ mod tests {
         }
         eprintln!("{name}: {hits} of {cases} cases returned nonzero, {busy} changed more than 3 words");
         assert_eq!(mismatches, 0, "{name} differs from the original");
+    }
+
+    /// The cars put against each other (as [`against`]), for [`crate::test_util::same_stack`].
+    fn together(c: &mut Cpu, rng: &mut Rng) {
+        let (a, b) = (NewtonObj(c.m.r32(0x8011_0CA0)), NewtonObj(c.m.r32(0x8011_0CA4)));
+        against(c, a, b, rng);
+    }
+
+    /// Two cars colliding leave the stack as the original does (on the scratchpad, as in a
+    /// race, under `Collide_CheckMeForCollisions`' frame): the AI reads it afterwards.
+    #[test]
+    fn collision_stack_fuzz() {
+        let top = crate::test_util::SCRATCH_TOP - 176;
+        crate::test_util::same_stack("Collide_CheckForCollisionBetween", 0x8009_1e64, nfs4rc::f_80091e64, 0x8009_28f0, top, 3000, 0x57AC, together, &|c, _| vec![c.m.r32(0x8011_0CA0), c.m.r32(0x8011_0CA4)]);
     }
 
     #[test]

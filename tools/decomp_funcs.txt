@@ -153,3 +153,25 @@
 800b8ed0 Stats_TrackStats
 800b92d8 Stats_ExtrapolateOpponentTimes
 800b9a80 Stats_TrackEndGame
+
+# CONTROL.CPP
+80092acc Control_AI
+80092ad4 Control_Human
+
+# SCHEDULE.CPP
+800b6e90 Sched_ExecuteCheck
+800b6fc4 Sched_CreateNewSchedule
+800b7034 Sched_CleanUpSchedule
+800b7054 Sched_AddFunction
+800b7108 Sched_DeleteFunction
+800b71d4 Sched_Execute
+
+# SIMQUEUE.CPP
+800b7fc0 SimQueue_StartUp
+800b7fec SimQueue_Reset
+800b808c SimQueue_CleanUp
+800b80a0 SimQueue_Put
+800b81b8 SimQueue_SetCurrentInput
+800b8278 SimQueue_GetCurrentInput
+800b82a0 SimQueue_SetLag
+800b82cc SimQueue_IsBlocking

@@ -23,11 +23,14 @@ pub mod bworldsm;
 pub mod cars;
 pub mod collide;
 pub mod check;
+pub mod control;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
 pub mod newton;
 pub mod physics;
+pub mod schedule;
+pub mod simqueue;
 pub mod stats;
 pub mod types;
 pub mod vec;
@@ -119,6 +122,8 @@ pub static FUNCS: &[Func] = &[
     func(0x8009_1fc4, "Collide_ClearCollisionRegistry", collide::abi_clear_collision_registry),
     func_ret(0x8009_21c4, "Collide_CheckAccuratePointRadiusCollision", collide::abi_check_accurate_point_radius_collision),
     func(0x8009_23bc, "Collide_CheckMeForCollisions", collide::abi_check_me_for_collisions),
+    func(0x8009_2acc, "Control_AI", control::abi_control_ai),
+    func(0x8009_2ad4, "Control_Human", control::abi_control_human),
     func_ret(0x8009_dea8, "Math_DistXZ", mathnfs::abi_dist_xz),
     func_ret(0x8009_defc, "Math_Dist3D", mathnfs::abi_dist_3d),
     func_ret(0x8009_df8c, "Math_BetterDist", mathnfs::abi_better_dist),
@@ -183,6 +188,20 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x800a_cc38, "Physics_CalculateRSControlDesiredPosition", physics::abi_calculate_rs_control_desired_position),
     func(0x800a_cdf8, "Physics_Real", physics::abi_real),
     func(0x800a_e1dc, "Physics_SimCar", physics::abi_sim_car),
+    func_ret(0x800b_6e90, "Sched_ExecuteCheck", schedule::abi_execute_check),
+    func_ret(0x800b_6fc4, "Sched_CreateNewSchedule", schedule::abi_create_new_schedule),
+    func(0x800b_7034, "Sched_CleanUpSchedule", schedule::abi_clean_up_schedule),
+    func(0x800b_7054, "Sched_AddFunction", schedule::abi_add_function),
+    func(0x800b_7108, "Sched_DeleteFunction", schedule::abi_delete_function),
+    func(0x800b_71d4, "Sched_Execute", schedule::abi_execute),
+    func(0x800b_7fc0, "SimQueue_StartUp", simqueue::abi_start_up),
+    func(0x800b_7fec, "SimQueue_Reset", simqueue::abi_reset),
+    func(0x800b_808c, "SimQueue_CleanUp", simqueue::abi_clean_up),
+    func_ret(0x800b_80a0, "SimQueue_Put", simqueue::abi_put),
+    func(0x800b_81b8, "SimQueue_SetCurrentInput", simqueue::abi_set_current_input),
+    func(0x800b_8278, "SimQueue_GetCurrentInput", simqueue::abi_get_current_input),
+    func(0x800b_82a0, "SimQueue_SetLag", simqueue::abi_set_lag),
+    func_ret(0x800b_82cc, "SimQueue_IsBlocking", simqueue::abi_is_blocking),
     func(0x800b_8c2c, "Stats_DoPlayerGlue", stats::abi_do_player_glue),
     func(0x800b_8de8, "Stats_ClearPosition", stats::abi_clear_position),
     func_ret(0x800b_8e28, "Stats_GetPosition", stats::abi_get_position),
@@ -532,8 +551,8 @@ pub(crate) mod test_util {
     fn owner(c: &mut Cpu, at: u32) -> String {
         TRACE.with(|t| {
             for &(f, sp) in t.borrow().iter().rev() {
-                let w = c.m.r32(f);
-                let size = if w >> 16 == 0x27BD { (w as u16 as i16 as i32).unsigned_abs() } else { 0 };
+                // (the prologue's `addiu sp, sp, -size`, not always the first instruction)
+                let size = (0..8).map(|k| c.m.r32(f + 4 * k)).find(|w| w >> 16 == 0x27BD).map_or(0, |w| (w as u16 as i16 as i32).unsigned_abs());
                 if at < sp && at >= sp - size {
                     let name = crate::find(f).map_or("?", |i| crate::FUNCS[i].name);
                     return format!("{name}+{}", at - (sp - size));

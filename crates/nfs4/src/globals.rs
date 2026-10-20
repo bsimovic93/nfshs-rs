@@ -220,3 +220,40 @@ pub const REAR_LIMIT: I32 = I32(0x8013_DADC);
 pub const ADD_CAR_WHEEL_DELAY: I32 = I32(0x8013_E7D8);
 /// `gLeafPixmap`: the track's leaves (`Draw_tPixMap *`; none on most tracks).
 pub const LEAF_PIXMAP: U32 = U32(0x8013_E4F0);
+
+// CONTROL.CPP, INPUT.CPP, HUD.CPP
+
+/// `Input_gSim`: the player's pad as the simulation reads it this tick.
+pub const INPUT_SIM: crate::types::InputResults = crate::types::InputResults(0x8013_E504);
+/// `HudBustedOverlay`: the "busted" screen is up.
+pub const HUD_BUSTED_OVERLAY: U32 = U32(0x8013_EC08);
+
+// SCHEDULE.CPP, SIMQUEUE.CPP, SIM.CPP
+
+/// `Sched_gExecuteInfo`: the simulation rate of each kind of object (rows of 20 bytes) by its
+/// distance in 16 m steps, an index into the four tables after it (7 rates each):
+/// `Sched_ExecuteTimes`, `Sched_ExecuteiTimes` and `Sched_ExecuteElapsedTimes` (the time
+/// steps), `Sched_ExecuteMasks` (the ticks it runs on).
+pub const SCHED_EXECUTE_INFO: u32 = 0x8011_F304;
+pub const SCHED_EXECUTE_TIMES: u32 = 0x8011_F294;
+pub const SCHED_EXECUTE_ELAPSED_TIMES: u32 = 0x8011_F2B0;
+pub const SCHED_EXECUTE_I_TIMES: u32 = 0x8011_F2CC;
+pub const SCHED_EXECUTE_MASKS: u32 = 0x8011_F2E8;
+/// `inputQueue`: the players' input queued for the ticks; `output`: this tick's
+/// (`Input_tResults[2]`); `maxTicksPerFrame`: how far ahead the queue may run.
+pub const INPUT_QUEUE: crate::types::SimQueue = crate::types::SimQueue(0x8013_F3FC);
+pub const QUEUE_OUTPUT: crate::types::InputResults = crate::types::InputResults(0x8013_F0D0);
+pub const MAX_TICKS_PER_FRAME: I32 = I32(0x8013_F0D8);
+/// `gSimQueue_Ticker`, `gSimQueue_BlockSelf`, `gSimQueue_BlockOther`.
+pub const SIM_QUEUE_TICKER: I32 = I32(0x8013_E718);
+pub const SIM_QUEUE_BLOCK_SELF: I32 = I32(0x8013_E71C);
+pub const SIM_QUEUE_BLOCK_OTHER: I32 = I32(0x8013_E720);
+/// `simGlobal`: the race started, its ticks ([`SIM_COUNTER`]) and its schedules; `simVar`:
+/// restarting, ending, paused.
+pub const SIM_GLOBAL: crate::types::SimGlobal = crate::types::SimGlobal(0x8011_F364);
+pub const SIM_VAR: crate::types::SimVar = crate::types::SimVar(0x8011_F37C);
+/// `countdown`: the start's countdown beeps played; `counter`: the tick of each (`int[4]`).
+pub const COUNTDOWN: u32 = 0x8013_D930;
+pub const COUNTDOWN_TICKS: I32s = I32s(0x8011_F354, 4);
+/// `gMasterSFXLevel`: the sound effects' volume now (faded in at the start).
+pub const MASTER_SFX_LEVEL: I32 = I32(0x8013_D948);

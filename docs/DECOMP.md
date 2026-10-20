@@ -52,7 +52,8 @@ collisions, AI), then the front end.
   decompiled function and the leftovers matter, it does the same with `abi::leave_prologue`,
   giving the s-registers and return address the original caller would have; a recompiled
   callee gets them with `abi::call_from`. A port that calls out a lot keeps an `abi::Saved`, the
-  original's s-registers and fp as it sets them, and calls through it (`Saved::call`, `Saved::enter`). `physics::tests::barrier_stack_fuzz` compares the
+  original's s-registers and fp as it sets them, and calls through it (`Saved::call`, `Saved::enter`, and `Saved::call_ptr` for the original's calls
+  through function pointers). `physics::tests::barrier_stack_fuzz` compares the
   whole scratchpad stack after the barrier test.
   A port leaves its frame as the original's when it returns: its locals at the original's
   offsets, its callees' frames below (the library's too: `intatan` is called recompiled for its
@@ -62,7 +63,11 @@ collisions, AI), then the front end.
   stack filled with a random byte (the scratchpad, or main RAM for calls that nest deeper than
   the scratchpad holds) and compares every stack word and the RAM with the original's.
   `STACK_WHO=1` names, for each differing word, the routed function whose frame last held it
-  and the offset in it (a saved register, a local, a callee's homed argument).
+  and the offset in it (a saved register, a local, a callee's homed argument). It knows only
+  routed calls: a word last written by a callee still recompiled is put down to the routed
+  frame around it, so when a "local" makes no sense, look for a callee whose prologue saves a
+  register there (a temporary write watch on the word in `ps1rt::Mem::w32` finds it; the
+  backtrace's function names are unreliable in release builds).
 
 ## Porting a function
 
@@ -116,10 +121,13 @@ collisions, AI), then the front end.
 | NEWTON.CPP | all 32: the ground under the wheels (`FindGroundElevationAndNormal` and its fast, general and rough forms), gravity and landing (`ApplyTheLawOfGravity`), the road's edges and bad quads (`TestForUndrivableSurfaces`, `DoPostBarrierCollisionHandling`, `GenerateVector`, `CheckForBadQuad`), the road position and geometry, the simulation level by distance (`CalcDistToClosestPlayerCar`, with its `SetSp` stack swap), rotation (`QDUpdateRot64Hz`/`32Hz`, `OptzRotxform`), shadows, damage (`AddDamageZone`), spike belts, the object setup (`InitBaseNewtonObj`, `SetInitialSlicePositionOrientationEtc`) |
 | COLLIDE.CPP | all 14: the per-frame entry (`CheckMeForCollisions`: track objects, road edges, the registry), object against object (`CheckForCollisionBetween`, `TestObjectVertices`, `DoActualObjectCollisionCheck`, the `CHECK_*VERTEX_WITH_DIRS*` tests, `DoObjectObjectCollision`), against a plane or a fixed object (`TestWithPlane`, `DoObjectFixedObjectCollision`), `LimitAngularVel`, `CheckAccuratePointRadiusCollision`, `ClearCollisionRegistry` |
 | CARS.CPP | the per-tick bookkeeping (`ManageBureaucracy`: the road span and position, the speed down the road, the way a human faces, `FindCurrentLap`, `FindTotalSlice`, `SortCars`, `Randomize`), `CheckForAccidentScenes`, after the collisions (`Car_DoPostCollisionStuff`: the body's pitch and roll; `DoExtraCarCollisionProcessing`: blowouts, the player's reset, sparks, parts falling off, crash smoke and sounds, the reset timer; `Car_DoSkiddingStuff`; `SetAudioCalls`), the tyres' marks, splashes, leaves and skid sounds (`Car_TireSkiddingStuff`, `AddCarSfx`), a crashed car put back on the road (`ResetCollidedCars`, `ResetVariablesAfterACollision`, `SetCarUpForHiRezSim`), `DoGravityEffectsOnAcc` (not yet: the set-up and clean-up) |
+| CONTROL.CPP | both: a human's controls each fourth tick from the pad or the replay's road-side control (`Control_Human`: throttle, brake, steering, the event button's wingman calls, indicators, hazard lights, a police car's siren, headlights and high beams, the gear), `Control_AI` (empty) |
+| SCHEDULE.CPP | all 6: the schedules' function lists by priority (`CreateNewSchedule`, `CleanUpSchedule`, `AddFunction`, `DeleteFunction`, `Execute`, which calls them through their pointers) and how often a far-off object is simulated (`ExecuteCheck`) |
+| SIMQUEUE.CPP | all 8: the players' pad input queued ahead for the ticks (`Put`, `SetCurrentInput`, `GetCurrentInput`, `IsBlocking`, `SetLag`, `StartUp`, `Reset`, `CleanUp`) |
 | STATS.CPP | all 7: laps, lap times and top speeds (`TrackStats`), the race order (`ClearPosition`, `GetPosition`, `GetNumOpponents`), the catch-up glue (`DoPlayerGlue`), the checkpoint gaps and the race's end (`TrackEndGame`), the final standings (`ExtrapolateOpponentTimes`) |
 
-The races seldom bring cars together, so COLLIDE.CPP is covered mostly by fuzz tests (`cargo test -p nfs4 collide`): two cars of the race RAM put against each other, closing fast or slow, one sometimes a track object, compared with the original.
+The races seldom bring cars together, so COLLIDE.CPP is covered mostly by fuzz tests (`cargo test -p nfs4 collide`): two cars of the race RAM put against each other, closing fast or slow, one sometimes a track object, compared with the original. `collide::tests::collision_stack_fuzz` compares the stack a collision leaves: the AI, still recompiled, reads it after (`schedule::tests::execute_fuzz` runs the race's schedules whole, cars shuffled, and found it).
 
 The race logic's fuzz tests (`cargo test -p nfs4 stats`, `cars`) shuffle the standings, laps, setups (one human or two, reversed tracks, time trials), collisions (each kind of hit, damage, blowouts, cars on their roofs) and skids (either axle's, each wheel's surface, rain, leaves, the big vehicles) on the race RAM; `cars::tests::skid_stack_fuzz` and `reset_stack_fuzz` compare the stack the skids and the resets leave (the skid marks' colours come from it), and `newton::tests::set_initial_stack_fuzz` that of putting a car on the road (the NEWTON and BWORLDSM functions under it). `nfshs decomp-check --laps 1` with `BOOT_SCRIPT="8:-,150:x"` (9480 frames) runs the whole race decompiled with the same RAM after every frame.
 
-Next: the rest of the race logic (CONTROL.CPP, the schedules and SIM.CPP's loop, the set-up), the AI and the front end.
+Next: the rest of the race logic (SIM.CPP's loop, the set-up), the AI and the front end.

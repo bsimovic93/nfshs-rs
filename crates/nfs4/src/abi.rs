@@ -34,6 +34,16 @@ pub fn call(c: &mut Cpu, f: fn(&mut Cpu), args: &[u32]) -> u32 {
 /// on the stack (for code that later reads stack it never wrote). Every register is as
 /// before afterwards.
 pub fn call_from(c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32, saved: &[u32]) -> u32 {
+    call_with(c, args, ra, saved, |c| {
+        f(c);
+        if c.cont != 0 {
+            c.run_cont();
+        }
+    })
+}
+
+/// [`call_from`] with `run` making the call.
+fn call_with(c: &mut Cpu, args: &[u32], ra: u32, saved: &[u32], run: impl FnOnce(&mut Cpu)) -> u32 {
     let r = c.r;
     c.r[16..16 + saved.len()].copy_from_slice(saved);
     let sp = c.r[29];
@@ -46,10 +56,7 @@ pub fn call_from(c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32, saved: &[u
     }
     c.r[31] = ra;
     let (hi, lo) = (c.hi, c.lo);
-    f(c);
-    if c.cont != 0 {
-        c.run_cont();
-    }
+    run(c);
     let ret = c.r[2];
     (c.r, c.hi, c.lo) = (r, hi, lo);
     ret
@@ -82,6 +89,16 @@ impl Saved {
         let r = c.r;
         self.load(c);
         let v = call_from(c, f, args, ra, &[]);
+        c.r = r;
+        v
+    }
+
+    /// [`Saved::call`] through a function pointer (the original's `jalr`): the function at
+    /// `addr`, wherever it is (decompiled, recompiled or the host's).
+    pub fn call_ptr(&self, c: &mut Cpu, addr: u32, args: &[u32], ra: u32) -> u32 {
+        let r = c.r;
+        self.load(c);
+        let v = call_with(c, args, ra, &[], |c| c.call(addr));
         c.r = r;
         v
     }

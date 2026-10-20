@@ -18,12 +18,13 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else '../crates/nfs4/src/types.rs'
 
 # The structures the ported code uses; whatever they hold by value comes with them.
 ROOTS = ['Car_tObj', 'Physics_tWheelAccStruct', 'Car_tSpecs', 'Udff_tInfo', 'BWorldSm_Pos', 'Trk_NewSlice', 'GameSetup_tData', 'Chunk', 'Trk_NewStrip', 'Trk_NewSimSlice', 'Trk_NewSimQuad', 'tNormalCacheEntry', 'AICop_spikeBelt_t',
-         'GameSetup_tCarData']
+         'GameSetup_tCarData', 'Input_tResults', 'Sched_tSchedule', 'sim_queue', 'Sim_tSimGlobalVar', 'Sim_tSimSystemVar']
 
 # Rust names for some structures (others: underscores and the `_t` type prefix dropped).
 NAMES = {'coorddef': 'Coord', 'matrixtdef': 'Matrix', 'BO_tNewtonObj': 'NewtonObj',
          'BO_tNewtonCollisionInfo': 'NewtonCollisionInfo', 'Physics_tWheelAccStruct': 'WheelAcc',
-         'Car_tObj': 'Car', 'CCOORD16': 'Coord16'}
+         'Car_tObj': 'Car', 'CCOORD16': 'Coord16', 'Sim_tSimGlobalVar': 'SimGlobal',
+         'Sim_tSimSystemVar': 'SimVar'}
 
 # (struct, field) -> (offset, type) where retail differs from the development build.
 OVERRIDES = {}
