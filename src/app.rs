@@ -189,8 +189,8 @@ impl App {
         // original drives the car then) are menus
         let driving = match &self.screen {
             Screen::Race(game) => {
-                let paused = game.sim.frame_snapshot().paused;
-                [!paused && game.racers.first().is_none_or(|r| r.finish_time.is_none()), !paused]
+                let s = game.sim.frame_snapshot();
+                [!s.paused && !s.player_finished, !s.paused]
             }
             _ => [false; 2],
         };

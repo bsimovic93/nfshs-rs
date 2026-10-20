@@ -30,6 +30,8 @@ pub struct OriginalSim {
     /// Camera mode still to reach once the race starts (None when done).
     camera_target: Option<i16>,
     camera_wait: u32,
+    /// The race restarted (the pause menu's Restart) in the last `advance`.
+    pub restarted: bool,
     /// The view the snapshot and camera are of (split screen: 0 top, 1 bottom).
     view: std::cell::Cell<usize>,
     /// Split screen: the newest frame as each view sees it (see `Snapshot::for_view`).
@@ -96,6 +98,7 @@ impl OriginalSim {
             render_t: 0.0,
             camera_target: Some(PREFERRED_CAMERA.load(Ordering::Relaxed)),
             camera_wait: 0,
+            restarted: false,
             view: Default::default(),
             view_snaps: Vec::new(),
         })
@@ -163,6 +166,7 @@ impl OriginalSim {
             render_t: 0.0,
             camera_target: Some(PREFERRED_CAMERA.load(Ordering::Relaxed)),
             camera_wait: 0,
+            restarted: false,
             view: Default::default(),
             view_snaps: Vec::new(),
         };
@@ -378,6 +382,7 @@ impl OriginalSim {
 
     /// Run the 60 Hz frames that fall into `dt` seconds of real time.
     pub fn advance(&mut self, dt: f32, input: &Input) {
+        self.restarted = false;
         if self.stopped {
             return;
         }
@@ -429,12 +434,29 @@ impl OriginalSim {
                 Self::race_sticks(input.sticks, input.left || input.pad1 & pad::LEFT != 0, input.right || input.pad1 & pad::RIGHT != 0),
                 Self::race_sticks(input.pad2_sticks, input.pad2 & pad::LEFT != 0, input.pad2 & pad::RIGHT != 0),
             ];
+            let (ticks, finished) = (snap.sim_ticks, snap.player_finished);
             if let Err(e) = self.thread.step(FrameInput { buttons, buttons2: input.pad2, want_ram: false, sticks }) {
                 log::warn!("original simulation ended: {e:#}");
                 self.stopped = true;
                 return;
             }
+            // the race restarted (the pause menu's Restart): its clock starts again, so the
+            // poses kept from before would be taken for the newest, and the game is back in the
+            // bumper view as at a race's start (not so a replay after the finish: it has its
+            // own cameras)
+            let restarted = self.thread.last.sim_ticks < ticks;
+            if restarted {
+                self.history.clear();
+                if !finished {
+                    self.camera_target = Some(PREFERRED_CAMERA.load(Ordering::Relaxed));
+                    self.camera_wait = 0;
+                }
+                self.restarted = true;
+            }
             self.record();
+            if restarted {
+                self.render_t = self.history.back().map_or(0.0, |h| h.0);
+            }
             self.accum -= FRAME;
         }
         // simulation time runs at real speed (16 steps of 1/64 s per 15 frames), so the render

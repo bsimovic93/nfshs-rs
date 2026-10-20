@@ -41,6 +41,9 @@ pub mod addr {
     pub const CAR_LIST: u32 = 0x8011_0CA0;
     /// The human players' cars (`Car_tObj *[2]`).
     pub const HUMAN_CARS: u32 = 0x8011_0D0C;
+    /// `Car_tObj.stats.finishType`: 0 while the car races, then 2 when it crosses the line
+    /// (1: given a time when the race ends without it).
+    pub const CAR_FINISH_TYPE: u32 = 0x390;
     /// Start sequence stage read by `Hud_Render321Go`: 0 = intro, 1..3 = lights, 4 = go.
     pub const COUNTDOWN_STAGE: u32 = 0x8013_D930;
     /// 128 Hz timer tick counter.
@@ -726,6 +729,9 @@ pub struct Snapshot {
     pub cars: Vec<CarState>,
     /// The human players' cars (`Car_tObj` addresses, 0 when there is none): player 1, 2.
     pub player_cars: [u32; 2],
+    /// Player 1's race is over (see [`addr::CAR_FINISH_TYPE`]): the original drives the car
+    /// and its results screens take the pad.
+    pub player_finished: bool,
     /// See [`addr::COUNTDOWN_STAGE`].
     pub countdown: u8,
     pub ticks: u32,
@@ -922,6 +928,10 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
         frame,
         field: info.field,
         player_cars: [c.m.r32(addr::HUMAN_CARS), c.m.r32(addr::HUMAN_CARS + 4)],
+        player_finished: {
+            let car = c.m.r32(addr::HUMAN_CARS);
+            car != 0 && c.m.r32(car + addr::CAR_FINISH_TYPE) != 0
+        },
         cars,
         countdown: c.m.r8(addr::COUNTDOWN_STAGE),
         ticks: c.m.r32(addr::TICKS),

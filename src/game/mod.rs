@@ -169,7 +169,6 @@ impl Game {
         if path.len() < 2 {
             path = track.nodes.clone();
         }
-        let n = path.len();
 
         let snap = sim.snapshot();
         // (the player's car as the original runs it: GS_SET can make it a police car)
@@ -301,11 +300,23 @@ impl Game {
             }
         }
         game.sync_original();
-        for r in &mut game.racers {
-            r.progress = Self::nearest_path(&game.path, r.car.pos, 0, n / 2 + 1);
-            r.laps_done = if r.progress > n / 2 { -1 } else { 0 };
-        }
+        game.start_progress();
         Ok(game)
+    }
+
+    /// The race from its start: no time, no laps yet, each car where it stands on the path
+    /// (a lap to go to the line when on the grid behind it).
+    fn start_progress(&mut self) {
+        let n = self.path.len();
+        self.race_time = 0.0;
+        self.phase = Phase::Intro;
+        for r in &mut self.racers {
+            r.progress = Self::nearest_path(&self.path, r.car.pos, 0, n / 2 + 1);
+            r.laps_done = if r.progress > n / 2 { -1 } else { 0 };
+            r.lap_time = 0.0;
+            r.best_lap = None;
+            r.finish_time = None;
+        }
     }
 
     /// The views the original draws: 2 split screen (top and bottom), else 1.
@@ -418,6 +429,10 @@ impl Game {
         }
         self.sim.advance(frame_dt, &input);
         self.sync_original();
+        // the pause menu's Restart: the cars are back on the grid
+        if self.sim.restarted {
+            self.start_progress();
+        }
         let racing = matches!(self.phase, Phase::Racing | Phase::Finished);
         self.track_progress(frame_dt, racing);
     }
