@@ -55,6 +55,51 @@ pub fn call_from(c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32, saved: &[u
     ret
 }
 
+/// The callee-saved registers as the original function being ported has them, s0..s7 and fp
+/// (`[8]`), kept up to date by the port where the original sets them. Its callees' prologues
+/// save them in their frames, where later code reads them as leftovers (see
+/// [`leave_prologue`]); a port that calls out often keeps one of these instead of naming the
+/// registers at each call.
+#[derive(Clone, Copy, Debug)]
+pub struct Saved(pub [u32; 9]);
+
+impl Saved {
+    /// The registers as the function was entered with (its caller's).
+    pub fn of(c: &Cpu) -> Self {
+        let mut s = [0; 9];
+        s[..8].copy_from_slice(&c.r[16..24]);
+        s[8] = c.r[30];
+        Self(s)
+    }
+
+    fn load(&self, c: &mut Cpu) {
+        c.r[16..24].copy_from_slice(&self.0[..8]);
+        c.r[30] = self.0[8];
+    }
+
+    /// [`call_from`] the call site returning to `ra`, with these registers.
+    pub fn call(&self, c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32) -> u32 {
+        let r = c.r;
+        self.load(c);
+        let v = call_from(c, f, args, ra, &[]);
+        c.r = r;
+        v
+    }
+
+    /// Run the decompiled function `f` (the original at `addr`) as called from the call site
+    /// returning to `ra`, with these registers: its prologue's stores left as the original's
+    /// would be, and the registers as before afterwards.
+    pub fn enter<R>(&self, c: &mut Cpu, addr: u32, ra: u32, f: impl FnOnce(&mut Cpu) -> R) -> R {
+        let r = c.r;
+        self.load(c);
+        c.r[31] = ra;
+        leave_prologue(c, addr, None, &[]);
+        let v = f(c);
+        c.r = r;
+        v
+    }
+}
+
 /// Call the function at `addr` (a function pointer the original calls with `jalr`), wherever
 /// it is: decompiled, recompiled or the host's.
 pub fn call_addr(c: &mut Cpu, addr: u32, args: &[u32]) -> u32 {

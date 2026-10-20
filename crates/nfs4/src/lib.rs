@@ -89,6 +89,8 @@ pub static FUNCS: &[Func] = &[
     func(0x8008_67a8, "Cars_DoGravityEffectsOnAcc", cars::abi_do_gravity_effects_on_acc),
     func(0x8008_69b0, "Cars_SetAudioCalls", cars::abi_set_audio_calls),
     func(0x8008_755c, "Cars_DoExtraCarCollisionProcessing", cars::abi_do_extra_car_collision_processing),
+    func(0x8008_7eb0, "Cars_AddCarSfx", cars::abi_add_car_sfx),
+    func(0x8008_82f0, "Car_TireSkiddingStuff", cars::abi_tire_skidding_stuff),
     func(0x8008_a184, "Cars_FindTotalSlice", cars::abi_find_total_slice),
     func(0x8008_a1f0, "Car_DoSkiddingStuff", cars::abi_do_skidding_stuff),
     func(0x8008_a300, "Car_DoPostCollisionStuff", cars::abi_do_post_collision_stuff),

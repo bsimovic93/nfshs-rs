@@ -67,6 +67,8 @@
 800867a8 Cars_DoGravityEffectsOnAcc
 800869b0 Cars_SetAudioCalls
 8008755c Cars_DoExtraCarCollisionProcessing
+80087eb0 Cars_AddCarSfx
+800882f0 Car_TireSkiddingStuff
 8008a184 Cars_FindTotalSlice
 8008a1f0 Car_DoSkiddingStuff
 8008a300 Car_DoPostCollisionStuff

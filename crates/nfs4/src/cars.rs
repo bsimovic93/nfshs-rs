@@ -3,11 +3,11 @@
 use crate::abi;
 use crate::fixed::fixedmult;
 use crate::globals::{
-    ACCIDENT_SLICE, BWORLDSM_SLICES, CARS_LIST, FAST_RANDOM, GAME_SETUP, HUMAN_RACE_CARS, NUM_AI_CARS, NUM_CARS, NUM_SLICES, RAND_SEED,
+    ACCIDENT_SLICE, ADD_CAR_WHEEL_DELAY, FRONT_LIMIT, LEAF_PIXMAP, REAR_LIMIT, BWORLDSM_SLICES, CARS_LIST, FAST_RANDOM, GAME_SETUP, HUMAN_RACE_CARS, NUM_AI_CARS, NUM_CARS, NUM_SLICES, RAND_SEED,
     RAND_TEMP, SCENE_LOADED, SIM_COUNTER, SORTED_LIST, TOTAL_SORTED_LIST,
 };
-use crate::newton;
-use crate::types::{Car, Matrix};
+use crate::types::{Car, Coord, Matrix};
+use crate::{bworldsm, newton};
 use ps1rt::{Cpu, Mem};
 
 /// `Car_tObj.carFlags`: a human player's car.
@@ -535,6 +535,275 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
     })
 }
 
+/// `Cars_kSmokingSurface` (the speed above which a wheel throws up its surface, 0 for none),
+/// `Cars_kConvertFromRoadToSfxType` (the effect), by surface.
+const SMOKING_SURFACE: u32 = 0x8011_0B44;
+const ROAD_TO_SFX_TYPE: u32 = 0x8011_0BC4;
+/// The effect of a wet surface: a splash.
+const SFX_SPLASH: i32 = 8;
+/// `Car_tObj.render.currentCarType`: the police helicopter (no wheels on the road), and the
+/// first of the big vehicles (their wheels' effects last twice as long, and leave no marks).
+const CAR_TYPE_HELICOPTER: i16 = 28;
+const CAR_TYPE_BIG: i16 = 29;
+
+/// `Cars_AddCarSfx` (CARS.CPP, 0x80087eb0): a wheel's skid mark and the effect it throws up
+/// at `pos`. Skidding (`kind` 1 to 3, `on`), the mark goes on from where the wheel last left
+/// it, as dark as the axle's skid and the load on the wheel (`TrgSfx_AddSkidmark`); not
+/// skidding, a mark is ended. The surface's effect (dust, a splash...) comes faster than its
+/// speed, or skidding hard (`TrgSfx_AddCarWheelSfx`); a heavy skid (kind 3) throws none of
+/// its own.
+pub fn add_car_sfx(c: &mut Cpu, car: Car, wheel: u32, pos: Coord, surface: i32, kind: i32, on: i32) {
+    abi::frame(c, 72, |c, _| {
+        let m = &mut c.m;
+        let surface = surface as u32 & 0xF;
+        let mut smoking = table(m, SMOKING_SURFACE, surface);
+        let sfx = table(m, ROAD_TO_SFX_TYPE, surface);
+        let bit = 1u32.wrapping_shl(wheel) as i32;
+        if kind == 3 {
+            smoking = 0;
+        }
+        let id = car.n().obj_id(m) as u32;
+        let car_type = car.render().current_car_type(m);
+        let big = car_type >= CAR_TYPE_BIG;
+        let mut delay = ADD_CAR_WHEEL_DELAY.get(m);
+        if big {
+            delay = delay.wrapping_shl(1);
+        }
+        if car_type == CAR_TYPE_HELICOPTER {
+            return;
+        }
+        let regs = abi::Saved([car.0, wheel, id, pos.0, bit as u32, delay as u32, smoking as u32, sfx as u32, c.r[30]]);
+        // the front wheels by the front skid, the rear by the rear; the left wheel (0 or 2)
+        // unloaded by the weight thrown right, the right loaded
+        let front = (wheel as i32) < 2;
+        let skid = |m: &mut Mem| if front { car.front_skid(m) } else { car.rear_skid(m) };
+        let (left, light, ra_on, ra_off) = if front { (0, 0x1_8000, 0x8008_81b8, 0x8008_8230) } else { (2, 0x1_0000, 0x8008_802c, 0x8008_80a4) };
+        let last = car.old_skid_point(wheel);
+        if on != 0 && kind != 0 && !big {
+            let (p, l) = (pos.get(m), last.get(m));
+            if p.x != l.x || p.z != l.z {
+                let right = car.g_transfer_right(m);
+                let load = if wheel == left { skid(m).wrapping_sub(right) } else { skid(m).wrapping_add(right) };
+                let dark = load.wrapping_sub(light).clamp(0, 0x6_0000);
+                let args = [id, wheel, pos.0, 0, dark as u32, car.0, kind.wrapping_sub(1) as u32];
+                regs.call(c, nfs4rc::f_800bc1f0, &args, ra_on); // TrgSfx_AddSkidmark
+                // (where the mark went, moved on with the car)
+                let p = pos.get(&mut c.m);
+                last.set(&mut c.m, p);
+                car.update_old_skid_state(&mut c.m, |s| s | bit);
+            }
+        } else if car.old_skid_state(m) & bit != 0 {
+            let dark = skid(m);
+            regs.call(c, nfs4rc::f_800bc1f0, &[id, wheel, last.0, 1, dark as u32, car.0, 0], ra_off);
+            car.update_old_skid_state(&mut c.m, |s| s.wrapping_sub(bit));
+        }
+        let m = &mut c.m;
+        let vel = car.n().linear_vel().0;
+        let speed = car.n().speed_xz(m);
+        if sfx == SFX_SPLASH {
+            let args = [id, wheel, pos.0, SFX_SPLASH as u32, vel, delay as u32, speed as u32];
+            regs.call(c, nfs4rc::f_800bc090, &args, 0x8008_8270); // TrgSfx_AddCarSplash
+        } else if (smoking < speed && smoking > 0) || skid(m) > 0x4_0000 {
+            regs.call(c, nfs4rc::f_800bbf10, &[id, wheel, pos.0, sfx as u32, vel, delay as u32], 0x8008_82c4); // TrgSfx_AddCarWheelSfx
+        }
+    })
+}
+
+/// The return addresses of `Car_TireSkiddingStuff`'s calls for each wheel: `Cars_AddCarSfx`
+/// not skidding and skidding, `TrgSfx_AddSkidmark`, `TrgSfx_AddCarSplash`,
+/// `TrgSfx_AddCarExtraCheck`, `random`, `TrgSfx_AddCarExtraSfx`.
+const TIRE_SKIDDING_RA: [[u32; 7]; 4] = [
+    [0x8008_8754, 0x8008_8734, 0x8008_8798, 0x8008_896c, 0x8008_89bc, 0x8008_89cc, 0x8008_8bbc],
+    [0x8008_8e08, 0x8008_8de8, 0x8008_8e4c, 0x8008_9020, 0x8008_9070, 0x8008_9080, 0x8008_9270],
+    [0x8008_94bc, 0x8008_949c, 0x8008_94f8, 0x8008_96dc, 0x8008_972c, 0x8008_973c, 0x8008_992c],
+    [0x8008_9b78, 0x8008_9b58, 0x8008_9bb4, 0x8008_9d98, 0x8008_9de8, 0x8008_9df8, 0x8008_9fe8],
+];
+
+/// A wheel's place on the road for `Car_TireSkiddingStuff`, at sp+48: the car's position at
+/// ground level (sp+32) out to the side by the wheel's offset (`spread` more, along the
+/// body's sideways axis: sp+64) and forward or back (along its forward axis: at `fwd_at`).
+fn wheel_point(m: &mut Mem, sp: u32, car: Car, wheel: u32, spread: i32, fwd_at: u32) {
+    let n = car.n();
+    let front = wheel < 2;
+    let (x, z) = if front { (n.wheel_front_x(m), n.wheel_front_z(m)) } else { (n.wheel_back_x(m), n.wheel_back_z(m)) };
+    let axis = |m: &mut Mem, r: u32, d: i32| [0, 1, 2].map(|k| (d / 256).wrapping_mul(n.orient_mat().m(m, 3 * r + k)) / 256);
+    let side = axis(m, 0, x.wrapping_add(spread));
+    let fwd = axis(m, 2, z);
+    for k in 0..3 {
+        m.w32(sp + 64 + 4 * k as u32, side[k] as u32);
+        m.w32(sp + fwd_at + 4 * k as u32, fwd[k] as u32);
+    }
+    for k in 0..3 {
+        let at = m.r32(sp + 32 + 4 * k as u32) as i32;
+        let at = if wheel & 1 == 0 { at.wrapping_sub(side[k]) } else { at.wrapping_add(side[k]) };
+        let at = if front { at.wrapping_add(fwd[k]) } else { at.wrapping_sub(fwd[k]) };
+        m.w32(sp + 48 + 4 * k as u32, at as u32);
+    }
+}
+
+/// `Car_TireSkiddingStuff` (CARS.CPP, 0x800882f0): what the tyres leave and throw up, for
+/// a car near a player and on the ground. The axles' skids (at most 10, the front less for
+/// a car sliding fast along) make marks where each wheel skids (or the surface itself marks,
+/// moving), ended where it stops; in the rain (outside tunnels) the wheels on a wet surface
+/// splash, and on a leafy one, fast, throw up leaves. Then the skids' sounds: a human's
+/// always, on the surface under the car (rain on the road, for the tyre type on dirt).
+pub fn tire_skidding_stuff(c: &mut Cpu, car: Car) {
+    abi::frame(c, 168, |c, sp| {
+        let n = car.n();
+        let mut r = abi::Saved::of(c);
+        let m = &mut c.m;
+        // (the speed in whole m/s)
+        let moving = n.speed_xz(m) >> 16;
+        r.0[0] = car.0;
+        r.0[5] = 0;
+        r.0[7] = 0;
+        r.0[8] = moving as u32;
+        let weather = GAME_SETUP.weather(m);
+        let rain = weather != 0 && !bworldsm::tunnel_flag_sm(c, n.sim_road_info());
+        r.0[7] = rain as u32;
+        let m = &mut c.m;
+        let near = n.dist_to_player(m) <= 0x3B_FFFF && n.obj_altitude(m) < 26214;
+        r.0[5] = near as u32;
+        // the skids: s3 (at sp+116), s6 (the front's for the marks), s4 (sp+120)
+        let (mut front, front_marks, mut rear);
+        if near {
+            let p = n.position().get(m);
+            for (k, v) in [p.x, n.ground_elevation(m), p.z].into_iter().enumerate() {
+                m.w32(sp + 32 + 4 * k as u32, v as u32);
+            }
+            front = 0;
+            let skid = car.front_skid(m);
+            front_marks = if skid > 0 {
+                front = skid.min(0xA_0000);
+                m.w32(sp + 116, front as u32);
+                car.set_front_skid(m, front);
+                let along = car.linear_vel_ch().z(m);
+                if along.wrapping_abs() > 0x14_0000 { front.wrapping_sub((along / 8).wrapping_abs()) } else { front }
+            } else {
+                m.w32(sp + 116, 0);
+                0
+            };
+            let skid = car.rear_skid(m);
+            rear = if skid > 0 { skid.min(0xA_0000) } else { 0 };
+            if skid > 0 {
+                car.set_rear_skid(m, rear);
+            }
+            m.w32(sp + 120, rear as u32);
+        } else {
+            (front, front_marks, rear) = (0, 0, 0);
+            m.w32(sp + 116, 0);
+            m.w32(sp + 120, 0);
+        }
+        (r.0[3], r.0[4], r.0[6]) = (front as u32, rear as u32, front_marks as u32);
+
+        // the skids' sound's surface: in the rain, the rain's (outside tunnels) where the
+        // ground has none; else on dirt by the tyre type
+        let on = n.drive_surface_type(m) as u32;
+        let audio = table(m, AUDIO_ROAD_SURFACE, on);
+        m.w32(sp + 112, audio as u32);
+        if weather > 0 {
+            if audio == 0 && !bworldsm::tunnel_flag_sm(c, n.sim_road_info()) {
+                c.m.w32(sp + 112, 16);
+            }
+        } else if audio == 0 {
+            match car.car_info(m).tire_type(m) {
+                0 => m.w32(sp + 112, 18),
+                2 => m.w32(sp + 112, 17),
+                _ => {}
+            }
+        }
+
+        for w in 0..4u32 {
+            let ra = &TIRE_SKIDDING_RA[w as usize];
+            let is_front = w < 2;
+            let m = &mut c.m;
+            let surface = car.wheel(w).road_surface_type(m);
+            let mut kind = table(m, SKID_MARK_SURFACE, surface as u32 & 0xF);
+            if car.wheel(w).wheel_in_air(m) != 0 {
+                kind = 0;
+            }
+            (r.0[1], r.0[2]) = (kind as u32, surface as u32);
+            let skid = if is_front { front } else { rear };
+            if near && ((skid != 0 && !rain) || (kind >= 2 && moving != 0)) {
+                wheel_point(m, sp, car, w, 0, 80);
+                let (limit, over) = if is_front { (FRONT_LIMIT.get(m), front_marks) } else { (REAR_LIMIT.get(m), rear) };
+                if kind >= 2 && limit < over {
+                    kind = 3;
+                    r.0[1] = 3;
+                }
+                let on = (kind != 0) as i32;
+                m.w32(sp + 16, kind as u32);
+                m.w32(sp + 20, on as u32);
+                r.enter(c, 0x8008_7eb0, ra[on as usize], |c| add_car_sfx(c, car, w, Coord(sp + 48), surface, kind, on));
+            } else if car.old_skid_state(m) & (1 << w) != 0 {
+                // the mark ends
+                let dark = if is_front { car.front_skid(m) } else { car.rear_skid(m) };
+                if is_front {
+                    car.update_old_skid_state(m, |s| s.wrapping_sub(1 << w));
+                }
+                let id = n.obj_id(m) as u32;
+                r.call(c, nfs4rc::f_800bc1f0, &[id, w, car.old_skid_point(w).0, 1, dark as u32, car.0, 0], ra[2]); // TrgSfx_AddSkidmark
+                if !is_front {
+                    car.update_old_skid_state(&mut c.m, |s| s.wrapping_sub(1 << w));
+                }
+            }
+
+            // a splash in the rain
+            let m = &mut c.m;
+            if rain && kind == 1 && moving != 0 && near {
+                wheel_point(m, sp, car, w, 0, if w == 0 { 96 } else { 80 });
+                let (id, speed) = (n.obj_id(m) as u32, n.speed_xz(m) as u32);
+                r.call(c, nfs4rc::f_800bc090, &[id, w, sp + 48, 10, n.linear_vel().0, 0, speed], ra[3]); // TrgSfx_AddCarSplash
+                // (a skid that sounds)
+                if is_front {
+                    front = front.max(1);
+                    r.0[3] = front as u32;
+                } else {
+                    rear = rear.max(1);
+                    r.0[4] = rear as u32;
+                }
+            }
+
+            // leaves
+            let m = &mut c.m;
+            if surface & 0x20 != 0 && LEAF_PIXMAP.get(m) != 0 && n.speed_xz(m) > 0xA_0000 {
+                let id = n.obj_id(m) as u32;
+                if r.call(c, nfs4rc::f_800bbfc0, &[id, w], ra[4]) != 0 {
+                    // TrgSfx_AddCarExtraCheck
+                    let spread = ((r.call(c, nfs4rc::f_800e8394, &[], ra[5]) & 7) as i32 - 4) * 0x3333; // random
+                    let m = &mut c.m;
+                    wheel_point(m, sp, car, w, spread, 80);
+                    let (speed, y, light) = (n.speed_xz(m), m.r32(sp + 52), car.render().light(m));
+                    let id = n.obj_id(m) as u32;
+                    let args = [id, w, sp + 48, 13, n.linear_vel().0, speed as u32, y, light as u32];
+                    r.call(c, nfs4rc::f_800bbffc, &args, ra[6]); // TrgSfx_AddCarExtraSfx
+                }
+            }
+        }
+
+        // the skids' sounds: front (channel 18, sounding while on), rear (20, at half)
+        let m = &mut c.m;
+        let audio = m.r32(sp + 112) as i32;
+        let human = car.car_flags(m) & CAR_HUMAN != 0;
+        for (skid, at, bit, start, channel) in [(front, 116, 1, 2, 18), (rear, 120, 2, 4, 20)] {
+            if skid != 0 {
+                if (m.r32(sp + at) as i32) < 0 {
+                    m.w32(sp + at, 0);
+                }
+                if m.r32(sp + at) == 0 && !human {
+                    continue;
+                }
+                let force = if bit == 1 { skid } else { skid / 2 };
+                set_audio_calls_from(m, sp, car, start, channel, 2, audio, force, 0);
+                car.update_old_audio_skid_state(m, |s| s | bit);
+            } else if car.old_audio_skid_state(m) & bit != 0 {
+                set_audio_calls_from(m, sp, car, start + 1, channel, 2, audio, 0, 0);
+                car.update_old_audio_skid_state(m, |s| s.wrapping_sub(bit));
+            }
+        }
+    })
+}
+
 /// `Car_DoSkiddingStuff` (CARS.CPP, 0x8008a1f0): on the wheels, the tyres' skids
 /// (`Car_TireSkiddingStuff`) and the body's scraping sound stopped; on its side or roof, the
 /// body scraping along the road (its sound on the surface, faster than 2 m/s and on the
@@ -548,7 +817,9 @@ pub fn do_skidding_stuff(c: &mut Cpu, car: Car) {
                 set_audio_calls_from(m, sp, car, 5, 20, 1, 0, 0, 0);
                 car.update_old_audio_skid_state(m, |s| s - 4);
             }
-            abi::call(c, nfs4rc::f_800882f0, &[car.0]); // Car_TireSkiddingStuff
+            let mut regs = abi::Saved::of(c);
+            regs.0[0] = car.0;
+            regs.enter(c, 0x8008_82f0, 0x8008_a258, |c| tire_skidding_stuff(c, car));
             return;
         }
         let on = n.drive_surface_type(m) as u32;
@@ -636,6 +907,15 @@ pub fn abi_set_audio_calls(c: &mut Cpu) {
 
 pub fn abi_do_extra_car_collision_processing(c: &mut Cpu) {
     do_extra_car_collision_processing(c, Car(c.r[4]));
+}
+
+pub fn abi_add_car_sfx(c: &mut Cpu) {
+    let (kind, on) = (abi::arg(c, 4) as i32, abi::arg(c, 5) as i32);
+    add_car_sfx(c, Car(c.r[4]), c.r[5], Coord(c.r[6]), c.r[7] as i32, kind, on);
+}
+
+pub fn abi_tire_skidding_stuff(c: &mut Cpu) {
+    tire_skidding_stuff(c, Car(c.r[4]));
 }
 
 pub fn abi_do_skidding_stuff(c: &mut Cpu) {
@@ -857,5 +1137,137 @@ mod tests {
                 None
             });
         }
+    }
+
+    /// The race's cars skidding or not: either axle's skid (none, light, past the limits,
+    /// beyond 10), thrown sideways, sliding fast along; near a player or far, on the ground or
+    /// in the air; each wheel in the air or on any surface (leafy, wet); old marks going on or
+    /// ended; rain or not, any tyres; the helicopter and the big vehicles; leaves on the track.
+    fn skidding(c: &mut Cpu, rng: &mut Rng) {
+        crash(c, rng);
+        let m = &mut c.m;
+        let mut pick = |n: u32| (rng.next() % n as u64) as i32;
+        GAME_SETUP.set_weather(m, [0, 0, 1, -1][pick(4) as usize]);
+        LEAF_PIXMAP.set(m, [0, 0, 0x8010_0000][pick(3) as usize]);
+        for i in 0..NUM_CARS.get(m) {
+            let car = Car(m.r32(CARS_LIST + 4 * i as u32));
+            let n = car.n();
+            let skid = |p: &mut dyn FnMut(u32) -> i32| [0, 0, p(0x4_0000), p(0x10_0000), 0xA_0000, -p(0x1000), 0x1_0000 + p(0x6_0000)][p(7) as usize];
+            car.set_front_skid(m, skid(&mut pick));
+            car.set_rear_skid(m, skid(&mut pick));
+            car.set_g_transfer_right(m, pick(0x8_0000) - 0x4_0000);
+            car.linear_vel_ch().set_z(m, [0, pick(0x40_0000) - 0x20_0000, 0x14_0001, -0x14_0001][pick(4) as usize]);
+            n.set_dist_to_player(m, [0, pick(0x40_0000), 0x3B_FFFF, 0x3C_0000][pick(4) as usize]);
+            n.set_obj_altitude(m, [0, pick(0x8000), 26213, 26214][pick(4) as usize]);
+            n.set_speed_xz(m, [0, pick(0x2_0000), pick(0x40_0000), 0xA_0001, 0xA_0000][pick(5) as usize]);
+            n.set_ground_elevation(m, pick(0x100_0000) - 0x80_0000);
+            for w in 0..4 {
+                let wheel = car.wheel(w);
+                wheel.set_wheel_in_air(m, (pick(4) == 0) as i32);
+                wheel.set_road_surface_type(m, pick(16) | [0, 0x20, 0x10, 0x40][pick(4) as usize]);
+                let p = n.position().get(m);
+                let near = crate::vec::Vec3::new(p.x + pick(0x4_0000) - 0x2_0000, p.y, p.z + pick(0x4_0000) - 0x2_0000);
+                car.old_skid_point(w).set(m, near);
+            }
+            car.set_old_skid_state(m, pick(16));
+            car.set_old_audio_skid_state(m, pick(4));
+            car.set_audio_count(m, pick(2));
+            car.render().set_current_car_type(m, [pick(28) as i16, 28, 29, 30, 0][pick(5) as usize]);
+            car.car_info(m).set_tire_type(m, pick(3));
+        }
+    }
+
+    #[test]
+    fn skid_fuzz() {
+        // Cars_AddCarSfx on its own: a wheel at a point near or at the old mark's, any surface,
+        // kind and switch (put at SCRATCH for the arguments)
+        fn sfx_args(c: &mut Cpu, rng: &mut Rng) {
+            skidding(c, rng);
+            let m = &mut c.m;
+            let mut pick = |n: u32| (rng.next() % n as u64) as i32;
+            let car = Car(m.r32(CARS_LIST + 4 * pick(3) as u32));
+            let w = pick(4) as u32;
+            let mut p = car.old_skid_point(w).get(m);
+            if pick(3) != 0 {
+                p.x += pick(0x1000) - 0x800;
+            }
+            if pick(3) != 0 {
+                p.z += pick(0x1000) - 0x800;
+            }
+            let at = crate::test_util::SCRATCH;
+            Coord(at).set(m, p);
+            for (k, v) in [car.0, w, pick(64) as u32, pick(4) as u32, [0, 1, pick(3)][pick(3) as usize] as u32].into_iter().enumerate() {
+                m.w32(at + 16 + 4 * k as u32, v);
+            }
+        }
+        let args = |c: &mut Cpu| {
+            let at = crate::test_util::SCRATCH;
+            let a = [0, 1, 2, 3, 4].map(|k| c.m.r32(at + 16 + 4 * k));
+            vec![a[0], a[1], at, a[2], a[3], a[4]]
+        };
+        against_original("Cars_AddCarSfx", 10_000, 0xADD5, sfx_args, nfs4rc::f_80087eb0, &args, |c, a| {
+            // (the caller's stack arguments)
+            c.m.w32(c.r[29] + 16, a[4]);
+            c.m.w32(c.r[29] + 20, a[5]);
+            add_car_sfx(c, Car(a[0]), a[1], Coord(a[2]), a[3] as i32, a[4] as i32, a[5] as i32);
+            None
+        });
+        for k in 0..3 {
+            against_original("Car_TireSkiddingStuff", 5_000, 0x71BE + k as u64, skidding, nfs4rc::f_800882f0, &|c| vec![car(c, k)], |c, a| {
+                tire_skidding_stuff(c, Car(a[0]));
+                None
+            });
+            against_original("Car_DoSkiddingStuff", 3_000, 0xD051 + k as u64, skidding, nfs4rc::f_8008a1f0, &|c| vec![car(c, k)], |c, a| {
+                do_skidding_stuff(c, Car(a[0]));
+                None
+            });
+        }
+    }
+
+    /// The skids entered from recompiled code leave the stack (on the scratchpad, as in a
+    /// race) as the original does, the registers the callees save included: the skid marks'
+    /// colours take a byte the stack held before.
+    #[test]
+    fn skid_stack_fuzz() {
+        let Some(ram) = crate::test_util::race_ram() else { return };
+        let mut rng = Rng(0x57AC);
+        let mut c = crate::test_util::cpu_with(&ram);
+        let top = 0x1F80_03DC - 32;
+        let mut mismatches = 0;
+        for i in 0..3000 {
+            c.m.ram.copy_from_slice(&ram);
+            skidding(&mut c, &mut rng);
+            let car = car(&mut c, (rng.next() % 3) as u32);
+            let fill = rng.next() as u8;
+            let state = c.m.ram.clone();
+            let enter = |c: &mut Cpu| {
+                c.m.scratch = [fill; 0x400];
+                for r in (16..24).chain([30]) {
+                    c.r[r] = 0x8000_0000 | r as u32;
+                }
+                c.r[29] = top;
+                c.r[4] = car;
+                c.r[31] = 0x8008_a3ac;
+            };
+            enter(&mut c);
+            nfs4rc::f_8008a1f0(&mut c);
+            let want = (c.m.scratch, c.m.ram.clone());
+            c.m.ram.copy_from_slice(&state);
+            enter(&mut c);
+            crate::decomp(&mut c, 0x8008_a1f0);
+            let differ: Vec<usize> = (0..0x400).step_by(4).filter(|&w| want.0[w..w + 4] != c.m.scratch[w..w + 4]).collect();
+            let ram = crate::test_util::ram_diff(&want.1, &c.m.ram);
+            if !differ.is_empty() || !ram.is_empty() {
+                mismatches += 1;
+                if mismatches <= 5 {
+                    let word = |s: &[u8], w: usize| u32::from_le_bytes(s[w..w + 4].try_into().unwrap());
+                    for &w in differ.iter().take(8) {
+                        eprintln!("case {i}: {:#x}: expected {:#010x} got {:#010x}", 0x1F80_0000 + w, word(&want.0, w), word(&c.m.scratch, w));
+                    }
+                    crate::test_util::report("Car_DoSkiddingStuff", i, &want.1, &c.m.ram, &ram);
+                }
+            }
+        }
+        assert_eq!(mismatches, 0, "the skids leave the stack otherwise than the original");
     }
 }

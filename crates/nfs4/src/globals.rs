@@ -212,3 +212,11 @@ pub const TOTAL_SORTED_LIST: u32 = 0x8011_0DE4;
 /// `SceneLoaded`: the accident scene's objects are on the track; `accidentSlice`: where.
 pub const SCENE_LOADED: I32 = I32(0x8013_DA4C);
 pub const ACCIDENT_SLICE: I32 = I32(0x8013_DB08);
+/// `frontLimit`, `rearLimit`: how hard an axle skids before its skid marks are the heaviest
+/// kind.
+pub const FRONT_LIMIT: I32 = I32(0x8013_DAD8);
+pub const REAR_LIMIT: I32 = I32(0x8013_DADC);
+/// `gTAddCarWheelDelay`: how long a wheel's sound effect lasts (doubled for the big vehicles).
+pub const ADD_CAR_WHEEL_DELAY: I32 = I32(0x8013_E7D8);
+/// `gLeafPixmap`: the track's leaves (`Draw_tPixMap *`; none on most tracks).
+pub const LEAF_PIXMAP: U32 = U32(0x8013_E4F0);
