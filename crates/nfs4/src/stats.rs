@@ -380,6 +380,9 @@ pub fn track_end_game(c: &mut Cpu) {
                 let human = human_car(m, i);
                 let mine = human.stats().slice_total(m).min(length);
                 m.w32(sp + 20, mine as u32);
+                // (the length and the human kept over the Stats_GetPosition calls)
+                m.w32(sp + 24, length as u32);
+                m.w32(sp + 28, i as u32);
                 let place = get_position(m, human);
                 let target = if place == 1 {
                     2

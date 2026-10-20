@@ -254,6 +254,30 @@ pub const SIM_GLOBAL: crate::types::SimGlobal = crate::types::SimGlobal(0x8011_F
 pub const SIM_VAR: crate::types::SimVar = crate::types::SimVar(0x8011_F37C);
 /// `countdown`: the start's countdown beeps played; `counter`: the tick of each (`int[4]`).
 pub const COUNTDOWN: u32 = 0x8013_D930;
-pub const COUNTDOWN_TICKS: I32s = I32s(0x8011_F354, 4);
+pub const COUNTDOWN_TICKS: u32 = 0x8011_F354;
 /// `gMasterSFXLevel`: the sound effects' volume now (faded in at the start).
 pub const MASTER_SFX_LEVEL: I32 = I32(0x8013_D948);
+/// `quitType`: how the race was left (1: as usual); `skipRender`: no frame drawn this time
+/// round (the simulation is ahead); `InBetween`: a slowed replay's frame between two ticks;
+/// `unPauseDelay`: the clock time the pause menu takes input from.
+pub const QUIT_TYPE: I32 = I32(0x8013_E714);
+pub const SKIP_RENDER: I32 = I32(0x8013_E710);
+pub const IN_BETWEEN: I32 = I32(0x8013_E6F0);
+pub const UNPAUSE_DELAY: I32 = I32(0x8013_E70C);
+/// `clock_realTime`: the clocks the timer interrupt runs (+4 in 1/x s ticks, +8 in frames).
+pub const CLOCK_TICKS: I32 = I32(0x8011_1EEC);
+pub const CLOCK_FRAMES: I32 = I32(0x8011_1EF0);
+/// `Input_gTime`: the 32 Hz ticks the pad has been read for; `Input_gLookBehind`: each
+/// player looks behind (`int[2]`).
+pub const INPUT_TIME: I32 = I32(0x8013_E4F8);
+pub const LOOK_BEHIND: u32 = 0x8013_E508;
+/// `Replay_ReplayMode` (0, 1 racing; 2 watching a replay; 3 the attract mode),
+/// `Replay_ReplayInterface`: the replay's controls.
+pub const REPLAY_MODE: I32 = I32(0x8013_E6D8);
+pub const REPLAY_INTERFACE: crate::types::ReplayInterface = crate::types::ReplayInterface(0x8011_82E4);
+/// `Device_gForcePause`: pause (the pad was pulled out...); `Device_gPausePortIndex`: the
+/// pad that paused (a byte).
+pub const FORCE_PAUSE: I32 = I32(0x8013_EA60);
+pub const PAUSE_PORT_INDEX: u32 = 0x8013_EA7C;
+/// `Hud_ActivateCDPlayer`: show the music player's song name.
+pub const HUD_ACTIVATE_CD_PLAYER: I32 = I32(0x8013_EC10);

@@ -481,8 +481,22 @@ pub fn abi_limit_angular_velocity(c: &mut Cpu) {
 /// `Newton_CalculateRoadPositionFromSliceAndPosition` (NEWTON.CPP, 0x800a46c4): how far
 /// `pos` is from `slice`'s centre along `across` (a direction).
 pub fn calculate_road_position_from_slice_and_position(c: &mut Cpu, slice: i32, pos: Coord, across: Coord) -> i32 {
-    let (cen, p, a) = (center(&mut c.m, slice), pos.get(&mut c.m), across.get(&mut c.m));
-    mul_8_8(a.x, p.x.wrapping_sub(cen.x)).wrapping_add(mul_8_8(a.y, p.y.wrapping_sub(cen.y))).wrapping_add(mul_8_8(a.z, p.z.wrapping_sub(cen.z)))
+    // (the centre and the offset kept in its frame, at 0 and 16)
+    abi::frame(c, 32, |c, sp| {
+        let p = pos.get(&mut c.m);
+        road_offset(&mut c.m, slice, p, across, sp)
+    })
+}
+
+/// How far `p` is from `slice`'s centre along `across`, the centre and the offset left at
+/// `at` and `at + 16` as the originals leave them.
+fn road_offset(m: &mut Mem, slice: i32, p: Vec3, across: Coord, at: u32) -> i32 {
+    let cen = center(m, slice);
+    Coord(at).set(m, cen);
+    let d = Vec3::new(p.x.wrapping_sub(cen.x), p.y.wrapping_sub(cen.y), p.z.wrapping_sub(cen.z));
+    Coord(at + 16).set(m, d);
+    let a = across.get(m);
+    mul_8_8(a.x, d.x).wrapping_add(mul_8_8(a.y, d.y)).wrapping_add(mul_8_8(a.z, d.z))
 }
 
 pub fn abi_calculate_road_position_from_slice_and_position(c: &mut Cpu) {
@@ -492,8 +506,14 @@ pub fn abi_calculate_road_position_from_slice_and_position(c: &mut Cpu) {
 /// `Newton_CalculateRoadPosition` (NEWTON.CPP, 0x800a47b8): how far the object is across the
 /// road from its slice's centre.
 pub fn calculate_road_position(c: &mut Cpu, obj: NewtonObj) -> i32 {
-    let slice = obj.sim_road_info().slice(&mut c.m) as i32;
-    calculate_road_position_from_slice_and_position(c, slice, obj.position(), Coord(obj.road_matrix().0))
+    // (the centre, the offset and the position kept in its frame, at 0, 16 and 32)
+    abi::frame(c, 48, |c, sp| {
+        let m = &mut c.m;
+        let slice = obj.sim_road_info().slice(m) as i32;
+        let p = obj.position().get(m);
+        Coord(sp + 32).set(m, p);
+        road_offset(m, slice, p, Coord(obj.road_matrix().0), sp)
+    })
 }
 
 pub fn abi_calculate_road_position(c: &mut Cpu) {

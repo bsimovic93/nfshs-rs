@@ -30,6 +30,7 @@ pub mod mathnfs;
 pub mod newton;
 pub mod physics;
 pub mod schedule;
+pub mod sim;
 pub mod simqueue;
 pub mod stats;
 pub mod types;
@@ -194,6 +195,14 @@ pub static FUNCS: &[Func] = &[
     func(0x800b_7054, "Sched_AddFunction", schedule::abi_add_function),
     func(0x800b_7108, "Sched_DeleteFunction", schedule::abi_delete_function),
     func(0x800b_71d4, "Sched_Execute", schedule::abi_execute),
+    func(0x800b_7248, "Sim_StartUp", sim::abi_start_up),
+    func(0x800b_735c, "Sim_Restart", sim::abi_restart),
+    func(0x800b_7428, "Sim_CleanUp", sim::abi_clean_up),
+    func(0x800b_74cc, "Sim_FadeInSFX", sim::abi_fade_in_sfx),
+    func(0x800b_754c, "Sim_ProcessSimSchedules", sim::abi_process_sim_schedules),
+    func(0x800b_7870, "Sim_ProcessPause", sim::abi_process_pause),
+    func(0x800b_7974, "Sim_CheckForPause", sim::abi_check_for_pause),
+    func(0x800b_7a20, "Sim_MainGameLoop", sim::abi_main_game_loop),
     func(0x800b_7fc0, "SimQueue_StartUp", simqueue::abi_start_up),
     func(0x800b_7fec, "SimQueue_Reset", simqueue::abi_reset),
     func(0x800b_808c, "SimQueue_CleanUp", simqueue::abi_clean_up),
@@ -419,9 +428,29 @@ pub(crate) mod test_util {
         let mut c = Cpu::new(m);
         c.dispatch = nfs4rc::dispatch;
         c.dispatch_at = nfs4rc::dispatch_at;
+        c.inner_hook = Some(no_host);
         c.r[28] = GP;
         c.r[29] = 0x801F_FF00;
         c
+    }
+
+    /// The game's host answers the library calls that aren't recompiled (pads, VSync, CD:
+    /// from 0x800e0000 on, `src/ps1/host/system.rs`), and the race RAM's pointers into them
+    /// are unset here; so is the pause menu's vtable when its race isn't paused. Such calls
+    /// return 0 (`PadGetState` a stable pad, 6), for the original and the port alike; code
+    /// that isn't recompiled below that (jumps into functions) is interpreted as usual.
+    fn no_host(c: &mut Cpu, addr: u32) -> bool {
+        if addr != 0 && addr < 0x800E_0000 {
+            return false;
+        }
+        if addr != 0 && (c.dispatch)(c, addr) {
+            if c.cont != 0 {
+                c.run_cont();
+            }
+            return true;
+        }
+        c.r[2] = if addr == 0x800F_07FC { 6 } else { 0 };
+        true
     }
 
     /// The words where two RAM images differ, but for the dead stack below 0x801FFF00.
@@ -489,8 +518,11 @@ pub(crate) mod test_util {
             shuffle(&mut c, &mut rng);
             let a = args(&mut c, &mut rng);
             let fill = rng.next() as u8;
+            // (the seed from the case, not the generator: the cases stay those the tests had)
+            let seed = (i ^ (fill as u32) << 16).wrapping_mul(0x9E37_79B9);
             let state = c.m.ram.clone();
             let enter = |c: &mut Cpu| {
+                c.rand_seed = seed;
                 c.m.scratch = [fill; 0x400];
                 c.m.ram[DEAD].fill(fill);
                 for r in (16..24).chain([30]) {
@@ -509,6 +541,7 @@ pub(crate) mod test_util {
             original(&mut c);
             c.decomp = plain;
             let want = (c.m.scratch, c.m.ram.clone());
+            let want_seed = c.rand_seed;
             c.m.ram.copy_from_slice(&state);
             enter(&mut c);
             crate::decomp(&mut c, addr);
@@ -520,10 +553,10 @@ pub(crate) mod test_util {
             let stack = (0..0x400u32).step_by(4).map(|w| 0x1F80_0000 + w).chain(DEAD.step_by(4).map(|a| 0x8000_0000 | a as u32));
             let differ: Vec<u32> = stack.filter(|&at| word_at(&want.0, &want.1, at) != word_at(&c.m.scratch, &c.m.ram, at)).collect();
             let ram = ram_diff(&want.1, &c.m.ram);
-            if !differ.is_empty() || !ram.is_empty() {
+            if !differ.is_empty() || !ram.is_empty() || c.rand_seed != want_seed {
                 mismatches += 1;
                 if mismatches <= 5 {
-                    eprintln!("{name} case {i}: {} stack words differ", differ.len());
+                    eprintln!("{name} case {i}: {} stack words differ; rand state {:#x}, the original {want_seed:#x}", differ.len(), c.rand_seed);
                     for &at in differ.iter().take(if who { 64 } else { 12 }) {
                         let by = if who { owner(&mut c, at) } else { String::new() };
                         let (w, g) = (word_at(&want.0, &want.1, at), word_at(&c.m.scratch, &c.m.ram, at));

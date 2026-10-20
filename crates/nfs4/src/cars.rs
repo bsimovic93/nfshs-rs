@@ -119,7 +119,8 @@ pub fn calculate_road_span(m: &mut Mem, car: Car) -> i32 {
 
 /// `Cars_CalculateRoadPosition` (CARS.CPP, 0x8008b954): `Newton_CalculateRoadPosition`.
 pub fn calculate_road_position(c: &mut Cpu, car: Car) -> i32 {
-    newton::calculate_road_position(c, car.n())
+    // (Newton_CalculateRoadPosition saves nothing on entry)
+    abi::frame(c, 24, |c, _| newton::calculate_road_position(c, car.n()))
 }
 
 /// `Cars_CalcVelDownRoad` (CARS.CPP, 0x8008b974): the car's speed along the road.
@@ -152,19 +153,27 @@ pub fn randomize(m: &mut Mem) {
 /// and the track's animations.
 pub fn manage_bureaucracy(c: &mut Cpu) {
     abi::frame(c, 40, |c, _| {
+        // s4 the index, s3 its place in the list, s2 the car; s1 and s0 left by a human's
+        // heading (its products with the slice's forward axis)
+        let mut r = abi::Saved::of(c);
         let mut i = 0;
-        while i < NUM_CARS.get(&mut c.m) {
+        loop {
+            (r.0[4], r.0[3]) = (i as u32, CARS_LIST + 4 * i as u32);
+            if i >= NUM_CARS.get(&mut c.m) {
+                break;
+            }
             let car = Car(c.m.r32(CARS_LIST + 4 * i as u32));
+            r.0[2] = car.0;
             i += 1;
             if car.n().active(&mut c.m) == 0 {
                 continue;
             }
             let span = calculate_road_span(&mut c.m, car);
             car.set_road_span(&mut c.m, span);
-            let pos = calculate_road_position(c, car);
+            let pos = r.enter(c, 0x8008_b954, 0x8008_baf0, |c| calculate_road_position(c, car));
             car.set_road_position(&mut c.m, pos);
-            abi::call(c, nfs4rc::f_80073e74, &[car.0]); // AIWorld_CalculateLaneInfo
-            if abi::call(c, nfs4rc::f_8006a6ec, &[car.0]) != 0 {
+            r.call(c, nfs4rc::f_80073e74, &[car.0], 0x8008_bafc); // AIWorld_CalculateLaneInfo
+            if r.call(c, nfs4rc::f_8006a6ec, &[car.0], 0x8008_bb04) != 0 {
                 // AIPhysics_UseCoolPhysics
                 let v = calc_vel_down_road(&mut c.m, car);
                 car.set_current_speed(&mut c.m, v);
@@ -180,10 +189,10 @@ pub fn manage_bureaucracy(c: &mut Cpu) {
                     // under 3 m/s down the road: the way the car points along the slice
                     let slice = (BWORLDSM_SLICES.get(m) as u32).wrapping_add((car.n().sim_road_info().slice(m) as i32 as u32) << 5);
                     let fwd = car.n().orient_mat();
-                    let along = (0..3u32).fold(0i32, |s, k| {
-                        let f = fwd.m(m, 6 + k);
-                        s.wrapping_add(fixedmult(f, m.r8(slice + 15 + k) as i8 as i32))
-                    });
+                    let part = |m: &mut Mem, k: u32| fixedmult(fwd.m(m, 6 + k), m.r8(slice + 15 + k) as i8 as i32);
+                    let (x, y, z) = (part(m, 0), part(m, 1), part(m, 2));
+                    (r.0[1], r.0[0]) = (x as u32, y as u32);
+                    let along = x.wrapping_add(y).wrapping_add(z);
                     if along > 0 { 1 } else { -1 }
                 };
                 car.set_direction(m, dir);
@@ -195,8 +204,8 @@ pub fn manage_bureaucracy(c: &mut Cpu) {
         }
         sort_cars(&mut c.m);
         randomize(&mut c.m);
-        abi::call(c, nfs4rc::f_8006f7a4, &[]); // AISpeeds_MaintainLeaderBoard
-        abi::call(c, nfs4rc::f_800c8568, &[]); // DrawW_DoObjectAnimations
+        r.call(c, nfs4rc::f_8006f7a4, &[], 0x8008_bc28); // AISpeeds_MaintainLeaderBoard
+        r.call(c, nfs4rc::f_800c8568, &[], 0x8008_bc30); // DrawW_DoObjectAnimations
     })
 }
 

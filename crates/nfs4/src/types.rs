@@ -2287,6 +2287,47 @@ impl RelCoord16 {
     pub fn update_z(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.z(m)); self.set_z(m, v) }
 }
 
+/// `tReplayInterface` (0x20 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ReplayInterface(pub u32);
+impl ReplayInterface {
+    pub const SIZE: u32 = 0x20;
+    /// Element `i` of an array of `tReplayInterface` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 int pause`
+    pub fn pause(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_pause(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_pause(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.pause(m)); self.set_pause(m, v) }
+    /// `+0x004 int speed`
+    pub fn speed(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_speed(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_speed(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.speed(m)); self.set_speed(m, v) }
+    /// `+0x008 int end`
+    pub fn end(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_end(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_end(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.end(m)); self.set_end(m, v) }
+    /// `+0x00c int camera`
+    pub fn camera(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_camera(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_camera(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.camera(m)); self.set_camera(m, v) }
+    /// `+0x010 int selection`
+    pub fn selection(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
+    pub fn set_selection(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
+    pub fn update_selection(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.selection(m)); self.set_selection(m, v) }
+    /// `+0x014 int depressed`
+    pub fn depressed(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x14); m.r32(a) as i32 }
+    pub fn set_depressed(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x14); m.w32(a, v as u32) }
+    pub fn update_depressed(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.depressed(m)); self.set_depressed(m, v) }
+    /// `+0x018 int changeCamera`
+    pub fn change_camera(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x18); m.r32(a) as i32 }
+    pub fn set_change_camera(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x18); m.w32(a, v as u32) }
+    pub fn update_change_camera(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.change_camera(m)); self.set_change_camera(m, v) }
+    /// `+0x01c int statsScreen`
+    pub fn stats_screen(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x1c); m.r32(a) as i32 }
+    pub fn set_stats_screen(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x1c); m.w32(a, v as u32) }
+    pub fn update_stats_screen(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.stats_screen(m)); self.set_stats_screen(m, v) }
+}
+
 /// `Sched_tFunctionSchedule` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct SchedFunctionSchedule(pub u32);
@@ -2663,8 +2704,9 @@ pub static STRUCTS: &[(&str, u32, &[Field])] = &[
     ("BO_tNewtonCollisionInfo", 0x30, &[Field { off: 0x0, size: 0x4, name: "collided", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "impulse", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "otherObj", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "sfxType", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "disableCollisionTimer", elem: 0x0, sub: None }, Field { off: 0x14, size: 0xc, name: "collisionPoint", elem: 0x0, sub: Some(14) }, Field { off: 0x20, size: 0x4, name: "lastCollision", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "lastOtherObj", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "lastImpulse", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "lastTime", elem: 0x0, sub: None }]),
     ("BO_tNewtonObj", 0x240, &[Field { off: 0x0, size: 0x4, name: "objID", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "oldSlice", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "totalSlice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x84, name: "simRoadInfo", elem: 0x0, sub: Some(4) }, Field { off: 0x8c, size: 0x4, name: "distToPlayer", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x1, name: "simOptz", elem: 0x0, sub: None }, Field { off: 0x91, size: 0x1, name: "active", elem: 0x0, sub: None }, Field { off: 0x92, size: 0x1, name: "reOrthoCounter", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "gravityMult", elem: 0x0, sub: None }, Field { off: 0x98, size: 0x4, name: "cumulatedRot", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x4, name: "lastUpdated", elem: 0x0, sub: None }, Field { off: 0xa0, size: 0xc, name: "position", elem: 0x0, sub: Some(14) }, Field { off: 0xac, size: 0xc, name: "linearVel", elem: 0x0, sub: Some(14) }, Field { off: 0xb8, size: 0x4, name: "mass", elem: 0x0, sub: None }, Field { off: 0xbc, size: 0x4, name: "massInv", elem: 0x0, sub: None }, Field { off: 0xc0, size: 0x4, name: "speedXZ", elem: 0x0, sub: None }, Field { off: 0xc4, size: 0x4, name: "xRelRoadCenter", elem: 0x0, sub: None }, Field { off: 0xc8, size: 0x2, name: "positionXZ", elem: 0x0, sub: None }, Field { off: 0xca, size: 0x2, name: "eIndexEnvMap", elem: 0x0, sub: None }, Field { off: 0xcc, size: 0x2, name: "eIndexShadow", elem: 0x0, sub: None }, Field { off: 0xd0, size: 0x8, name: "wheelRot", elem: 0x4, sub: None }, Field { off: 0xd8, size: 0x4, name: "wheelFrontX", elem: 0x0, sub: None }, Field { off: 0xdc, size: 0x4, name: "wheelFrontZ", elem: 0x0, sub: None }, Field { off: 0xe0, size: 0x4, name: "wheelBackX", elem: 0x0, sub: None }, Field { off: 0xe4, size: 0x4, name: "wheelBackZ", elem: 0x0, sub: None }, Field { off: 0xe8, size: 0x4, name: "wheelWidthF", elem: 0x0, sub: None }, Field { off: 0xec, size: 0x4, name: "wheelWidthB", elem: 0x0, sub: None }, Field { off: 0xf0, size: 0x24, name: "orientMat", elem: 0x0, sub: Some(22) }, Field { off: 0x114, size: 0xc, name: "angularVel", elem: 0x0, sub: Some(14) }, Field { off: 0x120, size: 0x4, name: "moInertia", elem: 0x0, sub: None }, Field { off: 0x124, size: 0x4, name: "moInertiaInv", elem: 0x0, sub: None }, Field { off: 0x128, size: 0xc, name: "orientationToGround", elem: 0x0, sub: Some(14) }, Field { off: 0x134, size: 0xc, name: "dimension", elem: 0x0, sub: Some(14) }, Field { off: 0x140, size: 0x4, name: "dimensionRadius", elem: 0x0, sub: None }, Field { off: 0x144, size: 0x24, name: "roadMatrix", elem: 0x0, sub: Some(22) }, Field { off: 0x168, size: 0xc, name: "roadCenterPoint", elem: 0x0, sub: Some(14) }, Field { off: 0x174, size: 0x4, name: "roadGravityModifier", elem: 0x0, sub: None }, Field { off: 0x178, size: 0x4, name: "roadYaw", elem: 0x0, sub: None }, Field { off: 0x17c, size: 0x2, name: "flightTime", elem: 0x0, sub: None }, Field { off: 0x17e, size: 0x2, name: "deadTimer", elem: 0x0, sub: None }, Field { off: 0x180, size: 0x4, name: "groundElevation", elem: 0x0, sub: None }, Field { off: 0x184, size: 0x4, name: "groundVel", elem: 0x0, sub: None }, Field { off: 0x188, size: 0x4, name: "objAltitude", elem: 0x0, sub: None }, Field { off: 0x18c, size: 0x30, name: "collision", elem: 0x0, sub: Some(23) }, Field { off: 0x1bc, size: 0x4, name: "groundSurfaceType", elem: 0x0, sub: None }, Field { off: 0x1c0, size: 0x4, name: "driveSurfaceType", elem: 0x0, sub: None }, Field { off: 0x1c4, size: 0x24, name: "shadowMat", elem: 0x0, sub: Some(22) }, Field { off: 0x1e8, size: 0x30, name: "shadowCoord", elem: 0xc, sub: Some(14) }, Field { off: 0x218, size: 0x28, name: "damage", elem: 0x4, sub: None }]),
     ("RelCoord16", 0x4, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "z", elem: 0x0, sub: None }]),
+    ("tReplayInterface", 0x20, &[Field { off: 0x0, size: 0x4, name: "pause", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "speed", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "end", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "camera", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "selection", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "depressed", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "changeCamera", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "statsScreen", elem: 0x0, sub: None }]),
     ("Sched_tFunctionSchedule", 0x10, &[Field { off: 0x0, size: 0x4, name: "priority", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "function", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "var1", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "var2", elem: 0x0, sub: None }]),
-    ("Sched_tSchedule", 0x18, &[Field { off: 0x0, size: 0x4, name: "maxNumFunctions", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "numFunctions", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x10, name: "func", elem: 0x10, sub: Some(26) }]),
+    ("Sched_tSchedule", 0x18, &[Field { off: 0x0, size: 0x4, name: "maxNumFunctions", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "numFunctions", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x10, name: "func", elem: 0x10, sub: Some(27) }]),
     ("Sim_tSimGlobalVar", 0x18, &[Field { off: 0x0, size: 0x4, name: "gameStarted", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "gameTicks", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "time32Hz", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "schedule64Hz", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "schedule32Hz", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "schedule32Hz2", elem: 0x0, sub: None }]),
     ("sim_queue", 0x20c, &[Field { off: 0x0, size: 0x100, name: "Buffer", elem: 0x4, sub: Some(21) }, Field { off: 0x100, size: 0x100, name: "Validity", elem: 0x4, sub: None }, Field { off: 0x200, size: 0x4, name: "HeadTime", elem: 0x0, sub: None }, Field { off: 0x204, size: 0x8, name: "TailTime", elem: 0x4, sub: None }]),
     ("Sim_tSimSystemVar", 0x1c, &[Field { off: 0x0, size: 0x4, name: "restartGame", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "endSimGame", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "pauseSim", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "keyRelease", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "quickPauseSim", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "goalClockTicks", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "currentClockTicks", elem: 0x0, sub: None }]),

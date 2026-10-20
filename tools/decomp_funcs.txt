@@ -166,6 +166,16 @@
 800b7108 Sched_DeleteFunction
 800b71d4 Sched_Execute
 
+# SIM.CPP (ProcessPause and CheckForPause start 8 bytes before retail_syms.tsv's addresses)
+800b7248 Sim_StartUp
+800b735c Sim_Restart
+800b7428 Sim_CleanUp
+800b74cc Sim_FadeInSFX
+800b754c Sim_ProcessSimSchedules
+800b7870 Sim_ProcessPause
+800b7974 Sim_CheckForPause
+800b7a20 Sim_MainGameLoop
+
 # SIMQUEUE.CPP
 800b7fc0 SimQueue_StartUp
 800b7fec SimQueue_Reset
