@@ -66,6 +66,9 @@
 # CARS.CPP
 800867a8 Cars_DoGravityEffectsOnAcc
 800869b0 Cars_SetAudioCalls
+80087020 Cars_ResetVariablesAfterACollision
+80087088 Cars_ResetCollidedCars
+800874e8 Cars_SetCarUpForHiRezSim
 8008755c Cars_DoExtraCarCollisionProcessing
 80087eb0 Cars_AddCarSfx
 800882f0 Car_TireSkiddingStuff

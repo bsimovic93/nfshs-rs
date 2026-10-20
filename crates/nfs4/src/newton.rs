@@ -1006,7 +1006,10 @@ pub fn calc_dist_to_closest_player_car(c: &mut Cpu, obj: NewtonObj) {
         if was < 2 {
             return;
         }
-        abi::call(c, nfs4rc::f_800874e8, &[car.0]);
+        // (with this function's s0..s2: the object, NO_SIM_DIST, hidden)
+        let mut r = abi::Saved::of(c);
+        r.0[..3].copy_from_slice(&[obj.0, NO_SIM_DIST as u32, hidden as u32]);
+        r.enter(c, 0x8008_74e8, 0x800a_1f98, |c| crate::cars::set_car_up_for_hi_rez_sim(c, car));
         find_closest_quad(c, obj);
         update_road_geometry(c, obj);
         limit_cars_to_drivable_dist(c, car);

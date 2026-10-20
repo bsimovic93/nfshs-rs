@@ -3,10 +3,10 @@
 use crate::abi;
 use crate::fixed::fixedmult;
 use crate::globals::{
-    ACCIDENT_SLICE, ADD_CAR_WHEEL_DELAY, FRONT_LIMIT, LEAF_PIXMAP, REAR_LIMIT, BWORLDSM_SLICES, CARS_LIST, FAST_RANDOM, GAME_SETUP, HUMAN_RACE_CARS, NUM_AI_CARS, NUM_CARS, NUM_SLICES, RAND_SEED,
+    ACCIDENT_SLICE, ADD_CAR_WHEEL_DELAY, AITUNE_DRIVE_SIDE, FRONT_LIMIT, LEAF_PIXMAP, REAR_LIMIT, BWORLDSM_SLICES, CARS_LIST, FAST_RANDOM, GAME_SETUP, HUMAN_RACE_CARS, NUM_AI_CARS, NUM_CARS, NUM_SLICES, RAND_SEED,
     RAND_TEMP, SCENE_LOADED, SIM_COUNTER, SORTED_LIST, TOTAL_SORTED_LIST,
 };
-use crate::types::{Car, Coord, Matrix};
+use crate::types::{Car, Coord, Matrix, TrkNewSlice};
 use crate::{bworldsm, newton};
 use ps1rt::{Cpu, Mem};
 
@@ -302,6 +302,172 @@ fn set_audio_calls_from(m: &mut Mem, sp: u32, car: Car, kind: i32, channel: i32,
     set_audio_calls(m, car, kind, channel, surface1, surface2, force, pan);
 }
 
+/// `Cars_ResetVariablesAfterACollision` (CARS.CPP, 0x80087020): a car put back on the road
+/// still: no spin, no acceleration, on the ground, no collision, not smoking; its controls
+/// and engine reset (`Physics_ResetCar`).
+pub fn reset_variables_after_a_collision(c: &mut Cpu, car: Car) {
+    abi::frame(c, 24, |c, _| {
+        let m = &mut c.m;
+        let n = car.n();
+        for v in [n.angular_vel(), car.angular_vel_ch(), car.linear_acc_ch()] {
+            v.set(m, Default::default());
+        }
+        n.set_flight_time(m, 0);
+        let hit = n.collision();
+        hit.set_collided(m, 0);
+        hit.set_last_collision(m, 0);
+        hit.set_impulse(m, 0);
+        hit.set_other_obj(m, crate::types::NewtonObj(0));
+        hit.set_disable_collision_timer(m, 0);
+        n.set_ground_vel(m, 0);
+        n.set_speed_xz(m, 0);
+        car.collision().set_smoking(m, 0);
+        n.set_road_gravity_modifier(m, 0);
+        crate::physics::reset_car(c, car);
+    })
+}
+
+/// `Cars_ResetCollidedCars` (CARS.CPP, 0x80087088): put a crashed car back on the road (`how`
+/// 0: only if it isn't upright and settled on the road; 1: always; 2: where it is, not 4
+/// slices on the way it goes), never with a tyre blown. Moved on past an accident scene; to
+/// the side of the road its grid place puts it (odd places one side, even the other, by the
+/// way it goes and the side traffic keeps to), its own width in from the edge; tried there
+/// again while that is off the road (41 more times), then in the middle of the road; still.
+pub fn reset_collided_cars(c: &mut Cpu, car: Car, how: i32) {
+    abi::frame(c, 56, |c, sp| {
+        let mut r = abi::Saved::of(c);
+        r.0[1] = how as u32;
+        r.0[2] = car.0;
+        let offset = Coord(sp + 16);
+        r.call(c, nfs4rc::f_800e4f04, &[offset.0, 0, 12], 0x8008_70bc); // memset
+        let m = &mut c.m;
+        let n = car.n();
+        let blowout = car.blowout(m);
+        let dir = car.desired_direction(m);
+        r.0[3] = dir as u32;
+        car.collision().set_smoking(m, 0);
+        if blowout != 0 {
+            return;
+        }
+        if how == 0 {
+            let up = dot_256(row(m, n.road_matrix(), 1), row(m, n.orient_mat(), 1));
+            let spin = n.angular_vel();
+            let surface = n.drive_surface_type(m);
+            if up > 0xC000
+                && spin.x(m) <= 0xFFFF
+                && spin.z(m) <= 0xFFFF
+                && surface != 14
+                && surface != 0
+                && n.sim_road_info().sim_quad(m).0 != 0
+                && n.flight_time(m) < 6
+                && n.obj_altitude(m) <= 0xFFFF
+            {
+                car.collision().set_smoking(m, 0);
+                return;
+            }
+        }
+        let slices = |m: &mut Mem| NUM_SLICES.get(m);
+        let wrap = |m: &mut Mem, s: i32, by: i32| {
+            let s = s.wrapping_add(by);
+            if by < 0 {
+                if s < 0 { s.wrapping_add(slices(m)) } else { s }
+            } else if s < slices(m) {
+                s
+            } else {
+                s.wrapping_sub(slices(m))
+            }
+        };
+        let here = n.sim_road_info().slice(m) as i32;
+        let mut slice = wrap(m, here, dir.wrapping_shl(2));
+        if how == 2 {
+            slice = here;
+        }
+        // clear of an accident scene (within 5 slices, as the original reckons it)
+        let accident = ACCIDENT_SLICE.get(m);
+        if accident > 0 {
+            let near = if accident + 5 < slices(m) {
+                slice < accident + 5 && {
+                    let back = accident - 5;
+                    if back < 0 { back.wrapping_add(slices(m)) < slice } else { back < slice }
+                }
+            } else {
+                slice < accident - (slices(m) - 5) && {
+                    let back = accident - 5;
+                    if back < 0 { accident + (slices(m) - 5) < slice } else { back < slice }
+                }
+            };
+            if near {
+                slice = wrap(m, slice, dir.wrapping_mul(5));
+            }
+        }
+        r.0[0] = slice as u32;
+        r.0[4] = 0;
+        // the side: by the grid place, the way the car goes and the side traffic keeps to
+        let mut left = car.car_index(m) % 2 != 0;
+        if dir == -1 {
+            left = !left;
+        }
+        if AITUNE_DRIVE_SIDE.get(m) == -1 {
+            left = !left;
+        }
+        let road = TrkNewSlice(BWORLDSM_SLICES.get(m) as u32).at(slice as u32);
+        let width = (n.dimension().x(m) / 256).wrapping_mul(384);
+        let x = if left {
+            let edge = ((road.avg_paved_width_lf(m) as i32) << 15).wrapping_mul((road.lane_count(m) >> 4) as i32);
+            edge.wrapping_neg().wrapping_add(width)
+        } else {
+            let edge = ((road.avg_paved_width_rt(m) as i32) << 15).wrapping_mul((road.lane_count(m) & 0xF) as i32);
+            edge.wrapping_sub(width)
+        };
+        offset.set_x(m, x);
+        let place = |c: &mut Cpu, r: &abi::Saved, ra: u32| {
+            r.enter(c, 0x800a_22a8, ra, |c| newton::set_initial_slice_position_orientation_etc(c, n, slice, offset, dir));
+        };
+        place(c, &r, 0x8008_744c);
+        let mut tries = 0;
+        r.0[1] = 0;
+        loop {
+            let m = &mut c.m;
+            let surface = n.drive_surface_type(m);
+            if surface != 0 && surface != 14 && n.sim_road_info().sim_quad(m).0 != 0 {
+                break;
+            }
+            tries += 1;
+            r.0[1] = tries;
+            // (moved on by nothing)
+            offset.update_x(m, |x| x.wrapping_add(0));
+            place(c, &r, 0x8008_747c);
+            if tries >= 41 {
+                offset.set_x(&mut c.m, 0);
+                place(c, &r, 0x8008_73e0);
+                break;
+            }
+        }
+        n.linear_vel().set(&mut c.m, Default::default());
+        r.enter(c, 0x8008_7020, 0x8008_74c8, |c| reset_variables_after_a_collision(c, car));
+    })
+}
+
+/// `Cars_SetCarUpForHiRezSim` (CARS.CPP, 0x800874e8): a car coming back into the full
+/// simulation: not smoking, its road found again, and put back on the road if off it.
+pub fn set_car_up_for_hi_rez_sim(c: &mut Cpu, car: Car) {
+    abi::frame(c, 24, |c, _| {
+        let n = car.n();
+        let m = &mut c.m;
+        car.collision().set_smoking(m, 0);
+        if n.sim_optz(m) >= 2 {
+            return;
+        }
+        let mut r = abi::Saved::of(c);
+        r.0[0] = car.0;
+        r.enter(c, 0x8008_04e8, 0x8008_751c, |c| bworldsm::find_closest_quad_rez(c, n.position(), n.sim_road_info(), 1));
+        let q = n.sim_road_info().sim_quad(&mut c.m);
+        if q.0 != 0 && q.surface(&mut c.m) & 0xF == 0 {
+            r.enter(c, 0x8008_7088, 0x8008_754c, |c| reset_collided_cars(c, car, 1));
+        }
+    })
+}
+
 /// `Car_tObj.carFlags`: the car is out of the race (nothing more happens to it).
 const CAR_OUT: i32 = 0x400;
 /// The kinds of collision (`BO_tNewtonCollisionInfo.sfxType`'s high half, but for its
@@ -334,6 +500,10 @@ fn table(m: &mut Mem, at: u32, i: u32) -> i32 {
 pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
     abi::frame(c, 120, |c, sp| {
         let n = car.n();
+        // s0: the scraping wheel, then whether parts fell off, then the hit's surface; s2 the
+        // hit's kind; s3 its volume
+        let mut r = abi::Saved::of(c);
+        r.0[1] = car.0;
         if car.car_flags(&mut c.m) & CAR_OUT != 0 {
             return;
         }
@@ -346,7 +516,7 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
             }
             if car.blowout(m) >= 321 {
                 car.set_blowout(m, 0);
-                abi::call(c, nfs4rc::f_80087088, &[car.0, 1, 0]); // Cars_ResetCollidedCars
+                r.enter(c, 0x8008_7088, 0x8008_7604, |c| reset_collided_cars(c, car, 1));
             }
             car.blowout(&mut c.m) == 0
         } else {
@@ -362,7 +532,7 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
             && stats.fatal_crashes(m) == 0
             && n.speed_xz(m) <= 0x1B_9998
         {
-            abi::call(c, nfs4rc::f_80087088, &[car.0, 2, 0]); // Cars_ResetCollidedCars
+            r.enter(c, 0x8008_7088, 0x8008_768c, |c| reset_collided_cars(c, car, 2));
             let m = &mut c.m;
             stats.set_fatal_crashes(m, 160);
             let second = (car.0 == m.r32(HUMAN_RACE_CARS + 4)) as u32;
@@ -377,7 +547,7 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
         }
 
         if car.collision().smoking(m) != 0 {
-            abi::call(c, nfs4rc::f_800bc144, &[n.position().0]); // TrgSfx_CrashCar
+            r.call(c, nfs4rc::f_800bc144, &[n.position().0], 0x8008_7720); // TrgSfx_CrashCar
             if n.flight_time(&mut c.m) == 0 {
                 car.collision().set_smoking(&mut c.m, 0);
             }
@@ -387,8 +557,9 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
         if car.audio_damage_scrape(&mut c.m) != 0 && n.sim_optz(&mut c.m) == 0 {
             let m = &mut c.m;
             let wheel = if car.render().current_roll(m) >= 0 { 2 } else { 3 };
+            r.0[0] = wheel;
             let surface = car.wheel(wheel).road_surface_type(m) as u32 & 0xF;
-            if table(m, SKID_MARK_SURFACE, surface) == 1 && abi::call(c, nfs4rc::f_800e8394, &[]) & 3 == 0 {
+            if table(m, SKID_MARK_SURFACE, surface) == 1 && r.call(c, nfs4rc::f_800e8394, &[], 0x8008_77a8) & 3 == 0 {
                 // random
                 let m = &mut c.m;
                 let back = n.wheel_back_x(m) / 256;
@@ -411,16 +582,18 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
                     m.w32(sp + 48 + 4 * k as u32, v as u32);
                 }
                 let id = n.obj_id(m) as u32;
-                abi::call(c, nfs4rc::f_800bbea4, &[id, sp + 48, 4, n.linear_vel().0]); // TrgSfx_AddCarSfx
+                r.call(c, nfs4rc::f_800bbea4, &[id, sp + 48, 4, n.linear_vel().0], 0x8008_7910); // TrgSfx_AddCarSfx
             }
             car.set_audio_damage_scrape(&mut c.m, 0);
         }
 
         let hit = n.collision();
+        r.0[0] = 0;
         if hit.impulse(&mut c.m) != 0 {
             let m = &mut c.m;
             let mut parts_off = false;
             let kind = hit.sfx_type(m) as u32 & 0xEFFF_0000;
+            r.0[2] = kind;
             if car.car_info(m).car_type(m) < 28 {
                 let render = car.render();
                 for (bit, zone, limit) in DAMAGE_PARTS {
@@ -431,12 +604,13 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
                     }
                 }
             }
+            r.0[0] = parts_off as u32;
             if hit.other_obj(m).0 == 0 && hit.impulse(m) > 0x4B_0000 {
                 // a heavy hit with no car: crashed
                 if car.car_flags(m) & CAR_HUMAN != 0 {
-                    crate::physics::fix_engine_rpm(c, car);
+                    r.enter(c, 0x800a_b178, 0x8008_7ad4, |c| crate::physics::fix_engine_rpm(c, car));
                 }
-                abi::call(c, nfs4rc::f_800bc144, &[n.position().0]); // TrgSfx_CrashCar
+                r.call(c, nfs4rc::f_800bc144, &[n.position().0], 0x8008_7adc); // TrgSfx_CrashCar
                 let m = &mut c.m;
                 car.collision().set_smoking(m, 1);
                 car.set_front_skid(m, 0);
@@ -458,12 +632,15 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
                 at_point(&mut c.m);
                 let m = &mut c.m;
                 if n.speed_xz(m) > 0x18_0000 {
+                    // (the table's address half made, in a delay slot)
+                    r.0[0] = SFX_WALL_SURFACE & 0xFFFF_0000;
                     if n.obj_altitude(m) > 0x9998 {
-                        abi::call(c, nfs4rc::f_800bbea4, &[id, point, 6, vel]); // TrgSfx_AddCarSfx
+                        r.call(c, nfs4rc::f_800bbea4, &[id, point, 6, vel], 0x8008_7c0c); // TrgSfx_AddCarSfx
                     } else {
+                        r.0[0] = SFX_WALL_SURFACE;
                         let surface = hit.sfx_type(m) as u8 as u32;
                         let sfx = table(m, SFX_WALL_SURFACE, surface);
-                        abi::call(c, nfs4rc::f_800bbea4, &[id, point, sfx as u32, vel]);
+                        r.call(c, nfs4rc::f_800bbea4, &[id, point, sfx as u32, vel], 0x8008_7b78);
                         let m = &mut c.m;
                         let surface = hit.sfx_type(m) as u8 as u32;
                         if table(m, SFX_WALL_SURFACE, surface) == 4 {
@@ -471,33 +648,38 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
                         }
                     }
                 } else if n.speed_xz(m) > 0xF_0000 || hit.impulse(m) > 0xF_0000 || parts_off {
-                    abi::call(c, nfs4rc::f_800bbea4, &[id, point, 1, vel]);
+                    r.call(c, nfs4rc::f_800bbea4, &[id, point, 1, vel], 0x8008_7c0c);
                 }
             }
             let m = &mut c.m;
             let impulse = hit.impulse(m);
             if impulse > 0xA_0000 {
                 let mut volume = m.r32(AUDIO_COLLISION_TYPE.wrapping_add(((kind as i32) >> 14) as u32)) as i32;
+                r.0[3] = volume as u32;
                 let on = hit.sfx_type(m) as u8 as u32;
                 let surface = if kind == HIT_WALL {
                     table(m, AUDIO_WALL_SURFACE, on)
                 } else if kind as i32 <= HIT_ROAD as i32 {
                     let surface = table(m, AUDIO_ROAD_SURFACE, on);
+                    r.0[0] = surface as u32;
                     if kind == HIT_ROAD {
                         if n.orientation_to_ground().y(m) <= 0xE665 {
                             volume = 1;
+                            r.0[3] = 1;
                         }
-                        abi::call(c, nfs4rc::f_800bc144, &[hit.collision_point().0]); // TrgSfx_CrashCar
+                        r.call(c, nfs4rc::f_800bc144, &[hit.collision_point().0], 0x8008_7ca8); // TrgSfx_CrashCar
                     }
                     surface
                 } else {
                     let surface = hit.sfx_type(m) as u8 as i32;
+                    r.0[0] = surface as u32;
                     if kind == HIT_CAR {
                         at_point(m);
-                        abi::call(c, nfs4rc::f_800bbea4, &[id, point, 4, vel]); // TrgSfx_AddCarSfx
+                        r.call(c, nfs4rc::f_800bbea4, &[id, point, 4, vel], 0x8008_7cf4); // TrgSfx_AddCarSfx
                     }
                     surface
                 };
+                r.0[0] = surface as u32;
                 let m = &mut c.m;
                 let force = hit.impulse(m) / 8;
                 set_audio_calls_from(m, sp, car, 1, -1, volume, surface, force, 0);
@@ -519,7 +701,7 @@ pub fn do_extra_car_collision_processing(c: &mut Cpu, car: Car) {
                 car.collision().update_reset_timer(m, |t| t - 8);
             }
             if car.collision().reset_timer(m) <= 0 {
-                abi::call(c, nfs4rc::f_80087088, &[car.0, 0, 0]); // Cars_ResetCollidedCars
+                r.enter(c, 0x8008_7088, 0x8008_7dc4, |c| reset_collided_cars(c, car, 0));
                 car.collision().set_reset_timer(&mut c.m, 0);
             }
         }
@@ -909,6 +1091,18 @@ pub fn abi_do_extra_car_collision_processing(c: &mut Cpu) {
     do_extra_car_collision_processing(c, Car(c.r[4]));
 }
 
+pub fn abi_reset_variables_after_a_collision(c: &mut Cpu) {
+    reset_variables_after_a_collision(c, Car(c.r[4]));
+}
+
+pub fn abi_reset_collided_cars(c: &mut Cpu) {
+    reset_collided_cars(c, Car(c.r[4]), c.r[5] as i32);
+}
+
+pub fn abi_set_car_up_for_hi_rez_sim(c: &mut Cpu) {
+    set_car_up_for_hi_rez_sim(c, Car(c.r[4]));
+}
+
 pub fn abi_add_car_sfx(c: &mut Cpu) {
     let (kind, on) = (abi::arg(c, 4) as i32, abi::arg(c, 5) as i32);
     add_car_sfx(c, Car(c.r[4]), c.r[5], Coord(c.r[6]), c.r[7] as i32, kind, on);
@@ -1224,19 +1418,18 @@ mod tests {
         }
     }
 
-    /// The skids entered from recompiled code leave the stack (on the scratchpad, as in a
-    /// race) as the original does, the registers the callees save included: the skid marks'
-    /// colours take a byte the stack held before.
-    #[test]
-    fn skid_stack_fuzz() {
+    /// The function at `addr` entered from recompiled code (returning to `ra`) on a car of
+    /// `shuffle`'s RAM leaves the stack (on the scratchpad, as in a race) as the original does,
+    /// the registers its callees save included, and the same RAM.
+    fn same_stack(name: &str, addr: u32, original: fn(&mut Cpu), ra: u32, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng)) {
         let Some(ram) = crate::test_util::race_ram() else { return };
-        let mut rng = Rng(0x57AC);
+        let mut rng = Rng(seed);
         let mut c = crate::test_util::cpu_with(&ram);
         let top = 0x1F80_03DC - 32;
         let mut mismatches = 0;
-        for i in 0..3000 {
+        for i in 0..cases {
             c.m.ram.copy_from_slice(&ram);
-            skidding(&mut c, &mut rng);
+            shuffle(&mut c, &mut rng);
             let car = car(&mut c, (rng.next() % 3) as u32);
             let fill = rng.next() as u8;
             let state = c.m.ram.clone();
@@ -1247,14 +1440,14 @@ mod tests {
                 }
                 c.r[29] = top;
                 c.r[4] = car;
-                c.r[31] = 0x8008_a3ac;
+                c.r[31] = ra;
             };
             enter(&mut c);
-            nfs4rc::f_8008a1f0(&mut c);
+            original(&mut c);
             let want = (c.m.scratch, c.m.ram.clone());
             c.m.ram.copy_from_slice(&state);
             enter(&mut c);
-            crate::decomp(&mut c, 0x8008_a1f0);
+            crate::decomp(&mut c, addr);
             let differ: Vec<usize> = (0..0x400).step_by(4).filter(|&w| want.0[w..w + 4] != c.m.scratch[w..w + 4]).collect();
             let ram = crate::test_util::ram_diff(&want.1, &c.m.ram);
             if !differ.is_empty() || !ram.is_empty() {
@@ -1262,12 +1455,94 @@ mod tests {
                 if mismatches <= 5 {
                     let word = |s: &[u8], w: usize| u32::from_le_bytes(s[w..w + 4].try_into().unwrap());
                     for &w in differ.iter().take(8) {
-                        eprintln!("case {i}: {:#x}: expected {:#010x} got {:#010x}", 0x1F80_0000 + w, word(&want.0, w), word(&c.m.scratch, w));
+                        eprintln!("{name} case {i}: {:#x}: expected {:#010x} got {:#010x}", 0x1F80_0000 + w, word(&want.0, w), word(&c.m.scratch, w));
                     }
-                    crate::test_util::report("Car_DoSkiddingStuff", i, &want.1, &c.m.ram, &ram);
+                    crate::test_util::report(name, i, &want.1, &c.m.ram, &ram);
                 }
             }
         }
-        assert_eq!(mismatches, 0, "the skids leave the stack otherwise than the original");
+        assert_eq!(mismatches, 0, "{name} leaves the stack otherwise than the original");
+    }
+
+    /// The skids leave the stack as the original: the skid marks' colours take a byte the
+    /// stack held before.
+    #[test]
+    fn skid_stack_fuzz() {
+        same_stack("Car_DoSkiddingStuff", 0x8008_a1f0, nfs4rc::f_8008a1f0, 0x8008_a3ac, 3000, 0x57AC, skidding);
+    }
+
+    /// The collisions' aftermath (the cars put back on the road) leaves the stack and RAM as
+    /// the original. Not yet: under `Newton_SetInitialSlicePositionOrientationEtc`, the NEWTON
+    /// and BWORLDSM ports leave less on the stack than the originals (`RawFindClosestQuad`
+    /// and `Check_Rot` call Rust without the callees' prologue stores...), and in a few cases
+    /// the original then reads that stack: it works on a road position at address 0 and
+    /// changes the normal cache, `corrPt` and the car's wheels where the port doesn't. With
+    /// that function recompiled, this passes.
+    #[test]
+    #[ignore = "the NEWTON/BWORLDSM ports under SetInitialSlicePositionOrientationEtc leave less on the stack, which the original reads"]
+    fn reset_stack_fuzz() {
+        same_stack("Cars_DoExtraCarCollisionProcessing", 0x8008_755c, nfs4rc::f_8008755c, 0x8008_a3a4, 3000, 0xE5AC, stranded);
+        same_stack("Cars_SetCarUpForHiRezSim", 0x8008_74e8, nfs4rc::f_800874e8, 0x800a_1f98, 1000, 0x5E7C, stranded);
+    }
+
+    /// The race's cars to be put back on the road: crashed (as [`crash`]), tilted, spinning,
+    /// off the road or in the air or not, going either way, any grid place and width, the
+    /// road off its surface sometimes, near an accident scene (at either end of the track
+    /// too), traffic on either side, simulated fully, roughly or not.
+    fn stranded(c: &mut Cpu, rng: &mut Rng) {
+        crash(c, rng);
+        let m = &mut c.m;
+        let mut pick = |n: u32| (rng.next() % n as u64) as i32;
+        let slices = NUM_SLICES.get(m);
+        ACCIDENT_SLICE.set(m, [0, 0, -3, pick(slices as u32), 2, slices - 3][pick(6) as usize]);
+        AITUNE_DRIVE_SIDE.set(m, [1, -1][pick(2) as usize]);
+        for i in 0..NUM_CARS.get(m) {
+            let car = Car(m.r32(CARS_LIST + 4 * i as u32));
+            let n = car.n();
+            if pick(2) == 0 {
+                // near the accident scene
+                let at = (ACCIDENT_SLICE.get(m) + pick(16) - 8).rem_euclid(slices);
+                n.sim_road_info().set_slice(m, at as i16);
+            }
+            car.set_blowout(m, [0, 0, 0, 1][pick(4) as usize]);
+            car.set_desired_direction(m, [1, -1][pick(2) as usize]);
+            car.set_car_index(m, pick(8) - 1);
+            let spin = n.angular_vel();
+            spin.set_x(m, [0, pick(0x2_0000), 0xFFFF, 0x1_0000][pick(4) as usize]);
+            spin.set_z(m, [0, pick(0x2_0000), 0xFFFF, 0x1_0000][pick(4) as usize]);
+            n.set_flight_time(m, [0, 5, 6, pick(10)][pick(4) as usize] as u16);
+            n.set_obj_altitude(m, [0, 0xFFFF, 0x1_0000, pick(0x2_0000)][pick(4) as usize]);
+            n.set_sim_optz(m, pick(3) as u8);
+            if pick(4) == 0 {
+                n.dimension().set_x(m, pick(0x40_0000));
+            }
+            if pick(8) == 0 {
+                n.sim_road_info().set_sim_quad(m, crate::types::TrkNewSimQuad(0));
+            }
+        }
+    }
+
+    #[test]
+    fn reset_fuzz() {
+        for k in 0..3 {
+            for how in 0..3u32 {
+                against_original("Cars_ResetCollidedCars", 300, 0x2E5E + 3 * k as u64 + how as u64, stranded, nfs4rc::f_80087088, &|c| vec![car(c, k), how, 0], |c, a| {
+                    reset_collided_cars(c, Car(a[0]), a[1] as i32);
+                    None
+                });
+            }
+            against_original("Cars_SetCarUpForHiRezSim", 2_000, 0x41E2 + k as u64, stranded, nfs4rc::f_800874e8, &|c| vec![car(c, k)], |c, a| {
+                set_car_up_for_hi_rez_sim(c, Car(a[0]));
+                None
+            });
+            against_original("Cars_ResetVariablesAfterACollision", 500, 0x7A2 + k as u64, stranded, nfs4rc::f_80087020, &|c| vec![car(c, k)], |c, a| {
+                reset_variables_after_a_collision(c, Car(a[0]));
+                None
+            });
+        }
+        against_original("Cars_DoExtraCarCollisionProcessing", 5_000, 0xE7D0, stranded, nfs4rc::f_8008755c, &|c| vec![car(c, 0)], |c, a| {
+            do_extra_car_collision_processing(c, Car(a[0]));
+            None
+        });
     }
 }
