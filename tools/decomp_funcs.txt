@@ -63,7 +63,21 @@
 800ab444 Physics_TestForBarrierCollision
 800a9f78 Physics_GetTorque
 
-# CARS.CPP
+# CARS.CPP (Restart and CleanUp start 4 bytes before retail_syms.tsv's addresses)
+800868e8 Cars_GetDashData
+8008690c Cars_QDUpdateVelGlue
+80086988 Cars_InitDashData
+80086a78 Cars_ResetCarCounters
+80086aa0 Cars_InitStats
+80086b08 Cars_InitializeCarTablesFlagsAndCounters
+8008a5d0 Cars_CalculateStartingGridOffset
+8008a814 Cars_IniCarObjects
+8008ac00 Cars_InitCar
+8008af10 Cars_DeInitCar
+8008af58 Cars_Restart
+8008b040 Cars_Initialize
+8008b064 Cars_StartUp
+8008b4cc Cars_CleanUp
 800867a8 Cars_DoGravityEffectsOnAcc
 800869b0 Cars_SetAudioCalls
 80087020 Cars_ResetVariablesAfterACollision

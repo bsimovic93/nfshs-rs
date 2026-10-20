@@ -42,10 +42,8 @@ pub fn call_from(c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32, saved: &[u
     })
 }
 
-/// [`call_from`] with `run` making the call.
-fn call_with(c: &mut Cpu, args: &[u32], ra: u32, saved: &[u32], run: impl FnOnce(&mut Cpu)) -> u32 {
-    let r = c.r;
-    c.r[16..16 + saved.len()].copy_from_slice(saved);
+/// The arguments in a0..a3 and from the fifth on at sp+16, and the return address.
+fn set_args(c: &mut Cpu, args: &[u32], ra: u32) {
     let sp = c.r[29];
     for (i, &a) in args.iter().enumerate() {
         if i < 4 {
@@ -55,6 +53,13 @@ fn call_with(c: &mut Cpu, args: &[u32], ra: u32, saved: &[u32], run: impl FnOnce
         }
     }
     c.r[31] = ra;
+}
+
+/// [`call_from`] with `run` making the call.
+fn call_with(c: &mut Cpu, args: &[u32], ra: u32, saved: &[u32], run: impl FnOnce(&mut Cpu)) -> u32 {
+    let r = c.r;
+    c.r[16..16 + saved.len()].copy_from_slice(saved);
+    set_args(c, args, ra);
     let (hi, lo) = (c.hi, c.lo);
     run(c);
     let ret = c.r[2];
@@ -91,6 +96,24 @@ impl Saved {
         let v = call_from(c, f, args, ra, &[]);
         c.r = r;
         v
+    }
+
+    /// [`Saved::call`], the callee's scratch registers (a0..a3, t, v, hi/lo) left as it
+    /// leaves them: for a following call that reads one it isn't given (a variadic `sprintf`
+    /// homes a2 and a3 whatever they hold).
+    pub fn call_leaving(&self, c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32) -> u32 {
+        let r = c.r;
+        self.load(c);
+        set_args(c, args, ra);
+        f(c);
+        if c.cont != 0 {
+            c.run_cont();
+        }
+        // the callee-saved registers, gp and sp as before
+        for k in (16..24).chain([28, 29, 30]) {
+            c.r[k] = r[k];
+        }
+        c.r[2]
     }
 
     /// [`Saved::call`] through a function pointer (the original's `jalr`): the function at

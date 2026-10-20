@@ -281,3 +281,43 @@ pub const FORCE_PAUSE: I32 = I32(0x8013_EA60);
 pub const PAUSE_PORT_INDEX: u32 = 0x8013_EA7C;
 /// `Hud_ActivateCDPlayer`: show the music player's song name.
 pub const HUD_ACTIVATE_CD_PLAYER: I32 = I32(0x8013_EC10);
+
+// CARS.CPP's set-up
+
+/// The car lists by kind (`Car_tObj *[9]`) and their counts: `Cars_gAICarList` (driven by
+/// the AI), `Cars_gTrafficCarList`, `Cars_gCopCarList`, `Cars_gLifeBasisCarList` (the cars
+/// the AI's world knows).
+pub const AI_CARS: u32 = 0x8011_0CE8;
+pub const TRAFFIC_CARS: u32 = 0x8011_0D54;
+pub const COP_CARS: u32 = 0x8011_0D78;
+pub const LIFE_BASIS_CARS: u32 = 0x8011_0D9C;
+pub const NUM_TRAFFIC_CARS: I32 = I32(0x8013_DAFC);
+pub const NUM_COP_CARS: I32 = I32(0x8013_DB00);
+pub const NUM_LIFE_BASIS_CARS: I32 = I32(0x8013_DB04);
+/// `GameSetup_gCarNames` (`char[51][5]`), `GameSetup_gPersonalityNames` (`char[15][8]`).
+pub const CAR_NAMES: u32 = 0x8011_42FC;
+pub const PERSONALITY_NAMES: u32 = 0x8011_442C;
+/// `frontEnd`: the front end's state (+3 the mode, +0x384 the players' licence plates,
+/// `char[2][8]`).
+pub const FRONT_END: u32 = 0x8011_58B8;
+/// `Paths_Paths`: the game's directories (`char *[]`: +0xC the cars', +0x10 the AI's).
+pub const PATHS: u32 = 0x8011_7720;
+/// `InfiniteMassNewton`: the heavy track objects' Newton objects (`BO_tNewtonObj[5]`);
+/// `Object_IMassObjInst`: their instances (`Object_tIMassObjInfo *`, 32 bytes each).
+pub const INFINITE_MASS_NEWTON: u32 = 0x8011_13A8;
+pub const IMASS_OBJ_INST: u32 = 0x8013_E5B4;
+/// `R3DCar_LicenseShapeFile`: the licence plates' shapes, loaded for the set-up.
+pub const R3DCAR_LICENSE_SHAPE_FILE: U32 = U32(0x8013_E698);
+/// Strings in the executable: the heaps' names ("Car_tObj", "carSpecs"), the AI packs'
+/// ("%s%s.qda", "%sSTDR.qda"), the specs' ("p%s.dat", "ptram.dat"), "%sdusty.viv", and the
+/// local name of the cars past the 29 proper.
+pub const CAR_HEAP_NAME: u32 = 0x8005_6174;
+pub const SPECS_HEAP_NAME: u32 = 0x8005_6168;
+pub const QDA_NAME: u32 = 0x8005_6138;
+pub const STD_QDA_NAME: u32 = 0x8005_6144;
+pub const SPECS_NAME: u32 = 0x8013_DAE0;
+pub const TRAM_SPECS_NAME: u32 = 0x8005_6150;
+pub const VIV_NAME: u32 = 0x8005_615C;
+pub const OTHER_CAR_NAME: u32 = 0x8013_DAD4;
+/// The force feedback's per-tick function (FORCE.CPP), on the 32 Hz schedule.
+pub const FORCE_TICK: u32 = 0x800c_b920;

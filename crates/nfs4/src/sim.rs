@@ -260,7 +260,7 @@ pub fn start_up(c: &mut Cpu) {
         r.call(c, nfs4rc::f_800673b0, &[], 0x800b_72e4); // AIInit_StartUp1
         r.call(c, nfs4rc::f_800ae9ac, &[], 0x800b_72ec); // R3DCar_StartUp
         r.call(c, nfs4rc::f_800bccf8, &[], 0x800b_72f4); // CarIO_StartUp
-        r.call(c, nfs4rc::f_8008b064, &[], 0x800b_72fc); // Cars_StartUp
+        r.enter(c, 0x8008_b064, 0x800b_72fc, cars::start_up);
         r.call(c, nfs4rc::f_800aea7c, &[], 0x800b_7304); // R3DCar_PostStartUp
         r.call(c, nfs4rc::f_8005b584, &[], 0x800b_730c); // AIHigh_StartUp
         r.call_ptr(c, 0x800d_bdec, &[8], 0x800b_7314); // Loading_UpdateLoadingScreen
@@ -303,7 +303,7 @@ pub fn restart(c: &mut Cpu) {
         r.call(c, nfs4rc::f_800674fc, &[], 0x800b_73c8); // AIInit_Reset1
         r.call(c, nfs4rc::f_800aeb60, &[], 0x800b_73d0); // R3DCar_Restart
         r.call(c, nfs4rc::f_8005b92c, &[], 0x800b_73d8); // AIHigh_Restart1
-        r.call(c, nfs4rc::f_8008af58, &[], 0x800b_73e0); // Cars_Restart
+        r.enter(c, 0x8008_af58, 0x800b_73e0, cars::restart);
         r.call(c, nfs4rc::f_8005b94c, &[], 0x800b_73e8); // AIHigh_Restart2
         r.call(c, nfs4rc::f_80067508, &[], 0x800b_73f0); // AIInit_Reset2
         r.call(c, nfs4rc::f_800da3dc, &[], 0x800b_73f8); // Hud_Reset
@@ -331,7 +331,7 @@ pub fn clean_up(c: &mut Cpu) {
         schedule::delete_function(&mut c.m, s64, CAMERA_TICK, 0);
         r.call(c, nfs4rc::f_80067644, &[], 0x800b_7460); // AIInit_CleanUp2
         r.call(c, nfs4rc::f_8005b974, &[], 0x800b_7468); // AIHigh_CleanUp
-        r.call(c, nfs4rc::f_8008b4cc, &[], 0x800b_7470); // Cars_CleanUp
+        r.enter(c, 0x8008_b4cc, 0x800b_7470, cars::clean_up);
         r.call(c, nfs4rc::f_800aebd8, &[], 0x800b_7478); // R3DCar_CleanUp
         r.call(c, nfs4rc::f_800bcd64, &[], 0x800b_7480); // CarIO_CleanUp
         r.call(c, nfs4rc::f_8006760c, &[], 0x800b_7488); // AIInit_CleanUp1

@@ -2,11 +2,10 @@
 
 use crate::abi;
 use crate::fixed::fixedmult;
-use crate::globals::{
-    ACCIDENT_SLICE, ADD_CAR_WHEEL_DELAY, AITUNE_DRIVE_SIDE, FRONT_LIMIT, LEAF_PIXMAP, REAR_LIMIT, BWORLDSM_SLICES, CARS_LIST, FAST_RANDOM, GAME_SETUP, HUMAN_RACE_CARS, NUM_AI_CARS, NUM_CARS, NUM_SLICES, RAND_SEED,
-    RAND_TEMP, SCENE_LOADED, SIM_COUNTER, SORTED_LIST, TOTAL_SORTED_LIST,
-};
+use crate::globals::*;
 use crate::types::{Car, Coord, Matrix, TrkNewSlice};
+use crate::vec::Vec3;
+use crate::{fixed::div, schedule};
 use crate::{bworldsm, newton};
 use ps1rt::{Cpu, Mem};
 
@@ -1169,6 +1168,765 @@ pub fn abi_sort_cars(c: &mut Cpu) {
     sort_cars(&mut c.m);
 }
 
+// the set-up and clean-up
+
+/// `Car_tObj.carFlags`: racing (on the race lists); the AI drives it; an AI racer; traffic;
+/// the police (0x40 the second kind); in the life-basis list (the cars the AI's world knows);
+/// a human playing the police.
+const CAR_RACING: i32 = 0x1;
+const CAR_AI: i32 = 0x2;
+const CAR_AI_RACER: i32 = 0x8;
+const CAR_TRAFFIC: i32 = 0x10;
+const CAR_COP: i32 = 0x20;
+const CAR_COP2: i32 = 0x40;
+const CAR_LIFE_BASIS: i32 = 0x100;
+const CAR_HUMAN_COP: i32 = 0x200;
+/// `GameSetup_tCarData.carClass`: who drives the car (a human, an AI racer, traffic, the
+/// police of two kinds; 0x40 a human as the police).
+const CLASS_HUMAN: i32 = 0x1;
+const CLASS_RACER: i32 = 0x2;
+const CLASS_TRAFFIC: i32 = 0x4;
+const CLASS_COPS: i32 = 0x18;
+const CLASS_COP2: i32 = 0x10;
+const CLASS_HUMAN_COP: i32 = 0x40;
+/// The car types up to 28 are the cars proper (with files of their own; the rest share).
+const CAR_TYPES: i32 = 29;
+
+/// `Cars_ResetCarCounters` (CARS.CPP, 0x80086a78): no cars on any list.
+pub fn reset_car_counters(m: &mut Mem) {
+    for n in [NUM_CARS, NUM_RACE_CARS, NUM_AI_CARS, NUM_HUMAN_RACE_CARS, NUM_AI_RACE_CARS, NUM_TRAFFIC_CARS, NUM_COP_CARS, NUM_LIFE_BASIS_CARS] {
+        n.set(m, 0);
+    }
+}
+
+pub fn abi_reset_car_counters(c: &mut Cpu) {
+    reset_car_counters(&mut c.m);
+}
+
+/// `Cars_InitStats` (CARS.CPP, 0x80086aa0): the car's race statistics cleared (a lap time
+/// of 512 to start with).
+pub fn init_stats(m: &mut Mem, car: Car) {
+    let s = car.stats();
+    s.set_slice_total(m, 0);
+    s.set_slice_time(m, 0);
+    s.set_slice(m, 0);
+    s.set_last_slice(m, 0);
+    s.set_lap(m, 0);
+    s.set_lap_time(m, 512);
+    for k in 0..4 {
+        s.set_time(m, k, 0);
+        s.set_top_speed(m, k, 0);
+    }
+    s.set_position(m, 0);
+    s.set_fatal_crashes(m, 0);
+    s.set_finish_type(m, 0);
+    s.set_checkpoint_update(m, 0);
+    s.set_checkpoint_difference(m, 0);
+    s.set_checkpoint_display(m, 0);
+    s.set_num_warnings(m, 0);
+    s.set_num_fines(m, 0);
+    s.set_num_arrests(m, 0);
+}
+
+pub fn abi_init_stats(c: &mut Cpu) {
+    init_stats(&mut c.m, Car(c.r[4]));
+}
+
+/// `Cars_GetDashData` (CARS.CPP, 0x800868e8): the revs, gear and forward speed for the
+/// dashboard.
+pub fn get_dash_data(m: &mut Mem, car: Car, rpm: u32, gear: u32, speed: u32) {
+    let v = car.flywheel_rpm(m);
+    m.w32(rpm, v as u32);
+    let g = car.control().gear(m) as u8;
+    m.w32(gear, g as u32);
+    let s = car.linear_vel_ch().z(m);
+    m.w32(speed, s as u32);
+}
+
+pub fn abi_get_dash_data(c: &mut Cpu) {
+    get_dash_data(&mut c.m, Car(c.r[4]), c.r[5], c.r[6], c.r[7]);
+}
+
+/// `Cars_QDUpdateVelGlue` (CARS.CPP, 0x8008690c, a human's position step with the catch-up
+/// logic on): the position moved by the velocity (a 64 Hz tick), across the ground scaled by
+/// the glue.
+pub fn qd_update_vel_glue(m: &mut Mem, car: Car) {
+    let n = car.n();
+    let (v, glue) = (n.linear_vel().get(m), car.glue(m) / 256);
+    let p = n.position();
+    p.update_y(m, |y| y.wrapping_add(v.y >> 6));
+    p.update_x(m, |x| x.wrapping_add((v.x / 256).wrapping_mul(glue) >> 6));
+    p.update_z(m, |z| z.wrapping_add((v.z / 256).wrapping_mul(glue) >> 6));
+}
+
+pub fn abi_qd_update_vel_glue(c: &mut Cpu) {
+    qd_update_vel_glue(&mut c.m, Car(c.r[4]));
+}
+
+/// `Cars_InitDashData` (CARS.CPP, 0x80086988): the redline and top speed for the dashboard.
+pub fn init_dash_data(m: &mut Mem, car: Car, redline: u32, max_speed: u32) {
+    let v = car.specs(m).redline(m);
+    m.w32(redline, v as u32);
+    let v = car.specs(m).max_speed(m);
+    m.w32(max_speed, v as u32);
+}
+
+pub fn abi_init_dash_data(c: &mut Cpu) {
+    init_dash_data(&mut c.m, Car(c.r[4]), c.r[5], c.r[6]);
+}
+
+/// `Cars_Initialize` (CARS.CPP, 0x8008b040): `len` bytes cleared.
+pub fn initialize(m: &mut Mem, at: u32, len: i32) {
+    for i in 0..len.max(0) as u32 {
+        m.w8(at.wrapping_add(i), 0);
+    }
+}
+
+pub fn abi_initialize(c: &mut Cpu) {
+    initialize(&mut c.m, c.r[4], c.r[5] as i32);
+}
+
+/// Add `car` to a car list (`list`, `count`).
+fn add_to(m: &mut Mem, list: u32, count: I32, car: Car) -> i32 {
+    let n = count.get(m);
+    m.w32(list.wrapping_add((n as u32) << 2), car.0);
+    count.set(m, n.wrapping_add(1));
+    n
+}
+
+/// `Cars_InitializeCarTablesFlagsAndCounters` (CARS.CPP, 0x80086b08): a new car on the
+/// lists by its class, with its index, flags and names: a human (its driver's name and
+/// licence from the front end; racing, in the AI's world, as the police with class 0x40),
+/// an AI racer (its personality's name, or "the police"'s text when a human is the police
+/// in a pursuit; in the AI's world when the police are about, unless a human is the police),
+/// traffic, the police.
+pub fn initialize_car_tables_flags_and_counters(c: &mut Cpu, car: Car) {
+    abi::frame(c, 40, |c, _| {
+        // s1 the car, s3 its class; s0 and s2 set for the AI racers (the calls leave their
+        // scratch registers: sprintf homes a2 and a3 when given fewer)
+        let mut r = abi::Saved::of(c);
+        let m = &mut c.m;
+        let info = car.car_info(m);
+        let class = info.car_class(m);
+        (r.0[1], r.0[3]) = (car.0, class as u32);
+        for list in [CARS_LIST, SORTED_LIST, TOTAL_SORTED_LIST] {
+            let at = list.wrapping_add((NUM_CARS.get(m) as u32) << 2);
+            m.w32(at, car.0);
+        }
+        let i = NUM_CARS.get(m);
+        car.set_car_index(m, i);
+        car.set_car_flags(m, 0);
+        car.set_human_index(m, -1);
+        NUM_CARS.set(m, i.wrapping_add(1));
+        let car_type = info.car_type(m) as u32;
+        let name = CAR_NAMES.wrapping_add(car_type.wrapping_mul(5));
+        // (a2 still the new count, as the original's: a two-argument sprintf below homes it)
+        r.call_leaving(c, nfs4rc::f_800e6714, &[car.0 + 0x240, name, i.wrapping_add(1) as u32], 0x8008_6ba0); // strcpy
+        let car_type = car.car_info(&mut c.m).car_type(&mut c.m);
+        if car_type < CAR_TYPES {
+            let word = r.call_leaving(c, nfs4rc::f_800b9f18, &[car_type.wrapping_add(78) as u32], 0x8008_6bc4); // TextSys_Word
+            r.call_leaving(c, nfs4rc::f_800e6714, &[car.0 + 0x249, word], 0x8008_6bd0); // strcpy
+        } else {
+            r.call_leaving(c, nfs4rc::f_800e50a8, &[car.0 + 0x249, OTHER_CAR_NAME], 0x8008_6be4); // sprintf
+        }
+        let info = car.car_info(&mut c.m);
+        if class & CLASS_HUMAN != 0 {
+            // the driver's name: a profile's, or "Player" (numbered when two race)
+            let humans = NUM_HUMAN_RACE_CARS.get(&mut c.m) as u32;
+            let driver = info.0 + 0x5C;
+            if r.call_leaving(c, nfs4rc::f_8002ba50, &[humans], 0x8008_6bfc) != 0 {
+                let name = r.call_leaving(c, nfs4rc::f_8002bb08, &[humans], 0x8008_6c10);
+                r.call_leaving(c, nfs4rc::f_800e50a8, &[driver, name], 0x8008_6c68); // sprintf
+            } else if c.m.r8(FRONT_END + 3) == 1 {
+                let word = r.call_leaving(c, nfs4rc::f_800b9f18, &[47], 0x8008_6c30); // TextSys_Word
+                let humans = NUM_HUMAN_RACE_CARS.get(&mut c.m) as u32;
+                r.call_leaving(c, nfs4rc::f_800e50a8, &[driver, word, humans.wrapping_add(1)], 0x8008_6c48); // sprintf
+            } else {
+                let word = r.call_leaving(c, nfs4rc::f_800b9f18, &[46], 0x8008_6c58); // TextSys_Word
+                r.call_leaving(c, nfs4rc::f_800e50a8, &[driver, word], 0x8008_6c68); // sprintf
+            }
+            let humans = NUM_HUMAN_RACE_CARS.get(&mut c.m) as u32;
+            r.call_leaving(c, nfs4rc::f_800e6714, &[info.0 + 0x68, FRONT_END + 0x384 + 8 * humans], 0x8008_6c88); // strcpy: the licence
+            let m = &mut c.m;
+            let h = add_to(m, HUMAN_RACE_CARS, NUM_HUMAN_RACE_CARS, car);
+            car.set_human_index(m, h);
+            car.update_car_flags(m, |f| f | CAR_HUMAN);
+            add_to(m, RACE_CARS, NUM_RACE_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_RACING);
+            add_to(m, LIFE_BASIS_CARS, NUM_LIFE_BASIS_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_LIFE_BASIS);
+            if class & CLASS_HUMAN_COP != 0 {
+                car.update_car_flags(m, |f| f | CAR_HUMAN_COP);
+            }
+        }
+        r.0[0] = 0x8011_0000;
+        if class & CLASS_RACER != 0 {
+            let m = &mut c.m;
+            let index = car.car_index(m) as u32;
+            let personality = GAME_SETUP.car_info(index).personality(m) as u32;
+            r.0[2] = personality;
+            let name = PERSONALITY_NAMES.wrapping_add(personality.wrapping_mul(8));
+            r.call_leaving(c, nfs4rc::f_800e6714, &[info.0 + 0x5C, name], 0x8008_6d6c); // strcpy: the driver
+            let licence = if human_cop_in_pursuit(&mut c.m) {
+                r.call_leaving(c, nfs4rc::f_800b9f18, &[50], 0x8008_6dd8) // TextSys_Word
+            } else {
+                name
+            };
+            r.call_leaving(c, nfs4rc::f_800e6714, &[info.0 + 0x68, licence], 0x8008_6e00); // strcpy
+            r.call_leaving(c, nfs4rc::f_80026970, &[info.0 + 0x68], 0x8008_6e0c);
+            let m = &mut c.m;
+            add_to(m, AI_CARS, NUM_AI_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_AI);
+            add_to(m, AI_RACE_CARS, NUM_AI_RACE_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_AI_RACER);
+            add_to(m, RACE_CARS, NUM_RACE_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_RACING);
+            if GAME_SETUP.cops(m) != 0 && !human_cop_in_pursuit(m) {
+                add_to(m, LIFE_BASIS_CARS, NUM_LIFE_BASIS_CARS, car);
+                car.update_car_flags(m, |f| f | CAR_LIFE_BASIS);
+            }
+        }
+        let m = &mut c.m;
+        if class & CLASS_TRAFFIC != 0 {
+            add_to(m, AI_CARS, NUM_AI_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_AI);
+            add_to(m, TRAFFIC_CARS, NUM_TRAFFIC_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_TRAFFIC);
+        }
+        if class & CLASS_COPS != 0 {
+            add_to(m, AI_CARS, NUM_AI_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_AI);
+            add_to(m, COP_CARS, NUM_COP_CARS, car);
+            car.update_car_flags(m, |f| f | CAR_COP);
+            if class & CLASS_COP2 != 0 {
+                car.update_car_flags(m, |f| f | CAR_COP2);
+            }
+        }
+    })
+}
+
+pub fn abi_initialize_car_tables_flags_and_counters(c: &mut Cpu) {
+    initialize_car_tables_flags_and_counters(c, Car(c.r[4]));
+}
+
+/// A pursuit (race types 1 and 5) where a human plays the police.
+fn human_cop_in_pursuit(m: &mut Mem) -> bool {
+    if !matches!(GAME_SETUP.race_type(m), 1 | 5) {
+        return false;
+    }
+    let cop = |m: &mut Mem, i: u32| Car(m.r32(HUMAN_RACE_CARS + 4 * i)).car_flags(m) & CAR_HUMAN_COP != 0;
+    cop(m, 0) || (NUM_HUMAN_RACE_CARS.get(m) == 2 && cop(m, 1))
+}
+
+/// `Cars_CalculateStartingGridOffset` (CARS.CPP, 0x8008a5d0): the car's place on the grid:
+/// its slice (10 slices back per grid place, from slice 1 or the last on a reversed track,
+/// wrapping round when more than two race) and its offset across the road: on a one-way road
+/// spread over the lanes by the grid side, else left or right of the middle by the grid
+/// side (and the way the car drives against the traffic's side); 0.5 m up.
+pub fn calculate_starting_grid_offset(c: &mut Cpu, car: Car, slice_at: u32, offset: Coord) {
+    abi::frame(c, 32, |c, _| {
+        // s1 the slice's address, s2 the offset's, s0 the grid side
+        let mut r = abi::Saved::of(c);
+        (r.0[1], r.0[2]) = (slice_at, offset.0);
+        let m = &mut c.m;
+        let dir: i32 = if GAME_SETUP.reverse_track(m) != 0 { 1 } else { -1 };
+        let place = GAME_SETUP.car_info(car.car_index(m) as u32).starting_pos(m);
+        let slices = NUM_SLICES.get(m);
+        let slice = if NUM_RACE_CARS.get(m) >= 3 { dir.wrapping_add((dir * 10).wrapping_mul(place)) } else { dir };
+        let slice = if slice < 0 {
+            slice.wrapping_add(NUM_SLICES.get(m))
+        } else if slice < slices {
+            slice
+        } else {
+            slice.wrapping_sub(slices)
+        };
+        m.w32(slice_at, slice as u32);
+        let mut side = place & 1;
+        if car.desired_direction(m).wrapping_mul(AITUNE_DRIVE_SIDE.get(m)) == -1 {
+            side = 1 - side;
+        }
+        r.0[0] = side as u32;
+        let one_way = r.call(c, nfs4rc::f_80073748, &[], 0x8008_a700) != 0; // AITune_GetOneWay
+        let m = &mut c.m;
+        let s = (BWORLDSM_SLICES.get(m) as u32).wrapping_add(m.r32(slice_at) << 5);
+        let (lanes, left, right) = (m.r8(s + 29) as i32, m.r8(s + 30) as i32, m.r8(s + 31) as i32);
+        let x = if one_way {
+            // the lanes' middle, and half a lane either side of it
+            let (l, rr) = (lanes >> 4, lanes & 0xF);
+            let (lw, rw) = ((left << 15).wrapping_mul(l), (right << 15).wrapping_mul(rr));
+            let sum = lw.wrapping_add(rw);
+            let mid = ((sum as u32) >> 1) as i32 - lw;
+            let half = div(sum, l + rr);
+            if side != 0 { mid.wrapping_add(half) } else { mid.wrapping_sub(half) }
+        } else if side != 0 {
+            right << 14
+        } else {
+            (left << 15).wrapping_neg() / 2
+        };
+        offset.set(m, Vec3::new(x, 0x8000, 0));
+    });
+}
+
+pub fn abi_calculate_starting_grid_offset(c: &mut Cpu) {
+    calculate_starting_grid_offset(c, Car(c.r[4]), c.r[5], Coord(c.r[6]));
+}
+
+/// The heavy vehicles' masses for the Newton object (the buses and trucks, 25 t, and the
+/// vans, 17 t; other cars their spec's mass in 1/128ths).
+fn object_mass(m: &mut Mem, car: Car) -> i32 {
+    match car.car_info(m).car_type(m) {
+        33 | 36 | 38 | 39 | 47 | 48 | 49 => 0x19_0000,
+        34 | 37 | 41 | 43 | 44 => 0x11_0000,
+        _ => car.specs(m).mass(m) / 128,
+    }
+}
+
+/// `Cars_IniCarObjects` (CARS.CPP, 0x8008a814): car `i` at the start: its statistics, its
+/// Newton object (when it races), on its grid place (the slice to extract its laps from
+/// counted the short way round), behind the line with no laps, at rest with its controls,
+/// wheels, collisions and body cleared (in first gear, its lights on in the dark), and its
+/// body's pitch and roll factors from its springs (the cars proper).
+pub fn ini_car_objects(c: &mut Cpu, car: Car, i: i32) {
+    abi::frame(c, 72, |c, sp| {
+        // s0 the car, s1 its index
+        let mut r = abi::Saved::of(c);
+        (r.0[0], r.0[1]) = (car.0, i as u32);
+        let m = &mut c.m;
+        init_stats(m, car);
+        car.set_swap_car(m, Car(0));
+        car.set_swap_time(m, 0);
+        if i < GAME_SETUP.num_cars(m) {
+            let mass = object_mass(m, car);
+            let size = car.n().dimension().get(m);
+            // (the size as its stack arguments)
+            for (k, v) in [size.x, size.y, size.z].into_iter().enumerate() {
+                c.m.w32(sp + 16 + 4 * k as u32, v as u32);
+            }
+            r.enter(c, 0x800a_26f4, 0x8008_a918, |c| newton::init_base_newton_obj(c, car.n(), i | 0x100, mass, size));
+        }
+        let (slice_at, offset) = (sp + 48, Coord(sp + 32));
+        r.enter(c, 0x8008_a5d0, 0x8008_a928, |c| calculate_starting_grid_offset(c, car, slice_at, offset));
+        let m = &mut c.m;
+        let (slices, slice) = (NUM_SLICES.get(m), m.r32(slice_at) as i32);
+        car.stats().set_extract_slice(m, if slices / 2 < slice { slices.wrapping_sub(slice) } else { slice });
+        let reversed = GAME_SETUP.reverse_track(m) != 0;
+        let slice = m.r32(slice_at) as i32;
+        r.enter(c, 0x800a_22a8, 0x8008_a990, |c| newton::set_initial_slice_position_orientation_etc(c, car.n(), slice, offset, if reversed { -1 } else { 1 }));
+        let m = &mut c.m;
+        car.set_unlap(m, 1);
+        car.set_lap(m, 0);
+        let n = car.n();
+        let on = n.sim_road_info().slice(m) as u16;
+        let old = if GAME_SETUP.reverse_track(m) != 0 { (NUM_SLICES.get(m) as u16).wrapping_sub(on).wrapping_sub(1) } else { on };
+        n.set_old_slice(m, old);
+        find_total_slice(m, car);
+        car.set_rs_control(m, 0);
+        car.set_rs_steering(m, 0);
+        car.set_rs_gas_level(m, 0);
+        car.set_rs_brake_level(m, 0);
+        car.set_glue(m, 0x1_0000);
+        car.set_ai_glue(m, 0x1_0000);
+        car.set_drag(m, 0);
+        car.set_crash(m, 0);
+        car.set_blowout(m, 0);
+        car.set_pull_over(m, 0);
+        for v in [car.linear_acc(), car.angular_acc(), car.linear_acc_ch(), car.linear_acc_rh(), car.linear_vel_ch(), car.angular_vel_ch()] {
+            v.set(m, Vec3::default());
+        }
+        for k in 0..4 {
+            let w = car.wheel(k);
+            w.set_actual_height(m, 0);
+            w.current_pos().set(m, Vec3::default());
+            w.road_normal().set(m, Vec3::new(0, 0x1_0000, 0));
+            w.set_wheel_acc(m, 0);
+            w.set_wheel_in_air(m, 0);
+            w.set_rebound(m, 0);
+            w.set_impact_compression(m, 0);
+            w.set_road_surface_type(m, 1);
+        }
+        let control = car.control();
+        control.set_desired_gear(m, 1);
+        control.set_gear(m, 1);
+        control.set_last_gear(m, 1);
+        for set in [Car::set_flywheel_rpm, Car::set_wheel_spin, Car::set_front_wheel_spin, Car::set_wheel_lock, Car::set_slide, Car::set_front_skid, Car::set_rear_skid] {
+            set(car, m, 0);
+        }
+        control.set_desired_gas_level(m, 0);
+        control.set_desired_brake_level(m, 0);
+        control.set_desired_steering(m, 0);
+        control.set_down_shifting(m, 0);
+        control.set_gear_shift_timer(m, 0);
+        control.set_gas_level(m, 0);
+        control.set_brake_level(m, 0);
+        control.set_steering(m, 0);
+        control.set_hand_brake(m, 0);
+        control.set_horn(m, 0);
+        // the headlights on in the dark
+        let dark = GAME_SETUP.time(m) != 0;
+        control.set_lights(m, if dark { 3 } else { 0 });
+        control.set_abort(m, 0);
+        control.set_look_behind(m, 0);
+        control.set_hanno(m, 0);
+        control.set_event(m, 0);
+        control.set_queued_event(m, 0);
+        car.set_g_transfer_front(m, 0);
+        car.set_old_skid_state(m, 0);
+        car.set_old_audio_skid_state(m, 0);
+        car.set_front_skid(m, 0);
+        car.set_rear_skid(m, 0);
+        r.call(c, nfs4rc::f_800679ec, &[car.0], 0x8008_ab48); // AIInit_RestartAICar
+        let m = &mut c.m;
+        car.set_audio_count(m, 0);
+        car.set_audio_damage_scrape(m, 0);
+        car.collision().set_reset_timer(m, 0);
+        car.collision().set_smoking(m, 0);
+        n.set_flight_time(m, 0);
+        let hit = n.collision();
+        hit.set_collided(m, 0);
+        hit.set_last_collision(m, 0);
+        hit.set_impulse(m, 0);
+        hit.set_other_obj(m, crate::types::NewtonObj(0));
+        hit.set_disable_collision_timer(m, 0);
+        n.set_ground_vel(m, 0);
+        n.set_road_gravity_modifier(m, 0);
+        n.set_speed_xz(m, 0);
+        let render = car.render();
+        render.set_body_pitch(m, 0);
+        render.set_body_roll(m, 0);
+        render.set_current_pitch(m, 0);
+        render.set_current_roll(m, 0);
+        render.set_current_height(m, 0);
+        if car.car_info(m).car_type(m) < CAR_TYPES {
+            let specs = car.specs(m);
+            let stiffness = specs.suspension_stiffness(m);
+            let pitch = crate::fixed::fixeddiv(specs.body_pitch_factor(m), stiffness.wrapping_mul(3));
+            render.set_pitch_factor(m, pitch);
+            let specs = car.specs(m);
+            let roll = crate::fixed::fixeddiv(specs.body_roll_factor(m), specs.suspension_stiffness(m) << 1);
+            render.set_roll_factor(m, roll);
+        } else {
+            render.set_pitch_factor(m, 0);
+            render.set_roll_factor(m, 0);
+        }
+    });
+}
+
+pub fn abi_ini_car_objects(c: &mut Cpu) {
+    ini_car_objects(c, Car(c.r[4]), c.r[5] as i32);
+}
+
+/// `Cars_InitCar` (CARS.CPP, 0x8008ac00): car `i`'s set-up: for a racing car its AI data
+/// (from its car's `.qda` pack, or the standard one) and specs (from its `p<name>.dat` in
+/// `dusty.viv`; the derived specs for a human's), then the functions the schedules run for
+/// it (a human's or the AI's control, physics and rotation; the catch-up position step for a
+/// human in a linked race with catch-up), and its 3D model; the files closed.
+pub fn init_car(c: &mut Cpu, car: Car, i: i32) {
+    abi::frame(c, 280, |c, sp| {
+        // s1 the car, s5 its index; s3 the AI pack, s4 its data, s2 dusty.viv, s0 the specs'
+        // data (0 before); the calls leave their scratch registers (for sprintf's homing)
+        let mut r = abi::Saved::of(c);
+        (r.0[1], r.0[5], r.0[2], r.0[3], r.0[4], r.0[0]) = (car.0, i as u32, 0, 0, 0, 0);
+        let (pack_name, specs_name, viv_name) = (sp + 16, sp + 224, sp + 120);
+        if i < GAME_SETUP.num_cars(&mut c.m) {
+            let car_type = car.car_info(&mut c.m).car_type(&mut c.m) as u32;
+            if r.call_leaving(c, nfs4rc::f_80067dd8, &[car_type], 0x8008_ac5c) != 0 {
+                // AIInit_IsNonStandardCarFile
+                let dir = c.m.r32(PATHS + 0x10);
+                r.call_leaving(c, nfs4rc::f_800e50a8, &[pack_name, QDA_NAME, dir, car.0 + 0x240], 0x8008_ac7c); // sprintf
+            } else {
+                let dir = c.m.r32(PATHS + 0x10);
+                r.call_leaving(c, nfs4rc::f_800e50a8, &[pack_name, STD_QDA_NAME, dir], 0x8008_ac98); // sprintf
+            }
+            r.0[3] = r.call_leaving(c, nfs4rc::f_800e6948, &[pack_name, 16], 0x8008_aca4); // loadpackadr
+            r.0[4] = r.call_leaving(c, nfs4rc::f_800bc7dc, &[0, r.0[3], 1], 0x8008_acb8); // Udff_Opena
+            let car_type = car.car_info(&mut c.m).car_type(&mut c.m);
+            if car_type < CAR_TYPES {
+                let name = CAR_NAMES.wrapping_add((car_type as u32).wrapping_mul(5));
+                r.call_leaving(c, nfs4rc::f_800e50a8, &[specs_name, SPECS_NAME, name], 0x8008_acf4); // sprintf
+            } else {
+                r.call_leaving(c, nfs4rc::f_800e50a8, &[specs_name, TRAM_SPECS_NAME], 0x8008_ad08); // sprintf
+            }
+            r.0[0] = viv_name;
+            let dir = c.m.r32(PATHS + 0xC);
+            r.call_leaving(c, nfs4rc::f_800e50a8, &[viv_name, VIV_NAME, dir], 0x8008_ad24); // sprintf
+            r.0[2] = r.call_leaving(c, nfs4rc::f_800e6394, &[viv_name, 16], 0x8008_ad30); // loadfileadrz
+            let at = r.call_leaving(c, nfs4rc::f_800e6e04, &[r.0[2], specs_name], 0x8008_ad40); // locatebig
+            r.0[0] = r.call_leaving(c, nfs4rc::f_800bc7dc, &[0, at, 0], 0x8008_ad50); // Udff_Opena
+            if i < GAME_SETUP.num_cars(&mut c.m) {
+                r.call_leaving(c, nfs4rc::f_80067b14, &[car.0, r.0[4]], 0x8008_ad74); // AIInit_InitAICar
+                r.call_leaving(c, nfs4rc::f_800679ec, &[car.0], 0x8008_ad7c); // AIInit_RestartAICar
+                let specs = r.call_leaving(c, nfs4rc::f_800e5f28, &[SPECS_HEAP_NAME, 464, 0], 0x8008_ad90); // reservememadr
+                car.set_specs(&mut c.m, crate::types::CarSpecs(specs));
+                let data = r.0[0];
+                r.enter(c, 0x800a_935c, 0x8008_ada0, |c| crate::physics::init_car_specs(c, car, data));
+                if car.car_flags(&mut c.m) & CAR_HUMAN != 0 {
+                    r.enter(c, 0x800a_95f8, 0x8008_adbc, |c| crate::physics::calculate_derived_car_specs(c, car));
+                }
+            }
+        }
+        let m = &mut c.m;
+        car.set_func_update_road_info(m, 0x800a_2074); // Newton_UpdateRoadInfo
+        car.set_func_replay(m, 0x800b_5d00);
+        car.set_func_control(m, 0x8009_2ad4); // Control_Human
+        car.set_func_stats(m, 0x800b_8ed0); // Stats_TrackStats
+        car.set_func_handling_physics(m, 0x800a_e1dc); // Physics_SimCar
+        car.set_func_gravity_physics(m, 0x800a_41d8); // Newton_ApplyTheLawOfGravity
+        car.set_func_qd_physics_update_vel(m, 0x800a_2974); // Newton_QDUpdateVel
+        car.set_func_qd_physics_update_rot(m, 0x800a_2bf4); // Newton_QDUpdateRot64Hz
+        car.set_func_test_me_for_collisions(m, 0x8009_23bc); // Collide_CheckMeForCollisions
+        car.set_func_do_post_collision_stuff(m, 0x8008_a300); // Car_DoPostCollisionStuff
+        if car.car_flags(m) & CAR_AI != 0 {
+            car.set_func_control(m, 0x8009_2acc); // Control_AI
+            car.set_func_handling_physics(m, 0x8006_a384); // the AI's physics
+            car.set_func_replay(m, 0);
+            car.set_func_qd_physics_update_rot(m, 0x800a_2d04); // Newton_QDUpdateRot32Hz
+        }
+        if car.car_flags(m) & CAR_HUMAN != 0 && GAME_SETUP.catchup_logic(m) != 0 && GAME_SETUP.comm_mode(m) > 0 {
+            car.set_func_qd_physics_update_vel(m, 0x8008_690c); // Cars_QDUpdateVelGlue
+        }
+        r.call_leaving(c, nfs4rc::f_800afbc4, &[car.0, i as u32], 0x8008_aeb4); // R3DCar_Instantiate3DCar
+        if i < GAME_SETUP.num_cars(&mut c.m) {
+            r.call_leaving(c, nfs4rc::f_800bc8a4, &[r.0[4]], 0x8008_aed4); // Udff_Close
+            r.call_leaving(c, nfs4rc::f_800bc8a4, &[r.0[0]], 0x8008_aedc); // Udff_Close
+            r.call_leaving(c, nfs4rc::f_800e612c, &[r.0[2]], 0x8008_aee4); // purgememadr
+            r.call_leaving(c, nfs4rc::f_800e612c, &[r.0[3]], 0x8008_aeec); // purgememadr
+        }
+    });
+}
+
+pub fn abi_init_car(c: &mut Cpu) {
+    init_car(c, Car(c.r[4]), c.r[5] as i32);
+}
+
+/// `Cars_DeInitCar` (CARS.CPP, 0x8008af10): the car's AI data, specs and 3D model freed.
+pub fn de_init_car(c: &mut Cpu, car: Car) {
+    abi::frame(c, 24, |c, _| {
+        let mut r = abi::Saved::of(c);
+        r.0[0] = car.0;
+        r.call(c, nfs4rc::f_80067ce8, &[car.0], 0x8008_af24); // AIInit_DeInitAICar
+        let specs = car.specs(&mut c.m).0;
+        if specs != 0 {
+            car.set_specs(&mut c.m, crate::types::CarSpecs(0));
+            r.call(c, nfs4rc::f_800e612c, &[specs], 0x8008_af40); // purgememadr
+        }
+        r.call(c, nfs4rc::f_800af910, &[car.0], 0x8008_af48); // R3DCar_DeInstantiate3DCar
+    });
+}
+
+pub fn abi_de_init_car(c: &mut Cpu) {
+    de_init_car(c, Car(c.r[4]));
+}
+
+/// `Cars_Restart` (CARS.CPP, 0x8008af58): the race from the start: the sorted lists in the
+/// cars' order, each car back on its grid place ([`ini_car_objects`]), the heavy objects
+/// stopped, no accident scene.
+pub fn restart(c: &mut Cpu) {
+    abi::frame(c, 32, |c, _| {
+        // s0 the index, s1 the place in the list
+        let mut r = abi::Saved::of(c);
+        let m = &mut c.m;
+        let n = NUM_CARS.get(m);
+        for i in 0..n.max(0) as u32 {
+            let car = m.r32(CARS_LIST + 4 * i);
+            m.w32(SORTED_LIST + 4 * i, car);
+            let car = m.r32(CARS_LIST + 4 * i);
+            m.w32(TOTAL_SORTED_LIST + 4 * i, car);
+        }
+        r.0[1] = CARS_LIST;
+        let mut i = 0;
+        while i < NUM_CARS.get(&mut c.m) {
+            let car = Car(c.m.r32(CARS_LIST + 4 * i as u32));
+            (r.0[0], r.0[1]) = (i as u32 + 1, CARS_LIST + 4 * (i as u32 + 1));
+            r.enter(c, 0x8008_a814, 0x8008_afe4, |c| ini_car_objects(c, car, i));
+            i += 1;
+        }
+        let mut k = 0u32;
+        loop {
+            r.0[0] = k;
+            if k as i32 >= r.call(c, nfs4rc::f_800a6b7c, &[], 0x8008_aff8) as i32 {
+                // Object_GetNumIMassObjects
+                break;
+            }
+            let obj = c.m.r32(IMASS_OBJ_INST).wrapping_add(k << 5);
+            for w in 0..4 {
+                c.m.w32(obj + 16 + 4 * w, 0);
+            }
+            k += 1;
+        }
+        ACCIDENT_SLICE.set(&mut c.m, 0);
+    });
+}
+
+pub fn abi_restart(c: &mut Cpu) {
+    restart(c);
+}
+
+/// `Cars_StartUp` (CARS.CPP, 0x8008b064): the race's cars made (each reserved, cleared, given
+/// its set-up and put on the lists), the heavy track objects as Newton objects, each car set
+/// up ([`init_car`]) and its functions put on the schedules (the road, controls, physics,
+/// gravity, collisions and their aftermath at 32 Hz; a racer's statistics and the velocity
+/// at 64 Hz; the rotation at 64 Hz for a human, else on the second 32 Hz schedule), the
+/// licence plates' shapes freed and the force feedback started.
+pub fn start_up(c: &mut Cpu) {
+    abi::frame(c, 72, |c, sp| {
+        // s1 the index (s2 its car data's offset, then its place in a list), s0 the car
+        let mut r = abi::Saved::of(c);
+        reset_car_counters(&mut c.m);
+        r.0[1] = 0;
+        if GAME_SETUP.num_cars(&mut c.m) > 0 {
+            (r.0[4], r.0[3], r.0[2]) = (0x8005_0000, GAME_SETUP.0, 0);
+            let mut i = 0;
+            loop {
+                let car = Car(r.call(c, nfs4rc::f_800e5f28, &[CAR_HEAP_NAME, Car::SIZE, 0], 0x8008_b0b8)); // reservememadr
+                r.0[0] = car.0;
+                initialize(&mut c.m, car.0, Car::SIZE as i32);
+                if i < GAME_SETUP.num_cars(&mut c.m) {
+                    car.set_car_info(&mut c.m, GAME_SETUP.car_info(i as u32));
+                }
+                r.enter(c, 0x8008_6b08, 0x8008_b0ec, |c| initialize_car_tables_flags_and_counters(c, car));
+                i += 1;
+                (r.0[1], r.0[2]) = (i as u32, r.0[2].wrapping_add(180));
+                if i >= GAME_SETUP.num_cars(&mut c.m) {
+                    break;
+                }
+            }
+        }
+        // the heavy track objects
+        let (mut k, mut obj) = (0u32, INFINITE_MASS_NEWTON);
+        loop {
+            (r.0[1], r.0[0]) = (k, obj);
+            if k as i32 >= r.call(c, nfs4rc::f_800a6b7c, &[], 0x8008_b114) as i32 {
+                // Object_GetNumIMassObjects
+                break;
+            }
+            r.call(c, nfs4rc::f_800a6b88, &[k, sp + 32], 0x8008_b128); // Object_GetIMassObjectDimensions
+            let size = Coord(sp + 32).get(&mut c.m);
+            let size = Vec3::new(size.x, size.y, size.z.wrapping_add(0x1_0000));
+            for (w, v) in [size.x, size.y, size.z].into_iter().enumerate() {
+                c.m.w32(sp + 16 + 4 * w as u32, v as u32);
+            }
+            let this = crate::types::NewtonObj(obj);
+            (k, obj) = (k + 1, obj + 576);
+            (r.0[1], r.0[0]) = (k, obj);
+            r.enter(c, 0x800a_26f4, 0x8008_b164, |c| newton::init_base_newton_obj(c, this, 513, 0x28_0000, size));
+        }
+        // each car set up, its road on the 32 Hz schedule
+        (r.0[1], r.0[4], r.0[3], r.0[2]) = (0, GAME_SETUP.0, SIM_GLOBAL.0, CARS_LIST);
+        let mut i = 0;
+        while i < GAME_SETUP.num_cars(&mut c.m) {
+            let car = Car(c.m.r32(CARS_LIST + 4 * i as u32));
+            (r.0[0], r.0[2], r.0[1]) = (car.0, CARS_LIST + 4 * (i as u32 + 1), i as u32 + 1);
+            r.enter(c, 0x8008_ac00, 0x8008_b1b0, |c| init_car(c, car, i));
+            let m = &mut c.m;
+            let f = car.func_update_road_info(m);
+            let s = SIM_GLOBAL.schedule32_hz(m);
+            schedule::add_function(m, s, f, car.0, 6);
+            i += 1;
+        }
+        let plates = R3DCAR_LICENSE_SHAPE_FILE.get(&mut c.m);
+        if plates != 0 {
+            r.call(c, nfs4rc::f_800e612c, &[plates], 0x8008_b1e8); // purgememadr
+        }
+        R3DCAR_LICENSE_SHAPE_FILE.set(&mut c.m, 0);
+        let m = &mut c.m;
+        type Func = fn(Car, &mut Mem) -> u32;
+        let on_32hz: [(Func, i32); 5] = [(Car::func_control, 21), (Car::func_handling_physics, 30), (Car::func_gravity_physics, 30), (Car::func_test_me_for_collisions, 40), (Car::func_do_post_collision_stuff, 50)];
+        for (func, priority) in on_32hz {
+            for i in 0..GAME_SETUP.num_cars(m).max(0) as u32 {
+                let car = Car(m.r32(CARS_LIST + 4 * i));
+                let f = func(car, m);
+                let s = SIM_GLOBAL.schedule32_hz(m);
+                schedule::add_function(m, s, f, car.0, priority);
+            }
+        }
+        let n = GAME_SETUP.num_cars(m).max(0) as u32;
+        (r.0[1], r.0[0], r.0[2], r.0[3]) = (0, CARS_LIST + 4 * n, SIM_GLOBAL.0, GAME_SETUP.0);
+        r.call(c, nfs4rc::f_800cbd78, &[], 0x8008_b388); // Force_StartUp
+        let m = &mut c.m;
+        for i in 0..GAME_SETUP.num_cars(m).max(0) as u32 {
+            let car = Car(m.r32(CARS_LIST + 4 * i));
+            if car.car_flags(m) & CAR_RACING != 0 {
+                let f = car.func_stats(m);
+                let s = SIM_GLOBAL.schedule64_hz(m);
+                schedule::add_function(m, s, f, car.0, 25);
+            }
+        }
+        for i in 0..GAME_SETUP.num_cars(m).max(0) as u32 {
+            let car = Car(m.r32(CARS_LIST + 4 * i));
+            let f = car.func_qd_physics_update_vel(m);
+            let s = SIM_GLOBAL.schedule64_hz(m);
+            schedule::add_function(m, s, f, car.0, 30);
+        }
+        for i in 0..GAME_SETUP.num_cars(m).max(0) as u32 {
+            let car = Car(m.r32(CARS_LIST + 4 * i));
+            let s = if car.car_flags(m) & CAR_HUMAN != 0 { SIM_GLOBAL.schedule64_hz(m) } else { SIM_GLOBAL.schedule32_hz2(m) };
+            let f = car.func_qd_physics_update_rot(m);
+            schedule::add_function(m, s, f, car.0, 30);
+        }
+    });
+}
+
+pub fn abi_start_up(c: &mut Cpu) {
+    start_up(c);
+}
+
+/// `Cars_CleanUp` (CARS.CPP, 0x8008b4cc): each car's functions taken off the schedules (and
+/// its force feedback's), the car freed.
+pub fn clean_up(c: &mut Cpu) {
+    abi::frame(c, 32, |c, _| {
+        // s2 the index, s0 its place in the list, s1 simGlobal
+        let mut r = abi::Saved::of(c);
+        r.0[2] = 0;
+        if NUM_CARS.get(&mut c.m) <= 0 {
+            return;
+        }
+        r.0[1] = SIM_GLOBAL.0;
+        let mut i = 0u32;
+        loop {
+            r.0[0] = CARS_LIST + 4 * i;
+            let m = &mut c.m;
+            let car = Car(m.r32(CARS_LIST + 4 * i));
+            let (s32, s64) = (SIM_GLOBAL.schedule32_hz(m), SIM_GLOBAL.schedule64_hz(m));
+            let delete = |m: &mut Mem, s, f: fn(Car, &mut Mem) -> u32| {
+                let f = f(car, m);
+                schedule::delete_function(m, s, f, car.0);
+            };
+            delete(m, s32, Car::func_update_road_info);
+            delete(m, s32, Car::func_control);
+            if car.car_flags(m) & CAR_RACING != 0 {
+                delete(m, s64, Car::func_stats);
+            }
+            delete(m, s32, Car::func_handling_physics);
+            delete(m, s32, Car::func_gravity_physics);
+            delete(m, s64, Car::func_qd_physics_update_vel);
+            delete(m, s32, Car::func_test_me_for_collisions);
+            delete(m, s32, Car::func_do_post_collision_stuff);
+            if r.call(c, nfs4rc::f_800cbeb8, &[car.0], 0x8008_b5c0) != 0 {
+                // Force_IsForceOn
+                let m = &mut c.m;
+                let s = SIM_GLOBAL.schedule32_hz(m);
+                schedule::delete_function(m, s, FORCE_TICK, car.0);
+            }
+            let m = &mut c.m;
+            let s = if car.car_flags(m) & CAR_HUMAN != 0 { SIM_GLOBAL.schedule64_hz(m) } else { SIM_GLOBAL.schedule32_hz2(m) };
+            let f = car.func_qd_physics_update_rot(m);
+            schedule::delete_function(m, s, f, car.0);
+            i += 1;
+            r.0[2] = i;
+            r.enter(c, 0x8008_af10, 0x8008_b61c, |c| de_init_car(c, car));
+            r.0[0] = CARS_LIST + 4 * i;
+            r.call(c, nfs4rc::f_800e612c, &[car.0], 0x8008_b628); // purgememadr
+            if i as i32 >= NUM_CARS.get(&mut c.m) {
+                break;
+            }
+        }
+    });
+}
+
+pub fn abi_clean_up(c: &mut Cpu) {
+    clean_up(c);
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1508,5 +2266,111 @@ pub(crate) mod tests {
             do_extra_car_collision_processing(c, Car(a[0]));
             None
         });
+    }
+
+    /// The set-up's small helpers on shuffled races (the dash data's pointers above the dead
+    /// stack).
+    #[test]
+    fn setup_helpers_fuzz() {
+        const OUT: u32 = 0x801F_FF80;
+        for k in 0..3 {
+            against_original("Cars_InitStats", 500, 0x157 + k as u64, shuffle, nfs4rc::f_80086aa0, &|c| vec![car(c, k)], |c, a| {
+                init_stats(&mut c.m, Car(a[0]));
+                None
+            });
+            against_original("Cars_QDUpdateVelGlue", 2_000, 0x61 + k as u64, glued, nfs4rc::f_8008690c, &|c| vec![car(c, k)], |c, a| {
+                qd_update_vel_glue(&mut c.m, Car(a[0]));
+                None
+            });
+            against_original("Cars_GetDashData", 500, 0xDA + k as u64, shuffle, nfs4rc::f_800868e8, &|c| vec![car(c, k), OUT, OUT + 4, OUT + 8], |c, a| {
+                get_dash_data(&mut c.m, Car(a[0]), a[1], a[2], a[3]);
+                None
+            });
+            against_original("Cars_InitDashData", 500, 0xDB + k as u64, shuffle, nfs4rc::f_80086988, &|c| vec![car(c, k), OUT, OUT + 4], |c, a| {
+                init_dash_data(&mut c.m, Car(a[0]), a[1], a[2]);
+                None
+            });
+        }
+        against_original("Cars_ResetCarCounters", 100, 0xC0, shuffle, nfs4rc::f_80086a78, &|_| vec![], |c, _| {
+            reset_car_counters(&mut c.m);
+            None
+        });
+        let filled = |c: &mut Cpu, rng: &mut Rng| {
+            shuffle(c, rng);
+            for a in (0x801F_FF40..0x801F_FF80).step_by(4) {
+                c.m.w32(a, rng.next() as u32);
+            }
+        };
+        against_original("Cars_Initialize", 500, 0x1A1, filled, nfs4rc::f_8008b040, &|c| vec![OUT - 0x40, c.m.r32(0x8011_F368) % 65], |c, a| {
+            initialize(&mut c.m, a[0], a[1] as i32);
+            None
+        });
+    }
+
+    /// The race's cars moving fast or slow with any glue.
+    fn glued(c: &mut Cpu, rng: &mut Rng) {
+        shuffle(c, rng);
+        for i in 0..3 {
+            let car = Car(car(c, i));
+            let m = &mut c.m;
+            car.set_glue(m, [0x1_0000, (rng.next() % 0x2_0000) as i32, rng.any()][(rng.next() % 3) as usize]);
+            let v = car.n().linear_vel();
+            v.set_y(m, rng.any());
+        }
+    }
+
+    /// The race's cars on any grid place, driving either way, on a track reversed or not.
+    fn gridded(c: &mut Cpu, rng: &mut Rng) {
+        shuffle(c, rng);
+        let m = &mut c.m;
+        let mut pick = |n: u32| (rng.next() % n as u64) as i32;
+        for i in 0..NUM_CARS.get(m) as u32 {
+            let car = Car(m.r32(CARS_LIST + 4 * i));
+            let index = car.car_index(m) as u32;
+            GAME_SETUP.car_info(index).set_starting_pos(m, pick(9));
+            car.set_desired_direction(m, [1, -1][pick(2) as usize]);
+        }
+        NUM_RACE_CARS.set(m, 1 + pick(6));
+        AITUNE_DRIVE_SIDE.set(m, [1, -1][pick(2) as usize]);
+    }
+
+    /// A car's grid place and setting it on the grid leave the stack and RAM as the
+    /// originals do.
+    #[test]
+    fn grid_fuzz() {
+        let place = |c: &mut Cpu, rng: &mut Rng| {
+            let k = (rng.next() % 3) as u32;
+            vec![car(c, k), 0x801F_FF80, 0x801F_FF90]
+        };
+        crate::test_util::same_stack("Cars_CalculateStartingGridOffset", 0x8008_a5d0, nfs4rc::f_8008a5d0, 0x8008_a928, 0x801F_FE00, 2_000, 0x641D, gridded, &place);
+        let ini = |c: &mut Cpu, rng: &mut Rng| {
+            let k = (rng.next() % 3) as u32;
+            vec![car(c, k), k]
+        };
+        crate::test_util::same_stack("Cars_IniCarObjects", 0x8008_a814, nfs4rc::f_8008a814, 0x8008_afe4, 0x801F_FE00, 1_000, 0x1C0, gridded, &ini);
+        crate::test_util::same_stack("Cars_Restart", 0x8008_af58, nfs4rc::f_8008af58, 0x800b_73e0, 0x801F_FE00, 100, 0x5E57, gridded, &|_, _| vec![]);
+    }
+
+    /// A car put on the lists again (the counts as the race's, or the lists shortened), of
+    /// any class.
+    #[test]
+    fn tables_fuzz() {
+        let shorter = |c: &mut Cpu, rng: &mut Rng| {
+            gridded(c, rng);
+            let m = &mut c.m;
+            let mut pick = |n: u32| (rng.next() % n as u64) as i32;
+            for n in [NUM_CARS, NUM_RACE_CARS, NUM_AI_CARS, NUM_AI_RACE_CARS, NUM_TRAFFIC_CARS, NUM_COP_CARS, NUM_LIFE_BASIS_CARS] {
+                n.update(m, |v| v.min(pick(4)));
+            }
+            NUM_HUMAN_RACE_CARS.update(m, |v| v.min(pick(2)));
+            GAME_SETUP.set_cops(m, pick(2));
+            for i in 0..3 {
+                let car = Car(m.r32(CARS_LIST + 4 * i));
+                car.car_info(m).set_car_class(m, [1, 2, 4, 8, 0x10, 0x41, 0x1F][pick(7) as usize]);
+                car.car_info(m).set_car_type(m, [pick(29), 29 + pick(20), 3][pick(3) as usize]);
+            }
+        };
+        let which = |c: &mut Cpu, rng: &mut Rng| vec![car(c, (rng.next() % 3) as u32)];
+        crate::test_util::same_stack("Cars_InitializeCarTablesFlagsAndCounters", 0x8008_6b08, nfs4rc::f_80086b08, 0x8008_b0ec, 0x801F_FE00, 1_000, 0x7AB, shorter, &which);
     }
 }
