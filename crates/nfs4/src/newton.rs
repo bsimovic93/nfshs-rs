@@ -4,7 +4,7 @@
 
 use crate::abi;
 use crate::bworldsm::{find_closest_quad_rez, u_forward, u_normal};
-use crate::fixed::{fixeddiv, fixedmult, intatan};
+use crate::fixed::{fixeddiv, fixedmult};
 use crate::globals::*;
 use crate::mathnfs::{longer_and_quarter, normalize_short_vector};
 use crate::types::{BWorldSmPos, Car, Coord, Matrix, NewtonObj, TrkNewSimSlice, TrkNewSlice};
@@ -47,16 +47,15 @@ fn next_slice(m: &mut Mem, slice: i32) -> i32 {
     if next < count { next } else { slice.wrapping_sub(count.wrapping_sub(1)) }
 }
 
-/// The road's heading at `slice` (to the next one), in 1024ths of a turn.
-fn slice_yaw(c: &mut Cpu, slice: i32) -> i32 {
-    let next = next_slice(&mut c.m, slice);
-    let (a, b) = (center(&mut c.m, slice), center(&mut c.m, next));
-    intatan(&mut c.m, b.x.wrapping_sub(a.x), b.z.wrapping_sub(a.z))
-}
-
-/// `Newton_CalculateSliceYaw` (NEWTON.CPP, 0x800a023c).
+/// `Newton_CalculateSliceYaw` (NEWTON.CPP, 0x800a023c): the road's heading at `slice` (to the
+/// next one), in 1024ths of a turn (`intatan` called recompiled, its frame left on the stack).
 pub fn calculate_slice_yaw(c: &mut Cpu, slice: i32) -> i32 {
-    slice_yaw(c, slice)
+    abi::frame(c, 24, |c, _| {
+        let next = next_slice(&mut c.m, slice);
+        let (a, b) = (center(&mut c.m, slice), center(&mut c.m, next));
+        let r = abi::Saved::of(c);
+        r.call(c, nfs4rc::f_800e6724, &[b.x.wrapping_sub(a.x) as u32, b.z.wrapping_sub(a.z) as u32], 0x800a_029c) as i32
+    })
 }
 
 pub fn abi_calculate_slice_yaw(c: &mut Cpu) {

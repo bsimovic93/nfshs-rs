@@ -178,7 +178,7 @@ pub fn manage_bureaucracy(c: &mut Cpu) {
             car.set_road_span(&mut c.m, span);
             let pos = r.enter(c, 0x8008_b954, 0x8008_baf0, |c| calculate_road_position(c, car));
             car.set_road_position(&mut c.m, pos);
-            r.call(c, nfs4rc::f_80073e74, &[car.0], 0x8008_bafc); // AIWorld_CalculateLaneInfo
+            r.enter(c, 0x8007_3e74, 0x8008_bafc, |c| crate::aiworld::calculate_lane_info(c, car));
             if r.call(c, nfs4rc::f_8006a6ec, &[car.0], 0x8008_bb04) != 0 {
                 // AIPhysics_UseCoolPhysics
                 let v = calc_vel_down_road(&mut c.m, car);

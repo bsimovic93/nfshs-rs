@@ -243,3 +243,27 @@
 8006d454 AIPhysic_ResetCar
 8006d460 AIPhysic_InitCar
 8006d5d4 AIPhysic_DeInitCar
+
+# AIWORLD.CPP
+80073870 AIWorld_ZSplineDistance
+80073904 AIWorld_ZSplineDistance
+80073998 AIWorld_ApxSplineDistance
+80073a08 AIWorld_ApxSplineDistance
+80073a74 AIWorld_ApxSplineDistance
+80073a9c AIWorld_ApxSplineDistance
+80073b04 AIWorld_SplineDistance
+80073b5c AIWorld_SplineDistance
+80073bb8 AIWorld_GameOdometer
+80073bd0 AIWorld_IsDriveableLaneInSliceRange
+80073c88 AIWorld_IsDriveableLane
+80073cdc AIWorld_GetProfileMask
+80073d1c AIWorld_IsDriveableLane_UsingMask
+80073d38 AIWorld_CheckForBarrierBetweenLanes
+80073dac AIWorld_LaneIndex
+80073e74 AIWorld_CalculateLaneInfo
+80073f38 AIWorld_CalculateDeltaRoadYaw
+80073fc0 AIWorld_CalcRoadBend
+8007409c AIWorld_CalcFutureLateralVel
+800741b4 AIWorld_CalcSpeed
+800741fc AIWorld_CalcLateralVelocity
+80074258 AIWorld_FindBarrierLessLaneAndPosition

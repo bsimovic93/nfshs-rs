@@ -340,3 +340,8 @@ pub const AITUNE_BTC_PERP_ACC_MULTS: I32s = I32s(0x8010_F12C, 3);
 pub const HUMAN_COP_HIT_TICKS: u32 = 0x8013_D880;
 pub const HUMAN_COP_HIT_GRIP: u32 = 0x8010_E8B0;
 pub const HUMAN_COP_HIT_BRAKE: u32 = 0x8010_E8C0;
+
+// AIWORLD.CPP
+
+/// `inverseLaneWidthTable`: 1 / a lane's width, by the width in half metres.
+pub const INVERSE_LANE_WIDTH_TABLE: u32 = 0x8010_F2D0;

@@ -19,6 +19,7 @@
 
 pub mod abi;
 pub mod aiphysic;
+pub mod aiworld;
 pub mod bworld;
 pub mod bworldsm;
 pub mod cars;
@@ -104,6 +105,28 @@ pub static FUNCS: &[Func] = &[
     func(0x8006_d454, "AIPhysic_ResetCar", aiphysic::abi_reset_car),
     func(0x8006_d460, "AIPhysic_InitCar", aiphysic::abi_init_car),
     func(0x8006_d5d4, "AIPhysic_DeInitCar", aiphysic::abi_de_init_car),
+    func_ret(0x8007_3870, "AIWorld_ZSplineDistance", aiworld::abi_z_spline_distance),
+    func_ret(0x8007_3904, "AIWorld_ZSplineDistance_Points", aiworld::abi_z_spline_distance_points),
+    func_ret(0x8007_3998, "AIWorld_ApxSplineDistance", aiworld::abi_apx_spline_distance),
+    func_ret(0x8007_3a08, "AIWorld_ApxSplineDistance_ToSlice", aiworld::abi_apx_spline_distance_to_slice),
+    func_ret(0x8007_3a74, "AIWorld_ApxSplineDistance_FromSlice", aiworld::abi_apx_spline_distance_from_slice),
+    func_ret(0x8007_3a9c, "AIWorld_ApxSplineDistance_Slices", aiworld::abi_apx_spline_distance_slices),
+    func_ret(0x8007_3b04, "AIWorld_SplineDistance", aiworld::abi_spline_distance),
+    func_ret(0x8007_3b5c, "AIWorld_SplineDistance_ToPoint", aiworld::abi_spline_distance_to_point),
+    func_ret(0x8007_3bb8, "AIWorld_GameOdometer", aiworld::abi_game_odometer),
+    func_ret(0x8007_3bd0, "AIWorld_IsDriveableLaneInSliceRange", aiworld::abi_is_driveable_lane_in_slice_range),
+    func_ret(0x8007_3c88, "AIWorld_IsDriveableLane", aiworld::abi_is_driveable_lane),
+    func_ret(0x8007_3cdc, "AIWorld_GetProfileMask", aiworld::abi_get_profile_mask),
+    func_ret(0x8007_3d1c, "AIWorld_IsDriveableLane_UsingMask", aiworld::abi_is_driveable_lane_using_mask),
+    func_ret(0x8007_3d38, "AIWorld_CheckForBarrierBetweenLanes", aiworld::abi_check_for_barrier_between_lanes),
+    func_ret(0x8007_3dac, "AIWorld_LaneIndex", aiworld::abi_lane_index),
+    func(0x8007_3e74, "AIWorld_CalculateLaneInfo", aiworld::abi_calculate_lane_info),
+    func_ret(0x8007_3f38, "AIWorld_CalculateDeltaRoadYaw", aiworld::abi_calculate_delta_road_yaw),
+    func_ret(0x8007_3fc0, "AIWorld_CalcRoadBend", aiworld::abi_calc_road_bend),
+    func_ret(0x8007_409c, "AIWorld_CalcFutureLateralVel", aiworld::abi_calc_future_lateral_vel),
+    func(0x8007_41b4, "AIWorld_CalcSpeed", aiworld::abi_calc_speed),
+    func_ret(0x8007_41fc, "AIWorld_CalcLateralVelocity", aiworld::abi_calc_lateral_velocity),
+    func(0x8007_4258, "AIWorld_FindBarrierLessLaneAndPosition", aiworld::abi_find_barrier_less_lane_and_position),
     func_ret(0x8007_df6c, "xzsquaredist32", bworld::abi_xzsquaredist32),
     func_ret(0x8007_f334, "BWorldSm_Init", bworldsm::abi_init),
     func(0x8007_f36c, "BWorldSm_Restart", bworldsm::abi_restart),

@@ -421,12 +421,12 @@ pub fn main(c: &mut Cpu, car: Car) {
             return;
         }
         if car.car_flags(&mut c.m) & CAR_AI != 0 {
-            r.call(c, nfs4rc::f_800741b4, &[car.0], 0x8006_a3fc); // AIWorld_CalcSpeed
+            crate::aiworld::calc_speed(&mut c.m, car);
         }
         check_desired_direction(&mut c.m, car);
         r.enter(c, 0x8006_d2a8, 0x8006_a40c, |c| check_for_grip_reduction(c, car));
         handle_signalling(&mut c.m, car);
-        let lat = r.call(c, nfs4rc::f_800741fc, &[car.0], 0x8006_a41c) as i32; // AIWorld_CalcLateralVelocity
+        let lat = r.enter(c, 0x8007_41fc, 0x8006_a41c, |c| crate::aiworld::calc_lateral_velocity(&mut c.m, car));
         car.set_lateral_velocity(&mut c.m, lat);
         let cool = use_cool_physics(&mut c.m, car);
         r.0[1] = cool as u32;
@@ -921,10 +921,8 @@ pub fn abi_targeted_get_desired_vector(c: &mut Cpu) {
 /// sharp bend, or slides sideways at more than 40% of its speed (under 15 m/s).
 pub fn check_if_out_of_control(c: &mut Cpu, car: Car) -> bool {
     abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = car.0;
         let dir = car.direction(&mut c.m);
-        let bend = r.call(c, nfs4rc::f_80073fc0, &[car.0, (dir << 3) as u32], 0x8006_ba7c) as i32; // AIWorld_CalcRoadBend
+        let bend = crate::aiworld::calc_road_bend(&mut c.m, car, dir << 3);
         let bend = bend.wrapping_abs();
         let m = &mut c.m;
         if SIM_COUNTER.get(m) < car.wipe_out_end_tick(m) {
@@ -1002,7 +1000,7 @@ pub fn get_desired_vector(c: &mut Cpu, car: Car) {
         let n = slices_ahead(m, ahead);
         let look = slice_ahead(m, slice, n);
         car.set_look_ahead_slice(m, look);
-        let bend = r.call(c, nfs4rc::f_80073fc0, &[car.0, n as u32], 0x8006_b5b0) as i32; // AIWorld_CalcRoadBend
+        let bend = crate::aiworld::calc_road_bend(&mut c.m, car, n);
         let m = &mut c.m;
         let look = car.look_ahead_slice(m);
         let s = slice_at(m, look);
@@ -1049,12 +1047,11 @@ pub fn get_desired_vector(c: &mut Cpu, car: Car) {
             let ok = if off {
                 let side: i32 = if at < pos { -1 } else { 1 };
                 r.0[0] = side as u32;
-                let lane = r.call(c, nfs4rc::f_80073dac, &[slice as u32, pos.wrapping_add(side << 19) as u32], 0x8006_b92c); // AIWorld_LaneIndex
-                if r.call(c, nfs4rc::f_80073c88, &[slice as u32, lane], 0x8006_b938) != 0 {
-                    // AIWorld_IsDriveableLane
+                let lane = r.enter(c, 0x8007_3dac, 0x8006_b92c, |c| crate::aiworld::lane_index(&mut c.m, slice, pos.wrapping_add(side << 19)));
+                if crate::aiworld::is_driveable_lane(&mut c.m, slice, lane) != 0 {
                     let pos = car.road_position(&mut c.m);
-                    let lane = r.call(c, nfs4rc::f_80073dac, &[slice as u32, pos.wrapping_add(side << 18) as u32], 0x8006_b950);
-                    r.call(c, nfs4rc::f_80073c88, &[slice as u32, lane], 0x8006_b95c) != 0
+                    let lane = r.enter(c, 0x8007_3dac, 0x8006_b950, |c| crate::aiworld::lane_index(&mut c.m, slice, pos.wrapping_add(side << 18)));
+                    crate::aiworld::is_driveable_lane(&mut c.m, slice, lane) != 0
                 } else {
                     false
                 }
@@ -1133,7 +1130,7 @@ pub fn out_of_control_physics(c: &mut Cpu, car: Car) {
         let m = &mut c.m;
         car.set_drag(m, 0);
         let ahead = car.direction(m).wrapping_mul(cfg.latvelcalc_lookahead(m));
-        let future = r.call(c, nfs4rc::f_8007409c, &[car.0, ahead as u32], 0x8006_bc48) as i32; // AIWorld_CalcFutureLateralVel
+        let future = r.enter(c, 0x8007_409c, 0x8006_bc48, |c| crate::aiworld::calc_future_lateral_vel(c, car, ahead));
         r.0[5] = future as u32;
         let m = &mut c.m;
         let backward = car.direction(m).wrapping_mul(car.current_speed(m)) < 0 && car.drive_direction(m) != -1;
@@ -1488,7 +1485,7 @@ pub fn calculate_ramped_desired_lat_pos(c: &mut Cpu, car: Car, ramp_type: i32) {
             return;
         }
         // (its result unused)
-        r.call(c, nfs4rc::f_80073f38, &[car.0], 0x8006_cf94); // AIWorld_CalculateDeltaRoadYaw
+        r.enter(c, 0x8007_3f38, 0x8006_cf94, |c| crate::aiworld::calculate_delta_road_yaw(c, car));
         let m = &mut c.m;
         let step = AIPHYSIC_ELAPSED_TIME.get(m).wrapping_mul(13107);
         let (at, want) = (car.road_position(m), car.desired_lat_pos(m));
@@ -1597,8 +1594,6 @@ pub fn abi_change_direction(c: &mut Cpu) {
 /// may lose it on a sharp bend (by the personality's chance per second).
 pub fn check_for_grip_reduction(c: &mut Cpu, car: Car) {
     abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = car.0;
         let m = &mut c.m;
         let grip = car.grip_factor(m);
         let p = car.personality(m);
@@ -1620,8 +1615,9 @@ pub fn check_for_grip_reduction(c: &mut Cpu, car: Car) {
         if car.n().sim_optz(m) != 0 || car.car_flags(m) & (CAR_AI_RACER | CAR_COP) == 0 {
             return;
         }
-        let bend = |c: &mut Cpu, ra: u32| r.call(c, nfs4rc::f_80073fc0, &[car.0, 1], ra) as i32; // AIWorld_CalcRoadBend
-        let sharp = if bend(c, 0x8006_d384) > 0 { bend(c, 0x8006_d394) >= 2001 } else { bend(c, 0x8006_d3a4).wrapping_neg() >= 2001 };
+        let bend = crate::aiworld::calc_road_bend(m, car, 1);
+        // (the original asks for the bend twice)
+        let sharp = if bend > 0 { bend >= 2001 } else { bend.wrapping_neg() >= 2001 };
         if !sharp {
             return;
         }
@@ -1717,7 +1713,7 @@ pub fn abi_de_init_car(c: &mut Cpu) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::globals::{CARS_LIST, NUM_CARS};
     use crate::test_util::{Rng, SCRATCH, against_original};

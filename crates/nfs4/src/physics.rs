@@ -335,14 +335,12 @@ pub fn abi_calculate_tire_forces(c: &mut Cpu) {
     calculate_tire_forces(c, Car(c.r[4]), WheelAcc(c.r[5]));
 }
 
-/// `AIWorld_IsDriveableLane` (still recompiled): lane `lane` of slice `slice` can be driven.
 fn is_driveable_lane(c: &mut Cpu, slice: i32, lane: i32) -> bool {
-    abi::call(c, nfs4rc::f_80073c88, &[slice as u32, lane as u32]) != 0
+    crate::aiworld::is_driveable_lane(&mut c.m, slice, lane) != 0
 }
 
-/// `AIWorld_IsDriveableLaneInSliceRange` (still recompiled).
 fn is_driveable_lane_in_slice_range(c: &mut Cpu, slice: i32, range: i32, side: i32, lane: i32) -> bool {
-    abi::call(c, nfs4rc::f_80073bd0, &[slice as u32, range as u32, side as u32, lane as u32]) != 0
+    crate::aiworld::is_driveable_lane_in_slice_range(&mut c.m, slice, range, side, lane)
 }
 
 /// `Physics_CalculateRSControlDesiredPosition` (PHYSICS.CPP, 0x800acc38): where across the road
