@@ -303,8 +303,7 @@ pub fn calc_acceleration(c: &mut Cpu, car: Car, speed: i32) -> i32 {
         }
         r.0[0] = acc as u32;
         acc = r.enter(c, 0x8006_a190, 0x8006_a148, |c| modify_acceleration_according_to_script(c, car, acc));
-        r.0[0] = acc as u32;
-        let boost = r.call(c, nfs4rc::f_8006e09c, &[car.0], 0x8006_a154) as i32; // AISpeeds_SuperDuperSpeedUpTheCarsAtTheStart...
+        let boost = crate::aispeeds::super_duper_speed_up(&mut c.m, car);
         if boost != 0x1_0000 {
             acc = fixedmult(acc, boost);
         }
@@ -1673,7 +1672,7 @@ pub fn init_car(c: &mut Cpu, car: Car) {
         r.0[0] = decel as u32;
         if flags & CAR_AI_RACER != 0 {
             let index = car.car_index(m);
-            let mult = r.call(c, nfs4rc::f_8006f9c8, &[index as u32], 0x8006_d4ec) as i32; // AISpeeds_GetUpgradeBrakeMult
+            let mult = r.enter(c, 0x8006_f9c8, 0x8006_d4ec, |c| crate::aispeeds::get_upgrade_brake_mult(&mut c.m, index));
             decel = mul_8_8(decel, mult);
             r.0[0] = decel as u32;
         }

@@ -345,3 +345,24 @@ pub const HUMAN_COP_HIT_BRAKE: u32 = 0x8010_E8C0;
 
 /// `inverseLaneWidthTable`: 1 / a lane's width, by the width in half metres.
 pub const INVERSE_LANE_WIDTH_TABLE: u32 = 0x8010_F2D0;
+
+// AISPEEDS.CPP
+
+/// `AI_elapsedTime`: the AI's time step this tick (64 Hz ticks).
+pub const AI_ELAPSED_TIME: I32 = I32(0x8013_D844);
+/// `AISpeeds_WeatherMultFactors`: the rain's speed factors by curvature (65, allocated).
+pub const AISPEEDS_WEATHER_MULT_FACTORS: U32 = U32(0x8013_D8A0);
+/// `AISpeeds_trackAndNightMult`: the AI racers' speed on this track (at night).
+pub const AISPEEDS_TRACK_AND_NIGHT_MULT: I32 = I32(0x8013_D8A4);
+/// `AISpeeds_TrackSpeeds`: each track's speed limits (slice, speed pairs).
+pub const AISPEEDS_TRACK_SPEEDS: u32 = 0x8010_E9D4;
+/// `AIPerson_glueTable`: the catch-up glue by the gap (21, one per 60 m).
+pub const GLUE_TABLE: u32 = 0x8010_E370;
+/// `leaderBoard` (`AISpeeds_tLeaderBoard`): the leading racer, human and AI racer, the last AI.
+pub const LEADER_BOARD: u32 = 0x8010_EA00;
+/// `CaravanInfo` (`AISpeeds_tSlotInfo[6]`): each AI slot's caravan.
+pub const CARAVAN_INFO: u32 = 0x8010_EA10;
+/// `engineUpgrade`, `suspensionUpgrade`, `aeroUpgrade` (`AISpeeds_Upgrade_t`).
+pub const ENGINE_UPGRADE: u32 = 0x8010_E93C;
+pub const SUSPENSION_UPGRADE: u32 = 0x8010_E94C;
+pub const AERO_UPGRADE: u32 = 0x8010_E95C;

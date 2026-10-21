@@ -210,7 +210,7 @@ pub fn manage_bureaucracy(c: &mut Cpu) {
         }
         sort_cars(&mut c.m);
         randomize(&mut c.m);
-        r.call(c, nfs4rc::f_8006f7a4, &[], 0x8008_bc28); // AISpeeds_MaintainLeaderBoard
+        crate::aispeeds::maintain_leader_board(&mut c.m);
         r.call(c, nfs4rc::f_800c8568, &[], 0x8008_bc30); // DrawW_DoObjectAnimations
     })
 }

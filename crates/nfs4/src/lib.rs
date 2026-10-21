@@ -19,6 +19,7 @@
 
 pub mod abi;
 pub mod aiphysic;
+pub mod aispeeds;
 pub mod aiworld;
 pub mod bworld;
 pub mod bworldsm;
@@ -105,6 +106,35 @@ pub static FUNCS: &[Func] = &[
     func(0x8006_d454, "AIPhysic_ResetCar", aiphysic::abi_reset_car),
     func(0x8006_d460, "AIPhysic_InitCar", aiphysic::abi_init_car),
     func(0x8006_d5d4, "AIPhysic_DeInitCar", aiphysic::abi_de_init_car),
+    func(0x8006_ddb4, "AISpeeds_StartUp", aispeeds::abi_start_up),
+    func(0x8006_ddec, "AISpeeds_ReadTuningInfo", aispeeds::abi_read_tuning_info),
+    func(0x8006_e070, "AISpeeds_CleanUp", aispeeds::abi_clean_up),
+    func_ret(0x8006_e09c, "AISpeeds_SuperDuperSpeedUp", aispeeds::abi_super_duper_speed_up),
+    func_ret(0x8006_e138, "AISpeeds_CalcOpponentTopSpeed", aispeeds::abi_calc_opponent_top_speed),
+    func_ret(0x8006_e690, "AISpeeds_NeedToSlowDownForCurve", aispeeds::abi_need_to_slow_down_for_curve),
+    func_ret(0x8006_e734, "AISpeeds_CalcOpponentCurveSpeed", aispeeds::abi_calc_opponent_curve_speed),
+    func_ret(0x8006_e89c, "AISpeeds_BTCGetGlueFactor", aispeeds::abi_btc_get_glue_factor),
+    func_ret(0x8006_ea58, "AISpeeds_GetNextAICar", aispeeds::abi_get_next_ai_car),
+    func_ret(0x8006_ea64, "AISpeeds_GetPrevAICar", aispeeds::abi_get_prev_ai_car),
+    func_ret(0x8006_ead0, "AISpeeds_GetCaravanFactor", aispeeds::abi_get_caravan_factor),
+    func_ret(0x8006_ee8c, "AISpeeds_GetGlueFactor", aispeeds::abi_get_glue_factor),
+    func_ret(0x8006_f098, "AISpeeds_GetDamageFactor", aispeeds::abi_get_damage_factor),
+    func_ret(0x8006_f1b0, "AISpeeds_LimitGlueMultiplier", aispeeds::abi_limit_glue_multiplier),
+    func_ret(0x8006_f2a4, "AISpeeds_CalcCopTopSpeed", aispeeds::abi_calc_cop_top_speed),
+    func_ret(0x8006_f36c, "AISpeeds_CalcTrafficTopSpeed", aispeeds::abi_calc_traffic_top_speed),
+    func_ret(0x8006_f50c, "AISpeeds_GetLegalSpeed", aispeeds::abi_get_legal_speed),
+    func_ret(0x8006_f550, "AISpeeds_RandomizeTrafficSpeed", aispeeds::abi_randomize_traffic_speed),
+    func(0x8006_f5dc, "AISpeeds_CalcDesiredSpeed", aispeeds::abi_calc_desired_speed),
+    func_ret(0x8006_f680, "AISpeeds_CalculateOncomingCarSpeed", aispeeds::abi_calculate_oncoming_car_speed),
+    func(0x8006_f728, "AISpeeds_SetTrafficSpeedRandomFactor", aispeeds::abi_set_traffic_speed_random_factor),
+    func(0x8006_f7a4, "AISpeeds_MaintainLeaderBoard", aispeeds::abi_maintain_leader_board),
+    func_ret(0x8006_f8a4, "AISpeeds_GetScriptFactor", aispeeds::abi_get_script_factor),
+    func_ret(0x8006_f90c, "AISpeeds_GetUpgradeAccMult", aispeeds::abi_get_upgrade_acc_mult),
+    func_ret(0x8006_f9c8, "AISpeeds_GetUpgradeBrakeMult", aispeeds::abi_get_upgrade_brake_mult),
+    func_ret(0x8006_fa84, "AISpeeds_GetUpgradeHandlingMult", aispeeds::abi_get_upgrade_handling_mult),
+    func_ret(0x8006_fb40, "AISpeeds_GetUpgradeTopSpeedMult", aispeeds::abi_get_upgrade_top_speed_mult),
+    func_ret(0x8006_fbfc, "AISpeeds_CalcHumanTopSpeed", aispeeds::abi_calc_human_top_speed),
+    func_ret(0x8006_fc1c, "AISpeeds_CalcHumanCurveSpeed", aispeeds::abi_calc_human_curve_speed),
     func_ret(0x8007_3870, "AIWorld_ZSplineDistance", aiworld::abi_z_spline_distance),
     func_ret(0x8007_3904, "AIWorld_ZSplineDistance_Points", aiworld::abi_z_spline_distance_points),
     func_ret(0x8007_3998, "AIWorld_ApxSplineDistance", aiworld::abi_apx_spline_distance),
