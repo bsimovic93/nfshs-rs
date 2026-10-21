@@ -278,7 +278,7 @@ pub fn calc_acceleration(c: &mut Cpu, car: Car, speed: i32) -> i32 {
         }
         let index = (speed / 0x1_0000).min(111).max(0);
         let record = car.acceleration_record(m);
-        let mut acc = r.call(c, nfs4rc::f_8006d9f4, &[record, index as u32], 0x8006_9f94) as i32; // AIDataRecord_AccTable_t::Get
+        let mut acc = crate::aidatarecord::acc_table_get(&mut c.m, crate::types::AIDataRecord(record), index);
         let m = &mut c.m;
         let nitrous = car.acc_nitrous(m);
         if nitrous != 0x1_0000 {
@@ -549,7 +549,7 @@ pub fn simple_physics(c: &mut Cpu, car: Car) {
             r.0[1] = SIM_GLOBAL.0;
             if car.wipe_out_start_tick(m) < SIM_COUNTER.get(m) {
                 let (curves, slice) = (AIDATARECORD_TRACK_CURVE.get(m), car.n().sim_road_info().slice(m) as i32);
-                let curve = r.call(c, nfs4rc::f_8006dba4, &[curves, slice as u32], 0x8006_a7b8) as i32; // AIDataRecord_TrackCurve_t::Get
+                let curve = crate::aidatarecord::track_curve_get(&mut c.m, crate::types::AIDataRecord(curves), slice);
                 let m = &mut c.m;
                 if curve >= 31 && 0x16_38E3 < car.speed(m) {
                     let end = SIM_COUNTER.get(m).wrapping_add(384);

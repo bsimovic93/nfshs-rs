@@ -366,3 +366,13 @@ pub const CARAVAN_INFO: u32 = 0x8010_EA10;
 pub const ENGINE_UPGRADE: u32 = 0x8010_E93C;
 pub const SUSPENSION_UPGRADE: u32 = 0x8010_E94C;
 pub const AERO_UPGRADE: u32 = 0x8010_E95C;
+
+// AIDATARECORD.CPP
+
+/// `recordCollection`: the AI's data records (24 slots).
+pub const RECORD_COLLECTION: u32 = 0x8013_F26C;
+/// `AIDataRecord_BestLine`: the track's best line record.
+pub const AIDATARECORD_BEST_LINE: U32 = U32(0x8013_D890);
+/// `AIDataRecord_WhichRecord`, `AIDataRecord_RecordMethod`.
+pub const AIDATARECORD_WHICH_RECORD: I32 = I32(0x8013_D898);
+pub const AIDATARECORD_RECORD_METHOD: I32 = I32(0x8013_D89C);

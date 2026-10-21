@@ -15,7 +15,8 @@ use crate::globals::{
     HUMAN_RACE_CARS, LEADER_BOARD, NUM_AI_RACE_CARS, NUM_CARS, NUM_HUMAN_RACE_CARS, NUM_SLICES, PATHS, RAND_SEED, RAND_TEMP,
     SIM_COUNTER, SUSPENSION_UPGRADE, TOTAL_SORTED_LIST,
 };
-use crate::types::{AISpeedsSlotInfo, Car, TrkNewSlice};
+use crate::aidatarecord::{curve_speed_table_get, track_curve_get};
+use crate::types::{AIDataRecord, AISpeedsSlotInfo, Car, TrkNewSlice};
 use ps1rt::{Cpu, Mem};
 
 /// `Car_tObj.carFlags`.
@@ -90,16 +91,15 @@ fn fast_random_step(m: &mut Mem) -> u32 {
     t
 }
 
-/// `AIDataRecord_TrackCurve_t::Get` and `AIDataRecord_CurveSpeedTable_t::Get` (still
-/// recompiled): the track's curvature at a slice, a car's speed for a curvature.
-fn track_curve(c: &mut Cpu, r: &Saved, slice: i32, ra: u32) -> i32 {
-    let table = AIDATARECORD_TRACK_CURVE.get(&mut c.m);
-    r.call(c, nfs4rc::f_8006dba4, &[table, slice as u32], ra) as i32
+/// The track's curvature at a slice, a car's speed for a curvature.
+fn track_curve(m: &mut Mem, slice: i32) -> i32 {
+    let table = AIDataRecord(AIDATARECORD_TRACK_CURVE.get(m));
+    track_curve_get(m, table, slice)
 }
 
-fn curve_speed(c: &mut Cpu, r: &Saved, car: Car, curve: i32, ra: u32) -> i32 {
-    let table = car.curve_speed_table(&mut c.m);
-    r.call(c, nfs4rc::f_8006dc4c, &[table, curve as u32], ra) as i32
+fn curve_speed(m: &mut Mem, car: Car, curve: i32) -> i32 {
+    let table = AIDataRecord(car.curve_speed_table(m));
+    curve_speed_table_get(m, table, curve)
 }
 
 /// `AISpeeds_StartUp` (AISPEEDS.CPP, 0x8006ddb4): the rain's speed factors' memory, and the
@@ -370,36 +370,26 @@ pub fn abi_need_to_slow_down_for_curve(c: &mut Cpu) {
 /// road ahead: from 200 m down, every 25 m, the curve speed there (slower in the rain) the
 /// first one it must already brake for, or here.
 pub fn calc_opponent_curve_speed(c: &mut Cpu, car: Car) -> i32 {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[3] = car.0;
-        r.0[5] = GAME_SETUP.0;
-        let speed = car.current_speed(&mut c.m).wrapping_abs();
-        r.0[4] = speed as u32;
-        let mut ahead = 200i32;
-        loop {
-            r.0[2] = ahead as u32;
-            let m = &mut c.m;
-            let hi = ((ahead as i64 * 0x2AAA_AAAB) >> 32) as i32;
-            let n = hi.wrapping_sub(ahead >> 31).wrapping_mul(car.direction(m));
-            let here = car_slice(m, car);
-            let slice = slice_on(m, here, n);
-            let curve = track_curve(c, &r, slice, 0x8006_e7fc);
-            r.0[0] = curve as u32;
-            let mut target = curve_speed(c, &r, car, curve, 0x8006_e80c);
-            let m = &mut c.m;
-            if GAME_SETUP.weather(m) != 0 {
-                let factors = AISPEEDS_WEATHER_MULT_FACTORS.get(m);
-                let f = m.r32(factors.wrapping_add(((curve / 4) as u32).wrapping_mul(4))) as i32;
-                target = fixedmult(target, f);
-            }
-            r.0[1] = target as u32;
-            if ahead == 0 || need_to_slow_down_for_curve(m, car, ahead << 16, speed, target) {
-                return target;
-            }
-            ahead -= 25;
+    let m = &mut c.m;
+    let speed = car.current_speed(m).wrapping_abs();
+    let mut ahead = 200i32;
+    loop {
+        let hi = ((ahead as i64 * 0x2AAA_AAAB) >> 32) as i32;
+        let n = hi.wrapping_sub(ahead >> 31).wrapping_mul(car.direction(m));
+        let here = car_slice(m, car);
+        let slice = slice_on(m, here, n);
+        let curve = track_curve(m, slice);
+        let mut target = curve_speed(m, car, curve);
+        if GAME_SETUP.weather(m) != 0 {
+            let factors = AISPEEDS_WEATHER_MULT_FACTORS.get(m);
+            let f = m.r32(factors.wrapping_add(((curve / 4) as u32).wrapping_mul(4))) as i32;
+            target = fixedmult(target, f);
         }
-    })
+        if ahead == 0 || need_to_slow_down_for_curve(m, car, ahead << 16, speed, target) {
+            return target;
+        }
+        ahead -= 25;
+    }
 }
 
 pub fn abi_calc_opponent_curve_speed(c: &mut Cpu) {
@@ -901,28 +891,17 @@ pub fn abi_calc_human_top_speed(c: &mut Cpu) {
 /// `AISpeeds_CalcHumanCurveSpeed` (AISPEEDS.CPP, 0x8006fc1c): the speed for the sharpest
 /// curve within 20 slices ahead of a human (every 4th), a little over its curve speed.
 pub fn calc_human_curve_speed(c: &mut Cpu, car: Car) -> i32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = car.0;
-        let m = &mut c.m;
-        let slice = car_slice(m, car);
-        r.0[1] = slice as u32;
-        let first = if slice < NUM_SLICES.get(m) { slice } else { slice.wrapping_sub(NUM_SLICES.get(m)) };
-        let mut sharpest = track_curve(c, &r, first, 0x8006_fc64);
-        for (k, ra) in [(4, 0x8006_fcc0), (8, 0x8006_fd30), (12, 0x8006_fda8), (16, 0x8006_fe18), (20, 0x8006_fe90)] {
-            r.0[0] = sharpest as u32;
-            let m = &mut c.m;
-            let by = car.direction(m).wrapping_mul(k);
-            let s = slice_on(m, slice, by);
-            let curve = track_curve(c, &r, s, ra);
-            if sharpest < curve {
-                sharpest = curve;
-            }
-        }
-        let curve = (sharpest.wrapping_mul(0x1_A666) / 0x1_0000).min(255);
-        r.0[0] = curve as u32;
-        curve_speed(c, &r, car, curve, 0x8006_fee0)
-    })
+    let m = &mut c.m;
+    let slice = car_slice(m, car);
+    let first = if slice < NUM_SLICES.get(m) { slice } else { slice.wrapping_sub(NUM_SLICES.get(m)) };
+    let mut sharpest = track_curve(m, first);
+    for k in [4, 8, 12, 16, 20] {
+        let by = car.direction(m).wrapping_mul(k);
+        let s = slice_on(m, slice, by);
+        sharpest = sharpest.max(track_curve(m, s));
+    }
+    let curve = (sharpest.wrapping_mul(0x1_A666) / 0x1_0000).min(255);
+    curve_speed(m, car, curve)
 }
 
 pub fn abi_calc_human_curve_speed(c: &mut Cpu) {

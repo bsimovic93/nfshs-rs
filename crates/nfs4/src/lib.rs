@@ -18,6 +18,7 @@
 //! - `NFSHS_DECOMP_STATS=1`: calls and checks per function when a game thread ends.
 
 pub mod abi;
+pub mod aidatarecord;
 pub mod aiphysic;
 pub mod aispeeds;
 pub mod aiworld;
@@ -106,6 +107,32 @@ pub static FUNCS: &[Func] = &[
     func(0x8006_d454, "AIPhysic_ResetCar", aiphysic::abi_reset_car),
     func(0x8006_d460, "AIPhysic_InitCar", aiphysic::abi_init_car),
     func(0x8006_d5d4, "AIPhysic_DeInitCar", aiphysic::abi_de_init_car),
+    func_ret(0x8006_d624, "AIDataRecord_t::AIDataRecord_t", aidatarecord::abi_record_construct),
+    func(0x8006_d66c, "AIDataRecord_t::~AIDataRecord_t", aidatarecord::abi_record_destruct),
+    func_ret(0x8006_d6c4, "AIDataRecord_t::AddRecordToCollection", aidatarecord::abi_add_record_to_collection),
+    func_ret(0x8006_d700, "AIDataRecord_t::RemoveRecordFromCollection", aidatarecord::abi_remove_record_from_collection),
+    func(0x8006_d73c, "AIDataRecord_t::StartUp1", aidatarecord::abi_start_up1),
+    func(0x8006_d7a8, "AIDataRecord_t::StartUp2", aidatarecord::abi_start_up2),
+    func(0x8006_d814, "AIDataRecord_t::CleanUp1", aidatarecord::abi_clean_up1),
+    func(0x8006_d884, "AIDataRecord_t::CleanUp2", aidatarecord::abi_clean_up2),
+    func(0x8006_d88c, "AIDataRecord_t::Setup", aidatarecord::abi_setup),
+    func_ret(0x8006_d8dc, "AIDataRecord_t::Load", aidatarecord::abi_load),
+    func_ret(0x8006_d920, "AIDataRecord_t::SaveAndPurge", aidatarecord::abi_save_and_purge),
+    func_ret(0x8006_d970, "AIDataRecord_AccTable_t::AIDataRecord_AccTable_t", aidatarecord::abi_acc_table_construct),
+    func_ret(0x8006_d9f4, "AIDataRecord_AccTable_t::Get", aidatarecord::abi_acc_table_get),
+    func(0x8006_da0c, "AIDataRecord_AccTable_t::Setup", aidatarecord::abi_acc_table_setup),
+    func_ret(0x8006_da78, "AIDataRecord_BestLine_t::AIDataRecord_BestLine_t", aidatarecord::abi_best_line_construct),
+    func_ret(0x8006_db0c, "AIDataRecord_TrackCurve_t::AIDataRecord_TrackCurve_t", aidatarecord::abi_track_curve_construct),
+    func_ret(0x8006_dba4, "AIDataRecord_TrackCurve_t::Get", aidatarecord::abi_track_curve_get),
+    func_ret(0x8006_dbbc, "AIDataRecord_CurveSpeedTable_t::AIDataRecord_CurveSpeedTable_t", aidatarecord::abi_curve_speed_table_construct),
+    func_ret(0x8006_dc4c, "AIDataRecord_CurveSpeedTable_t::Get", aidatarecord::abi_curve_speed_table_get),
+    func(0x8006_dc80, "AIDataRecord_CurveSpeedTable_t::Upgrade", aidatarecord::abi_curve_speed_table_upgrade),
+    func_ret(0x8006_dd0c, "AIDataRecord_CarTracking_t::Get", aidatarecord::abi_car_tracking_get),
+    func(0x8006_dd14, "AIDataRecord_CarTracking_t::~AIDataRecord_CarTracking_t", aidatarecord::abi_car_tracking_destruct),
+    func(0x8006_dd34, "AIDataRecord_CurveSpeedTable_t::~AIDataRecord_CurveSpeedTable_t", aidatarecord::abi_curve_speed_table_destruct),
+    func(0x8006_dd54, "AIDataRecord_TrackCurve_t::~AIDataRecord_TrackCurve_t", aidatarecord::abi_track_curve_destruct),
+    func(0x8006_dd74, "AIDataRecord_BestLine_t::~AIDataRecord_BestLine_t", aidatarecord::abi_best_line_destruct),
+    func(0x8006_dd94, "AIDataRecord_AccTable_t::~AIDataRecord_AccTable_t", aidatarecord::abi_acc_table_destruct),
     func(0x8006_ddb4, "AISpeeds_StartUp", aispeeds::abi_start_up),
     func(0x8006_ddec, "AISpeeds_ReadTuningInfo", aispeeds::abi_read_tuning_info),
     func(0x8006_e070, "AISpeeds_CleanUp", aispeeds::abi_clean_up),
