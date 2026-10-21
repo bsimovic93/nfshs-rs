@@ -18,6 +18,7 @@
 //! - `NFSHS_DECOMP_STATS=1`: calls and checks per function when a game thread ends.
 
 pub mod abi;
+pub mod aiphysic;
 pub mod bworld;
 pub mod bworldsm;
 pub mod cars;
@@ -61,6 +62,48 @@ const fn func_ret(addr: u32, name: &'static str, run: fn(&mut Cpu)) -> Func {
 
 /// Every decompiled function the game is routed to, by address.
 pub static FUNCS: &[Func] = &[
+    func(0x8006_9a38, "AIPhysic_StopCar", aiphysic::abi_stop_car),
+    func(0x8006_9afc, "AIPhysic_RevEngine", aiphysic::abi_rev_engine),
+    func(0x8006_9bcc, "AIPhysic_HandleShifting", aiphysic::abi_handle_shifting),
+    func_ret(0x8006_9d34, "AIPhysic_CalculateGear", aiphysic::abi_calculate_gear),
+    func_ret(0x8006_9e38, "AIPhysic_GearInvSpeedRange", aiphysic::abi_gear_inv_speed_range),
+    func_ret(0x8006_9e60, "AIPhysic_GearTopSpeed", aiphysic::abi_gear_top_speed),
+    func_ret(0x8006_9e88, "AIPhysic_GearBottomSpeed", aiphysic::abi_gear_bottom_speed),
+    func_ret(0x8006_9eb0, "AIPhysic_CalcAcceleration", aiphysic::abi_calc_acceleration),
+    func_ret(0x8006_a190, "AIPhysic_ModifyAccelerationAccordingToScript", aiphysic::abi_modify_acceleration_according_to_script),
+    func_ret(0x8006_a1e8, "AIPhysic_CalcDeceleration", aiphysic::abi_calc_deceleration),
+    func(0x8006_a234, "AIPhysic_CheckDesiredDirection", aiphysic::abi_check_desired_direction),
+    func(0x8006_a27c, "AIPhysic_HandleSignalling", aiphysic::abi_handle_signalling),
+    func(0x8006_a2f0, "AIPhysic_HandleWipeoutTimer", aiphysic::abi_handle_wipeout_timer),
+    func(0x8006_a384, "AIPhysic_Main", aiphysic::abi_main),
+    func(0x8006_a614, "AIPhysic_CheckForBadPosition", aiphysic::abi_check_for_bad_position),
+    func_ret(0x8006_a6ec, "AIPhysics_UseCoolPhysics", aiphysic::abi_use_cool_physics),
+    func(0x8006_a730, "AIPhysic_SimplePhysics", aiphysic::abi_simple_physics),
+    func(0x8006_aa9c, "AIPhysic_SimplePhysics_LongVel", aiphysic::abi_simple_physics_long_vel),
+    func(0x8006_adf4, "AIPhysic_SimplePhysics_LatVel", aiphysic::abi_simple_physics_lat_vel),
+    func(0x8006_af18, "AIPhysic_CoolPhysics", aiphysic::abi_cool_physics),
+    func(0x8006_afcc, "AIPhysic_HandleDirection", aiphysic::abi_handle_direction),
+    func(0x8006_b0b4, "AIPhysic_Preperation", aiphysic::abi_preperation),
+    func_ret(0x8006_b31c, "AIPhysic_CalculateRoadPosition", aiphysic::abi_calculate_road_position),
+    func(0x8006_b43c, "AIPhysic_GetDesiredVector", aiphysic::abi_get_desired_vector),
+    func(0x8006_ba24, "AIPhysic_TargetedGetDesiredVector", aiphysic::abi_targeted_get_desired_vector),
+    func_ret(0x8006_ba60, "AIPhysic_CheckIfOutOfControl", aiphysic::abi_check_if_out_of_control),
+    func(0x8006_bc00, "AIPhysic_OutOfControlPhysics", aiphysic::abi_out_of_control_physics),
+    func_ret(0x8006_c270, "AIPhysic_GetRearEndDamageFactor", aiphysic::abi_get_rear_end_damage_factor),
+    func(0x8006_c2c8, "AIPhysic_InControlPhysics", aiphysic::abi_in_control_physics),
+    func(0x8006_cb7c, "AIPhysic_FinishUp", aiphysic::abi_finish_up),
+    func(0x8006_cf68, "AIPhysic_CalculateRampedDesiredLatPos", aiphysic::abi_calculate_ramped_desired_lat_pos),
+    func_ret(0x8006_d070, "AIPhysic_HitWallCheck", aiphysic::abi_hit_wall_check),
+    func(0x8006_d120, "AIPhysic_ProcessBarrierCollision", aiphysic::abi_process_barrier_collision),
+    func(0x8006_d174, "AIPhysic_ProcessCollision", aiphysic::abi_process_collision),
+    func(0x8006_d1f0, "AIPhysic_ChangeDirection", aiphysic::abi_change_direction),
+    func(0x8006_d2a8, "AIPhysic_CheckForGripReduction", aiphysic::abi_check_for_grip_reduction),
+    func(0x8006_d43c, "AIPhysic_StartUp", aiphysic::abi_start_up),
+    func(0x8006_d444, "AIPhysic_CleanUp", aiphysic::abi_clean_up),
+    func(0x8006_d44c, "AIPhysic_Reset", aiphysic::abi_reset),
+    func(0x8006_d454, "AIPhysic_ResetCar", aiphysic::abi_reset_car),
+    func(0x8006_d460, "AIPhysic_InitCar", aiphysic::abi_init_car),
+    func(0x8006_d5d4, "AIPhysic_DeInitCar", aiphysic::abi_de_init_car),
     func_ret(0x8007_df6c, "xzsquaredist32", bworld::abi_xzsquaredist32),
     func_ret(0x8007_f334, "BWorldSm_Init", bworldsm::abi_init),
     func(0x8007_f36c, "BWorldSm_Restart", bworldsm::abi_restart),

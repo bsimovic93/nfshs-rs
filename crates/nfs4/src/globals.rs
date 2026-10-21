@@ -321,3 +321,22 @@ pub const VIV_NAME: u32 = 0x8005_615C;
 pub const OTHER_CAR_NAME: u32 = 0x8013_DAD4;
 /// The force feedback's per-tick function (FORCE.CPP), on the 32 Hz schedule.
 pub const FORCE_TICK: u32 = 0x800c_b920;
+
+// AIPHYSIC.CPP
+
+/// The AI physics' time step this tick, as `Sched_ExecuteCheck` sets it by the car's rate:
+/// `AIPhysic_time`, `AIPhysic_elapsedTime` (in 64 Hz ticks) and `AIPhysic_iTime` (16.16).
+pub const AIPHYSIC_TIME: I32 = I32(0x8013_D888);
+pub const AIPHYSIC_ELAPSED_TIME: I32 = I32(0x8013_D88C);
+pub const AIPHYSIC_I_TIME: I32 = I32(0x8013_D884);
+/// `AIPhysicConfig`: the look-ahead and the cool physics' models.
+pub const AIPHYSIC_CONFIG: crate::types::AIPhysicConfig = crate::types::AIPhysicConfig(0x8010_E8D0);
+/// `AIDataRecord_TrackCurve`: the track's curvature by slice.
+pub const AIDATARECORD_TRACK_CURVE: U32 = U32(0x8013_D894);
+/// `AITune_BTCPerpAccMults`: an AI racer's acceleration against a human cop, by the skill.
+pub const AITUNE_BTC_PERP_ACC_MULTS: I32s = I32s(0x8010_F12C, 3);
+/// A car just hit by a human cop, by the skill: for how many ticks (bytes), its grip then and
+/// its braking.
+pub const HUMAN_COP_HIT_TICKS: u32 = 0x8013_D880;
+pub const HUMAN_COP_HIT_GRIP: u32 = 0x8010_E8B0;
+pub const HUMAN_COP_HIT_BRAKE: u32 = 0x8010_E8C0;

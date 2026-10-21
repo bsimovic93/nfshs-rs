@@ -24,25 +24,32 @@ pub fn do_gravity_effects_on_acc(c: &mut Cpu, car: Car) {
     if car.car_flags(&mut c.m) & CAR_NO_GRAVITY != 0 {
         return;
     }
+    // (the pull is a local at sp+16 in the original's frame, left there)
+    let sp = c.r[29].wrapping_sub(40);
+    let m = &mut c.m;
     let orient = car.n().orient_mat();
     let acc = car.linear_acc_ch();
-    let up = fixedmult(0x1_0000, orient.m(&mut c.m, 4));
+    let up = fixedmult(0x1_0000, orient.m(m, 4));
     if up <= 0xB5C1 {
-        let g = [1, 4, 7].map(|i| fixedmult(GRAVITY, orient.m(&mut c.m, i)));
-        acc.update_x(&mut c.m, |a| a.wrapping_add(g[0]));
-        acc.update_y(&mut c.m, |a| a.wrapping_add(g[1]));
-        acc.update_z(&mut c.m, |a| a.wrapping_add(g[2]));
+        let g = [1, 4, 7].map(|i| fixedmult(GRAVITY, orient.m(m, i)));
+        for (k, v) in g.into_iter().enumerate() {
+            m.w32(sp + 16 + 4 * k as u32, v as u32);
+        }
+        acc.update_x(m, |a| a.wrapping_add(g[0]));
+        acc.update_y(m, |a| a.wrapping_add(g[1]));
+        acc.update_z(m, |a| a.wrapping_add(g[2]));
         return;
     }
-    if car.control().brake_level(&mut c.m) as u8 >= 64 {
+    if car.control().brake_level(m) as u8 >= 64 {
         return;
     }
-    let along = fixedmult(GRAVITY, orient.m(&mut c.m, 7));
-    let along = fixedmult(along, car.n().gravity_mult(&mut c.m));
+    let along = fixedmult(GRAVITY, orient.m(m, 7));
+    let along = fixedmult(along, car.n().gravity_mult(m));
+    m.w32(sp + 24, along as u32);
     if along.wrapping_abs() < 3277 {
         return;
     }
-    acc.update_z(&mut c.m, |a| {
+    acc.update_z(m, |a| {
         let with = (along > 0) == (a > 0);
         a.wrapping_add(if with { along >> 1 } else { along >> 3 })
     });
