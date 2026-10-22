@@ -411,6 +411,25 @@
 800672a8 AICop_CleanUp
 80067308 AICop_NoCopsInArea
 
+# AIINIT.CPP
+800673b0 AIInit_StartUp1
+80067424 AIInit_StartUp2
+800674fc AIInit_Reset1
+80067508 AIInit_Reset2
+8006760c AIInit_CleanUp1
+80067644 AIInit_CleanUp2
+8006770c AI_TrafficStartUp
+800677a8 AI_TrafficCleanUp
+800677f8 AIInit_LoadConfigs
+80067854 AIInit_LoadPhysicsConfig
+80067974 AIInit_ClearAICar
+800679ec AIInit_RestartAICar
+80067b14 AIInit_InitAICar
+80067ce8 AIInit_DeInitAICar
+80067d68 AIInit_InitAICar2
+80067dd0 AIInit_DeInitAICar2
+80067dd8 AIInit_IsNonStandardCarFile
+
 # AILIFE.CPP
 80067e50 AILife_EvaluateLife
 80067eb4 AILife_RCSetSpeeds

@@ -22,6 +22,7 @@ pub mod ai;
 pub mod aicop;
 pub mod aidatarecord;
 pub mod aidelaycar;
+pub mod aiinit;
 pub mod ailife;
 pub mod aiperson;
 pub mod aiphysic;
@@ -121,6 +122,23 @@ pub static FUNCS: &[Func] = &[
     func(0x8006_7258, "AICop_Restart", aicop::abi_restart),
     func(0x8006_72a8, "AICop_CleanUp", aicop::abi_clean_up),
     func_ret(0x8006_7308, "AICop_NoCopsInArea", aicop::abi_no_cops_in_area),
+    func(0x8006_73b0, "AIInit_StartUp1", aiinit::abi_start_up1),
+    func(0x8006_7424, "AIInit_StartUp2", aiinit::abi_start_up2),
+    func(0x8006_74fc, "AIInit_Reset1", aiinit::abi_reset1),
+    func(0x8006_7508, "AIInit_Reset2", aiinit::abi_reset2),
+    func(0x8006_760c, "AIInit_CleanUp1", aiinit::abi_clean_up1),
+    func(0x8006_7644, "AIInit_CleanUp2", aiinit::abi_clean_up2),
+    func(0x8006_770c, "AI_TrafficStartUp", aiinit::abi_traffic_start_up),
+    func(0x8006_77a8, "AI_TrafficCleanUp", aiinit::abi_traffic_clean_up),
+    func(0x8006_77f8, "AIInit_LoadConfigs", aiinit::abi_load_configs),
+    func(0x8006_7854, "AIInit_LoadPhysicsConfig", aiinit::abi_load_physics_config),
+    func(0x8006_7974, "AIInit_ClearAICar", aiinit::abi_clear_ai_car),
+    func(0x8006_79ec, "AIInit_RestartAICar", aiinit::abi_restart_ai_car),
+    func(0x8006_7b14, "AIInit_InitAICar", aiinit::abi_init_ai_car),
+    func(0x8006_7ce8, "AIInit_DeInitAICar", aiinit::abi_de_init_ai_car),
+    func(0x8006_7d68, "AIInit_InitAICar2", aiinit::abi_init_ai_car2),
+    func(0x8006_7dd0, "AIInit_DeInitAICar2", aiinit::abi_nothing),
+    func_ret(0x8006_7dd8, "AIInit_IsNonStandardCarFile", aiinit::abi_is_non_standard_car_file),
     func_ret(0x8006_7e50, "AILife_EvaluateLife", ailife::abi_evaluate_life),
     func(0x8006_7eb4, "AILife_RCSetSpeeds", ailife::abi_rc_set_speeds),
     func(0x8006_7ee4, "AILife_RCPickSliceAndDirection", ailife::abi_rc_pick_slice_and_direction),

@@ -35,7 +35,7 @@ fn name(r: AIDataRecord) -> u32 {
 
 /// The virtual function at slot `k` (entries of 8 bytes: the `this` adjustment, then the
 /// function, from +8): the object to call it on and the function.
-fn virtual_fn(m: &mut Mem, obj: u32, k: u32) -> (u32, u32) {
+pub(crate) fn virtual_fn(m: &mut Mem, obj: u32, k: u32) -> (u32, u32) {
     let vf = m.r32(obj.wrapping_add(VF));
     let adjust = m.r16(vf.wrapping_add(8 * k)) as i16 as i32;
     (obj.wrapping_add(adjust as u32), m.r32(vf.wrapping_add(8 * k + 4)))
