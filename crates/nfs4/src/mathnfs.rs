@@ -177,14 +177,18 @@ pub fn abi_better_dist(c: &mut Cpu) {
 
 /// `Math_fasttransmult` (MATHNFS.CPP, 0x8009e850): `out` = `a` x `b`, each product of 16.16
 /// numbers taken as (a >> 3) (b >> 3) >> 10 (quicker, losing the low bits); `out` may be
-/// one of them.
+/// one of them (the product made in its frame, at sp+0).
 pub fn fasttransmult(c: &mut Cpu, a: Matrix, b: Matrix, out: Matrix) {
-    let (a, b) = (a.get(&mut c.m).m, b.get(&mut c.m).m);
-    let product = std::array::from_fn(|k| {
-        let (i, j) = (k / 3, k % 3);
-        (0..3).fold(0i32, |s, n| s.wrapping_add((a[3 * i + n] >> 3).wrapping_mul(b[3 * n + j] >> 3) >> 10))
-    });
-    out.set(&mut c.m, &crate::vec::Mat3 { m: product });
+    abi::frame(c, 56, |c, sp| {
+        let (a, b) = (a.get(&mut c.m).m, b.get(&mut c.m).m);
+        let product = std::array::from_fn(|k| {
+            let (i, j) = (k / 3, k % 3);
+            (0..3).fold(0i32, |s, n| s.wrapping_add((a[3 * i + n] >> 3).wrapping_mul(b[3 * n + j] >> 3) >> 10))
+        });
+        let product = crate::vec::Mat3 { m: product };
+        Matrix(sp).set(&mut c.m, &product);
+        out.set(&mut c.m, &product);
+    })
 }
 
 pub fn abi_fasttransmult(c: &mut Cpu) {

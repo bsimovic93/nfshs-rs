@@ -411,6 +411,28 @@
 800672a8 AICop_CleanUp
 80067308 AICop_NoCopsInArea
 
+# AILIFE.CPP
+80067e50 AILife_EvaluateLife
+80067eb4 AILife_RCSetSpeeds
+80067ee4 AILife_RCPickSliceAndDirection
+8006831c AILife_RCPickDesiredLatPosition
+80068450 AILife_PlaceCarAtLocation(6)
+8006848c AILife_SetInitialSlicePositionOrientationEtc
+800684e0 AILife_PlaceCarAtLocation
+800686e4 AILife_ReencarnateTraffic
+80068794 AILife_ReencarnateTrafficByPosition
+800689a0 AILife_ReencarnateCopBySlice
+80068b24 AILife_ReencarnateCopByPosition
+80068cd4 AILife_ReencarnateCopByLatPosAndRotation
+80068e58 AILife_IsCoordInThisLiveArea
+80068f04 AILife_IsTrafficCarInAnyLiveArea
+80068f88 AILife_IsCoordInThisVisibleArea
+80068fec AILife_IsCarInAnyVisibleArea
+8006900c AILife_IsSliceInAnyVisibleArea
+800690ac AILife_IsSliceCloseToAnyCopCar
+8006914c AILife_IsPositionInAnyVisibleArea
+800691d0 AILife_Debug
+
 # AIPERSON.CPP
 800691e8 AIPerson_LoadGridAndSetPersonalityIndexes
 80069234 AIPerson_SetPersonality

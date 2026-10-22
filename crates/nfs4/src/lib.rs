@@ -22,6 +22,7 @@ pub mod ai;
 pub mod aicop;
 pub mod aidatarecord;
 pub mod aidelaycar;
+pub mod ailife;
 pub mod aiperson;
 pub mod aiphysic;
 pub mod aiscript;
@@ -120,6 +121,26 @@ pub static FUNCS: &[Func] = &[
     func(0x8006_7258, "AICop_Restart", aicop::abi_restart),
     func(0x8006_72a8, "AICop_CleanUp", aicop::abi_clean_up),
     func_ret(0x8006_7308, "AICop_NoCopsInArea", aicop::abi_no_cops_in_area),
+    func_ret(0x8006_7e50, "AILife_EvaluateLife", ailife::abi_evaluate_life),
+    func(0x8006_7eb4, "AILife_RCSetSpeeds", ailife::abi_rc_set_speeds),
+    func(0x8006_7ee4, "AILife_RCPickSliceAndDirection", ailife::abi_rc_pick_slice_and_direction),
+    func(0x8006_831c, "AILife_RCPickDesiredLatPosition", ailife::abi_rc_pick_desired_lat_position),
+    func(0x8006_8450, "AILife_PlaceCarAtLocation(6)", ailife::abi_place_car_at_location_at),
+    func(0x8006_848c, "AILife_SetInitialSlicePositionOrientationEtc", ailife::abi_set_initial_slice_position_orientation_etc),
+    func(0x8006_84e0, "AILife_PlaceCarAtLocation", ailife::abi_place_car_at_location),
+    func(0x8006_86e4, "AILife_ReencarnateTraffic", ailife::abi_reencarnate_traffic),
+    func(0x8006_8794, "AILife_ReencarnateTrafficByPosition", ailife::abi_reencarnate_traffic_by_position),
+    func(0x8006_89a0, "AILife_ReencarnateCopBySlice", ailife::abi_reencarnate_cop_by_slice),
+    func(0x8006_8b24, "AILife_ReencarnateCopByPosition", ailife::abi_reencarnate_cop_by_position),
+    func(0x8006_8cd4, "AILife_ReencarnateCopByLatPosAndRotation", ailife::abi_reencarnate_cop_by_lat_pos_and_rotation),
+    func_ret(0x8006_8e58, "AILife_IsCoordInThisLiveArea", ailife::abi_is_coord_in_this_live_area),
+    func_ret(0x8006_8f04, "AILife_IsTrafficCarInAnyLiveArea", ailife::abi_is_traffic_car_in_any_live_area),
+    func_ret(0x8006_8f88, "AILife_IsCoordInThisVisibleArea", ailife::abi_is_coord_in_this_visible_area),
+    func_ret(0x8006_8fec, "AILife_IsCarInAnyVisibleArea", ailife::abi_is_car_in_any_visible_area),
+    func_ret(0x8006_900c, "AILife_IsSliceInAnyVisibleArea", ailife::abi_is_slice_in_any_visible_area),
+    func_ret(0x8006_90ac, "AILife_IsSliceCloseToAnyCopCar", ailife::abi_is_slice_close_to_any_cop_car),
+    func_ret(0x8006_914c, "AILife_IsPositionInAnyVisibleArea", ailife::abi_is_position_in_any_visible_area),
+    func(0x8006_91d0, "AILife_Debug", ailife::abi_debug),
     func(0x8006_91e8, "AIPerson_LoadGridAndSetPersonalityIndexes", aiperson::abi_load_grid_and_set_personality_indexes),
     func(0x8006_9234, "AIPerson_SetPersonality", aiperson::abi_set_personality),
     func(0x8006_92fc, "AIPerson_SetPersonalityPointers", aiperson::abi_set_personality_pointers),
