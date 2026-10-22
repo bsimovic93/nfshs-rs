@@ -32,12 +32,12 @@ pub const VT_BASIC_COP: u32 = 0x8005_566C;
 pub const VT_BTC_WINGMAN: u32 = 0x8005_5694;
 pub const VT_BTC_HUMAN_COP: u32 = 0x8005_56B4;
 pub const VT_BTC_COP: u32 = 0x8005_56D4;
-pub const VT_BTC_AI_PERP: u32 = 0x8005_576C;
-pub const VT_BTC_HUMAN_PERP: u32 = 0x8005_578C;
-pub const VT_BTC_PERP2: u32 = 0x8005_57AC;
-pub const VT_PLAYER: u32 = 0x8005_5864;
-pub const VT_HUMAN: u32 = 0x8005_5894;
-pub const VT_OPPONENT: u32 = 0x8005_58C4;
+pub const VT_BTC_AI_PERP: u32 = 0x8005_5770;
+pub const VT_BTC_HUMAN_PERP: u32 = 0x8005_5790;
+pub const VT_BTC_PERP2: u32 = 0x8005_57B0;
+pub const VT_PLAYER: u32 = 0x8005_5868;
+pub const VT_HUMAN: u32 = 0x8005_5898;
+pub const VT_OPPONENT: u32 = 0x8005_58C8;
 
 // The states' vtables as this file has them (the inline classes' copies): `AIState_None`,
 // `AIState_Base`.
@@ -87,6 +87,15 @@ fn delete_state(c: &mut Cpu, r: &Saved, state: u32, ra: u32) {
         let (obj, f) = aistate::virtual_fn(&mut c.m, state, 2);
         r.call_ptr(c, f, &[obj, 3], ra);
     }
+}
+
+/// `SetState` (inline): the object's state replaced by `state` of kind `kind`, the old one
+/// deleted (its destructor's call returning to `ra`).
+pub fn set_state(c: &mut Cpu, r: &Saved, this: u32, state: u32, kind: i32, ra: u32) {
+    let old = c.m.r32(this.wrapping_add(4));
+    delete_state(c, r, old, ra);
+    c.m.w32(this.wrapping_add(4), state);
+    c.m.w32(this.wrapping_add(8), kind as u32);
 }
 
 /// `AIHigh_Base::AIHigh_Base(Car_tObj*)` (AIHIGH.CPP, 0x8005bb08): for `car`, its state none
@@ -194,6 +203,7 @@ pub fn abi_state_test_for_release(c: &mut Cpu) {
 pub(crate) mod tests {
     use super::*;
     use crate::globals::{CARS_LIST, COP_CARS, NUM_CARS, NUM_COP_CARS, SIM_COUNTER};
+    use crate::types::AIStateBase;
     use crate::test_util::Rng;
 
     /// RAM the race leaves unused: a high-level object per car (0x100 bytes each), the
@@ -372,6 +382,149 @@ pub(crate) mod tests {
         let args = [cars[pick(n) as usize].0, cars[pick(n) as usize].0, pick(ncops) as u32, pick(n) as u32, pick(2) as u32, pick(6) as u32, OBJS + 0x100 * this];
         for (k, a) in args.into_iter().enumerate() {
             m.w32(ARGS + 4 * k as u32, a);
+        }
+    }
+
+    /// More arguments of the "be the cop" shuffle: a human cop's object, an AI police car's
+    /// (a wingman), a speeder's.
+    pub(crate) const BTC_ARGS: u32 = ARGS + 0x70;
+
+    /// The shuffle as a "be the cop" race: one or two human cops (the first humans), AI police
+    /// cars (wingmen) and speeders (AI or human); their objects of those classes with any
+    /// chase, freeze, stage, time, wingman request and role, boss, spike belt; each object in
+    /// a state of any kind (built by the original's constructors: none, driving, idle, a chase
+    /// after another car, not active, going to a slice); any cop game type.
+    pub(crate) fn btc_shuffle(c: &mut Cpu, rng: &mut Rng) {
+        shuffle(c, rng);
+        let mut pick = |n: u32| (rng.next() % n as u64) as i32;
+        let m = &mut c.m;
+        let n = NUM_CARS.get(m) as u32;
+        let cars: Vec<Car> = (0..n).map(|i| Car(m.r32(CARS_LIST + 4 * i))).collect();
+        let now = SIM_COUNTER.get(m);
+        GAME_SETUP.set_race_type(m, [1, 5][pick(2) as usize]);
+        COP_GAME_TYPE.set(m, [2, 2, 3, 4, 1][pick(5) as usize]);
+        let humans = if pick(3) == 0 { 2 } else { 1 };
+        NUM_HUMAN_RACE_CARS.set(m, humans);
+        // (roles: the human cops first, then AI police cars and speeders)
+        let role: Vec<i32> = (0..n as usize).map(|i| if i < humans as usize { 0 } else { [1, 2, 2, 3][pick(4) as usize] }).collect();
+        let obj_of = |i: usize| OBJS + 0x100 * i as u32;
+        let perps: Vec<usize> = (0..n as usize).filter(|&i| role[i] >= 2).collect();
+        let hcs: Vec<usize> = (0..n as usize).filter(|&i| role[i] == 0).collect();
+        let wingmen: Vec<usize> = (0..n as usize).filter(|&i| role[i] == 1).collect();
+        let mut race = Vec::new();
+        for (i, &car) in cars.iter().enumerate() {
+            let f = match role[i] {
+                0 => CAR_HUMAN | CAR_HUMAN_COP,
+                1 => CAR_COP,
+                2 => CAR_OPPONENT,
+                _ => CAR_HUMAN | 2,
+            };
+            car.update_car_flags(m, |x| x & !(CAR_HUMAN | 2 | CAR_HUMAN_COP | CAR_OPPONENT | CAR_TRAFFIC | CAR_COP) | f);
+            if role[i] == 0 {
+                m.w32(HUMAN_RACE_CARS + 4 * i as u32, car.0);
+            }
+            if role[i] != 1 {
+                race.push(car);
+            }
+        }
+        crate::globals::NUM_RACE_CARS.set(m, race.len() as i32);
+        for (k, car) in race.iter().enumerate() {
+            m.w32(crate::globals::RACE_CARS + 4 * k as u32, car.0);
+        }
+        // (the states' pool all free)
+        for i in 0..10 {
+            m.w32(0x8010_F0B0 + 4 * i, 0);
+        }
+        let mut cops = 0;
+        for (i, &car) in cars.iter().enumerate() {
+            let m = &mut c.m;
+            let o = obj_of(i);
+            let some = |p: &mut dyn FnMut(u32) -> i32, v: &Vec<usize>| if v.is_empty() || p(4) == 0 { 0 } else { obj_of(v[p(v.len() as u32) as usize]) };
+            match role[i] {
+                0 | 1 => {
+                    set_vt(m, o, if role[i] == 0 { VT_BTC_HUMAN_COP } else { VT_BTC_WINGMAN });
+                    m.w32(o + 0x18, pick(2) as u32);
+                    m.w32(o + 0x1C, if role[i] == 0 { i as u32 } else { cops });
+                    cops += 1;
+                    let p = some(&mut pick, &perps);
+                    m.w32(o + 0x58, p);
+                    m.w32(o + 0x5C, pick(6) as u32);
+                    m.w32(o + 0x60, [0, 0, 1, 2, 3, 4][pick(6) as usize] as u32);
+                    if role[i] == 0 {
+                        m.w32(o + 0x64, (pick(5) - 1) as u32);
+                        m.w32(o + 0x68, pick(3) as u32);
+                        m.w32(o + 0x6C, [0x1_0000, 0x8000, 0x1_8000][pick(3) as usize]);
+                        m.w32(o + 0x70, [pick(400) - 300, pick(4000)][pick(2) as usize] as u32);
+                        m.w32(o + 0x74, [0, now - pick(4000)][pick(2) as usize] as u32);
+                        m.w32(o + 0x78, pick(6) as u32);
+                        m.w32(o + 0x7C, pick(2) as u32);
+                        m.w32(o + 0x80, [1, -1][pick(2) as usize] as u32);
+                        m.w32(o + 0x84, pick(2) as u32);
+                        m.w32(o + 0x88, pick(0x40_0000) as u32);
+                    } else {
+                        m.w32(o + 0x64, pick(4) as u32);
+                        m.w32(o + 0x68, pick(4) as u32);
+                        let boss = some(&mut pick, &hcs);
+                        m.w32(o + 0x6C, boss);
+                        m.w32(o + 0x70, pick(2) as u32);
+                        let belt = crate::globals::SPIKE_BELT.slice_(m);
+                        m.w32(o + 0x74, [belt, pick(500)][pick(2) as usize] as u32);
+                        m.w32(o + 0x78, pick(0x8_0000) as u32);
+                    }
+                }
+                _ => {
+                    set_vt(m, o, if role[i] == 2 { VT_BTC_AI_PERP } else { VT_BTC_HUMAN_PERP });
+                    m.w32(o + 0x7C, pick(2) as u32);
+                    m.w32(o + 0x80, pick(2) as u32);
+                    let hc = some(&mut pick, &hcs);
+                    m.w32(o + 0x84, hc);
+                }
+            }
+            // (its state, of a kind)
+            let kind = [0, 2, 3, 4, 4, 7, 9][pick(7) as usize];
+            let st = crate::aistate::pool_new(m);
+            let target = cars[pick(n) as usize];
+            match kind {
+                2 => {
+                    crate::test_util::run(c, nfs4rc::f_800703bc, &[st, car.0]);
+                }
+                4 => {
+                    let rel = ARGS + 0x60;
+                    c.m.w32(rel, (pick(0x8_0000) - 0x4_0000) as u32);
+                    c.m.w32(rel + 8, (pick(0x10_0000) - 0x8_0000) as u32);
+                    crate::test_util::run(c, nfs4rc::f_800704dc, &[st, car.0, target.0, rel, 512, 0x3C_0000, 0x19_0000, 2, 0x1_0000]);
+                    let ch = crate::types::AIStateChase(st);
+                    let m = &mut c.m;
+                    ch.set_barrier_ticks32_(m, [0, 0, 170][pick(3) as usize]);
+                    ch.set_in_target_region_(m, pick(20));
+                    ch.set_lat_meters_between_(m, pick(0x20_0000) - 0x10_0000);
+                    ch.set_long_meters_between_(m, pick(0x20_0000) - 0x10_0000);
+                }
+                9 => {
+                    let slice = car.n().sim_road_info().slice(&mut c.m) as i32;
+                    crate::test_util::run(c, nfs4rc::f_80072c4c, &[st, car.0, (slice + pick(10) - 5).max(0) as u32, 0]);
+                }
+                _ => {
+                    let m = &mut c.m;
+                    crate::aistate::base_construct(m, AIStateBase(st), car);
+                    let vt = match kind {
+                        3 => 0x8005_5DD0,
+                        7 => 0x8005_56F4,
+                        _ => VT_STATE_NONE,
+                    };
+                    m.w32(st + 4, vt);
+                    m.w32(st + 12, 1);
+                }
+            }
+            let m = &mut c.m;
+            m.w32(o + 4, st);
+            m.w32(o + 8, kind as u32);
+        }
+        let m = &mut c.m;
+        let one = |p: &mut dyn FnMut(u32) -> i32, v: &Vec<usize>| if v.is_empty() { 0 } else { obj_of(v[p(v.len() as u32) as usize]) };
+        let a = [one(&mut pick, &hcs), one(&mut pick, &wingmen), one(&mut pick, &perps)];
+        for (k, v) in a.into_iter().enumerate() {
+            m.w32(BTC_ARGS + 4 * k as u32, v);
         }
     }
 

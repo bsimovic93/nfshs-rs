@@ -138,6 +138,21 @@ impl Saved {
         c.r = r;
         v
     }
+
+    /// [`Saved::enter`], the callee's scratch registers (a0..a3, t, v, hi/lo) left as it leaves
+    /// them, as [`Saved::call_leaving`] does for a recompiled callee: for a later call that
+    /// homes a register it isn't given.
+    pub fn enter_leaving<R>(&self, c: &mut Cpu, addr: u32, ra: u32, f: impl FnOnce(&mut Cpu) -> R) -> R {
+        let r = c.r;
+        self.load(c);
+        c.r[31] = ra;
+        leave_prologue(c, addr, None, &[]);
+        let v = f(c);
+        for k in (16..24).chain([28, 29, 30, 31]) {
+            c.r[k] = r[k];
+        }
+        v
+    }
 }
 
 /// Call the function at `addr` (a function pointer the original calls with `jalr`), wherever

@@ -24,6 +24,7 @@ pub mod aidatarecord;
 pub mod aidelaycar;
 pub mod aih_basiccop;
 pub mod aih_basicperp;
+pub mod aih_btccop;
 pub mod aihigh;
 pub mod aiinit;
 pub mod ailife;
@@ -149,6 +150,46 @@ pub static FUNCS: &[Func] = &[
     func(0x8005_cf80, "AIHigh_BasicCop::SetupBlockadeElements", aih_basiccop::abi_setup_blockade_elements),
     func(0x8005_d218, "AIHigh_BasicCop::HandleBlockadeSpeech", aih_basiccop::abi_handle_blockade_speech),
     func(0x8005_d33c, "AIHigh_BasicCop::~AIHigh_BasicCop", aih_basiccop::abi_destruct),
+    func_ret(0x8005_d35c, "AIHigh_BTC_Cop::AIHigh_BTC_Cop", aih_btccop::abi_cop_construct),
+    func(0x8005_d39c, "AIHigh_BTC_Cop::AssignToPlayer", aih_btccop::abi_cop_assign_to_player),
+    func_ret(0x8005_d40c, "AIHigh_BTC_Cop::GetCheckChasePosition", aih_btccop::abi_cop_get_check_chase_position),
+    func_ret(0x8005_d4a8, "AIHigh_BTC_Cop::CheckForNewTarget", aih_btccop::abi_cop_check_for_new_target),
+    func(0x8005_d600, "AIHigh_BTC_Cop::StartArrest", aih_btccop::abi_cop_start_arrest),
+    func(0x8005_d670, "AIHigh_BTC_Cop::FinishArrest", aih_btccop::abi_cop_finish_arrest),
+    func(0x8005_d6d0, "AIHigh_BTC_Cop::FalseArrest", aih_btccop::abi_cop_false_arrest),
+    func(0x8005_d6ec, "AIHigh_BTC_Cop::FreezeAndEndChase", aihigh::abi_nothing),
+    func(0x8005_d6f4, "AIHigh_BTC_Cop::HudOff", aih_btccop::abi_cop_hud_off),
+    func_ret(0x8005_d724, "AIHigh_BTC_HumanCop::AIHigh_BTC_HumanCop", aih_btccop::abi_human_cop_construct),
+    func_ret(0x8005_d940, "AIHigh_BTC_HumanCop::FindRandomBarrierFreeArea", aih_btccop::abi_find_random_barrier_free_area),
+    func(0x8005_db10, "AIHigh_BTC_HumanCop::ReleaseAndStartChase", aih_btccop::abi_human_cop_release_and_start_chase),
+    func(0x8005_db80, "AIHigh_BTC_HumanCop::FreezeAndEndChase", aih_btccop::abi_human_cop_freeze_and_end_chase),
+    func(0x8005_dd54, "AIHigh_BTC_HumanCop::CheckConditionWithCop0", aih_btccop::abi_human_cop_check_condition_with_cop0),
+    func(0x8005_de40, "AIHigh_BTC_HumanCop::NewStage", aih_btccop::abi_human_cop_new_stage),
+    func(0x8005_e1b0, "AIHigh_BTC_HumanCop::UpdateAndCheckTimeLeft", aih_btccop::abi_human_cop_update_and_check_time_left),
+    func(0x8005_e2c4, "AIHigh_BTC_HumanCop::UpdateFreezeModeAndPullOverMode", aih_btccop::abi_human_cop_update_freeze_mode_and_pull_over_mode),
+    func(0x8005_e3e8, "AIHigh_BTC_HumanCop::RequestWingman", aih_btccop::abi_human_cop_request_wingman),
+    func(0x8005_e504, "AIHigh_BTC_HumanCop::RequestBlockader", aih_btccop::abi_human_cop_request_blockader),
+    func_ret(0x8005_e6dc, "AIHigh_BTC_HumanCop::CheckForWingmanRequest", aih_btccop::abi_human_cop_check_for_wingman_request),
+    func_ret(0x8005_e700, "AIHigh_BTC_HumanCop::CheckForBlockaderRequest", aih_btccop::abi_human_cop_check_for_blockader_request),
+    func(0x8005_e744, "AIHigh_BTC_HumanCop::UpdateWingmanRole", aih_btccop::abi_human_cop_update_wingman_role),
+    func(0x8005_e790, "AIHigh_BTC_HumanCop::ClearTrafficToPurgatory", aih_btccop::abi_clear_traffic_to_purgatory),
+    func(0x8005_e7e8, "AIHigh_BTC_HumanCop::ResetClearTrafficToPurgatory", aih_btccop::abi_reset_clear_traffic_to_purgatory),
+    func(0x8005_e83c, "AIHigh_BTC_HumanCop::SetDesiredSpeed", aih_btccop::abi_human_cop_set_desired_speed),
+    func(0x8005_e89c, "AIHigh_BTC_HumanCop::HighExecute", aih_btccop::abi_human_cop_high_execute),
+    func(0x8005_ea74, "AIHigh_BTC_HumanCop::HudOn", aih_btccop::abi_human_cop_hud_on),
+    func_ret(0x8005_eae0, "AIHigh_BTC_Wingman::AIHigh_BTC_Wingman", aih_btccop::abi_wingman_construct),
+    func(0x8005_eb2c, "AIHigh_BTC_Wingman::HighExecute", aih_btccop::abi_wingman_high_execute),
+    func_ret(0x8005_f5b8, "AIHigh_BTC_Wingman::CheckForActivation", aih_btccop::abi_wingman_check_for_activation),
+    func_ret(0x8005_f6e8, "AIHigh_BTC_Wingman::UpdateFreezeModeAndPullOverMode", aih_btccop::abi_wingman_update_freeze_mode_and_pull_over_mode),
+    func(0x8005_f728, "AIHigh_BTC_Wingman::SetupWingman", aih_btccop::abi_wingman_setup_wingman),
+    func(0x8005_f864, "AIHigh_BTC_Wingman::SetupBlockader", aih_btccop::abi_wingman_setup_blockader),
+    func(0x8005_fdb4, "AIHigh_BTC_Wingman::~AIHigh_BTC_Wingman", aih_btccop::abi_wingman_destruct),
+    func(0x8005_fdd4, "AIHigh_BTC_HumanCop::~AIHigh_BTC_HumanCop", aih_btccop::abi_human_cop_destruct),
+    func(0x8005_fdf4, "AIHigh_BTC_Cop::~AIHigh_BTC_Cop", aih_btccop::abi_cop_destruct),
+    func(0x8005_fe14, "AIState_NonActive::Execute", aihigh::abi_nothing),
+    func(0x8005_fe1c, "AIState_NonActive::~AIState_NonActive", aih_btccop::abi_non_active_destruct),
+    func_ret(0x8005_fe68, "AIState_Base::TestForRelease", aihigh::abi_state_test_for_release),
+    func(0x8005_fe70, "AIState_Base::~AIState_Base", aih_btccop::abi_state_base_destruct),
     func(0x8006_71ac, "AICop_StartUp", aicop::abi_start_up),
     func(0x8006_7258, "AICop_Restart", aicop::abi_restart),
     func(0x8006_72a8, "AICop_CleanUp", aicop::abi_clean_up),
@@ -870,7 +911,9 @@ pub(crate) mod test_util {
             // (the seed from the case, not the generator: the cases stay those the tests had)
             let seed = (i ^ (fill as u32) << 16).wrapping_mul(0x9E37_79B9);
             let state = c.m.ram.clone();
+            let regs = c.r;
             let enter = |c: &mut Cpu| {
+                c.r = regs;
                 c.rand_seed = seed;
                 c.m.scratch = [fill; 0x400];
                 c.m.ram[DEAD].fill(fill);
