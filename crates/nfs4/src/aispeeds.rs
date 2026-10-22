@@ -810,18 +810,12 @@ pub fn abi_maintain_leader_board(c: &mut Cpu) {
 /// `AISpeeds_GetScriptFactor` (AISPEEDS.CPP, 0x8006f8a4): the AI script's speed: 1.5 with
 /// reaction 4 on, half with 16, else 1.
 pub fn get_script_factor(c: &mut Cpu, car: Car) -> i32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        let script = car.script().0;
-        r.0[0] = script;
-        let fast = r.call(c, nfs4rc::f_80070170, &[script, 4], 0x8006_f8c4) as i32; // AIScript_DoReAction
-        r.0[1] = fast as u32;
-        if fast != -1 {
-            return 0x1_8000;
-        }
-        let slow = r.call(c, nfs4rc::f_80070170, &[script, 16], 0x8006_f8dc) as i32;
-        if slow != fast { 0x8000 } else { 0x1_0000 }
-    })
+    let fast = crate::aiscript::do_re_action(&mut c.m, car.script(), 4);
+    if fast != -1 {
+        return 0x1_8000;
+    }
+    let slow = crate::aiscript::do_re_action(&mut c.m, car.script(), 16);
+    if slow != fast { 0x8000 } else { 0x1_0000 }
 }
 
 pub fn abi_get_script_factor(c: &mut Cpu) {
@@ -909,14 +903,14 @@ pub fn abi_calc_human_curve_speed(c: &mut Cpu) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::test_util::{Rng, SCRATCH, against_original};
 
     /// The AI physics' shuffled car (at `SCRATCH`) among the race's cars in any order, with any
     /// AI slots, caravans (falling back or not, distances, timers), damage, nitrous, speed
     /// factors, the humans anywhere, any leader board, laps, track direction and race.
-    fn shuffle(c: &mut Cpu, rng: &mut Rng) {
+    pub(crate) fn shuffle(c: &mut Cpu, rng: &mut Rng) {
         crate::aiphysic::tests::shuffle(c, rng);
         let m = &mut c.m;
         let mut pick = |n: u32| (rng.next() % n as u64) as i32;

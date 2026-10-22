@@ -318,12 +318,8 @@ pub fn abi_calc_acceleration(c: &mut Cpu) {
 /// `AIPhysic_ModifyAccelerationAccordingToScript` (AIPHYSIC.CPP, 0x8006a190): `acc` at 1.5
 /// times when the AI script's reaction 4 is on.
 pub fn modify_acceleration_according_to_script(c: &mut Cpu, car: Car, acc: i32) -> i32 {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = acc as u32;
-        let on = r.call(c, nfs4rc::f_80070170, &[car.script().0, 4], 0x8006_a1ac) as i32; // AIScript_DoReAction
-        if on == -1 { acc } else { (acc / 256).wrapping_mul(384) }
-    })
+    let on = crate::aiscript::do_re_action(&mut c.m, car.script(), 4);
+    if on == -1 { acc } else { (acc / 256).wrapping_mul(384) }
 }
 
 pub fn abi_modify_acceleration_according_to_script(c: &mut Cpu) {
@@ -1273,7 +1269,7 @@ pub fn in_control_physics(c: &mut Cpu, car: Car) {
         r.0[1] = SIM_GLOBAL.0;
         let since_hit = SIM_COUNTER.get(m).wrapping_sub(car.n().collision().last_time(m));
         r.0[3] = since_hit as u32;
-        let fishtail = r.call(c, nfs4rc::f_80070170, &[car.script().0, 2048], 0x8006_c444) as i32 != -1; // AIScript_DoReAction
+        let fishtail = crate::aiscript::do_re_action(&mut c.m, car.script(), 2048) != -1;
         let m = &mut c.m;
         let mut skid = 0;
         if fishtail || SIM_COUNTER.get(m) < car.wipe_out_end_tick(m) {

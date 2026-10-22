@@ -1432,9 +1432,6 @@ fn human_cop_in_pursuit(m: &mut Mem) -> bool {
 /// side (and the way the car drives against the traffic's side); 0.5 m up.
 pub fn calculate_starting_grid_offset(c: &mut Cpu, car: Car, slice_at: u32, offset: Coord) {
     abi::frame(c, 32, |c, _| {
-        // s1 the slice's address, s2 the offset's, s0 the grid side
-        let mut r = abi::Saved::of(c);
-        (r.0[1], r.0[2]) = (slice_at, offset.0);
         let m = &mut c.m;
         let dir: i32 = if GAME_SETUP.reverse_track(m) != 0 { 1 } else { -1 };
         let place = GAME_SETUP.car_info(car.car_index(m) as u32).starting_pos(m);
@@ -1452,8 +1449,7 @@ pub fn calculate_starting_grid_offset(c: &mut Cpu, car: Car, slice_at: u32, offs
         if car.desired_direction(m).wrapping_mul(AITUNE_DRIVE_SIDE.get(m)) == -1 {
             side = 1 - side;
         }
-        r.0[0] = side as u32;
-        let one_way = r.call(c, nfs4rc::f_80073748, &[], 0x8008_a700) != 0; // AITune_GetOneWay
+        let one_way = crate::aitune::get_one_way(&mut c.m) != 0;
         let m = &mut c.m;
         let s = (BWORLDSM_SLICES.get(m) as u32).wrapping_add(m.r32(slice_at) << 5);
         let (lanes, left, right) = (m.r8(s + 29) as i32, m.r8(s + 30) as i32, m.r8(s + 31) as i32);

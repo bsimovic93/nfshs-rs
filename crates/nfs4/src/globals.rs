@@ -124,6 +124,11 @@ pub const SIM_COUNTER: I32 = I32(0x8011_F368);
 
 /// `AITune_driveSide`: which side of the road traffic keeps to (1 right, -1 left).
 pub const AITUNE_DRIVE_SIDE: I32 = I32(0x8013_D8E4);
+/// `AITune_oneWay`, `AITune_gRoughLapTime`: the track is one way; about how long a lap takes.
+pub const AITUNE_ONE_WAY: I32 = I32(0x8013_D8E0);
+pub const AITUNE_ROUGH_LAP_TIME: I32 = I32(0x8013_D8E8);
+/// `AITune_trackInfo` (12 bytes a track: one way, the drive side, the lap time).
+pub const AITUNE_TRACK_INFO: u32 = 0x8010_F138;
 /// `gMaxFindQuadSliceIterations`: how many slices around the quad search tries.
 pub const MAX_FIND_QUAD_SLICE_ITERATIONS: I32 = I32(0x8013_DAC8);
 /// The slices the quad search tries next, relative to the last (+1, -1, +2, -2...).

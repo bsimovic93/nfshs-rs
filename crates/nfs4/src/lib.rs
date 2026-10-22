@@ -18,9 +18,12 @@
 //! - `NFSHS_DECOMP_STATS=1`: calls and checks per function when a game thread ends.
 
 pub mod abi;
+pub mod ai;
 pub mod aidatarecord;
 pub mod aiphysic;
+pub mod aiscript;
 pub mod aispeeds;
+pub mod aitune;
 pub mod aiworld;
 pub mod bworld;
 pub mod bworldsm;
@@ -65,6 +68,46 @@ const fn func_ret(addr: u32, name: &'static str, run: fn(&mut Cpu)) -> Func {
 
 /// Every decompiled function the game is routed to, by address.
 pub static FUNCS: &[Func] = &[
+    func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
+    func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
+    func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),
+    func(0x8005_8184, "AI_CarAvoidance", ai::abi_car_avoidance),
+    func(0x8005_81c8, "AI_WorldAvoidance", ai::abi_world_avoidance),
+    func(0x8005_8214, "AI_InitAIInfo", ai::abi_init_ai_info),
+    func(0x8005_825c, "AI_GenericBeginCycle", ai::abi_generic_begin_cycle),
+    func(0x8005_8284, "AI_GenericCycle", ai::abi_generic_cycle),
+    func(0x8005_82d8, "AI_GenericEndCycle", ai::abi_generic_end_cycle),
+    func(0x8005_830c, "AI_TargetLane", ai::abi_target_lane),
+    func(0x8005_835c, "AI_ClearLaneMerits", ai::abi_clear_lane_merits),
+    func(0x8005_8384, "AI_DoReactions", ai::abi_do_reactions),
+    func(0x8005_85c4, "AI_CheckForPlayerActions", ai::abi_check_for_player_actions),
+    func(0x8005_8804, "AI_DoReactionsAndBehavior", ai::abi_do_reactions_and_behavior),
+    func(0x8005_88c8, "AI_OpponentBlockPlayer", ai::abi_opponent_block_player),
+    func(0x8005_8ac4, "AI_CheckForBarriers", ai::abi_check_for_barriers),
+    func(0x8005_8e84, "AI_SetupOncomingLaneDemerits", ai::abi_setup_oncoming_lane_demerits),
+    func(0x8005_8fdc, "AI_HandleChangeInNumLanes", ai::abi_handle_change_in_num_lanes),
+    func(0x8005_914c, "AI_HandleShouldersAndOffRoad", ai::abi_handle_shoulders_and_off_road),
+    func(0x8005_9510, "AI_CalculateLaneSpeeds", ai::abi_calculate_lane_speeds),
+    func(0x8005_98a4, "AI_CalcMeritsBasedOnSpeed", ai::abi_calc_merits_based_on_speed),
+    func(0x8005_9c24, "AI_CheckForClearLanes", ai::abi_check_for_clear_lanes),
+    func(0x8005_9e94, "AI_CalcBestLineMerits", ai::abi_calc_best_line_merits),
+    func(0x8005_9f1c, "AI_AddCollidableObjects", ai::abi_add_collidable_objects),
+    func(0x8005_a118, "AI_AvoidObjects", ai::abi_avoid_objects),
+    func(0x8005_a14c, "AI_AvoidSpikeBelt", ai::abi_avoid_spike_belt),
+    func(0x8005_a1d4, "AI_SubmitObstacle", ai::abi_submit_obstacle),
+    func(0x8005_a378, "AI_HandleTrafficHonking", ai::abi_handle_traffic_honking),
+    func(0x8005_a47c, "AI_CheckForCarsOnSide", ai::abi_check_for_cars_on_side),
+    func(0x8005_a5cc, "AI_ProcessObservationsAndChooseLane", ai::abi_process_observations_and_choose_lane),
+    func(0x8005_a610, "AI_ChooseBestLane", ai::abi_choose_best_lane),
+    func_ret(0x8005_a69c, "AI_CheckPreferredLateralPosition", ai::abi_check_preferred_lateral_position),
+    func_ret(0x8005_a850, "AI_TryToShareLanes", ai::abi_try_to_share_lanes),
+    func(0x8005_a94c, "AI_CalculateDesiredLatPosition", ai::abi_calculate_desired_lat_position),
+    func(0x8005_ab80, "AI_CalculateAdjustedDesiredSpeed", ai::abi_calculate_adjusted_desired_speed),
+    func_ret(0x8005_ae18, "AI_IsMellowZone", ai::abi_is_mellow_zone),
+    func(0x8005_af04, "AI_KeepCarsInLane", ai::abi_keep_cars_in_lane),
+    func(0x8005_af14, "AI_PushFinishedCarsToSide", ai::abi_push_finished_cars_to_side),
+    func(0x8005_b0b0, "AI_MaybeChangeLaneSlack", ai::abi_maybe_change_lane_slack),
+    func(0x8005_b1cc, "AI_ChooseNewLaneSlack", ai::abi_choose_new_lane_slack),
     func(0x8006_9a38, "AIPhysic_StopCar", aiphysic::abi_stop_car),
     func(0x8006_9afc, "AIPhysic_RevEngine", aiphysic::abi_rev_engine),
     func(0x8006_9bcc, "AIPhysic_HandleShifting", aiphysic::abi_handle_shifting),
@@ -162,6 +205,21 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8006_fb40, "AISpeeds_GetUpgradeTopSpeedMult", aispeeds::abi_get_upgrade_top_speed_mult),
     func_ret(0x8006_fbfc, "AISpeeds_CalcHumanTopSpeed", aispeeds::abi_calc_human_top_speed),
     func_ret(0x8006_fc1c, "AISpeeds_CalcHumanCurveSpeed", aispeeds::abi_calc_human_curve_speed),
+    func(0x8006_fef8, "AIScript_Assign", aiscript::abi_assign),
+    func(0x8006_ff18, "AIScript_ClearLastReactionIndex", aiscript::abi_clear_last_reaction_index),
+    func(0x8006_ff3c, "AIScript_Startup", aiscript::abi_startup),
+    func(0x8006_ff78, "AIScript_Cleanup", aiscript::abi_cleanup),
+    func(0x8006_ff80, "AIScript_SubmitPlayerAction", aiscript::abi_submit_player_action),
+    func(0x8007_0008, "AIScript_ProcessActionsAndReactions", aiscript::abi_process_actions_and_reactions),
+    func_ret(0x8007_0170, "AIScript_DoReAction", aiscript::abi_do_re_action),
+    func_ret(0x8007_01a0, "AIScript_GetReactionTicksLeft", aiscript::abi_get_reaction_ticks_left),
+    func_ret(0x8007_3748, "AITune_GetOneWay", aitune::abi_get_one_way),
+    func_ret(0x8007_37a0, "AITune_GetDriveSide", aitune::abi_get_drive_side),
+    func_ret(0x8007_37e0, "AITune_GetRoughLapTimes", aitune::abi_get_rough_lap_times),
+    func(0x8007_3820, "AITune_StartUp1", aitune::abi_start_up1),
+    func(0x8007_3858, "AITune_StartUp2", aitune::abi_nothing),
+    func(0x8007_3860, "AITune_CleanUp1", aitune::abi_nothing),
+    func(0x8007_3868, "AITune_CleanUp2", aitune::abi_nothing),
     func_ret(0x8007_3870, "AIWorld_ZSplineDistance", aiworld::abi_z_spline_distance),
     func_ret(0x8007_3904, "AIWorld_ZSplineDistance_Points", aiworld::abi_z_spline_distance_points),
     func_ret(0x8007_3998, "AIWorld_ApxSplineDistance", aiworld::abi_apx_spline_distance),
