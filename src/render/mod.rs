@@ -104,6 +104,9 @@ pub struct FrameParams {
     pub sky_dome: u32,
     pub sky_top: Vec3,
     pub view_proj: Mat4,
+    /// `view_proj` mirrors the picture left to right: the track's front faces wind the
+    /// other way round.
+    pub mirrored: bool,
     pub cam_pos: Vec3,
     pub fog_color: Vec3,
     pub fog_start: f32,
@@ -1074,7 +1077,7 @@ impl Renderer {
                 rp.draw(dome..sky.len() as u32, 0..1);
                 rp.set_bind_group(0, &self.world_bg, &[]);
             }
-            rp.set_pipeline(&self.pipes.track);
+            rp.set_pipeline(if p.mirrored { &self.pipes.track_mirrored } else { &self.pipes.track });
             if let Some((vb, ib, n)) = &self.static_vb {
                 rp.set_vertex_buffer(0, vb.slice(..));
                 rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
@@ -1547,6 +1550,8 @@ struct ScenePipelines {
     samples: u32,
     world: wgpu::RenderPipeline,
     track: wgpu::RenderPipeline,
+    /// `track` for a mirrored view.
+    track_mirrored: wgpu::RenderPipeline,
     hud: wgpu::RenderPipeline,
     /// 2D drawn subtracting.
     hud_sub: wgpu::RenderPipeline,
@@ -1574,6 +1579,7 @@ impl ScenePipelines {
             samples,
             // the track is single-sided like on the PS1 (double-sided materials are emitted twice)
             track: mk("vs_main", "fs_hud", true, depth, blend, Some(wgpu::Face::Back)),
+            track_mirrored: mk("vs_main", "fs_hud", true, depth, blend, Some(wgpu::Face::Front)),
             world: mk("vs_main", "fs_hud", true, depth, blend, None),
             sub: mk("vs_main", "fs_sub", true, tested, subtract, None),
             hud_sub: mk("vs_main", "fs_sub", true, None, subtract, None),

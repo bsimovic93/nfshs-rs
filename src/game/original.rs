@@ -49,6 +49,9 @@ pub struct Camera {
     /// The view matrix's vertical scale: the game squashes the picture vertically by
     /// scaling the camera's up row (about 0.85).
     pub y_scale: f32,
+    /// A mirrored track (`GameSetup.mirrorTrack`): Camera_GetViewInfo negates the view
+    /// matrix's X row, so the picture is mirrored left to right.
+    pub mirrored: bool,
 }
 
 #[derive(Clone)]
@@ -183,12 +186,15 @@ impl OriginalSim {
             let raw = |i: usize| v3([rot[i * 3], rot[i * 3 + 1], rot[i * 3 + 2]]);
             let row = |i: usize| raw(i).normalize_or_zero();
             let y_scale = (raw(1).length() / raw(2).length().max(1e-6)).clamp(0.5, 1.5);
+            // (in PS1 space the camera's matrix is otherwise a rotation: determinant > 0)
+            let [r0, r1, r2] = [0, 1, 2].map(|i| glam::DVec3::new(rot[i * 3] as f64, rot[i * 3 + 1] as f64, rot[i * 3 + 2] as f64));
             Camera {
                 pos: v3(pos),
                 forward: row(2),
                 up: row(1),
                 tan_half_h: (width.max(1) as f32 / 2.0) / projection.max(1) as f32,
                 y_scale: if y_scale.is_finite() { y_scale } else { 1.0 },
+                mirrored: r0.dot(r1.cross(r2)) < 0.0,
             }
         };
         let cameras = match s.views.len() {
@@ -290,6 +296,7 @@ impl OriginalSim {
                 up: p.up.lerp(q.up, f).normalize_or(q.up),
                 tan_half_h: q.tan_half_h,
                 y_scale: q.y_scale,
+                mirrored: q.mirrored,
             }
         };
         (cars, Some(camera))

@@ -374,3 +374,66 @@ fn file_name(s: &str) -> String {
 fn esc(s: &str) -> String {
     s.chars().flat_map(|c| if c == '"' || c == '\\' { vec!['\\', c] } else if c.is_control() { vec![] } else { vec![c] }).collect()
 }
+
+/// `export-bgs`: the full-screen pictures (front-end backgrounds, loading screens) as PNG at
+/// their own resolution. Such a picture is a grid of tiles sharing a name, each placed at
+/// `(-center_x, -center_y)`; a name whose tiles cover at least 300×200 counts as one. It
+/// looks in every `.PSH`, every compressed `.QPS` and every shape file inside a `.VIV`.
+pub fn export_bgs(data: &GameData, out: &Path) -> Result<()> {
+    let mut files: Vec<_> = std::fs::read_dir(&data.root)?
+        .filter_map(|e| e.ok().filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect();
+    files.sort();
+    let mut count = 0;
+    for file in files {
+        let upper = file.to_ascii_uppercase();
+        let d = data.read(&file)?;
+        let pshs: Vec<(String, Vec<u8>)> = if upper.ends_with(".PSH") {
+            vec![(String::new(), d)]
+        } else if upper.ends_with(".QPS") {
+            vec![(String::new(), formats::compress::decompress(&d)?)]
+        } else if upper.ends_with(".VIV") {
+            let Ok(viv) = Viv::parse(&d) else { continue };
+            viv.entries.into_iter().filter(|(_, e)| e.starts_with(b"SHPP")).collect()
+        } else {
+            continue;
+        };
+        let stem = Path::new(&file).file_stem().unwrap().to_string_lossy().into_owned();
+        for (entry, psh) in pshs {
+            let Ok(psh) = Psh::parse(&psh) else { continue };
+            let mut groups: BTreeMap<&str, Vec<&formats::psh::Shape>> = BTreeMap::new();
+            for s in &psh.shapes {
+                groups.entry(s.name.as_str()).or_default().push(s);
+            }
+            for (name, tiles) in groups {
+                let x0 = tiles.iter().map(|s| -(s.center.0 as i32)).min().unwrap();
+                let y0 = tiles.iter().map(|s| -(s.center.1 as i32)).min().unwrap();
+                let x1 = tiles.iter().map(|s| s.width as i32 - s.center.0 as i32).max().unwrap();
+                let y1 = tiles.iter().map(|s| s.height as i32 - s.center.1 as i32).max().unwrap();
+                let (w, h) = ((x1 - x0) as u32, (y1 - y0) as u32);
+                if w < 300 || h < 200 {
+                    continue;
+                }
+                let mut img = image::RgbaImage::new(w, h);
+                for s in &tiles {
+                    let (ox, oy) = ((-(s.center.0 as i32) - x0) as u32, (-(s.center.1 as i32) - y0) as u32);
+                    for (i, px) in s.rgba.chunks_exact(4).enumerate() {
+                        // (opaque: the semi-transparency bit means nothing on a background)
+                        let a = if px[3] == 0 { 0 } else { 255 };
+                        img.put_pixel(ox + (i % s.width as usize) as u32, oy + (i / s.width as usize) as u32, image::Rgba([px[0], px[1], px[2], a]));
+                    }
+                }
+                let entry = Path::new(&entry).file_stem().map(|e| format!("_{}", e.to_string_lossy())).unwrap_or_default();
+                let name: String = name.trim().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+                let dir = out.join(&stem);
+                std::fs::create_dir_all(&dir)?;
+                let path = dir.join(format!("{stem}{entry}_{name}.png"));
+                img.save(&path)?;
+                println!("{w:4}x{h:<4} {} ({} tiles)", path.display(), tiles.len());
+                count += 1;
+            }
+        }
+    }
+    println!("{count} pictures in {}", out.display());
+    Ok(())
+}

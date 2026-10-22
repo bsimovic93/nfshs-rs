@@ -56,7 +56,8 @@ All codecs reproduce the emulated originals byte-for-byte (`nfshs verify-decompr
 a chain of 16-byte block headers: `u8 type, u24 next (relative, 0 = last), u16 w, u16 h,
 i16 center_x, i16 center_y, u16 vram_x, u16 vram_y`.
 
-* `0x40` 4bpp, `0x41` 8bpp, `0x42` 16bpp (PS1 BGR555, `0x0000` = transparent), `0xC1` 8bpp variant.
+* `0x40` 4bpp, `0x41` 8bpp, `0x42` 16bpp (PS1 BGR555, `0x0000` = transparent); `0x80` set (`0xC0`, `0xC1`) = the
+  same with the pixels compressed (RefPack, unpacking to the plain rows).
 * Rows are padded to whole 16-bit VRAM words (4 px at 4bpp, 2 px at 8bpp).
 * `0x23` block = 16-bit CLUT for the preceding image.
 * `vram_x` is in 16-bit units (×4 px at 4bpp). Car sheets tile one 256×256 texture page,

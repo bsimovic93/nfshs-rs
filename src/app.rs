@@ -638,6 +638,7 @@ pub fn flat_params() -> FrameParams {
         sky_dome: 0,
         sky_top: Vec3::ZERO,
         view_proj: Mat4::IDENTITY,
+        mirrored: false,
         cam_pos: Vec3::ZERO,
         fog_color: Vec3::ZERO,
         fog_start: 0.0,

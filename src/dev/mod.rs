@@ -14,7 +14,7 @@ use std::path::Path;
 pub use headless::{front_end_play, screenshot};
 
 /// The commands [`run`] knows.
-pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car", "export-car", "decomp-check"];
+pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car", "export-car", "export-bgs", "decomp-check"];
 
 /// Run developer command `cmd` (`args` as on the command line); false if there is none.
 pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::RaceConfig) -> Result<bool> {
@@ -458,6 +458,8 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             });
             export::export_car(data, code, &out)?;
         }
+        // export-bgs [OUTDIR]: the full-screen pictures, tiles stitched, as PNG (export/bgs)
+        "export-bgs" => export::export_bgs(data, Path::new(args.get(2).map(String::as_str).unwrap_or("export/bgs")))?,
         _ => return Ok(false),
     }
     Ok(true)

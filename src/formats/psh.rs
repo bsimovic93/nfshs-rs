@@ -99,7 +99,16 @@ impl Psh {
         let (wu, hu) = (w as usize, h as usize);
         let mut rgba = vec![0u8; wu * hu * 4];
         let mut indices = Vec::new();
-        match kind {
+        // 0x80 set: the pixels are compressed (RefPack in the front end's 0xC0 / 0xC1 shapes)
+        let unpacked;
+        let (d, px) = match kind & 0x80 != 0 {
+            true => {
+                unpacked = super::compress::decompress(&d[px..]).unwrap_or_default();
+                (&unpacked[..], 0)
+            }
+            false => (d, px),
+        };
+        match kind & 0x7F {
             0x40 => {
                 // VRAM rows are whole 16-bit words: 4 pixels per word at 4bpp
                 let stride = wu.div_ceil(4) * 2;

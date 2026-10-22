@@ -114,6 +114,8 @@ pub struct Game {
     pub tan_half_v: f32,
     /// Vertical squash of the picture (the original's view matrix scales Y), 1 = none.
     pub y_scale: f32,
+    /// The picture is mirrored left to right (a mirrored track).
+    pub mirrored: bool,
     autopilot: ai::Driver,
     /// Fog colour and distances (the draw distance; the original's depth cue does the
     /// colouring).
@@ -287,6 +289,7 @@ impl Game {
             cam_up: Vec3::Y,
             tan_half_v: (1.05f32 / 2.0).tan(),
             y_scale: 1.0,
+            mirrored: false,
             autopilot: ai::Driver::default(),
             fog,
             night_driving: matches!(cfg.variant, "N" | "S"),
@@ -365,6 +368,7 @@ impl Game {
             // keep the original horizontal field of view on a 4:3 screen
             self.tan_half_v = cam.tan_half_h * self.view_ratio;
             self.y_scale = cam.y_scale;
+            self.mirrored = cam.mirrored;
             // the bumper view does not show the player's car
             self.cam_mode = match self.racers.get(self.view_player) {
                 Some(r) if r.car.pos.distance(cam.pos) < 2.0 => CameraMode::Bumper,

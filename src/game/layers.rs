@@ -243,7 +243,7 @@ impl Game {
     pub(super) fn view_proj_of(&self, c: &original::Camera, aspect: f32) -> Mat4 {
         let tan_half_v = c.tan_half_h * self.view_ratio;
         let fov = 2.0 * tan_half_v.atan();
-        let squash = Mat4::from_scale(Vec3::new(1.0, c.y_scale, 1.0));
+        let squash = Mat4::from_scale(Vec3::new(if c.mirrored { -1.0 } else { 1.0 }, c.y_scale, 1.0));
         let proj = squash * Mat4::perspective_infinite_reverse_rh(fov, aspect, 0.1);
         proj * Mat4::look_at_rh(c.pos, c.pos + c.forward, c.up)
     }
