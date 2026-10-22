@@ -24,6 +24,15 @@
 8005c8a8 AIHigh_BasicPerp::Clear
 8005c8e4 AIHigh_BasicPerp::AIHigh_BasicPerp
 8005c92c AIHigh_BasicPerp::~AIHigh_BasicPerp
+8005c954 AIHigh_BasicCop::AIHigh_BasicCop
+8005c9dc AIHigh_BasicCop::CheckSpikeBelt
+8005caa4 AIHigh_BasicCop::ShouldIPerformCutOffBlock
+8005cc04 Blockade_AddRoadFlare
+8005cc58 Blockade_AddObject
+8005cdd4 PlacePointOnRoad
+8005cf80 AIHigh_BasicCop::SetupBlockadeElements
+8005d218 AIHigh_BasicCop::HandleBlockadeSpeech
+8005d33c AIHigh_BasicCop::~AIHigh_BasicCop
 8009fa38 Newton_AddDamageZone
 800a0210 Newton_FindClosestQuad
 800a023c Newton_CalculateSliceYaw

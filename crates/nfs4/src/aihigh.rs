@@ -332,7 +332,43 @@ pub(crate) mod tests {
             if pick(2) == 0 {
                 m.w32(o + 0x6C, 0);
             }
+            let across = perp.road_position(m) + (0x1_8000 + pick(0x3_0000)) * [1, -1][pick(2) as usize];
+            cop.set_road_position(m, across);
+            m.w32(ARGS + 0x50, cop.0);
+        } else {
+            m.w32(ARGS + 0x50, cars[pick(n) as usize].0);
         }
+        // (the police's blockades: a target object, near its car's slice, either way, any
+        // elements and speech; the spike belt and road block, near the humans or not)
+        for (i, &car) in cars.iter().enumerate() {
+            let o = OBJS + 0x100 * i as u32;
+            let target = cars[pick(n) as usize];
+            let ti = target.car_index(m) as u32;
+            m.w32(o + 0x24, [0, OBJS + 0x100 * ti][(pick(5) != 0) as usize]);
+            m.w32(o + 0x28, pick(8) as u32);
+            let slice = target.stats().slice(m);
+            m.w32(o + 0x34, (slice + pick(80) - 40).max(0) as u32);
+            m.w32(o + 0x38, [1, -1][pick(2) as usize] as u32);
+            m.w16(o + 0x50, pick(8) as u16);
+            if m.r32(ARGS + 0x50) != car.0 && i as u32 != this {
+                car.set_road_position(m, [pick(0x10_0000) - 0x8_0000, pick(0x4_0000)][pick(2) as usize]);
+            }
+        }
+        let belt = crate::globals::SPIKE_BELT;
+        belt.set_active_(m, pick(2));
+        let human = Car(m.r32(HUMAN_RACE_CARS));
+        let slice = human.n().sim_road_info().slice(m) as i32;
+        let slices = crate::globals::NUM_SLICES.get(m);
+        belt.set_slice_(m, [(slice + pick(20) - 10).clamp(0, slices - 1), pick(slices as u32)][pick(2) as usize]);
+        belt.set_freshen_time_(m, now - pick(640));
+        crate::aih_basiccop::ROAD_BLOCK_STATE.set(m, [0, 1, 2][pick(3) as usize]);
+        crate::aih_basiccop::CUSTOM_SLICE_NUM.set(m, [(slice + pick(20) - 10).clamp(0, slices - 1), pick(slices as u32)][pick(2) as usize]);
+        // (a point near the road's centre, for placing on it)
+        m.w32(ARGS + 0x40, (pick(0x10_0000) - 0x8_0000) as u32);
+        m.w32(ARGS + 0x44, pick(0x1_0000) as u32);
+        m.w32(ARGS + 0x48, (pick(0x10_0000) - 0x8_0000) as u32);
+        let s = cars[this as usize].n().sim_road_info().slice(m) as i32 as u32;
+        m.w32(ARGS + 0x4C, s);
         let args = [cars[pick(n) as usize].0, cars[pick(n) as usize].0, pick(ncops) as u32, pick(n) as u32, pick(2) as u32, pick(6) as u32, OBJS + 0x100 * this];
         for (k, a) in args.into_iter().enumerate() {
             m.w32(ARGS + 4 * k as u32, a);

@@ -22,6 +22,7 @@ pub mod ai;
 pub mod aicop;
 pub mod aidatarecord;
 pub mod aidelaycar;
+pub mod aih_basiccop;
 pub mod aih_basicperp;
 pub mod aihigh;
 pub mod aiinit;
@@ -139,6 +140,15 @@ pub static FUNCS: &[Func] = &[
     func(0x8005_c8a8, "AIHigh_BasicPerp::Clear", aih_basicperp::abi_clear),
     func_ret(0x8005_c8e4, "AIHigh_BasicPerp::AIHigh_BasicPerp", aih_basicperp::abi_construct),
     func(0x8005_c92c, "AIHigh_BasicPerp::~AIHigh_BasicPerp", aih_basicperp::abi_destruct),
+    func_ret(0x8005_c954, "AIHigh_BasicCop::AIHigh_BasicCop", aih_basiccop::abi_construct),
+    func(0x8005_c9dc, "AIHigh_BasicCop::CheckSpikeBelt", aih_basiccop::abi_check_spike_belt),
+    func_ret(0x8005_caa4, "AIHigh_BasicCop::ShouldIPerformCutOffBlock", aih_basiccop::abi_should_i_perform_cut_off_block),
+    func(0x8005_cc04, "Blockade_AddRoadFlare", aih_basiccop::abi_add_road_flare),
+    func(0x8005_cc58, "Blockade_AddObject", aih_basiccop::abi_add_object),
+    func(0x8005_cdd4, "PlacePointOnRoad", aih_basiccop::abi_place_point_on_road),
+    func(0x8005_cf80, "AIHigh_BasicCop::SetupBlockadeElements", aih_basiccop::abi_setup_blockade_elements),
+    func(0x8005_d218, "AIHigh_BasicCop::HandleBlockadeSpeech", aih_basiccop::abi_handle_blockade_speech),
+    func(0x8005_d33c, "AIHigh_BasicCop::~AIHigh_BasicCop", aih_basiccop::abi_destruct),
     func(0x8006_71ac, "AICop_StartUp", aicop::abi_start_up),
     func(0x8006_7258, "AICop_Restart", aicop::abi_restart),
     func(0x8006_72a8, "AICop_CleanUp", aicop::abi_clean_up),
