@@ -20,9 +20,11 @@
 pub mod abi;
 pub mod ai;
 pub mod aidatarecord;
+pub mod aidelaycar;
 pub mod aiphysic;
 pub mod aiscript;
 pub mod aispeeds;
+pub mod aitrigger;
 pub mod aitune;
 pub mod aiworld;
 pub mod bworld;
@@ -108,6 +110,9 @@ pub static FUNCS: &[Func] = &[
     func(0x8005_af14, "AI_PushFinishedCarsToSide", ai::abi_push_finished_cars_to_side),
     func(0x8005_b0b0, "AI_MaybeChangeLaneSlack", ai::abi_maybe_change_lane_slack),
     func(0x8005_b1cc, "AI_ChooseNewLaneSlack", ai::abi_choose_new_lane_slack),
+    func_ret(0x8005_b218, "AIDelayCar::AIDelayCar", aidelaycar::abi_construct),
+    func(0x8005_b24c, "AIDelayCar::SetNewTargetCar", aidelaycar::abi_set_new_target_car),
+    func(0x8005_b334, "AIDelayCar::Update", aidelaycar::abi_update),
     func(0x8006_9a38, "AIPhysic_StopCar", aiphysic::abi_stop_car),
     func(0x8006_9afc, "AIPhysic_RevEngine", aiphysic::abi_rev_engine),
     func(0x8006_9bcc, "AIPhysic_HandleShifting", aiphysic::abi_handle_shifting),
@@ -213,6 +218,16 @@ pub static FUNCS: &[Func] = &[
     func(0x8007_0008, "AIScript_ProcessActionsAndReactions", aiscript::abi_process_actions_and_reactions),
     func_ret(0x8007_0170, "AIScript_DoReAction", aiscript::abi_do_re_action),
     func_ret(0x8007_01a0, "AIScript_GetReactionTicksLeft", aiscript::abi_get_reaction_ticks_left),
+    func(0x8007_314c, "AITrigger_TriggerManager::Init", aitrigger::abi_init),
+    func_ret(0x8007_3228, "AITrigger_TriggerManager::InsertTrigger", aitrigger::abi_insert_trigger),
+    func_ret(0x8007_3324, "AITrigger_TriggerManager::GetNextTrigger", aitrigger::abi_get_next_trigger),
+    func_ret(0x8007_3394, "AITrigger_TriggerManager::GetPrevTrigger", aitrigger::abi_get_prev_trigger),
+    func_ret(0x8007_3404, "AITrigger_TriggerManager::CheckForTriggerAtSlice", aitrigger::abi_check_for_trigger_at_slice),
+    func_ret(0x8007_35b8, "AITrigger_TriggerManager::GetTrigger", aitrigger::abi_get_trigger),
+    func_ret(0x8007_3620, "AITrigger_TriggerManager::CheckForClosestTriggerOfType", aitrigger::abi_check_for_closest_trigger_of_type),
+    func(0x8007_36f0, "AITrigger_TriggerManager::DescribeTrigger", aitrigger::abi_describe_trigger),
+    func_ret(0x8007_36f8, "AITrigger_Compare", aitrigger::abi_compare),
+    func(0x8007_3710, "AITrigger_TriggerManager::Sort", aitrigger::abi_sort),
     func_ret(0x8007_3748, "AITune_GetOneWay", aitune::abi_get_one_way),
     func_ret(0x8007_37a0, "AITune_GetDriveSide", aitune::abi_get_drive_side),
     func_ret(0x8007_37e0, "AITune_GetRoughLapTimes", aitune::abi_get_rough_lap_times),

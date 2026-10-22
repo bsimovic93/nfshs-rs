@@ -369,6 +369,11 @@
 8005b0b0 AI_MaybeChangeLaneSlack
 8005b1cc AI_ChooseNewLaneSlack
 
+# AIDELAYCAR.CPP
+8005b218 AIDelayCar::AIDelayCar
+8005b24c AIDelayCar::SetNewTargetCar
+8005b334 AIDelayCar::Update
+
 # AISCRIPT.CPP
 8006fef8 AIScript_Assign
 8006ff18 AIScript_ClearLastReactionIndex
@@ -378,6 +383,18 @@
 80070008 AIScript_ProcessActionsAndReactions
 80070170 AIScript_DoReAction
 800701a0 AIScript_GetReactionTicksLeft
+
+# AITRIGER.CPP
+8007314c AITrigger_TriggerManager::Init
+80073228 AITrigger_TriggerManager::InsertTrigger
+80073324 AITrigger_TriggerManager::GetNextTrigger
+80073394 AITrigger_TriggerManager::GetPrevTrigger
+80073404 AITrigger_TriggerManager::CheckForTriggerAtSlice
+800735b8 AITrigger_TriggerManager::GetTrigger
+80073620 AITrigger_TriggerManager::CheckForClosestTriggerOfType
+800736f0 AITrigger_TriggerManager::DescribeTrigger
+800736f8 AITrigger_Compare
+80073710 AITrigger_TriggerManager::Sort
 
 # AITUNE.CPP
 80073748 AITune_GetOneWay

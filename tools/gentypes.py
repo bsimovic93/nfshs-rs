@@ -18,7 +18,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else '../crates/nfs4/src/types.rs'
 
 # The structures the ported code uses; whatever they hold by value comes with them.
 ROOTS = ['Car_tObj', 'Physics_tWheelAccStruct', 'Car_tSpecs', 'Udff_tInfo', 'BWorldSm_Pos', 'Trk_NewSlice', 'GameSetup_tData', 'Chunk', 'Trk_NewStrip', 'Trk_NewSimSlice', 'Trk_NewSimQuad', 'tNormalCacheEntry', 'AICop_spikeBelt_t',
-         'GameSetup_tCarData', 'AIPerson_t', 'AIDataRecord_t', 'AISpeeds_tSlotInfo', 'AISpeeds_tLeaderBoard', 'AIPhysic_BrakeInfo', 'AIPhysic_Config_t', 'Input_tResults', 'Sched_tSchedule', 'sim_queue', 'Sim_tSimGlobalVar', 'Sim_tSimSystemVar', 'tReplayInterface']
+         'GameSetup_tCarData', 'AIPerson_t', 'AIDataRecord_t', 'AISpeeds_tSlotInfo', 'AISpeeds_tLeaderBoard', 'AIPhysic_BrakeInfo', 'AIPhysic_Config_t', 'AIDelayCar', 'AITrigger_TriggerManager', 'trigger_t', 'Input_tResults', 'Sched_tSchedule', 'sim_queue', 'Sim_tSimGlobalVar', 'Sim_tSimSystemVar', 'tReplayInterface']
 
 # Rust names for some structures (others: underscores and the `_t` type prefix dropped).
 NAMES = {'coorddef': 'Coord', 'matrixtdef': 'Matrix', 'BO_tNewtonObj': 'NewtonObj',
@@ -26,8 +26,9 @@ NAMES = {'coorddef': 'Coord', 'matrixtdef': 'Matrix', 'BO_tNewtonObj': 'NewtonOb
          'Car_tObj': 'Car', 'CCOORD16': 'Coord16', 'Sim_tSimGlobalVar': 'SimGlobal', 'tReplayInterface': 'ReplayInterface',
          'Sim_tSimSystemVar': 'SimVar'}
 
-# (struct, field) -> (offset, type) where retail differs from the development build.
-OVERRIDES = {}
+# (struct, field) -> (offset, type) where retail differs from the development build, or the
+# SYM's type reads wrong (the trigger manager's `trigger_t *triggers_[100]`, 100 addresses).
+OVERRIDES = {('AITrigger_TriggerManager', 'triggers_'): (0x8, 'ulong[100]')}
 
 SCALARS = {'char': ('i8', 1), 'uchar': ('u8', 1), 'short': ('i16', 2), 'ushort': ('u16', 2),
            'int': ('i32', 4), 'uint': ('u32', 4), 'long': ('i32', 4), 'ulong': ('u32', 4),
