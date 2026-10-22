@@ -22,6 +22,8 @@ pub mod ai;
 pub mod aicop;
 pub mod aidatarecord;
 pub mod aidelaycar;
+pub mod aih_basicperp;
+pub mod aihigh;
 pub mod aiinit;
 pub mod ailife;
 pub mod aiperson;
@@ -119,6 +121,24 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8005_b218, "AIDelayCar::AIDelayCar", aidelaycar::abi_construct),
     func(0x8005_b24c, "AIDelayCar::SetNewTargetCar", aidelaycar::abi_set_new_target_car),
     func(0x8005_b334, "AIDelayCar::Update", aidelaycar::abi_update),
+    func_ret(0x8005_bb08, "AIHigh_Base::AIHigh_Base", aihigh::abi_base_construct),
+    func(0x8005_bbb4, "AIHigh_Base::~AIHigh_Base", aihigh::abi_base_destruct),
+    func(0x8005_bc28, "AIHigh_BTC_Perp::~AIHigh_BTC_Perp", aihigh::abi_btc_perp_destruct),
+    func(0x8005_bc50, "AIHigh_None::HighExecute", aihigh::abi_nothing),
+    func(0x8005_bc58, "AIHigh_None::~AIHigh_None", aihigh::abi_none_destruct),
+    func(0x8005_bc78, "AIState_None::Execute", aihigh::abi_nothing),
+    func(0x8005_bc80, "AIState_None::~AIState_None", aihigh::abi_state_none_destruct),
+    func_ret(0x8005_bcb4, "AIState_Base::TestForRelease", aihigh::abi_state_test_for_release),
+    func(0x8005_bcbc, "AIState_Base::~AIState_Base", aihigh::abi_state_none_destruct),
+    func(0x8005_bcf0, "AIHigh_BasicPerp::CheckForCrimes", aih_basicperp::abi_check_for_crimes),
+    func_ret(0x8005_bf7c, "AIHigh_BasicPerp::CheckIfCaught", aih_basicperp::abi_check_if_caught),
+    func(0x8005_c56c, "AIHigh_BasicPerp::RemoveCloseCops", aih_basicperp::abi_remove_close_cops),
+    func(0x8005_c6bc, "AIHigh_BasicPerp::RemoveChaser", aih_basicperp::abi_remove_chaser),
+    func(0x8005_c6f8, "AIHigh_BasicPerp::AddChaser", aih_basicperp::abi_add_chaser),
+    func_ret(0x8005_c74c, "AIHigh_BasicPerp::CheckChaserPosition", aih_basicperp::abi_check_chaser_position),
+    func(0x8005_c8a8, "AIHigh_BasicPerp::Clear", aih_basicperp::abi_clear),
+    func_ret(0x8005_c8e4, "AIHigh_BasicPerp::AIHigh_BasicPerp", aih_basicperp::abi_construct),
+    func(0x8005_c92c, "AIHigh_BasicPerp::~AIHigh_BasicPerp", aih_basicperp::abi_destruct),
     func(0x8006_71ac, "AICop_StartUp", aicop::abi_start_up),
     func(0x8006_7258, "AICop_Restart", aicop::abi_restart),
     func(0x8006_72a8, "AICop_CleanUp", aicop::abi_clean_up),

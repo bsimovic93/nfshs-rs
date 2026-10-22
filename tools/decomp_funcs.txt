@@ -6,6 +6,24 @@
 # calls it, and its unit tests compare it with the original over all edge cases instead.
 
 # NEWTON.CPP
+8005bb08 AIHigh_Base::AIHigh_Base
+8005bbb4 AIHigh_Base::~AIHigh_Base
+8005bc28 AIHigh_BTC_Perp::~AIHigh_BTC_Perp
+8005bc50 AIHigh_None::HighExecute
+8005bc58 AIHigh_None::~AIHigh_None
+8005bc78 AIState_None::Execute
+8005bc80 AIState_None::~AIState_None
+8005bcb4 AIState_Base::TestForRelease
+8005bcbc AIState_Base::~AIState_Base
+8005bcf0 AIHigh_BasicPerp::CheckForCrimes
+8005bf7c AIHigh_BasicPerp::CheckIfCaught
+8005c56c AIHigh_BasicPerp::RemoveCloseCops
+8005c6bc AIHigh_BasicPerp::RemoveChaser
+8005c6f8 AIHigh_BasicPerp::AddChaser
+8005c74c AIHigh_BasicPerp::CheckChaserPosition
+8005c8a8 AIHigh_BasicPerp::Clear
+8005c8e4 AIHigh_BasicPerp::AIHigh_BasicPerp
+8005c92c AIHigh_BasicPerp::~AIHigh_BasicPerp
 8009fa38 Newton_AddDamageZone
 800a0210 Newton_FindClosestQuad
 800a023c Newton_CalculateSliceYaw

@@ -18,13 +18,13 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else '../crates/nfs4/src/types.rs'
 
 # The structures the ported code uses; whatever they hold by value comes with them.
 ROOTS = ['Car_tObj', 'Physics_tWheelAccStruct', 'Car_tSpecs', 'Udff_tInfo', 'BWorldSm_Pos', 'Trk_NewSlice', 'GameSetup_tData', 'Chunk', 'Trk_NewStrip', 'Trk_NewSimSlice', 'Trk_NewSimQuad', 'tNormalCacheEntry', 'AICop_spikeBelt_t',
-         'GameSetup_tCarData', 'AIPerson_t', 'AIDataRecord_t', 'AISpeeds_tSlotInfo', 'AISpeeds_tLeaderBoard', 'AIPhysic_BrakeInfo', 'AIPhysic_Config_t', 'AIDelayCar', 'AITrigger_TriggerManager', 'trigger_t', 'AIState_Chase', 'AIState_Idle', 'AIState_Offroad', 'AIState_Purgatory', 'AIState_RovingTraffic', 'AIState_Donuts', 'AIState_GotoSlice', 'AIState_Cruise', 'AIState_Normal', 'AIState_NonActive', 'AIState_None', 'Input_tResults', 'Sched_tSchedule', 'sim_queue', 'Sim_tSimGlobalVar', 'Sim_tSimSystemVar', 'tReplayInterface']
+         'GameSetup_tCarData', 'AIPerson_t', 'AIDataRecord_t', 'AISpeeds_tSlotInfo', 'AISpeeds_tLeaderBoard', 'AIPhysic_BrakeInfo', 'AIPhysic_Config_t', 'AIDelayCar', 'AITrigger_TriggerManager', 'trigger_t', 'AIState_Chase', 'AIState_Idle', 'AIState_Offroad', 'AIState_Purgatory', 'AIState_RovingTraffic', 'AIState_Donuts', 'AIState_GotoSlice', 'AIState_Cruise', 'AIState_Normal', 'AIState_NonActive', 'AIState_None', 'AIHigh_Base', 'AIHigh_None', 'AIHigh_BasicPerp', 'AIHigh_BasicCop', 'AIHigh_BTC_Cop', 'AIHigh_BTC_HumanCop', 'AIHigh_BTC_Wingman', 'AIHigh_BTC_Perp', 'AIHigh_BTC_HumanPerp', 'AIHigh_BTC_AIPerp', 'AIHigh_Player', 'AIHigh_Human', 'AIHigh_Opponent', 'AIHigh_Cop', 'AIHigh_Traffic', 'Input_tResults', 'Sched_tSchedule', 'sim_queue', 'Sim_tSimGlobalVar', 'Sim_tSimSystemVar', 'tReplayInterface']
 
 # Rust names for some structures (others: underscores and the `_t` type prefix dropped).
 NAMES = {'coorddef': 'Coord', 'matrixtdef': 'Matrix', 'BO_tNewtonObj': 'NewtonObj',
          'BO_tNewtonCollisionInfo': 'NewtonCollisionInfo', 'Physics_tWheelAccStruct': 'WheelAcc',
          'Car_tObj': 'Car', 'CCOORD16': 'Coord16', 'Sim_tSimGlobalVar': 'SimGlobal', 'tReplayInterface': 'ReplayInterface',
-         'Sim_tSimSystemVar': 'SimVar'}
+         'Sim_tSimSystemVar': 'SimVar', '._96': 'CopPosition'}
 
 # (struct, field) -> (offset, type) where retail differs from the development build, or the
 # SYM's type reads wrong (the trigger manager's `trigger_t *triggers_[100]`, 100 addresses).

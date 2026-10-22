@@ -696,7 +696,7 @@ pub fn abi_is_position_in_any_visible_area(c: &mut Cpu) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::globals::CARS_LIST;
     use crate::test_util::{Rng, SCRATCH_TOP, against_original, same_stack};
