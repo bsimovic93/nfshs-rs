@@ -3,6 +3,7 @@
 //! it give up to four reactions in turn (bits, 1 none), each for a time; the AI asks which are
 //! on (`DoReAction`) and gets the human's index.
 
+use crate::abi::{self, Saved};
 use crate::types::AIScript;
 use ps1rt::{Cpu, Mem};
 
@@ -23,13 +24,15 @@ fn last_reaction_at(s: AIScript, action: i32) -> u32 {
 }
 
 /// `AIScript_Assign` (AISCRIPT.CPP, 0x8006fef8): the script's details, and it started.
-pub fn assign(m: &mut Mem, s: AIScript, data: u32) {
-    m.w32(s.0.wrapping_add(0x1c), data);
-    startup(m, s);
+pub fn assign(c: &mut Cpu, s: AIScript, data: u32) {
+    abi::frame(c, 24, |c, _| {
+        c.m.w32(s.0.wrapping_add(0x1c), data);
+        Saved::of(c).enter(c, 0x8006_ff3c, 0x8006_ff08, |c| startup(&mut c.m, s));
+    })
 }
 
 pub fn abi_assign(c: &mut Cpu) {
-    assign(&mut c.m, AIScript(c.r[4]), c.r[5]);
+    assign(c, AIScript(c.r[4]), c.r[5]);
 }
 
 /// `AIScript_ClearLastReactionIndex` (AISCRIPT.CPP, 0x8006ff18): each action's reactions from

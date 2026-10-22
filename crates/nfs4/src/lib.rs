@@ -19,8 +19,10 @@
 
 pub mod abi;
 pub mod ai;
+pub mod aicop;
 pub mod aidatarecord;
 pub mod aidelaycar;
+pub mod aiperson;
 pub mod aiphysic;
 pub mod aiscript;
 pub mod aispeeds;
@@ -43,6 +45,7 @@ pub mod sim;
 pub mod simqueue;
 pub mod stats;
 pub mod types;
+pub mod udff;
 pub mod vec;
 
 use ps1rt::Cpu;
@@ -113,6 +116,18 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8005_b218, "AIDelayCar::AIDelayCar", aidelaycar::abi_construct),
     func(0x8005_b24c, "AIDelayCar::SetNewTargetCar", aidelaycar::abi_set_new_target_car),
     func(0x8005_b334, "AIDelayCar::Update", aidelaycar::abi_update),
+    func(0x8006_71ac, "AICop_StartUp", aicop::abi_start_up),
+    func(0x8006_7258, "AICop_Restart", aicop::abi_restart),
+    func(0x8006_72a8, "AICop_CleanUp", aicop::abi_clean_up),
+    func_ret(0x8006_7308, "AICop_NoCopsInArea", aicop::abi_no_cops_in_area),
+    func(0x8006_91e8, "AIPerson_LoadGridAndSetPersonalityIndexes", aiperson::abi_load_grid_and_set_personality_indexes),
+    func(0x8006_9234, "AIPerson_SetPersonality", aiperson::abi_set_personality),
+    func(0x8006_92fc, "AIPerson_SetPersonalityPointers", aiperson::abi_set_personality_pointers),
+    func(0x8006_9360, "AIPerson_LoadPersonalityData", aiperson::abi_load_personality_data),
+    func(0x8006_96a4, "AIPerson_LoadScriptData", aiperson::abi_load_script_data),
+    func(0x8006_9780, "AIPerson_LoadGlue", aiperson::abi_load_glue),
+    func(0x8006_988c, "AIPerson_Startup", aiperson::abi_startup),
+    func(0x8006_9a30, "AIPerson_Cleanup", aiperson::abi_cleanup),
     func(0x8006_9a38, "AIPhysic_StopCar", aiphysic::abi_stop_car),
     func(0x8006_9afc, "AIPhysic_RevEngine", aiphysic::abi_rev_engine),
     func(0x8006_9bcc, "AIPhysic_HandleShifting", aiphysic::abi_handle_shifting),

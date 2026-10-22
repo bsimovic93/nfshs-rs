@@ -404,3 +404,22 @@
 80073858 AITune_StartUp2
 80073860 AITune_CleanUp1
 80073868 AITune_CleanUp2
+
+# AICOP.CPP
+800671ac AICop_StartUp
+80067258 AICop_Restart
+800672a8 AICop_CleanUp
+80067308 AICop_NoCopsInArea
+
+# AIPERSON.CPP
+800691e8 AIPerson_LoadGridAndSetPersonalityIndexes
+80069234 AIPerson_SetPersonality
+800692fc AIPerson_SetPersonalityPointers
+80069360 AIPerson_LoadPersonalityData
+800696a4 AIPerson_LoadScriptData
+80069780 AIPerson_LoadGlue
+8006988c AIPerson_Startup
+80069a30 AIPerson_Cleanup
+
+# UDFF.CPP
+800bc8f8 Udff_GetInt
