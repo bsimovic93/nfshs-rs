@@ -225,12 +225,14 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             // decomp-check [--track N --variant V --car C --opponents A,B --laps N] [--same]:
             // the race BOOT_SCRIPT drives (as boot-race) run with the recompiled originals and
             // with the decompiled code (crates/nfs4) side by side, the RAM compared after every
-            // frame; --same runs the recompiled code in both (they must agree too)
+            // frame; --same runs the recompiled code in both (they must agree too); --main powers
+            // the game on instead and BOOT_SCRIPT drives its front end
             let mut cars = vec![car.to_string()];
             cars.extend(cfg.opponents.iter().cloned());
             let setup = ps1::race::RaceSetup { track, variant: variant.to_string(), cars, laps: laps as u32 };
             let script = std::env::var("BOOT_SCRIPT").unwrap_or_else(|_| "8:-,3:x".into());
-            decomp::check(data.root.clone(), &setup, &script_steps(&script)?, args.iter().any(|a| a == "--same"))?;
+            let main = args.iter().any(|a| a == "--main");
+            decomp::check(data.root.clone(), (!main).then_some(&setup), &script_steps(&script)?, args.iter().any(|a| a == "--same"))?;
         }
         "boot-main" => {
             // boot-main: run the original main (front end, then races) headless, for exploring

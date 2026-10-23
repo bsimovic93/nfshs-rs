@@ -12,15 +12,22 @@ const STACK: std::ops::Range<usize> = 0x1F_0000..0x20_0000;
 
 /// Run `setup` twice in lockstep through `steps` (seconds, buttons, sticks); `both_original`
 /// runs the recompiled code in both (the baseline: they must agree with each other too).
-pub fn check(root: PathBuf, setup: &RaceSetup, steps: &[(f32, u16, Option<[u8; 4]>)], both_original: bool) -> Result<()> {
-    let gs = setup.game_setup()?;
+/// `setup` None powers the game on instead: its front end (and the races it starts) from the
+/// first frame.
+pub fn check(root: PathBuf, setup: Option<&RaceSetup>, steps: &[(f32, u16, Option<[u8; 4]>)], both_original: bool) -> Result<()> {
+    let gs = setup.map(|s| s.game_setup()).transpose()?;
+    let start = |root: PathBuf| match &gs {
+        Some(gs) => RaceThread::start(root, gs.clone()),
+        None => RaceThread::start_main(root),
+    };
     let was = nfs4::enabled();
     nfs4::set_enabled(false);
-    let mut a = RaceThread::start(root.clone(), gs.clone())?;
+    let mut a = start(root.clone())?;
     nfs4::set_enabled(!both_original);
-    let mut b = RaceThread::start(root, gs)?;
+    let mut b = start(root)?;
     nfs4::set_enabled(was);
-    println!("two races booted (the second {})", if both_original { "recompiled too" } else { "decompiled" });
+    let what = if gs.is_some() { "races" } else { "games (from power-on)" };
+    println!("two {what} booted (the second {})", if both_original { "recompiled too" } else { "decompiled" });
     let mut frames = 0u32;
     for &(secs, buttons, sticks) in steps {
         for _ in 0..(secs * 60.0).round() as u32 {

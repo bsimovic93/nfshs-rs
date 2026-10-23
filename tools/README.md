@@ -18,7 +18,7 @@ original. Run them from this folder (they import each other: `mips`, `ds`, `reco
 | Script | What it does |
 |---|---|
 | `mips.py` | MIPS-I disassembler and xref helper for the PS-X EXE (used by the others). |
-| `fdis.py ADDR [--calls]` | Disassembles a whole retail function. |
+| `fdis.py ADDR [--calls]` | Disassembles a whole retail function (the front end's overlay, FRONT.BIN, too: its names from `re/front_syms.tsv`). |
 | `ramdis.py RAM.bin ADDR COUNT` | Disassembles from a 2 MB RAM dump (overlays such as the front end). |
 | `calltree.py` | Call tree of a function. |
 | `carprims.py RAM.bin [car]` | A car's GPU packets in its ordering table, from a RAM dump. |

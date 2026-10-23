@@ -5,10 +5,11 @@ import bisect
 import re
 import sys; sys.path.insert(0, '.')
 import mips
-from recomp import func_end
+from recomp import func_end, e as image
 
 GP = 0x8013D83C
-e = mips.Exe('../gamedata/NFS4.EXE')
+# (the executable with the front end's overlay laid over its low region, as recompiled)
+e = image
 a = int(sys.argv[1], 16)
 
 funcs = {}
@@ -17,6 +18,12 @@ try:
     for line in open('../re/retail_syms.tsv'):
         r, n, _ = line.rstrip('\n').split('\t')
         funcs[int(r, 16)] = n.split('__')[0]
+    # the front end's overlay (FRONT.BIN at 0x80010000): Name__Class... as Class::Name
+    for line in open('../re/front_syms.tsv'):
+        r, n = line.rstrip('\n').split('\t')[:2]
+        name, _, cls = n.partition('__')
+        m = re.match(r'(\d+)', cls)
+        funcs.setdefault(int(r, 16), f'{cls[len(m[1]):len(m[1]) + int(m[1])]}::{name}' if m and not cls.startswith('F') else name)
     for line in open('../re/retail_globals.tsv', encoding='utf-8'):
         f = line.rstrip('\n').split('\t')
         glob[int(f[0], 16)] = f[1]

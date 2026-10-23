@@ -48,6 +48,7 @@ pub mod cars;
 pub mod collide;
 pub mod check;
 pub mod control;
+pub mod fecars;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
@@ -86,6 +87,52 @@ const fn func_ret(addr: u32, name: &'static str, run: fn(&mut Cpu)) -> Func {
 
 /// Every decompiled function the game is routed to, by address.
 pub static FUNCS: &[Func] = &[
+    func(0x8001_62d8, "tCarManager::Initialize", fecars::abi_initialize),
+    func_ret(0x8001_6374, "tCarManager::GetCarFromID", fecars::abi_get_car_from_id),
+    func_ret(0x8001_63e4, "tCarManager::GetCarFromSimID", fecars::abi_get_car_from_sim_id),
+    func_ret(0x8001_6434, "tCarManager::CheapestCarStockPrice", fecars::abi_cheapest_car_stock_price),
+    func_ret(0x8001_648c, "tCarManager::CalcUsedPrice", fecars::abi_calc_used_price),
+    func_ret(0x8001_6598, "tCarManager::PurchaseCar", fecars::abi_purchase_car),
+    func_ret(0x8001_6674, "tCarManager::SellCar", fecars::abi_sell_car),
+    func_ret(0x8001_67f4, "tCarManager::PurchaseUpgrade", fecars::abi_purchase_upgrade),
+    func(0x8001_6900, "tCarManager::RemoveFromPinkSlipsList", fecars::abi_remove_from_pink_slips_list),
+    func(0x8001_6a48, "tCarManager::AddToPinkSlipsList", fecars::abi_add_to_pink_slips_list),
+    func(0x8001_6ac4, "tCarManager::AddUpgradesToPinkSlipsList", fecars::abi_add_upgrades_to_pink_slips_list),
+    func(0x8001_6b9c, "tCarManager::LoadCars", fecars::abi_load_cars),
+    func(0x8001_6c38, "tCarManager::SaveCars", fecars::abi_save_cars),
+    func(0x8001_6cb0, "tCarManager::LoadPinkSlipsCars", fecars::abi_load_pink_slips_cars),
+    func(0x8001_6d54, "tCarManager::SavePinkSlipsCars", fecars::abi_save_pink_slips_cars),
+    func(0x8001_6eb0, "tCarManager::SetClassAvailable", fecars::abi_set_class_available),
+    func(0x8001_6f34, "tCarManager::SetCarAvailable", fecars::abi_set_car_available),
+    func(0x8001_6f50, "tCarManager::SetClassViewable", fecars::abi_set_class_viewable),
+    func(0x8001_6fbc, "tCarManager::SetCarViewable", fecars::abi_set_car_viewable),
+    func(0x8001_6fd8, "tCarManager::GetStockCar", fecars::abi_get_stock_car),
+    func(0x8001_7094, "tCarManager::GetGarageCar", fecars::abi_get_garage_car),
+    func(0x8001_71a0, "tCarManager::GetPinkSlipsCar", fecars::abi_get_pink_slips_car),
+    func(0x8001_727c, "tCarManager::LoadDescription", fecars::abi_load_description),
+    func(0x8001_743c, "tCarManager::ReleaseDescription", fecars::abi_release_description),
+    func_ret(0x8001_747c, "tCarManager::GetNumOwnedCars", fecars::abi_get_num_owned_cars),
+    func_ret(0x8001_74c0, "tCarManager::GetNumTourneyCars", fecars::abi_get_num_tourney_cars),
+    func_ret(0x8001_7568, "tCarManager::GetNumPinkSlipsCars", fecars::abi_get_num_pink_slips_cars),
+    func_ret(0x8001_75ac, "tCarManager::GetClassList", fecars::abi_get_class_list),
+    func(0x8001_76c0, "tCarManager::InitializeIngameCarList", fecars::abi_initialize_ingame_car_list),
+    func_ret(0x8001_7740, "tCarManager::IsCarAnAddedModel", fecars::abi_is_car_an_added_model),
+    func(0x8001_77c0, "tCarManager::AddCarToIngameList", fecars::abi_add_car_to_ingame_list),
+    func_ret(0x8001_7860, "tCarManager::FindSimilarCar", fecars::abi_find_similar_car),
+    func_ret(0x8001_7a14, "tListIteratorCar::tListIteratorCar", fecars::abi_list_iterator_car),
+    func(0x8001_7a70, "tListIteratorCar::~tListIteratorCar", fecars::abi_list_iterator_car_dtor),
+    func_ret(0x8001_7a98, "tListIteratorCar::Value", fecars::abi_list_iterator_car_value),
+    func_ret(0x8001_7ac4, "tListIteratorCar::TextValue", fecars::abi_list_iterator_car_text_value),
+    func(0x8001_7be4, "tListIteratorCar::AdjustPosition", fecars::abi_adjust_position),
+    func(0x8001_81d4, "tListIteratorCar::Increment", fecars::abi_list_iterator_car_increment),
+    func(0x8001_81f4, "tListIteratorCar::Decrement", fecars::abi_list_iterator_car_decrement),
+    func_ret(0x8001_8214, "tListIteratorCar::ValidCar", fecars::abi_valid_car),
+    func_ret(0x8001_85e0, "tListIteratorCarColor::tListIteratorCarColor", fecars::abi_list_iterator_car_color),
+    func(0x8001_8660, "tListIteratorCarColor::~tListIteratorCarColor", fecars::abi_list_iterator_car_color_dtor),
+    func_ret(0x8001_8688, "tListIteratorCarColor::Value", fecars::abi_list_iterator_car_color_value),
+    func_ret(0x8001_86e8, "tListIteratorCarColor::TextValue", fecars::abi_list_iterator_car_color_text_value),
+    func(0x8001_86f0, "tListIteratorCarColor::Increment", fecars::abi_list_iterator_car_color_increment),
+    func(0x8001_8788, "tListIteratorCarColor::Decrement", fecars::abi_list_iterator_car_color_decrement),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),
@@ -876,10 +923,21 @@ pub(crate) mod test_util {
 
     /// A race's RAM (`BOOT_RAM=1 nfshs boot-race ...` writes it), or None.
     pub fn race_ram() -> Option<Vec<u8>> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../re/boot/ram.bin");
+        boot_ram("ram.bin", "BOOT_RAM=1 nfshs boot-race")
+    }
+
+    /// The front end's RAM at the car select (`BOOT_RAM_FRAME=1850 nfshs boot-main` with the
+    /// front-end tour's script up to the race writes it: one player, test drive, a track and
+    /// cars browsed), or None.
+    pub fn fe_ram() -> Option<Vec<u8>> {
+        boot_ram("fe_ram.bin", "BOOT_RAM_FRAME=1850 nfshs boot-main")
+    }
+
+    fn boot_ram(file: &str, how: &str) -> Option<Vec<u8>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../re/boot").join(file);
         let ram = std::fs::read(&path).ok();
         if ram.is_none() {
-            eprintln!("{} not found (BOOT_RAM=1 nfshs boot-race): skipped", path.display());
+            eprintln!("{} not found ({how}): skipped", path.display());
         }
         ram
     }
@@ -926,12 +984,18 @@ pub(crate) mod test_util {
     /// must be the same. The port runs with the decompiled code routed, the original without.
     pub fn against_original(name: &str, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng), original: fn(&mut Cpu), args: &dyn Fn(&mut Cpu) -> Vec<u32>, port: fn(&mut Cpu, &[u32]) -> Option<u32>) {
         let Some(ram) = race_ram() else { return };
+        against_original_in(&ram, name, cases, seed, shuffle, original, args, port);
+    }
+
+    /// [`against_original`] on another RAM image (`fe_ram`'s).
+    #[allow(clippy::too_many_arguments)]
+    pub fn against_original_in(ram: &[u8], name: &str, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng), original: fn(&mut Cpu), args: &dyn Fn(&mut Cpu) -> Vec<u32>, port: fn(&mut Cpu, &[u32]) -> Option<u32>) {
         let mut rng = Rng(seed);
-        let mut c = cpu_with(&ram);
+        let mut c = cpu_with(ram);
         let plain = c.decomp;
         let (mut mismatches, mut busy) = (0, 0);
         for i in 0..cases {
-            c.m.ram.copy_from_slice(&ram);
+            c.m.ram.copy_from_slice(ram);
             shuffle(&mut c, &mut rng);
             let a = args(&mut c);
             let seed = rng.next() as u32;
@@ -971,12 +1035,18 @@ pub(crate) mod test_util {
     #[allow(clippy::too_many_arguments)]
     pub fn same_stack(name: &str, addr: u32, original: fn(&mut Cpu), ra: u32, top: u32, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng), args: &dyn Fn(&mut Cpu, &mut Rng) -> Vec<u32>) {
         let Some(ram) = race_ram() else { return };
+        same_stack_in(&ram, name, addr, original, ra, top, cases, seed, shuffle, args);
+    }
+
+    /// [`same_stack`] on another RAM image (`fe_ram`'s).
+    #[allow(clippy::too_many_arguments)]
+    pub fn same_stack_in(ram: &[u8], name: &str, addr: u32, original: fn(&mut Cpu), ra: u32, top: u32, cases: u32, seed: u64, shuffle: fn(&mut Cpu, &mut Rng), args: &dyn Fn(&mut Cpu, &mut Rng) -> Vec<u32>) {
         let mut rng = Rng(seed);
-        let mut c = cpu_with(&ram);
+        let mut c = cpu_with(ram);
         let plain = c.decomp;
         let mut mismatches = 0;
         for i in 0..cases {
-            c.m.ram.copy_from_slice(&ram);
+            c.m.ram.copy_from_slice(ram);
             shuffle(&mut c, &mut rng);
             let a = args(&mut c, &mut rng);
             let fill = rng.next() as u8;

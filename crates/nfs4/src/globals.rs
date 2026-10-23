@@ -381,3 +381,24 @@ pub const AIDATARECORD_BEST_LINE: U32 = U32(0x8013_D890);
 /// `AIDataRecord_WhichRecord`, `AIDataRecord_RecordMethod`.
 pub const AIDATARECORD_WHICH_RECORD: I32 = I32(0x8013_D898);
 pub const AIDATARECORD_RECORD_METHOD: I32 = I32(0x8013_D89C);
+
+// FECARS.CPP (the front end: FRONT.BIN, laid over the executable from 0x80010000)
+
+/// `carManager`: the cars (`tCarManager`: their descriptions from fecars.car, the garages and
+/// pink slips' cars, which are available and viewable).
+pub const CAR_MANAGER: crate::types::CarManager = crate::types::CarManager(0x8011_552C);
+/// `tournamentManager` (`tTournamentManager`), `trackManager` (`tTrackManager`).
+pub const TOURNAMENT_MANAGER: u32 = 0x8011_5D90;
+pub const TRACK_MANAGER: u32 = 0x8011_5D08;
+/// `gCarSelected` (`char[2][50]`): the models (and colours) in a race's line-up, a bit per
+/// colour in each bank of 8 colours.
+pub const CAR_SELECTED: u32 = 0x8005_1A2C;
+/// The front end's strings: "%s%s", "fecars.car", "Car List" (the descriptions' heap name).
+pub const FECARS_PATH_FORMAT: u32 = 0x8001_01AC;
+pub const FECARS_FILE: u32 = 0x8001_01B4;
+pub const FECARS_HEAP_NAME: u32 = 0x8001_01C0;
+/// The car names' first text ids by `tCarNameLength` (`short[3]`).
+pub const CAR_NAME_TEXT: u32 = 0x8001_0178;
+/// The vtables of `tListIteratorCar` and `tListIteratorCarColor`.
+pub const LIST_ITERATOR_CAR_VTABLE: u32 = 0x8001_0200;
+pub const LIST_ITERATOR_CAR_COLOR_VTABLE: u32 = 0x8001_01D0;
