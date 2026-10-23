@@ -49,6 +49,7 @@ pub mod collide;
 pub mod check;
 pub mod control;
 pub mod fecars;
+pub mod femenu;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
@@ -133,6 +134,78 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8001_86e8, "tListIteratorCarColor::TextValue", fecars::abi_list_iterator_car_color_text_value),
     func(0x8001_86f0, "tListIteratorCarColor::Increment", fecars::abi_list_iterator_car_color_increment),
     func(0x8001_8788, "tListIteratorCarColor::Decrement", fecars::abi_list_iterator_car_color_decrement),
+    func_ret(0x8002_3df0, "tListIterator::tListIterator", femenu::abi_list_iterator),
+    func(0x8002_3e14, "tListIterator::~tListIterator", femenu::abi_list_iterator_dtor),
+    func_ret(0x8002_3e48, "tListIterator::Value", femenu::abi_value),
+    func_ret(0x8002_3e5c, "tListIterator::TextValue", femenu::abi_text_value),
+    func(0x8002_3eac, "tListIterator::Increment", femenu::abi_increment),
+    func(0x8002_3ef8, "tListIterator::Decrement", femenu::abi_decrement),
+    func_ret(0x8002_3f80, "tListIteratorIndexed::tListIteratorIndexed", femenu::abi_indexed),
+    func(0x8002_3fc4, "tListIteratorIndexed::~tListIteratorIndexed", femenu::abi_indexed_dtor),
+    func_ret(0x8002_3fec, "tListIteratorIndexed::Value", femenu::abi_indexed_value),
+    func_ret(0x8002_4010, "tListIteratorIndexed::TextValue", femenu::abi_indexed_text_value),
+    func(0x8002_4060, "tListIteratorIndexed::Increment", femenu::abi_indexed_increment),
+    func(0x8002_40c8, "tListIteratorIndexed::Decrement", femenu::abi_indexed_decrement),
+    func(0x8002_4174, "tListIteratorDoubleIndexed::~tListIteratorDoubleIndexed", femenu::abi_double_indexed_dtor),
+    func_ret(0x8002_419c, "tListIteratorDoubleIndexed::Value", femenu::abi_double_indexed_value),
+    func_ret(0x8002_41d8, "tListIteratorDoubleIndexed::TextValue", femenu::abi_double_indexed_text_value),
+    func(0x8002_4228, "tListIteratorDoubleIndexed::Increment", femenu::abi_double_indexed_increment),
+    func(0x8002_42c4, "tListIteratorDoubleIndexed::Decrement", femenu::abi_double_indexed_decrement),
+    func(0x8002_43b0, "tListIteratorMultiPlayer::~tListIteratorMultiPlayer", femenu::abi_multi_player_dtor),
+    func_ret(0x8002_43d8, "tListIteratorMultiPlayer::Value", femenu::abi_multi_player_value),
+    func_ret(0x8002_4400, "tListIteratorMultiPlayer::TextValue", femenu::abi_multi_player_text_value),
+    func(0x8002_4450, "tListIteratorMultiPlayer::Increment", femenu::abi_multi_player_increment),
+    func(0x8002_44b4, "tListIteratorMultiPlayer::Decrement", femenu::abi_multi_player_decrement),
+    func_ret(0x8002_4554, "tListIteratorRange::tListIteratorRange", femenu::abi_range),
+    func(0x8002_45b0, "tListIteratorRange::~tListIteratorRange", femenu::abi_range_dtor),
+    func_ret(0x8002_45d8, "tListIteratorRange::Value", femenu::abi_range_value),
+    func_ret(0x8002_45ec, "tListIteratorRange::TextValue", femenu::abi_range_text_value),
+    func(0x8002_45f4, "tListIteratorRange::Increment", femenu::abi_range_increment),
+    func(0x8002_461c, "tListIteratorRange::Decrement", femenu::abi_range_decrement),
+    func_ret(0x8002_4644, "tListIteratorRangeIndexed::tListIteratorRangeIndexed", femenu::abi_range_indexed),
+    func(0x8002_4690, "tListIteratorRangeIndexed::~tListIteratorRangeIndexed", femenu::abi_range_indexed_dtor),
+    func_ret(0x8002_46b8, "tListIteratorRangeIndexed::Value", femenu::abi_range_indexed_value),
+    func(0x8002_46dc, "tListIteratorRangeIndexed::Increment", femenu::abi_range_indexed_increment),
+    func(0x8002_4718, "tListIteratorRangeIndexed::Decrement", femenu::abi_range_indexed_decrement),
+    func_ret(0x8002_4754, "tMenuItem::tMenuItem", femenu::abi_menu_item),
+    func(0x8002_4784, "tMenuItem::~tMenuItem", femenu::abi_menu_item_dtor),
+    func_ret(0x8002_47b8, "tMenuItem::DebounceKeys", femenu::abi_menu_item_debounce_keys),
+    func(0x8002_47c0, "tMenuItem::ProcessInput", femenu::abi_nothing),
+    func(0x8002_47c8, "tMenuItem::UpdateTransition", femenu::abi_menu_item_update_transition),
+    func_ret(0x8002_47e8, "tMenuItem::TransitionIsFinished", femenu::abi_finished),
+    func(0x8002_47f0, "tMenuItem::UpdateSelFade", femenu::abi_update_sel_fade),
+    func(0x8002_4848, "tMenuItem::Draw", femenu::abi_menu_item_draw_at),
+    func(0x8002_4884, "tMenuItem::Draw(int,int,int,bool)", femenu::abi_menu_item_draw_at3),
+    func_ret(0x8002_48c8, "tMenuItemInteractive::tMenuItemInteractive", femenu::abi_interactive),
+    func(0x8002_48fc, "tMenuItemInteractive::~tMenuItemInteractive", femenu::abi_interactive_dtor),
+    func_ret(0x8002_4924, "tMenuItemLeftRightChoice::tMenuItemLeftRightChoice", femenu::abi_left_right_choice),
+    func(0x8002_4974, "tMenuItemLeftRightChoice::~tMenuItemLeftRightChoice", femenu::abi_left_right_choice_dtor),
+    func(0x8002_499c, "tMenuItemLeftRightChoice::ProcessInput", femenu::abi_left_right_choice_process_input),
+    func(0x8002_4a4c, "tMenuItemLeftRightChoice::Draw", femenu::abi_left_right_choice_draw),
+    func_ret(0x8002_4b18, "tMenuItemLeftRightSlider::tMenuItemLeftRightSlider", femenu::abi_left_right_slider),
+    func(0x8002_4b74, "tMenuItemLeftRightSlider::~tMenuItemLeftRightSlider", femenu::abi_left_right_slider_dtor),
+    func_ret(0x8002_4b9c, "tMenuItemLeftRightSlider::DebounceKeys", femenu::abi_left_right_slider_debounce_keys),
+    func(0x8002_4ba4, "tMenuItemLeftRightSlider::ProcessInput", femenu::abi_left_right_slider_process_input),
+    func(0x8002_5204, "tMenuItemLeftRightSlider::Draw", femenu::abi_left_right_slider_draw),
+    func(0x8002_5330, "tMenuItemLeftRightSlider::SetDimensions", femenu::abi_set_dimensions),
+    func_ret(0x8002_5348, "tMenuItemGoToMenuButton::tMenuItemGoToMenuButton", femenu::abi_go_to_menu_button),
+    func(0x8002_539c, "tMenuItemGoToMenuButton::~tMenuItemGoToMenuButton", femenu::abi_go_to_menu_button_dtor),
+    func(0x8002_53c4, "tMenuItemGoToMenuButton::ProcessInput", femenu::abi_go_to_menu_button_process_input),
+    func(0x8002_5454, "tMenu::tMenuConstructor", femenu::abi_menu_constructor),
+    func_ret(0x8002_548c, "tMenu::tMenu", femenu::abi_menu),
+    func(0x8002_54d0, "tMenu::~tMenu", femenu::abi_menu_dtor),
+    func(0x8002_5504, "tMenu::Initialize", femenu::abi_initialize),
+    func(0x8002_5598, "tMenu::ProcessInput", femenu::abi_process_input),
+    func_ret(0x8002_58b4, "tMenu::GetNumberEnabledItems", femenu::abi_get_number_enabled_items),
+    func(0x8002_591c, "tMenu::Draw", femenu::abi_draw),
+    func(0x8002_59c8, "tMenu::UpdateTransition", femenu::abi_update_transition),
+    func(0x8002_5a5c, "tMenu::TransitionOff", femenu::abi_nothing),
+    func(0x8002_5a64, "tMenu::TransitionOn", femenu::abi_nothing),
+    func_ret(0x8002_5a6c, "tMenu::TransitionIsFinished", femenu::abi_finished),
+    func_ret(0x8002_5a74, "tMenu::IsSubMenu", femenu::abi_is_sub_menu),
+    func_ret(0x8002_5a7c, "tMenu::DebounceKeys", femenu::abi_debounce_keys),
+    func(0x8002_5ac8, "tMenuItem::TransitionOn", femenu::abi_nothing),
+    func(0x8002_5ad0, "tMenuItem::TransitionOff", femenu::abi_nothing),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),
@@ -996,15 +1069,19 @@ pub(crate) mod test_util {
         let (mut mismatches, mut busy) = (0, 0);
         for i in 0..cases {
             c.m.ram.copy_from_slice(ram);
+            // (the image has no scratchpad: each case from an empty one, not the last's)
+            c.m.scratch = [0; 0x400];
             shuffle(&mut c, &mut rng);
             let a = args(&mut c);
             let seed = rng.next() as u32;
-            let state = c.m.ram.clone();
+            // (the scratchpad too: the front end keeps its drawing's state there)
+            let (state, scratch) = (c.m.ram.clone(), c.m.scratch);
             c.rand_seed = seed;
             c.decomp = plain;
             let want_v = run(&mut c, original, &a);
             let (want, want_seed) = (c.m.ram.clone(), c.rand_seed);
             c.m.ram.copy_from_slice(&state);
+            c.m.scratch = scratch;
             c.rand_seed = seed;
             c.decomp = crate::decomp;
             let got_v = port(&mut c, &a);

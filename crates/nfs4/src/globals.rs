@@ -402,3 +402,10 @@ pub const CAR_NAME_TEXT: u32 = 0x8001_0178;
 /// The vtables of `tListIteratorCar` and `tListIteratorCarColor`.
 pub const LIST_ITERATOR_CAR_VTABLE: u32 = 0x8001_0200;
 pub const LIST_ITERATOR_CAR_COLOR_VTABLE: u32 = 0x8001_01D0;
+
+// FEMENU.CPP
+
+/// `FEApp`: the front end's application (`tFEApplication *`).
+pub const FE_APP: u32 = 0x8005_19A8;
+/// `gMenu_SubMenuPlayer` (`tPlayer`): the player a sub-menu is for (-1: all).
+pub const SUB_MENU_PLAYER: u32 = 0x8005_1C48;

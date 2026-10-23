@@ -109,8 +109,8 @@ impl Saved {
         if c.cont != 0 {
             c.run_cont();
         }
-        // the callee-saved registers, gp and sp as before
-        for k in (16..24).chain([28, 29, 30]) {
+        // the callee-saved registers, gp, sp and the return address as before
+        for k in (16..24).chain([28, 29, 30, 31]) {
             c.r[k] = r[k];
         }
         c.r[2]
@@ -124,6 +124,20 @@ impl Saved {
         let v = call_with(c, args, ra, &[], |c| c.call(addr));
         c.r = r;
         v
+    }
+
+    /// [`Saved::call_ptr`], the callee's scratch registers left as it leaves them (as
+    /// [`Saved::call_leaving`]): for the original's virtual calls, whose callees get the
+    /// registers the caller didn't set from the calls before.
+    pub fn call_ptr_leaving(&self, c: &mut Cpu, addr: u32, args: &[u32], ra: u32) -> u32 {
+        let r = c.r;
+        self.load(c);
+        set_args(c, args, ra);
+        c.call(addr);
+        for k in (16..24).chain([28, 29, 30, 31]) {
+            c.r[k] = r[k];
+        }
+        c.r[2]
     }
 
     /// Run the decompiled function `f` (the original at `addr`) as called from the call site
