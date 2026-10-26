@@ -49,6 +49,7 @@ pub mod collide;
 pub mod check;
 pub mod control;
 pub mod fecars;
+pub mod fedialog;
 pub mod femenu;
 pub mod femenuextended;
 pub mod femenuoptions;
@@ -91,6 +92,7 @@ const fn func_ret(addr: u32, name: &'static str, run: fn(&mut Cpu)) -> Func {
 
 /// Every decompiled function the game is routed to, by address.
 pub static FUNCS: &[Func] = &[
+    func(0x8001_5884, "tDialogMessageStringWithTimeout::~tDialogMessageStringWithTimeout", fedialog::abi_message_with_timeout_destructor),
     func(0x8001_62d8, "tCarManager::Initialize", fecars::abi_initialize),
     func_ret(0x8001_6374, "tCarManager::GetCarFromID", fecars::abi_get_car_from_id),
     func_ret(0x8001_63e4, "tCarManager::GetCarFromSimID", fecars::abi_get_car_from_sim_id),
@@ -137,6 +139,38 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8001_86e8, "tListIteratorCarColor::TextValue", fecars::abi_list_iterator_car_color_text_value),
     func(0x8001_86f0, "tListIteratorCarColor::Increment", fecars::abi_list_iterator_car_color_increment),
     func(0x8001_8788, "tListIteratorCarColor::Decrement", fecars::abi_list_iterator_car_color_decrement),
+    func_ret(0x8001_8808, "tDialogBase::ShouldTimeOut", fedialog::abi_should_time_out),
+    func(0x8001_8840, "tDialogBase::InitializeClass", fedialog::abi_initialize_class),
+    func(0x8001_8860, "tDialogBase::DrawAllDialogs", fedialog::abi_draw_all_dialogs),
+    func(0x8001_8930, "tDialogBase::HideAllDialogs", fedialog::abi_hide_all_dialogs),
+    func_ret(0x8001_8970, "tDialogBase::GetTopMostDialog", fedialog::abi_get_top_most_dialog),
+    func(0x8001_8980, "tDialogBase::Display", fedialog::abi_display),
+    func(0x8001_8a44, "tDialogBase::Hide", fedialog::abi_hide),
+    func(0x8001_8af8, "tDialogBase::Draw", fedialog::abi_draw),
+    func(0x8001_8c08, "tDialogBase::ProcessInput", fedialog::abi_process_input),
+    func(0x8001_8c4c, "tDialogHelp::AddItem", fedialog::abi_add_item),
+    func(0x8001_8cd0, "tDialogHelp::CalculateDimensions", fedialog::abi_calculate_dimensions_help),
+    func(0x8001_926c, "tDialogHelp::Draw", fedialog::abi_draw_help),
+    func(0x8001_9558, "tDialogMessageString::CalculateDimensions", fedialog::abi_calculate_dimensions_message),
+    func(0x8001_976c, "tDialogMessageString::Draw", fedialog::abi_draw_message),
+    func(0x8001_98d0, "tDialogBackUpOnly::ProcessInput", fedialog::abi_process_input_back_up_only),
+    func_ret(0x8001_9928, "tDialogInteractive::Run", fedialog::abi_run),
+    func(0x8001_9b14, "tDialogYesNo::CalculateDimensions", fedialog::abi_calculate_dimensions_yes_no),
+    func_ret(0x8001_9bcc, "tDialogYesNo::tDialogYesNo", fedialog::abi_yes_no),
+    func(0x8001_9c84, "tDialogYesNo::Draw", fedialog::abi_draw_yes_no),
+    func(0x8001_9e0c, "tDialogYesNo::ProcessInput", fedialog::abi_process_input_yes_no),
+    func(0x8001_9ed8, "tDialogYesNoMem::ProcessInput", fedialog::abi_process_input_yes_no_mem),
+    func(0x8001_9fbc, "tDialogYesNoTri::ProcessInput", fedialog::abi_process_input_yes_no_tri),
+    func(0x8001_9ffc, "tDialogNoInputMessage::ProcessInput", fedialog::abi_process_input_no_input),
+    func(0x8001_a004, "tDialogYesNoTri::~tDialogYesNoTri", fedialog::abi_yes_no_tri_destructor),
+    func(0x8001_a024, "tDialogYesNoMem::~tDialogYesNoMem", fedialog::abi_yes_no_mem_destructor),
+    func(0x8001_a044, "tDialogYesNo::~tDialogYesNo", fedialog::abi_yes_no_destructor),
+    func(0x8001_a064, "tDialogInteractive::~tDialogInteractive", fedialog::abi_interactive_destructor),
+    func(0x8001_a084, "tDialogNoInputMessage::~tDialogNoInputMessage", fedialog::abi_no_input_destructor),
+    func(0x8001_a0a4, "tDialogBackUpOnly::~tDialogBackUpOnly", fedialog::abi_back_up_only_destructor),
+    func(0x8001_a0c4, "tDialogMessageString::~tDialogMessageString", fedialog::abi_message_destructor),
+    func(0x8001_a0e4, "tDialogHelp::~tDialogHelp", fedialog::abi_help_destructor),
+    func(0x8001_a104, "tDialogBase::~tDialogBase", fedialog::abi_base_destructor),
     func(0x8001_a128, "MenuNFS4_SetHelpPos", femenuextended::abi_set_help_pos),
     func(0x8001_a158, "MenuNFS4_DrawTextBox", femenuextended::abi_draw_text_box),
     func_ret(0x8001_a60c, "tMenuItemGoToMenuNFS4Button::tMenuItemGoToMenuNFS4Button", femenuextended::abi_go_to_menu_nfs4_button),

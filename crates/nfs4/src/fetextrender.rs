@@ -507,6 +507,11 @@ pub fn abi_word_wrap_text_rgb(c: &mut Cpu) {
     c.r[2] = word_wrap_text_rgb(c, c.r[4], c.r[5], c.r[6]);
 }
 
+pub fn word_wrap_text_rgb_entry(c: &mut Cpu) {
+    abi::leave_prologue(c, 0x8002_1878, None, &[]);
+    abi_word_wrap_text_rgb(c);
+}
+
 /// `FETextRender_WordWrapTextFade` (FETEXTRENDER.CPP, 0x800218a0): `text` word-wrapped into
 /// `rect` in text type `ty`'s font, justification and colour in `state`, faded by `fade`.
 pub fn word_wrap_text_fade(c: &mut Cpu, fade: u32, text: u32, rect: u32, state: u32, ty: u32) -> u32 {
@@ -589,6 +594,11 @@ pub fn abi_word_wrap_height(c: &mut Cpu) {
     c.r[2] = word_wrap_height(c, c.r[4], c.r[5]);
 }
 
+pub fn word_wrap_height_entry(c: &mut Cpu) {
+    abi::leave_prologue(c, 0x8002_1a28, None, &[]);
+    abi_word_wrap_height(c);
+}
+
 /// `FETextRender_Title` (FETEXTRENDER.CPP, 0x80021a74): a menu's title, text `id` (copied into
 /// an 80-byte buffer) in lower case at the top left (lower in a two-player front end), on a
 /// translucent bar as long as it.
@@ -637,6 +647,11 @@ pub fn set_abr(c: &mut Cpu, abr: u32, on: u32) {
 
 pub fn abi_set_abr(c: &mut Cpu) {
     set_abr(c, c.r[4], c.r[5]);
+}
+
+pub fn set_abr_entry(c: &mut Cpu) {
+    abi::leave_prologue(c, 0x8002_1b48, None, &[]);
+    abi_set_abr(c);
 }
 
 #[cfg(test)]

@@ -776,6 +776,41 @@
 80025ac8 tMenuItem::TransitionOn
 80025ad0 tMenuItem::TransitionOff
 
+# FEDIALOG.CPP (the front end; with FEDIALOG.H's destructors)
+80015884 tDialogMessageStringWithTimeout::~tDialogMessageStringWithTimeout
+80018808 tDialogBase::ShouldTimeOut
+80018840 tDialogBase::InitializeClass
+80018860 tDialogBase::DrawAllDialogs
+80018930 tDialogBase::HideAllDialogs
+80018970 tDialogBase::GetTopMostDialog
+80018980 tDialogBase::Display
+80018a44 tDialogBase::Hide
+80018af8 tDialogBase::Draw
+80018c08 tDialogBase::ProcessInput
+80018c4c tDialogHelp::AddItem
+80018cd0 tDialogHelp::CalculateDimensions
+8001926c tDialogHelp::Draw
+80019558 tDialogMessageString::CalculateDimensions
+8001976c tDialogMessageString::Draw
+800198d0 tDialogBackUpOnly::ProcessInput
+80019928 tDialogInteractive::Run
+80019b14 tDialogYesNo::CalculateDimensions
+80019bcc tDialogYesNo::tDialogYesNo
+80019c84 tDialogYesNo::Draw
+80019e0c tDialogYesNo::ProcessInput
+80019ed8 tDialogYesNoMem::ProcessInput
+80019fbc tDialogYesNoTri::ProcessInput
+80019ffc tDialogNoInputMessage::ProcessInput
+8001a004 tDialogYesNoTri::~tDialogYesNoTri
+8001a024 tDialogYesNoMem::~tDialogYesNoMem
+8001a044 tDialogYesNo::~tDialogYesNo
+8001a064 tDialogInteractive::~tDialogInteractive
+8001a084 tDialogNoInputMessage::~tDialogNoInputMessage
+8001a0a4 tDialogBackUpOnly::~tDialogBackUpOnly
+8001a0c4 tDialogMessageString::~tDialogMessageString
+8001a0e4 tDialogHelp::~tDialogHelp
+8001a104 tDialogBase::~tDialogBase
+
 # FEMENUEXTENDED.CPP (the front end)
 8001a128 MenuNFS4_SetHelpPos
 8001a158 MenuNFS4_DrawTextBox
@@ -946,3 +981,4 @@
 80020dd8 tMenuItemDisplayLeftRightChoice::~tMenuItemDisplayLeftRightChoice
 80020df8 tMenuItemSlidingActivated::~tMenuItemSlidingActivated
 80020e18 tMenuItemLeftRightFade::~tMenuItemLeftRightFade
+
