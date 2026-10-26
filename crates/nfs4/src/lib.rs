@@ -49,6 +49,7 @@ pub mod collide;
 pub mod check;
 pub mod control;
 pub mod fecars;
+pub mod fecheats;
 pub mod fedialog;
 pub mod femenu;
 pub mod femenuextended;
@@ -353,6 +354,16 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_1f74, "tListIteratorTrack::Increment", fetracks::abi_list_iterator_track_increment),
     func(0x8002_2020, "tListIteratorTrack::Decrement", fetracks::abi_list_iterator_track_decrement),
     func_ret(0x8002_20b0, "tListIteratorTrack::ValidTrack", fetracks::abi_valid_track),
+    func(0x8002_33a0, "FECheat_HandleActivation", fecheats::abi_handle_activation),
+    func(0x8002_3430, "FECheat_EncodeString", fecheats::abi_encode_string),
+    func(0x8002_34bc, "FECheat_EncodeString2", fecheats::abi_encode_string2),
+    func(0x8002_35f8, "FECheat_ActivateBonus", fecheats::abi_activate_bonus),
+    func_ret(0x8002_3634, "FECheat_ActivateCheat", fecheats::abi_activate_cheat),
+    func_ret(0x8002_373c, "FECheat_IsCheatEnabled", fecheats::abi_is_cheat_enabled),
+    func(0x8002_3768, "FECheat_SaveBonus", fecheats::abi_save_bonus),
+    func(0x8002_3778, "FECheat_LoadBonus", fecheats::abi_load_bonus),
+    func_ret(0x8002_37f0, "FECheat_IsTheUserACryBabyCheater", fecheats::abi_is_the_user_a_cry_baby_cheater),
+    func_ret(0x8002_3800, "FECheat_ActivateBonusByCode", fecheats::abi_activate_bonus_by_code),
     func_ret(0x8002_3df0, "tListIterator::tListIterator", femenu::abi_list_iterator),
     func(0x8002_3e14, "tListIterator::~tListIterator", femenu::abi_list_iterator_dtor),
     func_ret(0x8002_3e48, "tListIterator::Value", femenu::abi_value),

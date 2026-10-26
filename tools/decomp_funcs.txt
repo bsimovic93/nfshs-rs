@@ -1027,3 +1027,15 @@
 80021f74 tListIteratorTrack::Increment
 80022020 tListIteratorTrack::Decrement
 800220b0 tListIteratorTrack::ValidTrack
+
+# FECHEATS.CPP (the front end)
+800233a0 FECheat_HandleActivation
+80023430 FECheat_EncodeString
+800234bc FECheat_EncodeString2
+800235f8 FECheat_ActivateBonus
+80023634 FECheat_ActivateCheat
+8002373c FECheat_IsCheatEnabled
+80023768 FECheat_SaveBonus
+80023778 FECheat_LoadBonus
+800237f0 FECheat_IsTheUserACryBabyCheater
+80023800 FECheat_ActivateBonusByCode
