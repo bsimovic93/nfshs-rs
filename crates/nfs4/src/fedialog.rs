@@ -1040,7 +1040,8 @@ mod tests {
     const YES_NO_MEM_VT: u32 = 0x8001_0308;
     const YES_NO_TRI_VT: u32 = 0x8001_02A8;
     const VTS: [u32; 8] = [HELP_VT, MESSAGE_VT, BACK_UP_ONLY_VT, NO_INPUT_VT, INTERACTIVE_VT, YES_NO_VT, YES_NO_MEM_VT, YES_NO_TRI_VT];
-    const STRINGS: u32 = 0x8014_E000;
+    /// (in the RAM the image leaves free: the CD's reads are at 0x8014e268)
+    const STRINGS: u32 = 0x8014_7000;
     /// The pads' library state (`Padglobal`, 34 bytes a pad); the memory cards' (the one in
     /// use's first word -1 when it is out; `MCRD_getcard`'s).
     const PAD_GLOBAL: u32 = 0x8013_FBF8;
