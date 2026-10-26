@@ -51,6 +51,7 @@ pub mod control;
 pub mod fecars;
 pub mod femenu;
 pub mod femenuextended;
+pub mod fetextrender;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
@@ -192,6 +193,23 @@ pub static FUNCS: &[Func] = &[
     func(0x8001_c060, "tMenuItemOptionsTwoItemChoice::~tMenuItemOptionsTwoItemChoice", femenuextended::abi_two_item_choice_dtor),
     func(0x8001_c080, "tMenuItemOptionsLeftRightChoice::~tMenuItemOptionsLeftRightChoice", femenuextended::abi_options_left_right_choice_dtor),
     func(0x8001_c0a0, "tMenuItemGoToMenuNFS4Button::Draw(bool)", femenuextended::abi_nothing),
+    func(0x8002_0e38, "FETextRender_SetFont", fetextrender::abi_set_font),
+    func(0x8002_0eac, "FETextRender_FullTextRGB", fetextrender::abi_full_text_rgb),
+    func(0x8002_1020, "FETextRender_FullText", fetextrender::abi_full_text),
+    func(0x8002_10a4, "FETextRender_FullTextFade", fetextrender::abi_full_text_fade),
+    func(0x8002_1174, "FETextRender_MenuTextPositioned", fetextrender::abi_menu_text_positioned),
+    func(0x8002_1214, "FETextRender_MenuTextFade", fetextrender::abi_menu_text_fade),
+    func(0x8002_12e0, "FETextRender_MenuTextPositionedJustify", fetextrender::abi_menu_text_positioned_justify),
+    func(0x8002_1334, "FETextRender_MenuTextPositionedJustifyFade", fetextrender::abi_menu_text_positioned_justify_fade),
+    func_ret(0x8002_1404, "FETextRender_WordWrapTextRGBJustify", fetextrender::abi_word_wrap_text_rgb_justify),
+    func_ret(0x8002_1878, "FETextRender_WordWrapTextRGB", fetextrender::abi_word_wrap_text_rgb),
+    func_ret(0x8002_18a0, "FETextRender_WordWrapTextFade", fetextrender::abi_word_wrap_text_fade),
+    func_ret(0x8002_1948, "FETextRender_WordWrapText", fetextrender::abi_word_wrap_text),
+    func_ret(0x8002_1984, "FETextRender_WordWrapFade", fetextrender::abi_word_wrap_fade),
+    func_ret(0x8002_19ec, "FETextRender_WordWrap", fetextrender::abi_word_wrap),
+    func_ret(0x8002_1a28, "FETextRender_WordWrapHeight", fetextrender::abi_word_wrap_height),
+    func(0x8002_1a74, "FETextRender_Title", fetextrender::abi_title),
+    func(0x8002_1b48, "FETextRender_SetABR", fetextrender::abi_set_abr),
     func_ret(0x8002_3df0, "tListIterator::tListIterator", femenu::abi_list_iterator),
     func(0x8002_3e14, "tListIterator::~tListIterator", femenu::abi_list_iterator_dtor),
     func_ret(0x8002_3e48, "tListIterator::Value", femenu::abi_value),
@@ -1089,9 +1107,11 @@ pub(crate) mod test_util {
     /// from 0x800e0000 on, `src/ps1/host/system.rs`), and the race RAM's pointers into them
     /// are unset here; so is the pause menu's vtable when its race isn't paused. Such calls
     /// return 0 (`PadGetState` a stable pad, 6), for the original and the port alike; code
-    /// that isn't recompiled below that (jumps into functions) is interpreted as usual.
+    /// that isn't recompiled below that (jumps into functions) is interpreted as usual, and so
+    /// is the font's character reader (0x80107358, `currentfont`'s: reached only through its
+    /// pointer, never recompiled; stubbed, every text would measure 0 pixels).
     fn no_host(c: &mut Cpu, addr: u32) -> bool {
-        if addr != 0 && addr < 0x800E_0000 {
+        if addr != 0 && (addr < 0x800E_0000 || addr == 0x8010_7358) {
             return false;
         }
         if addr != 0 && (c.dispatch)(c, addr) {

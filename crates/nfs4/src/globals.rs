@@ -422,3 +422,16 @@ pub const SCREEN_WIDTH: u32 = 0x8013_EF68;
 pub const HELP_POS: u32 = 0x8005_2FE8;
 /// `gCurrentShapes` (`tTexture_ShapeInfo *`, 32 bytes each: +16 the width, +18 the height).
 pub const SHAPES: u32 = 0x8005_2EF4;
+
+// FETEXTRENDER.CPP
+
+/// `gTextStyles`: each text type's style (6 bytes: the font, the justification, then from +3
+/// an index into [`TEXT_COLORS`] for each state).
+pub const TEXT_STYLES: u32 = 0x8005_1AA0;
+/// The text colours (RGB words) the styles pick.
+pub const TEXT_COLORS: u32 = 0x8005_1B50;
+/// Whether the text is blended (`FETextRender_SetABR`'s flag: the text colour 15, not 1).
+pub const TEXT_ABR: u32 = 0x8005_1AF4;
+/// The fonts (font 0's, the others', font 3's) and the current font (a short).
+pub const FONTS: u32 = 0x8005_1C5C;
+pub const CURRENT_FONT: u32 = 0x8005_1C68;

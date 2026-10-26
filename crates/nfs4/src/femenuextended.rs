@@ -9,6 +9,7 @@
 //! registers each call gets as the original has them at its `jal` or `jalr`.
 
 use crate::abi::{self, Saved};
+use crate::fetextrender;
 use crate::femenu::{self, ITEM_DISABLED, ITEM_VPTR, ITERATOR_VPTR, KEY_NONE, PLAY_FE_SFX, TEXT_VALUE, TITLE, VALUE, method};
 use crate::globals::{FE_APP, FLIP, GAME_TICKS, HELP_POS, PLAYER1_VIEW, SCREEN_WIDTH, SHAPES};
 use ps1rt::{Cpu, Mem};
@@ -44,14 +45,14 @@ const GET_DRAWENV: fn(&mut Cpu) = nfs4rc::f_800beb84;
 const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bcd8;
 const CALC_TEXT_FADE_SEL_TO_HI: fn(&mut Cpu) = nfs4rc::f_8004be30;
 const CALC_ON_OFF_FADE: fn(&mut Cpu) = nfs4rc::f_8004beb4;
-const SET_FONT: fn(&mut Cpu) = nfs4rc::f_80020e38;
+const SET_FONT: fn(&mut Cpu) = fetextrender::set_font_entry;
 const TEXT_WORD: fn(&mut Cpu) = nfs4rc::f_800b9f18;
 const SPRINTF: fn(&mut Cpu) = nfs4rc::f_800e50a8;
 const S_UPPER: fn(&mut Cpu) = nfs4rc::f_80026910;
 const TEXT_PIXELS: fn(&mut Cpu) = nfs4rc::f_800e4a2c;
 const STRLEN: fn(&mut Cpu) = nfs4rc::f_800ea8d0;
-const FULL_TEXT_RGB: fn(&mut Cpu) = nfs4rc::f_80020eac;
-const MENU_TEXT_POSITIONED_JUSTIFY: fn(&mut Cpu) = nfs4rc::f_800212e0;
+const FULL_TEXT_RGB: fn(&mut Cpu) = fetextrender::full_text_rgb_entry;
+const MENU_TEXT_POSITIONED_JUSTIFY: fn(&mut Cpu) = fetextrender::menu_text_positioned_justify_entry;
 const DRAW_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004eb60;
 const ROUND_RECTANGLE: fn(&mut Cpu) = nfs4rc::f_8004c490;
 const SET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc52c;

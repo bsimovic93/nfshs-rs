@@ -72,8 +72,8 @@ const PLAY_FE_SFX_VOL: u32 = 0x8007_A0AC;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 /// `FETextRender_MenuTextPositioned` (FETEXTRENDER.CPP), `FETextRender_Title`.
-const MENU_TEXT_POSITIONED: fn(&mut Cpu) = nfs4rc::f_80021174;
-pub(crate) const TITLE: fn(&mut Cpu) = nfs4rc::f_80021a74;
+const MENU_TEXT_POSITIONED: fn(&mut Cpu) = crate::fetextrender::menu_text_positioned_entry;
+pub(crate) const TITLE: fn(&mut Cpu) = crate::fetextrender::title_entry;
 /// `tFEApplication::DisplayHelp` (FEAPP.CPP).
 const DISPLAY_HELP: fn(&mut Cpu) = nfs4rc::f_80014048;
 /// `DrawSlider` (the host captures its primitives: called by address).

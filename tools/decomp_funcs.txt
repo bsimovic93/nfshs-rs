@@ -834,3 +834,22 @@
 8001c060 tMenuItemOptionsTwoItemChoice::~tMenuItemOptionsTwoItemChoice
 8001c080 tMenuItemOptionsLeftRightChoice::~tMenuItemOptionsLeftRightChoice
 8001c0a0 tMenuItemGoToMenuNFS4Button::Draw(bool)
+
+# FETEXTRENDER.CPP (the front end)
+80020e38 FETextRender_SetFont
+80020eac FETextRender_FullTextRGB
+80021020 FETextRender_FullText
+800210a4 FETextRender_FullTextFade
+80021174 FETextRender_MenuTextPositioned
+80021214 FETextRender_MenuTextFade
+800212e0 FETextRender_MenuTextPositionedJustify
+80021334 FETextRender_MenuTextPositionedJustifyFade
+80021404 FETextRender_WordWrapTextRGBJustify
+80021878 FETextRender_WordWrapTextRGB
+800218a0 FETextRender_WordWrapTextFade
+80021948 FETextRender_WordWrapText
+80021984 FETextRender_WordWrapFade
+800219ec FETextRender_WordWrap
+80021a28 FETextRender_WordWrapHeight
+80021a74 FETextRender_Title
+80021b48 FETextRender_SetABR
