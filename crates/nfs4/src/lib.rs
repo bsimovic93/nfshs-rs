@@ -55,6 +55,7 @@ pub mod femenuextended;
 pub mod femenuoptions;
 pub mod fescreen;
 pub mod fetextrender;
+pub mod fetracks;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
@@ -337,6 +338,21 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8002_1a28, "FETextRender_WordWrapHeight", fetextrender::abi_word_wrap_height),
     func(0x8002_1a74, "FETextRender_Title", fetextrender::abi_title),
     func(0x8002_1b48, "FETextRender_SetABR", fetextrender::abi_set_abr),
+    func(0x8002_1b70, "tTrackManager::Initialize", fetracks::abi_initialize),
+    func(0x8002_1bb0, "tTrackManager::LoadTracks", fetracks::abi_load_tracks),
+    func(0x8002_1bdc, "tTrackManager::SaveTracks", fetracks::abi_save_tracks),
+    func(0x8002_1c04, "tTrackManager::GetTrack", fetracks::abi_get_track),
+    func(0x8002_1c74, "tTrackManager::LoadDescription", fetracks::abi_load_description),
+    func(0x8002_1dac, "tTrackManager::ReleaseDescription", fetracks::abi_release_description),
+    func(0x8002_1dec, "tTrackManager::SetTrackAvailable", fetracks::abi_set_track_available),
+    func(0x8002_1e00, "tTrackManager::SetClassAvailable", fetracks::abi_set_class_available),
+    func_ret(0x8002_1e60, "tTrackManager::GetTrackByID", fetracks::abi_get_track_by_id),
+    func_ret(0x8002_1eb4, "tListIteratorTrack::tListIteratorTrack", fetracks::abi_list_iterator_track),
+    func(0x8002_1f0c, "tListIteratorTrack::~tListIteratorTrack", fetracks::abi_list_iterator_track_dtor),
+    func_ret(0x8002_1f34, "tListIteratorTrack::TextValue", fetracks::abi_list_iterator_track_text_value),
+    func(0x8002_1f74, "tListIteratorTrack::Increment", fetracks::abi_list_iterator_track_increment),
+    func(0x8002_2020, "tListIteratorTrack::Decrement", fetracks::abi_list_iterator_track_decrement),
+    func_ret(0x8002_20b0, "tListIteratorTrack::ValidTrack", fetracks::abi_valid_track),
     func_ret(0x8002_3df0, "tListIterator::tListIterator", femenu::abi_list_iterator),
     func(0x8002_3e14, "tListIterator::~tListIterator", femenu::abi_list_iterator_dtor),
     func_ret(0x8002_3e48, "tListIterator::Value", femenu::abi_value),

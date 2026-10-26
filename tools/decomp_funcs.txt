@@ -1010,3 +1010,20 @@
 800268f8 tScreen::ProcessInput
 80026900 tScreen::DrawForeground
 80026908 tScreen::DrawBackground
+
+# FETRACKS.CPP (the front end)
+80021b70 tTrackManager::Initialize
+80021bb0 tTrackManager::LoadTracks
+80021bdc tTrackManager::SaveTracks
+80021c04 tTrackManager::GetTrack
+80021c74 tTrackManager::LoadDescription
+80021dac tTrackManager::ReleaseDescription
+80021dec tTrackManager::SetTrackAvailable
+80021e00 tTrackManager::SetClassAvailable
+80021e60 tTrackManager::GetTrackByID
+80021eb4 tListIteratorTrack::tListIteratorTrack
+80021f0c tListIteratorTrack::~tListIteratorTrack
+80021f34 tListIteratorTrack::TextValue
+80021f74 tListIteratorTrack::Increment
+80022020 tListIteratorTrack::Decrement
+800220b0 tListIteratorTrack::ValidTrack
