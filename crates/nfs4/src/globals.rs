@@ -435,3 +435,20 @@ pub const TEXT_ABR: u32 = 0x8005_1AF4;
 /// The fonts (font 0's, the others', font 3's) and the current font (a short).
 pub const FONTS: u32 = 0x8005_1C5C;
 pub const CURRENT_FONT: u32 = 0x8005_1C68;
+
+// FEMENUOPTIONS.CPP
+
+/// `gPulsateYellow`: the options screens' pulsing yellow (`CalcPulsateYellow`'s).
+pub const PULSATE_YELLOW: u32 = 0x8005_1A94;
+/// The flare's phase left of a sliding box's text; the help text a box's items show (-1:
+/// none).
+pub const SLIDING_FLARE_PHASE: u32 = 0x8005_1A90;
+pub const BOX_HELP_TEXT: u32 = 0x8005_1A98;
+/// The screen whose object (+10072) is the songs' menu a sliding box can hold.
+pub const SONGS_SCREEN: u32 = 0x8005_1EE0;
+/// The music's state (+120 the song list's memory).
+pub const MUSIC_STATE: u32 = 0x8005_2D78;
+/// `screenheight`.
+pub const SCREEN_HEIGHT: u32 = 0x8013_EF6C;
+/// `gPadinfo`: each pad's state (32 bytes: +5 its kind, +8.. the sticks).
+pub const PAD_INFO: u32 = 0x8013_FBA4;

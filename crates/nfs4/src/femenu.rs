@@ -34,32 +34,32 @@ pub(crate) const ITEM_VPTR: u32 = 24;
 /// `Increment`, `Decrement`.
 pub(crate) const VALUE: u32 = 16;
 pub(crate) const TEXT_VALUE: u32 = 24;
-const INCREMENT: u32 = 32;
-const DECREMENT: u32 = 40;
+pub(crate) const INCREMENT: u32 = 32;
+pub(crate) const DECREMENT: u32 = 40;
 /// The menu items': `DebounceKeys`, `ProcessInput`, `Draw(bool)`, `Draw` at a place,
 /// `UpdateTransition`.
-const DEBOUNCE_KEYS: u32 = 16;
-const PROCESS_INPUT: u32 = 24;
+pub(crate) const DEBOUNCE_KEYS: u32 = 16;
+pub(crate) const PROCESS_INPUT: u32 = 24;
 pub(crate) const DRAW: u32 = 32;
-const DRAW_AT: u32 = 48;
-const UPDATE_TRANSITION: u32 = 80;
+pub(crate) const DRAW_AT: u32 = 48;
+pub(crate) const UPDATE_TRANSITION: u32 = 80;
 
 /// The input keys a menu reacts to (`tInputKeyType`).
 pub(crate) const KEY_NONE: u32 = 1;
-const KEY_ACCEPT: u32 = 2;
-const KEY_HELP: u32 = 4;
-const KEY_OPTIONS: u32 = 8;
-const KEY_START: u32 = 16;
-const KEY_UP: u32 = 512;
-const KEY_DOWN: u32 = 1024;
-const KEY_LEFT: u32 = 2048;
-const KEY_RIGHT: u32 = 4096;
-const KEY_BACK: u32 = 8192;
+pub(crate) const KEY_ACCEPT: u32 = 2;
+pub(crate) const KEY_HELP: u32 = 4;
+pub(crate) const KEY_OPTIONS: u32 = 8;
+pub(crate) const KEY_START: u32 = 16;
+pub(crate) const KEY_UP: u32 = 512;
+pub(crate) const KEY_DOWN: u32 = 1024;
+pub(crate) const KEY_LEFT: u32 = 2048;
+pub(crate) const KEY_RIGHT: u32 = 4096;
+pub(crate) const KEY_BACK: u32 = 8192;
 /// A menu command's types (`tMenuCommandType`): go to a menu, the start, back, back out.
-const COMMAND_GO_TO: u32 = 1;
-const COMMAND_START: u32 = 4;
-const COMMAND_BACK: u32 = 5;
-const COMMAND_EXIT: u32 = 6;
+pub(crate) const COMMAND_GO_TO: u32 = 1;
+pub(crate) const COMMAND_START: u32 = 4;
+pub(crate) const COMMAND_BACK: u32 = 5;
+pub(crate) const COMMAND_EXIT: u32 = 6;
 /// A menu item is disabled (flag bit 0).
 pub(crate) const ITEM_DISABLED: u32 = 1;
 

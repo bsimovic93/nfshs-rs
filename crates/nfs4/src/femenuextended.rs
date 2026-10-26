@@ -25,52 +25,52 @@ const MENU_OPTIONS_VT: u32 = 0x8001_0618;
 
 /// A menu's vtable pointer, and its virtual functions used here: `TransitionIsFinished`,
 /// `DrawItem(int)`.
-const MENU_VPTR: u32 = 104;
-const MENU_TRANSITION_IS_FINISHED: u32 = 56;
+pub(crate) const MENU_VPTR: u32 = 104;
+pub(crate) const MENU_TRANSITION_IS_FINISHED: u32 = 56;
 const MENU_DRAW_ITEM: u32 = 88;
 /// The items' virtual functions used here: `Draw(int, int, bool)`, `TransitionOff`,
 /// `TransitionOn`, `TransitionIsFinished`, `UpdateTransition`.
-const ITEM_DRAW_AT: u32 = 40;
-const ITEM_TRANSITION_OFF: u32 = 56;
-const ITEM_TRANSITION_ON: u32 = 64;
-const ITEM_TRANSITION_IS_FINISHED: u32 = 72;
-const ITEM_UPDATE_TRANSITION: u32 = 80;
+pub(crate) const ITEM_DRAW_AT: u32 = 40;
+pub(crate) const ITEM_TRANSITION_OFF: u32 = 56;
+pub(crate) const ITEM_TRANSITION_ON: u32 = 64;
+pub(crate) const ITEM_TRANSITION_IS_FINISHED: u32 = 72;
+pub(crate) const ITEM_UPDATE_TRANSITION: u32 = 80;
 
 /// The drawing library: `Draw_GetDRAWENV`, `CalcFadeVal`, `CalcTextFadeSelToHi`,
 /// `CalcOnOffFade`, `FETextRender_SetFont`, `TextSys_Word`, `sprintf`, `s_upper`,
 /// `textpixels`, `strlen`, `FETextRender_FullTextRGB`, `FETextRender_MenuTextPositionedJustify`,
 /// `DrawShapeExtended`, `DrawShape_NFS4RoundRectangle`, `Font_SetBlitter`,
 /// `Font_ReSetBlitter`, `FeDraw_SetABRMode`.
-const GET_DRAWENV: fn(&mut Cpu) = nfs4rc::f_800beb84;
+pub(crate) const GET_DRAWENV: fn(&mut Cpu) = nfs4rc::f_800beb84;
 const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bcd8;
-const CALC_TEXT_FADE_SEL_TO_HI: fn(&mut Cpu) = nfs4rc::f_8004be30;
-const CALC_ON_OFF_FADE: fn(&mut Cpu) = nfs4rc::f_8004beb4;
+pub(crate) const CALC_TEXT_FADE_SEL_TO_HI: fn(&mut Cpu) = nfs4rc::f_8004be30;
+pub(crate) const CALC_ON_OFF_FADE: fn(&mut Cpu) = nfs4rc::f_8004beb4;
 const SET_FONT: fn(&mut Cpu) = fetextrender::set_font_entry;
-const TEXT_WORD: fn(&mut Cpu) = nfs4rc::f_800b9f18;
-const SPRINTF: fn(&mut Cpu) = nfs4rc::f_800e50a8;
-const S_UPPER: fn(&mut Cpu) = nfs4rc::f_80026910;
-const TEXT_PIXELS: fn(&mut Cpu) = nfs4rc::f_800e4a2c;
-const STRLEN: fn(&mut Cpu) = nfs4rc::f_800ea8d0;
+pub(crate) const TEXT_WORD: fn(&mut Cpu) = nfs4rc::f_800b9f18;
+pub(crate) const SPRINTF: fn(&mut Cpu) = nfs4rc::f_800e50a8;
+pub(crate) const S_UPPER: fn(&mut Cpu) = nfs4rc::f_80026910;
+pub(crate) const TEXT_PIXELS: fn(&mut Cpu) = nfs4rc::f_800e4a2c;
+pub(crate) const STRLEN: fn(&mut Cpu) = nfs4rc::f_800ea8d0;
 const FULL_TEXT_RGB: fn(&mut Cpu) = fetextrender::full_text_rgb_entry;
 const MENU_TEXT_POSITIONED_JUSTIFY: fn(&mut Cpu) = fetextrender::menu_text_positioned_justify_entry;
-const DRAW_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004eb60;
-const ROUND_RECTANGLE: fn(&mut Cpu) = nfs4rc::f_8004c490;
-const SET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc52c;
-const RESET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc538;
-const SET_ABR_MODE: fn(&mut Cpu) = nfs4rc::f_8004dbc0;
+pub(crate) const DRAW_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004eb60;
+pub(crate) const ROUND_RECTANGLE: fn(&mut Cpu) = nfs4rc::f_8004c490;
+pub(crate) const SET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc52c;
+pub(crate) const RESET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc538;
+pub(crate) const SET_ABR_MODE: fn(&mut Cpu) = nfs4rc::f_8004dbc0;
 /// Called by address (the host watches or replaces them): `DrawShape_SubtractNFS4RectEdges`,
 /// `SetDrawArea`, `PSXDrawSquare`, `PSXDrawTransSquare`.
 const SUBTRACT_RECT_EDGES: u32 = 0x8004_C2E0;
-const SET_DRAW_AREA: u32 = 0x800E_EC70;
-const DRAW_SQUARE: u32 = 0x8004_F12C;
-const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
+pub(crate) const SET_DRAW_AREA: u32 = 0x800E_EC70;
+pub(crate) const DRAW_SQUARE: u32 = 0x8004_F12C;
+pub(crate) const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 /// The mirrored blitter `Font_SetBlitter` takes for the reflections.
 const MIRROR_BLITTER: u32 = 0x8004_F49C;
 /// "%s".
 const TEXT_FORMAT: u32 = 0x8001_0614;
 /// The scratchpad's drawing state: the ordering table's entry, the next primitive.
-const OT: u32 = 0x1F80_0000;
-const NEXT_PRIM: u32 = 0x1F80_0004;
+pub(crate) const OT: u32 = 0x1F80_0000;
+pub(crate) const NEXT_PRIM: u32 = 0x1F80_0004;
 
 /// The short in a register's low half, sign-extended.
 fn sx(v: u32) -> u32 {
@@ -87,7 +87,7 @@ fn lhu(m: &mut Mem, at: u32) -> u32 {
 
 /// A 12-byte primitive (a draw area's) taken from the scratchpad's buffer and linked into the
 /// ordering table.
-fn add_prim(m: &mut Mem) -> u32 {
+pub(crate) fn add_prim(m: &mut Mem) -> u32 {
     let prim = m.r32(NEXT_PRIM);
     let ot = m.r32(OT);
     let v = (m.r32(prim) & 0xFF00_0000) | (m.r32(ot) & 0x00FF_FFFF);
@@ -304,7 +304,7 @@ pub fn abi_go_to_menu_nfs4_button(c: &mut Cpu) {
 
 /// A destructor: the vtable set back to the class's (when there's one), then the base's
 /// (`base` at `base_addr`), given the caller's flags; `ra` its return.
-fn destroy(c: &mut Cpu, this: u32, vptr_vt: Option<(u32, u32)>, base_addr: u32, ra: u32, base: fn(&mut Cpu)) {
+pub(crate) fn destroy(c: &mut Cpu, this: u32, vptr_vt: Option<(u32, u32)>, base_addr: u32, ra: u32, base: fn(&mut Cpu)) {
     abi::frame(c, 24, |c, _| {
         if let Some((vptr, vt)) = vptr_vt {
             c.m.w32(this + vptr, vt);
