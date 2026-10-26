@@ -409,3 +409,16 @@ pub const LIST_ITERATOR_CAR_COLOR_VTABLE: u32 = 0x8001_01D0;
 pub const FE_APP: u32 = 0x8005_19A8;
 /// `gMenu_SubMenuPlayer` (`tPlayer`): the player a sub-menu is for (-1: all).
 pub const SUB_MENU_PLAYER: u32 = 0x8005_1C48;
+
+// FEMENUEXTENDED.CPP
+
+/// `Draw_gPlayer1View`, `gFlip`: the first player's view and the buffer drawn into.
+pub const PLAYER1_VIEW: u32 = 0x8013_E6B0;
+pub const FLIP: u32 = 0x8013_EA9C;
+/// `ticks`: the game's clock (60 Hz); `screenwidth`.
+pub const GAME_TICKS: u32 = 0x8013_EF8C;
+pub const SCREEN_WIDTH: u32 = 0x8013_EF68;
+/// `gHelpPos` (`RECT`): where the help box goes.
+pub const HELP_POS: u32 = 0x8005_2FE8;
+/// `gCurrentShapes` (`tTexture_ShapeInfo *`, 32 bytes each: +16 the width, +18 the height).
+pub const SHAPES: u32 = 0x8005_2EF4;

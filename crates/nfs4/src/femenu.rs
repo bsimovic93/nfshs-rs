@@ -28,24 +28,24 @@ const GO_TO_MENU_BUTTON_VT: u32 = 0x8001_10C8;
 const MENU_VT: u32 = 0x8001_1070;
 
 /// Where an iterator's, an item's and a menu's vtable pointer is.
-const ITERATOR_VPTR: u32 = 12;
-const ITEM_VPTR: u32 = 24;
+pub(crate) const ITERATOR_VPTR: u32 = 12;
+pub(crate) const ITEM_VPTR: u32 = 24;
 /// The iterators' virtual functions (their vtable entries' offsets): `Value`, `TextValue`,
 /// `Increment`, `Decrement`.
-const VALUE: u32 = 16;
-const TEXT_VALUE: u32 = 24;
+pub(crate) const VALUE: u32 = 16;
+pub(crate) const TEXT_VALUE: u32 = 24;
 const INCREMENT: u32 = 32;
 const DECREMENT: u32 = 40;
 /// The menu items': `DebounceKeys`, `ProcessInput`, `Draw(bool)`, `Draw` at a place,
 /// `UpdateTransition`.
 const DEBOUNCE_KEYS: u32 = 16;
 const PROCESS_INPUT: u32 = 24;
-const DRAW: u32 = 32;
+pub(crate) const DRAW: u32 = 32;
 const DRAW_AT: u32 = 48;
 const UPDATE_TRANSITION: u32 = 80;
 
 /// The input keys a menu reacts to (`tInputKeyType`).
-const KEY_NONE: u32 = 1;
+pub(crate) const KEY_NONE: u32 = 1;
 const KEY_ACCEPT: u32 = 2;
 const KEY_HELP: u32 = 4;
 const KEY_OPTIONS: u32 = 8;
@@ -61,11 +61,11 @@ const COMMAND_START: u32 = 4;
 const COMMAND_BACK: u32 = 5;
 const COMMAND_EXIT: u32 = 6;
 /// A menu item is disabled (flag bit 0).
-const ITEM_DISABLED: u32 = 1;
+pub(crate) const ITEM_DISABLED: u32 = 1;
 
 /// The library's `__builtin_delete` (0x800a4910), and the front end's sounds.
 const DELETE: fn(&mut Cpu) = nfs4rc::f_800a4910;
-const PLAY_FE_SFX: fn(&mut Cpu) = nfs4rc::f_8007a08c;
+pub(crate) const PLAY_FE_SFX: fn(&mut Cpu) = nfs4rc::f_8007a08c;
 /// `AudioCmn_PlayFESFXVol` (the host watches it: called by address).
 const PLAY_FE_SFX_VOL: u32 = 0x8007_A0AC;
 /// `TextSys_WordX`, `TextSys_WordY`: a text id's place on the screen.
@@ -73,7 +73,7 @@ const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 /// `FETextRender_MenuTextPositioned` (FETEXTRENDER.CPP), `FETextRender_Title`.
 const MENU_TEXT_POSITIONED: fn(&mut Cpu) = nfs4rc::f_80021174;
-const TITLE: fn(&mut Cpu) = nfs4rc::f_80021a74;
+pub(crate) const TITLE: fn(&mut Cpu) = nfs4rc::f_80021a74;
 /// `tFEApplication::DisplayHelp` (FEAPP.CPP).
 const DISPLAY_HELP: fn(&mut Cpu) = nfs4rc::f_80014048;
 /// `DrawSlider` (the host captures its primitives: called by address).
@@ -81,7 +81,7 @@ const DRAW_SLIDER: u32 = 0x8002_4C4C;
 
 /// The virtual function at `slot` of the object `this` whose vtable pointer is at
 /// `this + vptr`: `this` adjusted by the entry's offset, and the function.
-fn method(m: &mut Mem, this: u32, vptr: u32, slot: u32) -> (u32, u32) {
+pub(crate) fn method(m: &mut Mem, this: u32, vptr: u32, slot: u32) -> (u32, u32) {
     let vt = m.r32(this.wrapping_add(vptr));
     let delta = m.r16(vt.wrapping_add(slot)) as i16 as i32 as u32;
     (this.wrapping_add(delta), m.r32(vt.wrapping_add(slot + 4)))
@@ -1199,7 +1199,7 @@ pub fn abi_debounce_keys(c: &mut Cpu) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
     use std::cell::Cell;
@@ -1207,33 +1207,33 @@ mod tests {
     /// The test's structures, in RAM the front end leaves zero: a list of text ids, values,
     /// two index bytes; an iterator of each class; a menu item of each class; two menus, their
     /// item lists, a key and a command.
-    const LIST: u32 = 0x8014_0000;
-    const VALUES: u32 = 0x8014_0100;
-    const INDEX1: u32 = 0x8014_0200;
-    const INDEX2: u32 = 0x8014_0201;
-    const IT_BASE: u32 = 0x8014_0400;
-    const IT_INDEXED: u32 = 0x8014_0420;
-    const IT_DOUBLE: u32 = 0x8014_0440;
-    const IT_MULTI: u32 = 0x8014_0460;
-    const IT_RANGE: u32 = 0x8014_0480;
-    const IT_RANGE_INDEXED: u32 = 0x8014_04A0;
-    const ITEMS: u32 = 0x8014_0800;
-    const ITEM_SIZE: u32 = 0x40;
-    const MENU: u32 = 0x8014_1000;
-    const MENU2: u32 = 0x8014_1100;
-    const KEY: u32 = 0x8014_2000;
-    const COMMAND: u32 = 0x8014_2010;
-    const NEW: u32 = 0x8014_3000;
+    pub(crate) const LIST: u32 = 0x8014_0000;
+    pub(crate) const VALUES: u32 = 0x8014_0100;
+    pub(crate) const INDEX1: u32 = 0x8014_0200;
+    pub(crate) const INDEX2: u32 = 0x8014_0201;
+    pub(crate) const IT_BASE: u32 = 0x8014_0400;
+    pub(crate) const IT_INDEXED: u32 = 0x8014_0420;
+    pub(crate) const IT_DOUBLE: u32 = 0x8014_0440;
+    pub(crate) const IT_MULTI: u32 = 0x8014_0460;
+    pub(crate) const IT_RANGE: u32 = 0x8014_0480;
+    pub(crate) const IT_RANGE_INDEXED: u32 = 0x8014_04A0;
+    pub(crate) const ITEMS: u32 = 0x8014_0800;
+    pub(crate) const ITEM_SIZE: u32 = 0x40;
+    pub(crate) const MENU: u32 = 0x8014_1000;
+    pub(crate) const MENU2: u32 = 0x8014_1100;
+    pub(crate) const KEY: u32 = 0x8014_2000;
+    pub(crate) const COMMAND: u32 = 0x8014_2010;
+    pub(crate) const NEW: u32 = 0x8014_3000;
     /// A copy of the base item's vtable with the four-argument `Draw` doing nothing (no class
     /// here has one: the base's calls itself), for the item after the five classes'.
-    const FAKE_VT: u32 = 0x8014_0700;
-    const FAKE_ITEM: u32 = ITEMS + 5 * ITEM_SIZE;
+    pub(crate) const FAKE_VT: u32 = 0x8014_0700;
+    pub(crate) const FAKE_ITEM: u32 = ITEMS + 5 * ITEM_SIZE;
     /// A function the menus may call (does nothing): `tMenuItem::ProcessInput`.
-    const NOTHING: u32 = 0x8002_47C0;
+    pub(crate) const NOTHING: u32 = 0x8002_47C0;
     /// The stack's top in the front end's tests (main RAM).
-    const TOP: u32 = 0x801F_FE00;
+    pub(crate) const TOP: u32 = 0x801F_FE00;
 
-    fn pick(rng: &mut Rng, n: u32) -> u32 {
+    pub(crate) fn pick(rng: &mut Rng, n: u32) -> u32 {
         (rng.next() % n as u64) as u32
     }
 
@@ -1246,7 +1246,7 @@ mod tests {
     /// item of each class (some disabled, a text id, a fade, an iterator, a slider's place, a
     /// menu to go to and a function), two menus of a few of them (any current item, flags,
     /// title, menus after and for options, a function for back); a key and a command.
-    fn shuffle(c: &mut Cpu, rng: &mut Rng) {
+    pub(crate) fn shuffle(c: &mut Cpu, rng: &mut Rng) {
         let m = &mut c.m;
         let n = 1 + pick(rng, 10);
         for k in 0..n {
@@ -1342,7 +1342,7 @@ mod tests {
     }
 
     /// The length of text `id`'s string (`TextSys_Word`'s, from the loaded texts).
-    fn text_len(m: &mut Mem, id: i16) -> u32 {
+    pub(crate) fn text_len(m: &mut Mem, id: i16) -> u32 {
         let mut c = crate::test_util::cpu_with(&m.ram);
         let mut at = crate::abi::call(&mut c, nfs4rc::f_800b9f18, &[id as i32 as u32]);
         let mut n = 0;
@@ -1355,12 +1355,12 @@ mod tests {
 
     thread_local! {
         /// The function [`via_abi`] runs.
-        static ADDR: Cell<u32> = const { Cell::new(0) };
+        pub(crate) static ADDR: Cell<u32> = const { Cell::new(0) };
     }
 
     /// The port at `ADDR` entered through its ABI entry with `a` (from the fifth on at sp+16,
     /// where the original's caller has them); its v0 when it returns one.
-    fn via_abi(c: &mut Cpu, a: &[u32]) -> Option<u32> {
+    pub(crate) fn via_abi(c: &mut Cpu, a: &[u32]) -> Option<u32> {
         let i = crate::find(ADDR.get()).expect("routed");
         let sp = c.r[29];
         for (k, &v) in a.iter().enumerate() {
@@ -1374,11 +1374,11 @@ mod tests {
         crate::FUNCS[i].returns.then_some(c.r[2])
     }
 
-    type Args = fn(&mut Cpu, &mut Rng) -> Vec<u32>;
+    pub(crate) type Args = fn(&mut Cpu, &mut Rng) -> Vec<u32>;
     /// A function's name, address, original and arguments.
-    type Case = (&'static str, u32, fn(&mut Cpu), Args);
+    pub(crate) type Case = (&'static str, u32, fn(&mut Cpu), Args);
 
-    fn iterator(rng: &mut Rng) -> u32 {
+    pub(crate) fn iterator(rng: &mut Rng) -> u32 {
         ITERATORS[pick(rng, 6) as usize].0
     }
 
@@ -1386,7 +1386,7 @@ mod tests {
         ITEMS + ITEM_SIZE * pick(rng, 5)
     }
 
-    fn player(rng: &mut Rng) -> u32 {
+    pub(crate) fn player(rng: &mut Rng) -> u32 {
         [u32::MAX, 0, 1, 2][pick(rng, 4) as usize]
     }
 
