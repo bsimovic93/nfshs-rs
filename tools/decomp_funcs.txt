@@ -982,3 +982,31 @@
 80020df8 tMenuItemSlidingActivated::~tMenuItemSlidingActivated
 80020e18 tMenuItemLeftRightFade::~tMenuItemLeftRightFade
 
+# FESCREEN.CPP (the front end; with FESCREEN.H's)
+80025ad8 tScreen::DisplayLoadingText
+80025c18 tScreen::GoNonInterlaced
+80025ce8 tScreen::DrawBackgroundImage
+80025db8 tScreen::AsyncLoadPermanentShapeFile
+80025dd8 tScreen::AsyncLoadSwapShapeFile
+80025e2c tScreen::IsShapeFileLoaded
+80025fa4 tScreen::UploadPermanentShapes
+80025ff0 tScreen::UploadSwapShapes
+80026028 tScreen::GetShapeInfo
+80026040 tScreen::tScreen
+80026098 tScreen::~tScreen
+800260cc tScreen::Initialize
+800261c0 tScreen::Cleanup
+8002620c tScreen::Draw
+80026260 tScreen::AsyncLoadShapeFile
+80026374 tScreen::CancelAsyncLoad
+8002640c tScreen::InitializeShapes
+800264b4 tScreen::FreeShapes
+80026614 tScreen::UploadShapes
+800267a0 tScreen::PreLoad
+80026824 tScreen::TransitionOff
+80026844 tScreen::TransitionOn
+80026868 tScreen::UpdateTransition
+800268e0 tScreen::TransitionIsFinished
+800268f8 tScreen::ProcessInput
+80026900 tScreen::DrawForeground
+80026908 tScreen::DrawBackground

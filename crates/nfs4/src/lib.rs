@@ -53,6 +53,7 @@ pub mod fedialog;
 pub mod femenu;
 pub mod femenuextended;
 pub mod femenuoptions;
+pub mod fescreen;
 pub mod fetextrender;
 pub mod fixed;
 pub mod globals;
@@ -408,6 +409,33 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8002_5a7c, "tMenu::DebounceKeys", femenu::abi_debounce_keys),
     func(0x8002_5ac8, "tMenuItem::TransitionOn", femenu::abi_nothing),
     func(0x8002_5ad0, "tMenuItem::TransitionOff", femenu::abi_nothing),
+    func(0x8002_5ad8, "tScreen::DisplayLoadingText", fescreen::abi_display_loading_text),
+    func(0x8002_5c18, "tScreen::GoNonInterlaced", fescreen::abi_go_non_interlaced),
+    func(0x8002_5ce8, "tScreen::DrawBackgroundImage", fescreen::abi_draw_background_image),
+    func(0x8002_5db8, "tScreen::AsyncLoadPermanentShapeFile", fescreen::abi_async_load_permanent_shape_file),
+    func(0x8002_5dd8, "tScreen::AsyncLoadSwapShapeFile", fescreen::abi_async_load_swap_shape_file),
+    func_ret(0x8002_5e2c, "tScreen::IsShapeFileLoaded", fescreen::abi_is_shape_file_loaded),
+    func(0x8002_5fa4, "tScreen::UploadPermanentShapes", fescreen::abi_upload_permanent_shapes),
+    func(0x8002_5ff0, "tScreen::UploadSwapShapes", fescreen::abi_upload_swap_shapes),
+    func(0x8002_6028, "tScreen::GetShapeInfo", fescreen::abi_get_shape_info),
+    func_ret(0x8002_6040, "tScreen::tScreen", fescreen::abi_screen),
+    func(0x8002_6098, "tScreen::~tScreen", fescreen::abi_screen_destructor),
+    func(0x8002_60cc, "tScreen::Initialize", fescreen::abi_initialize),
+    func(0x8002_61c0, "tScreen::Cleanup", fescreen::abi_cleanup),
+    func(0x8002_620c, "tScreen::Draw", fescreen::abi_draw),
+    func(0x8002_6260, "tScreen::AsyncLoadShapeFile", fescreen::abi_async_load_shape_file),
+    func(0x8002_6374, "tScreen::CancelAsyncLoad", fescreen::abi_cancel_async_load),
+    func(0x8002_640c, "tScreen::InitializeShapes", fescreen::abi_initialize_shapes),
+    func(0x8002_64b4, "tScreen::FreeShapes", fescreen::abi_free_shapes),
+    func(0x8002_6614, "tScreen::UploadShapes", fescreen::abi_upload_shapes),
+    func(0x8002_67a0, "tScreen::PreLoad", fescreen::abi_pre_load),
+    func(0x8002_6824, "tScreen::TransitionOff", fescreen::abi_transition_off),
+    func(0x8002_6844, "tScreen::TransitionOn", fescreen::abi_transition_on),
+    func(0x8002_6868, "tScreen::UpdateTransition", fescreen::abi_update_transition),
+    func_ret(0x8002_68e0, "tScreen::TransitionIsFinished", fescreen::abi_transition_is_finished),
+    func(0x8002_68f8, "tScreen::ProcessInput", fescreen::abi_process_input),
+    func(0x8002_6900, "tScreen::DrawForeground", fescreen::abi_draw_foreground),
+    func(0x8002_6908, "tScreen::DrawBackground", fescreen::abi_draw_background),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),
@@ -1235,9 +1263,10 @@ pub(crate) mod test_util {
     /// return 0 (`PadGetState` a stable pad, 6), for the original and the port alike; code
     /// that isn't recompiled below that (jumps into functions) is interpreted as usual, and so
     /// is the font's character reader (0x80107358, `currentfont`'s: reached only through its
-    /// pointer, never recompiled; stubbed, every text would measure 0 pixels).
+    /// pointer, never recompiled; stubbed, every text would measure 0 pixels) and the tests' own
+    /// routines among their structures (0x80140000 on).
     fn no_host(c: &mut Cpu, addr: u32) -> bool {
-        if addr != 0 && (addr < 0x800E_0000 || addr == 0x8010_7358) {
+        if addr != 0 && (addr < 0x800E_0000 || addr == 0x8010_7358 || (0x8014_0000..0x8015_0000).contains(&addr)) {
             return false;
         }
         if addr != 0 && (c.dispatch)(c, addr) {
