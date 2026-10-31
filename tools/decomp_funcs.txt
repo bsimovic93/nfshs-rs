@@ -1053,3 +1053,19 @@
 80026bc8 FeTools_init
 80026cb0 FeTools_deinit
 80026d00 FeTools_FormatMoney
+
+# FEAPP.CPP (the front end; RunPostGame and RunDemoVideo still recompiled)
+800143c8 tFEApplication::MainLoop
+800130f8 tFEApplication::tFEApplication
+8001331c tFEApplication::~tFEApplication
+8001338c tFEApplication::PerformMenuInitialization
+800133f4 tFEApplication::PerformMenuDestruction
+8001349c tFEApplication::DrawHelpIcons
+80013894 tFEApplication::Redraw
+80013e34 tFEApplication::UpdateMusic
+80013ef4 tFEApplication::SetMenu
+80013ff8 tFEApplication::SetScreen
+80014048 tFEApplication::DisplayHelp
+8001406c FreeHelpShapeCluts
+8001585c tFEApplication::RunFrontEnd
+

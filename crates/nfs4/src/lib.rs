@@ -48,6 +48,7 @@ pub mod cars;
 pub mod collide;
 pub mod check;
 pub mod control;
+pub mod feapp;
 pub mod fecars;
 pub mod fecheats;
 pub mod fedialog;
@@ -97,6 +98,19 @@ const fn func_ret(addr: u32, name: &'static str, run: fn(&mut Cpu)) -> Func {
 
 /// Every decompiled function the game is routed to, by address.
 pub static FUNCS: &[Func] = &[
+    func_ret(0x8001_30f8, "tFEApplication::tFEApplication", feapp::abi_fe_application),
+    func(0x8001_331c, "tFEApplication::~tFEApplication", feapp::abi_fe_application_dtor),
+    func(0x8001_338c, "tFEApplication::PerformMenuInitialization", feapp::abi_perform_menu_initialization),
+    func(0x8001_33f4, "tFEApplication::PerformMenuDestruction", feapp::abi_perform_menu_destruction),
+    func(0x8001_349c, "tFEApplication::DrawHelpIcons", feapp::abi_draw_help_icons),
+    func(0x8001_3894, "tFEApplication::Redraw", feapp::abi_redraw),
+    func(0x8001_3e34, "tFEApplication::UpdateMusic", feapp::abi_update_music),
+    func(0x8001_3ef4, "tFEApplication::SetMenu", feapp::abi_set_menu),
+    func(0x8001_3ff8, "tFEApplication::SetScreen", feapp::abi_set_screen),
+    func(0x8001_4048, "tFEApplication::DisplayHelp", feapp::abi_display_help),
+    func(0x8001_406c, "FreeHelpShapeCluts", feapp::abi_free_help_shape_cluts),
+    func_ret(0x8001_43c8, "tFEApplication::MainLoop", feapp::abi_main_loop),
+    func(0x8001_585c, "tFEApplication::RunFrontEnd", feapp::abi_run_front_end),
     func(0x8001_5884, "tDialogMessageStringWithTimeout::~tDialogMessageStringWithTimeout", fedialog::abi_message_with_timeout_destructor),
     func(0x8001_62d8, "tCarManager::Initialize", fecars::abi_initialize),
     func_ret(0x8001_6374, "tCarManager::GetCarFromID", fecars::abi_get_car_from_id),
