@@ -48,12 +48,14 @@ pub mod cars;
 pub mod collide;
 pub mod check;
 pub mod control;
+pub mod drawshp;
 pub mod feapp;
 pub mod fecars;
 pub mod fecheats;
 pub mod fedialog;
 pub mod fefades;
 pub mod feinput;
+pub mod felines;
 pub mod femenu;
 pub mod femenuextended;
 pub mod femenuoptions;
@@ -496,6 +498,11 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8004_bdc0, "CalcTextFadeUnselToSel", fefades::abi_text_fade_unsel_to_sel),
     func_ret(0x8004_be30, "CalcTextFadeSelToHi", fefades::abi_text_fade_sel_to_hi),
     func(0x8004_beb4, "CalcOnOffFade", fefades::abi_on_off_fade),
+    func(0x8004_c018, "PSXDrawBrightEndLine", felines::abi_draw_bright_end_line),
+    func(0x8004_c058, "PSXTransDrawBrightEndLine", felines::abi_draw),
+    func(0x8004_c490, "DrawShape_NFS4RoundRectangle", drawshp::abi_round_rectangle),
+    func(0x8004_c69c, "DrawShape_NFS4Rectangle", drawshp::abi_rectangle),
+    func(0x8004_c9bc, "DrawShape_NFS4TransRectangle", drawshp::abi_trans_rectangle),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),

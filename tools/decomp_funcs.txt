@@ -1076,3 +1076,12 @@
 8004bdc0 CalcTextFadeUnselToSel
 8004be30 CalcTextFadeSelToHi
 8004beb4 CalcOnOffFade
+
+# FELINES.CPP (the front end)
+8004c018 PSXDrawBrightEndLine
+8004c058 PSXTransDrawBrightEndLine
+
+# DRAWSHP.CPP (the front end; DrawShape_SubtractNFS4RectEdges stays: a host hook)
+8004c490 DrawShape_NFS4RoundRectangle
+8004c69c DrawShape_NFS4Rectangle
+8004c9bc DrawShape_NFS4TransRectangle
