@@ -164,6 +164,9 @@ pub fn abi_go_non_interlaced(c: &mut Cpu) {
         m.w16(v + 110, 256);
         m.w8(v + 123, 0);
         m.w16(v + 106, h);
+        // (a1..a3 as the stores above left them: the height, the views, 256; the host's calls
+        // leave them for the caller)
+        c.r[5..8].copy_from_slice(&[h as u32, VIEWS, 256]);
         let r = Saved::of(c);
         r.call_ptr_leaving(c, DRAW_SYNC, &[0], 0x8002_5cd0);
         r.call_ptr_leaving(c, VSYNC, &[0], 0x8002_5cd8);

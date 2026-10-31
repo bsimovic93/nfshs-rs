@@ -72,11 +72,16 @@ pub mod mathnfs;
 pub mod newton;
 pub mod physics;
 pub mod schedule;
+pub mod screenaudio;
+pub mod screendisplay;
 pub mod screenmain;
 pub mod screenpinkslips;
 pub mod screentrackinfo;
+pub mod screentournselect;
 pub mod screentrackrecords;
 pub mod screentrophyinfo;
+pub mod screentrophyroom;
+pub mod screenusername;
 pub mod sim;
 pub mod simqueue;
 pub mod stats;
@@ -542,6 +547,24 @@ pub static FUNCS: &[Func] = &[
     func(0x8003_96a8, "tScreenPinkSlips::DrawVideoWall", screenpinkslips::abi_draw_video_wall),
     func(0x8003_9924, "tScreenPinkSlips::ProcessInput", screenpinkslips::abi_process_input),
     func(0x8003_9a60, "~tScreenPinkSlips", screenpinkslips::abi_destructor),
+    func_ret(0x8003_fb48, "tScreenTournSelect::tScreenTournSelect", screentournselect::abi_screen_tourn_select),
+    func(0x8003_fb7c, "~tScreenTournSelect", screentournselect::abi_destructor),
+    func(0x8003_fba4, "tScreenTournSelect::GetShapeInfo", screentournselect::abi_get_shape_info),
+    func(0x8003_fc70, "tScreenTournSelect::Initialize", screentournselect::abi_initialize),
+    func(0x8003_feb8, "tScreenTournSelect::Cleanup", screentournselect::abi_cleanup),
+    func(0x8003_fef8, "tScreenTournSelect::UpdateVideoWall", screentournselect::abi_update_video_wall),
+    func(0x8003_ff9c, "tScreenTournSelect::DrawVideoWall", screentournselect::abi_draw_video_wall),
+    func(0x8004_022c, "tScreenTournSelect::DrawBackground", screentournselect::abi_draw_background),
+    func(0x8004_08a8, "tScreenTournSelect::DrawForeground", screentournselect::abi_draw_foreground),
+    func_ret(0x8004_0950, "tScreenTrophyRoom::tScreenTrophyRoom", screentrophyroom::abi_screen_trophy_room),
+    func(0x8004_0990, "~tScreenTrophyRoom", screentrophyroom::abi_destructor),
+    func(0x8004_09b8, "tScreenTrophyRoom::GetShapeInfo", screentrophyroom::abi_get_shape_info),
+    func(0x8004_0a78, "tScreenTrophyRoom::ProcessInput", screentrophyroom::abi_process_input),
+    func(0x8004_0c88, "tScreenTrophyRoom::PreLoad", screentrophyroom::abi_pre_load),
+    func(0x8004_0cf0, "tScreenTrophyRoom::Initialize", screentrophyroom::abi_initialize),
+    func(0x8004_0ec8, "tScreenTrophyRoom::Cleanup", screentrophyroom::abi_cleanup),
+    func(0x8004_0ef8, "tScreenTrophyRoom::DrawBackground", screentrophyroom::abi_draw_background),
+    func(0x8004_130c, "tScreenTrophyRoom::LoadTrophy", screentrophyroom::abi_load_trophy),
     func(0x8004_13e8, "tScreenTrophyInfo::GetShapeInfo", screentrophyinfo::abi_get_shape_info),
     func(0x8004_1518, "tScreenTrophyInfo::DrawBackground", screentrophyinfo::abi_draw_background),
     func(0x8004_19c0, "~tScreenTrophyInfo", screentrophyinfo::abi_destructor),
@@ -557,6 +580,23 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_2d50, "tScreenTrackRecords::DrawRecords", screentrackrecords::abi_draw_records),
     func(0x8004_2f30, "tScreenTrackRecords::DrawBackground", screentrackrecords::abi_draw_background),
     func(0x8004_34e0, "~tScreenTrackRecords", screentrackrecords::abi_destructor),
+    func(0x8004_5d38, "tScreenDisplay::DrawBackground", screendisplay::abi_draw_background),
+    func(0x8004_5dc4, "tScreenDisplay::GetShapeInfo", screendisplay::abi_get_shape_info),
+    func(0x8004_5dec, "~tScreenDisplay", screendisplay::abi_destructor),
+    func(0x8004_5e10, "tScreenAudio::PlaySound", screenaudio::abi_play_sound),
+    func(0x8004_61b0, "tScreenAudio::DrawForeground", screenaudio::abi_draw_foreground),
+    func(0x8004_62c0, "tScreenAudio::DrawBackground", screenaudio::abi_draw_background),
+    func(0x8004_6528, "tScreenAudio::GetShapeInfo", screenaudio::abi_get_shape_info),
+    func_ret(0x8004_654c, "tScreenAudio::tScreenAudio", screenaudio::abi_screen_audio),
+    func(0x8004_658c, "tScreenAudio::Initialize", screenaudio::abi_initialize),
+    func(0x8004_65ec, "tScreenAudio::Cleanup", screenaudio::abi_cleanup),
+    func(0x8004_66e4, "~tScreenAudio", screenaudio::abi_destructor),
+    func(0x8004_b468, "tScreenUserName::Initialize", screenusername::abi_initialize),
+    func(0x8004_b528, "tScreenUserName::GetShapeInfo", screenusername::abi_get_shape_info),
+    func(0x8004_b588, "tScreenUserName::DrawVerticalLine", screenusername::abi_draw_vertical_line),
+    func(0x8004_b608, "tScreenUserName::DrawHorizontalLine", screenusername::abi_draw_horizontal_line),
+    func(0x8004_b68c, "tScreenUserName::DrawBackground", screenusername::abi_draw_background),
+    func(0x8004_bcb4, "~tScreenUserName", screenusername::abi_destructor),
     func_ret(0x8004_bcd8, "CalcFadeVal(int,int,int)", fefades::abi_fade),
     func_ret(0x8004_bd68, "CalcFadeVal(int,int)", fefades::abi_fade_out),
     func_ret(0x8004_bd8c, "CalcFadeVal(int,int,int,int)", fefades::abi_fade_faded),

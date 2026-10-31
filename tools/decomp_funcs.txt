@@ -1158,3 +1158,48 @@
 80042d50 tScreenTrackRecords::DrawRecords
 80042f30 tScreenTrackRecords::DrawBackground
 800434e0 ~tScreenTrackRecords
+
+# SCREENTOURNSELECT.CPP (retail = dev + 0x3d0)
+8003fb48 tScreenTournSelect::tScreenTournSelect
+8003fb7c ~tScreenTournSelect
+8003fba4 tScreenTournSelect::GetShapeInfo
+8003fc70 tScreenTournSelect::Initialize
+8003feb8 tScreenTournSelect::Cleanup
+8003fef8 tScreenTournSelect::UpdateVideoWall
+8003ff9c tScreenTournSelect::DrawVideoWall
+8004022c tScreenTournSelect::DrawBackground
+800408a8 tScreenTournSelect::DrawForeground
+
+# SCREENTROPHYROOM.CPP (retail = dev + 0x3e0)
+80040950 tScreenTrophyRoom::tScreenTrophyRoom
+80040990 ~tScreenTrophyRoom
+800409b8 tScreenTrophyRoom::GetShapeInfo
+80040a78 tScreenTrophyRoom::ProcessInput
+80040c88 tScreenTrophyRoom::PreLoad
+80040cf0 tScreenTrophyRoom::Initialize
+80040ec8 tScreenTrophyRoom::Cleanup
+80040ef8 tScreenTrophyRoom::DrawBackground
+8004130c tScreenTrophyRoom::LoadTrophy
+
+# SCREENDISPLAY.CPP (retail = dev + 0x3e8)
+80045d38 tScreenDisplay::DrawBackground
+80045dc4 tScreenDisplay::GetShapeInfo
+80045dec ~tScreenDisplay
+
+# SCREENAUDIO.CPP (retail = dev + 0x3e8)
+80045e10 tScreenAudio::PlaySound
+800461b0 tScreenAudio::DrawForeground
+800462c0 tScreenAudio::DrawBackground
+80046528 tScreenAudio::GetShapeInfo
+8004654c tScreenAudio::tScreenAudio
+8004658c tScreenAudio::Initialize
+800465ec tScreenAudio::Cleanup
+800466e4 ~tScreenAudio
+
+# SCREENUSERNAME.CPP (retail = dev + 0x4e0)
+8004b468 tScreenUserName::Initialize
+8004b528 tScreenUserName::GetShapeInfo
+8004b588 tScreenUserName::DrawVerticalLine
+8004b608 tScreenUserName::DrawHorizontalLine
+8004b68c tScreenUserName::DrawBackground
+8004bcb4 ~tScreenUserName
