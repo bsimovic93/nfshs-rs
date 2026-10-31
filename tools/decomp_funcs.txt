@@ -1039,3 +1039,9 @@
 80023778 FECheat_LoadBonus
 800237f0 FECheat_IsTheUserACryBabyCheater
 80023800 FECheat_ActivateBonusByCode
+
+# FEINPUT.CPP (the front end)
+800238b8 FEInput_VerifyControllerValues
+80023918 FEInput_GetNoDebounceKey
+80023b94 FEInput_GetDebounceKey
+80023ca8 FEInput_GetKeyFromPlayer

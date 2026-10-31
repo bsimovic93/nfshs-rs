@@ -51,6 +51,7 @@ pub mod control;
 pub mod fecars;
 pub mod fecheats;
 pub mod fedialog;
+pub mod feinput;
 pub mod femenu;
 pub mod femenuextended;
 pub mod femenuoptions;
@@ -364,6 +365,10 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_3778, "FECheat_LoadBonus", fecheats::abi_load_bonus),
     func_ret(0x8002_37f0, "FECheat_IsTheUserACryBabyCheater", fecheats::abi_is_the_user_a_cry_baby_cheater),
     func_ret(0x8002_3800, "FECheat_ActivateBonusByCode", fecheats::abi_activate_bonus_by_code),
+    func(0x8002_38b8, "FEInput_VerifyControllerValues", feinput::abi_verify_controller_values),
+    func_ret(0x8002_3918, "FEInput_GetNoDebounceKey", feinput::abi_get_no_debounce_key),
+    func_ret(0x8002_3b94, "FEInput_GetDebounceKey", feinput::abi_get_debounce_key),
+    func_ret(0x8002_3ca8, "FEInput_GetKeyFromPlayer", feinput::abi_get_key_from_player),
     func_ret(0x8002_3df0, "tListIterator::tListIterator", femenu::abi_list_iterator),
     func(0x8002_3e14, "tListIterator::~tListIterator", femenu::abi_list_iterator_dtor),
     func_ret(0x8002_3e48, "tListIterator::Value", femenu::abi_value),
