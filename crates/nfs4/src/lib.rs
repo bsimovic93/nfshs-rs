@@ -57,6 +57,7 @@ pub mod femenuextended;
 pub mod femenuoptions;
 pub mod fescreen;
 pub mod fetextrender;
+pub mod fetools;
 pub mod fetracks;
 pub mod fixed;
 pub mod globals;
@@ -468,6 +469,12 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_68f8, "tScreen::ProcessInput", fescreen::abi_process_input),
     func(0x8002_6900, "tScreen::DrawForeground", fescreen::abi_draw_foreground),
     func(0x8002_6908, "tScreen::DrawBackground", fescreen::abi_draw_background),
+    func(0x8002_6910, "s_upper", fetools::abi_s_upper),
+    func(0x8002_6970, "s_lower", fetools::abi_s_lower),
+    func(0x8002_69d0, "FeTools_DrawPSXButton", fetools::abi_draw_psx_button),
+    func(0x8002_6bc8, "FeTools_init", fetools::abi_init),
+    func(0x8002_6cb0, "FeTools_deinit", fetools::abi_deinit),
+    func(0x8002_6d00, "FeTools_FormatMoney", fetools::abi_format_money),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),

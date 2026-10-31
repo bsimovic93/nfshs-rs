@@ -1045,3 +1045,11 @@
 80023918 FEInput_GetNoDebounceKey
 80023b94 FEInput_GetDebounceKey
 80023ca8 FEInput_GetKeyFromPlayer
+
+# FETOOLS.CPP (the front end)
+80026910 s_upper
+80026970 s_lower
+800269d0 FeTools_DrawPSXButton
+80026bc8 FeTools_init
+80026cb0 FeTools_deinit
+80026d00 FeTools_FormatMoney
