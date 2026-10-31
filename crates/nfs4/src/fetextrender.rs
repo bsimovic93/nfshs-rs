@@ -200,7 +200,7 @@ pub fn abi_full_text_fade(c: &mut Cpu) {
     full_text_fade(c, c.r[4], c.r[5], c.r[6], c.r[7], ty, state, justify);
 }
 
-fn full_text_fade_entry(c: &mut Cpu) {
+pub(crate) fn full_text_fade_entry(c: &mut Cpu) {
     abi::leave_prologue(c, 0x8002_10a4, None, &[]);
     abi_full_text_fade(c);
 }

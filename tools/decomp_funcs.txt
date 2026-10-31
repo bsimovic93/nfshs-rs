@@ -1203,3 +1203,25 @@
 8004b608 tScreenUserName::DrawHorizontalLine
 8004b68c tScreenUserName::DrawBackground
 8004bcb4 ~tScreenUserName
+
+# SCREENPOST.CPP (retail = dev + 0x290)
+80039a80 DrawMoney
+80039bb8 tScreenTournamentStandings::tScreenTournamentStandings
+80039bf0 tScreenTournamentStandings::Initialize
+80039d7c tScreenTournamentStandings::Cleanup
+80039d9c tScreenTournamentStandings::GetShapeInfo
+80039dc0 tScreenTournamentStandings3item::GetShapeInfo
+80039de4 tScreenTournamentStandings::ProcessInput
+80039e14 tScreenTournamentStandings::DrawBackground
+8003a6d8 tScreenPinkSlipStandings::DrawBackground
+8003aafc tScreenPinkSlipStandings::ProcessInput
+8003ab1c ~tScreenPinkSlipStandings
+8003ab3c ~tScreenTournamentStandings3item
+8003ab5c ~tScreenTournamentStandings
+
+# FEMISSION.CPP (retail = dev + 0x138)
+80034198 tMissionManager::Initialize
+800341b4 tMissionManager::LoadDescription
+800342e8 tMissionManager::ReleaseDescription
+80034324 tMissionManager::GetMissionStages
+8003438c tMissionManager::GetMissionToRace

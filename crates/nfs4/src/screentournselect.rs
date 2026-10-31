@@ -9,7 +9,7 @@
 use crate::abi::{self, Saved};
 use crate::femenuextended::{SET_ABR_MODE, SPRINTF, TEXT_WORD};
 use crate::globals::{FRONT_END, GAME_TICKS, PATHS, SONGS_SCREEN, TOURNAMENT_MANAGER};
-use crate::{fefades, felines, fescreen, fetextrender, fetv};
+use crate::{fefades, felines, fescreen, fetextrender, fetv, screenpost};
 use ps1rt::{Cpu, Mem};
 
 // The screen: a `tScreen` (+0 its permanent shapes' table, +40 its swapped ones (the trophy's):
@@ -76,12 +76,10 @@ const DRAW_SYNC: u32 = 0x800E_E1D8;
 const DRAW_TV: u32 = 0x8002_24AC;
 const DRAW_TV_LINES: u32 = 0x8002_2158;
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
-/// `GetTrophyName`, `tListIteratorTournament::TextValue` (FETOURN.CPP), `DrawMoney`
-/// (SCREENPOST.CPP), all still recompiled; `GetTPage`, `ScaleShapeExtended`, `purgememadr`,
-/// `TextSys_WordX`, `TextSys_WordY`.
+/// `GetTrophyName`, `tListIteratorTournament::TextValue` (FETOURN.CPP), still recompiled;
+/// `GetTPage`, `ScaleShapeExtended`, `purgememadr`, `TextSys_WordX`, `TextSys_WordY`.
 const GET_TROPHY_NAME: fn(&mut Cpu) = nfs4rc::f_80033ca0;
 const TOURNAMENT_TEXT: fn(&mut Cpu) = nfs4rc::f_80033f64;
-const DRAW_MONEY: fn(&mut Cpu) = nfs4rc::f_80039a80;
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
 const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004ef70;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
@@ -384,7 +382,7 @@ pub fn abi_draw_background(c: &mut Cpu) {
         let money = |c: &mut Cpu, r: &Saved, x: u32, y: u32, amount: u32, ra: u32| {
             c.m.w32(sp + 16, r.0[6]);
             c.m.w32(sp + 20, r.0[5]);
-            r.call_leaving(c, DRAW_MONEY, &[x, y, 6, amount], ra);
+            port(c, r, 0x8003_9a80, ra, &[x, y, 6, amount], screenpost::abi_draw_money);
         };
         // the money, the entry fee
         let f = lh(&mut c.m, this + FADE) as u32;

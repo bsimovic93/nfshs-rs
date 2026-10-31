@@ -60,6 +60,7 @@ pub mod felines;
 pub mod femenu;
 pub mod femenuextended;
 pub mod femenuoptions;
+pub mod femission;
 pub mod fescreen;
 pub mod fetextrender;
 pub mod fetools;
@@ -76,6 +77,7 @@ pub mod screenaudio;
 pub mod screendisplay;
 pub mod screenmain;
 pub mod screenpinkslips;
+pub mod screenpost;
 pub mod screentrackinfo;
 pub mod screentournselect;
 pub mod screentrackrecords;
@@ -508,6 +510,11 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_6bc8, "FeTools_init", fetools::abi_init),
     func(0x8002_6cb0, "FeTools_deinit", fetools::abi_deinit),
     func(0x8002_6d00, "FeTools_FormatMoney", fetools::abi_format_money),
+    func(0x8003_4198, "tMissionManager::Initialize", femission::abi_initialize),
+    func(0x8003_41b4, "tMissionManager::LoadDescription", femission::abi_load_description),
+    func(0x8003_42e8, "tMissionManager::ReleaseDescription", femission::abi_release_description),
+    func_ret(0x8003_4324, "tMissionManager::GetMissionStages", femission::abi_get_mission_stages),
+    func(0x8003_438c, "tMissionManager::GetMissionToRace", femission::abi_get_mission_to_race),
     func(0x8003_5ca0, "tCreditManager::Setup", fecredits::abi_setup),
     func(0x8003_5cb0, "tCreditManager::Init", fecredits::abi_init),
     func(0x8003_5d90, "tCreditManager::DeInit", fecredits::abi_de_init),
@@ -547,6 +554,19 @@ pub static FUNCS: &[Func] = &[
     func(0x8003_96a8, "tScreenPinkSlips::DrawVideoWall", screenpinkslips::abi_draw_video_wall),
     func(0x8003_9924, "tScreenPinkSlips::ProcessInput", screenpinkslips::abi_process_input),
     func(0x8003_9a60, "~tScreenPinkSlips", screenpinkslips::abi_destructor),
+    func(0x8003_9a80, "DrawMoney", screenpost::abi_draw_money),
+    func_ret(0x8003_9bb8, "tScreenTournamentStandings::tScreenTournamentStandings", screenpost::abi_screen_tournament_standings),
+    func(0x8003_9bf0, "tScreenTournamentStandings::Initialize", screenpost::abi_initialize),
+    func(0x8003_9d7c, "tScreenTournamentStandings::Cleanup", screenpost::abi_cleanup),
+    func(0x8003_9d9c, "tScreenTournamentStandings::GetShapeInfo", screenpost::abi_get_shape_info),
+    func(0x8003_9dc0, "tScreenTournamentStandings3item::GetShapeInfo", screenpost::abi_get_shape_info3),
+    func(0x8003_9de4, "tScreenTournamentStandings::ProcessInput", screenpost::abi_process_input),
+    func(0x8003_9e14, "tScreenTournamentStandings::DrawBackground", screenpost::abi_draw_background),
+    func(0x8003_a6d8, "tScreenPinkSlipStandings::DrawBackground", screenpost::abi_pink_slip_draw_background),
+    func(0x8003_aafc, "tScreenPinkSlipStandings::ProcessInput", screenpost::abi_pink_slip_process_input),
+    func(0x8003_ab1c, "~tScreenPinkSlipStandings", screenpost::abi_pink_slip_destructor),
+    func(0x8003_ab3c, "~tScreenTournamentStandings3item", screenpost::abi_destructor3),
+    func(0x8003_ab5c, "~tScreenTournamentStandings", screenpost::abi_destructor),
     func_ret(0x8003_fb48, "tScreenTournSelect::tScreenTournSelect", screentournselect::abi_screen_tourn_select),
     func(0x8003_fb7c, "~tScreenTournSelect", screentournselect::abi_destructor),
     func(0x8003_fba4, "tScreenTournSelect::GetShapeInfo", screentournselect::abi_get_shape_info),
