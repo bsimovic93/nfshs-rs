@@ -63,6 +63,7 @@ pub mod fescreen;
 pub mod fetextrender;
 pub mod fetools;
 pub mod fetracks;
+pub mod fetv;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
@@ -373,6 +374,9 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_1f74, "tListIteratorTrack::Increment", fetracks::abi_list_iterator_track_increment),
     func(0x8002_2020, "tListIteratorTrack::Decrement", fetracks::abi_list_iterator_track_decrement),
     func_ret(0x8002_20b0, "tListIteratorTrack::ValidTrack", fetracks::abi_valid_track),
+    func(0x8002_3168, "InitTV", fetv::abi_init_tv),
+    func(0x8002_3378, "TurnOffTV", fetv::abi_turn_off_tv),
+    func(0x8002_3388, "TurnOnTV", fetv::abi_turn_on_tv),
     func(0x8002_33a0, "FECheat_HandleActivation", fecheats::abi_handle_activation),
     func(0x8002_3430, "FECheat_EncodeString", fecheats::abi_encode_string),
     func(0x8002_34bc, "FECheat_EncodeString2", fecheats::abi_encode_string2),

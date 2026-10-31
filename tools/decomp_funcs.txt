@@ -1085,3 +1085,8 @@
 8004c490 DrawShape_NFS4RoundRectangle
 8004c69c DrawShape_NFS4Rectangle
 8004c9bc DrawShape_NFS4TransRectangle
+
+# FETV.CPP (the front end; DrawTV and DrawTVLines stay: host hooks)
+80023168 InitTV
+80023378 TurnOffTV
+80023388 TurnOnTV
