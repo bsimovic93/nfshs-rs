@@ -11,7 +11,7 @@ use crate::abi::{self, Saved};
 use crate::femenu::{KEY_ACCEPT, KEY_NONE, PLAY_FE_SFX};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SPRINTF, TEXT_PIXELS, TEXT_WORD};
 use crate::globals::{FRONT_END, GAME_TICKS, SONGS_SCREEN, TOURNAMENT_MANAGER, TRACK_MANAGER};
-use crate::{fefades, felines, fescreen, fetextrender, fetools, fetracks};
+use crate::{fefades, felines, fescreen, fetextrender, fetools, fetourn, fetracks};
 use ps1rt::{Cpu, Mem};
 
 // The standings: a `tScreen` (+92 its fade), then +100 the final money, +104 the money won, +108
@@ -65,14 +65,14 @@ const PERMANENT_SHAPES: u32 = 0x8005_1C54;
 /// `PSXDrawSquare`: the host's.
 const DRAW_SQUARE: u32 = 0x8004_F12C;
 /// FETOURN's `GetAwardInformation`, `CalcTrackFinishDamageBill`, `PlayerRanking`,
-/// `TournPointTotal`, `tListIteratorTournament::TextValue`; FRONT's `Front_GetTrackRaced`,
-/// `PlayerName`; a competitor's name (0x8004b428): still recompiled. `TextSys_WordX`,
+/// `TournPointTotal`, `tListIteratorTournament::TextValue` (ported); FRONT's
+/// `Front_GetTrackRaced`, `PlayerName`; a competitor's name (0x8004b428): still recompiled. `TextSys_WordX`,
 /// `TextSys_WordY`.
-const GET_AWARD: fn(&mut Cpu) = nfs4rc::f_80033a10;
-const DAMAGE_BILL: fn(&mut Cpu) = nfs4rc::f_80032dbc;
-const PLAYER_RANKING: fn(&mut Cpu) = nfs4rc::f_80033be4;
-const POINT_TOTAL: fn(&mut Cpu) = nfs4rc::f_80033bc8;
-const TOURNAMENT_TEXT: fn(&mut Cpu) = nfs4rc::f_80033f64;
+const GET_AWARD: fn(&mut Cpu) = fetourn::get_award_information_entry;
+const DAMAGE_BILL: fn(&mut Cpu) = fetourn::calc_track_finish_damage_bill_entry;
+const PLAYER_RANKING: fn(&mut Cpu) = fetourn::player_ranking_entry;
+const POINT_TOTAL: fn(&mut Cpu) = fetourn::tourn_point_total_entry;
+const TOURNAMENT_TEXT: fn(&mut Cpu) = fetourn::text_value_entry;
 const TRACK_RACED: fn(&mut Cpu) = nfs4rc::f_8002b9e0;
 const PLAYER_NAME: fn(&mut Cpu) = nfs4rc::f_8002ba7c;
 const COMPETITOR_NAME: fn(&mut Cpu) = nfs4rc::f_8004b428;

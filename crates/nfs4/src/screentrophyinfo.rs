@@ -6,7 +6,7 @@
 use crate::abi::{self, Saved};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, STRLEN, TEXT_WORD};
 use crate::globals::{FRONT_END, GAME_TICKS, TOURNAMENT_MANAGER};
-use crate::{fefades, fescreen, fetextrender};
+use crate::{fefades, fescreen, fetextrender, fetourn};
 use ps1rt::{Cpu, Mem};
 
 // The screen: a `tScreen` (+40 its swapped shapes: +40 their table, +44 the file read; +92 its
@@ -44,8 +44,8 @@ const DESCRIPTIONS: u32 = 872;
 /// The texts' grey.
 const GREY: u32 = 0x0050_5050;
 
-/// `tTournamentManager::GetTrophyName` (FETOURN.CPP, still recompiled), `ScaleShapeExtended`.
-const GET_TROPHY_NAME: fn(&mut Cpu) = nfs4rc::f_80033ca0;
+/// `tTournamentManager::GetTrophyName` (FETOURN.CPP's port), `ScaleShapeExtended`.
+const GET_TROPHY_NAME: fn(&mut Cpu) = fetourn::get_trophy_name_entry;
 const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004ef70;
 
 /// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).

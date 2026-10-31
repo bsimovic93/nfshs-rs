@@ -10,7 +10,7 @@ use crate::abi::{self, Saved};
 use crate::femenu::KEY_START;
 use crate::femenuextended::{SET_ABR_MODE, SPRINTF};
 use crate::globals::{FRONT_END, TOURNAMENT_MANAGER, TRACK_MANAGER};
-use crate::{fescreen, fetextrender, fetracks, fevideowall};
+use crate::{fescreen, fetextrender, fetourn, fetracks, fevideowall};
 use ps1rt::{Cpu, Mem};
 
 // The screen: a `tScreen` (+0 its permanent shapes' table, +40 its swapped ones'), then +100 the
@@ -53,9 +53,9 @@ const SWAP_NAME: u32 = 0x8005_3148;
 
 /// `PSXDrawTransSquare`: the host's.
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
-/// `tTournamentManager::GetTrackToRace`, `::GetTrackList` (FETOURN.CPP, still recompiled).
-const GET_TRACK_TO_RACE: fn(&mut Cpu) = nfs4rc::f_800327dc;
-const GET_TRACK_LIST: fn(&mut Cpu) = nfs4rc::f_800327a4;
+/// `tTournamentManager::GetTrackToRace`, `::GetTrackList` (FETOURN.CPP's ports).
+const GET_TRACK_TO_RACE: fn(&mut Cpu) = fetourn::get_track_to_race_entry;
+const GET_TRACK_LIST: fn(&mut Cpu) = fetourn::get_track_list_entry;
 
 /// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).
 fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {

@@ -533,7 +533,7 @@ pub fn abi_word_wrap_text_fade(c: &mut Cpu) {
     c.r[2] = word_wrap_text_fade(c, c.r[4], c.r[5], c.r[6], c.r[7], ty);
 }
 
-fn word_wrap_text_fade_entry(c: &mut Cpu) {
+pub(crate) fn word_wrap_text_fade_entry(c: &mut Cpu) {
     abi::leave_prologue(c, 0x8002_18a0, None, &[]);
     abi_word_wrap_text_fade(c);
 }

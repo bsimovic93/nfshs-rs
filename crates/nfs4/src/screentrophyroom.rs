@@ -8,7 +8,7 @@ use crate::abi::{self, Saved};
 use crate::femenu::{COMMAND_GO_TO, KEY_ACCEPT, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, PLAY_FE_SFX};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, TEXT_WORD};
 use crate::globals::{FRONT_END, GAME_TICKS, PAD_INFO, SONGS_SCREEN, TOURNAMENT_MANAGER};
-use crate::{fefades, felines, fescreen, fetextrender};
+use crate::{fefades, felines, fescreen, fetextrender, fetourn};
 use ps1rt::{Cpu, Mem};
 
 // The trophy room: a `tScreen` (+0 its permanent shapes' table, +40 its swapped ones (the chosen
@@ -53,7 +53,7 @@ const PAD_NEGCON: u8 = 35;
 const NAMES: u32 = 853;
 /// `GetTrophyName`, `systemtask`, `FETexture_LoadPmxAtOffset`, `purgememadr`,
 /// `ScaleShapeExtended`.
-const GET_TROPHY_NAME: fn(&mut Cpu) = nfs4rc::f_80033ca0;
+const GET_TROPHY_NAME: fn(&mut Cpu) = fetourn::get_trophy_name_entry;
 const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_800e77f0;
 const LOAD_PMX: fn(&mut Cpu) = nfs4rc::f_8004f5e8;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;

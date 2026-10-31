@@ -740,7 +740,7 @@ pub fn get_num_tourney_cars(c: &mut Cpu, this: CarManager, player: u32) -> i32 {
             let desc = CarInfo(get_car_from_id(m, this, model as i32));
             let v = desc.car_class(m);
             info.set_car_class(m, v);
-            if r.call(c, nfs4rc::f_80033d60, &[TOURNAMENT_MANAGER, info.0], 0x8001_7528) != 0 {
+            if r.call(c, crate::fetourn::valid_car_entry, &[TOURNAMENT_MANAGER, info.0], 0x8001_7528) != 0 {
                 count += 1;
                 r.0[2] = count;
             }
@@ -1255,7 +1255,7 @@ pub fn valid_car(c: &mut Cpu, this: u32, player: u32, car_pos: u32) -> u32 {
             let manager = mgr(m);
             let id = short((s2 & 0xFF).wrapping_add(m.r16(manager.0) as u32)) as u32;
             r.enter(c, 0x8001_7094, 0x8001_837c, |c| get_garage_car(c, manager, id, info_local, 0));
-            return r.call(c, nfs4rc::f_80033d60, &[TOURNAMENT_MANAGER, info_local], 0x8001_85b8);
+            return r.call(c, crate::fetourn::valid_car_entry, &[TOURNAMENT_MANAGER, info_local], 0x8001_85b8);
         }
         let info = car(m, manager, pos);
         let model = info.car_id(m) as i32;
@@ -1303,7 +1303,7 @@ pub fn valid_car(c: &mut Cpu, this: u32, player: u32, car_pos: u32) -> u32 {
         r.0[..4].copy_from_slice(&[s0, s1, s2, s3]);
         let g = mgr(m);
         let info = car(m, g, s2 & 0xFF).0;
-        r.call(c, nfs4rc::f_80033d60, &[TOURNAMENT_MANAGER, info], 0x8001_85b8) // tTournamentManager::ValidCar
+        r.call(c, crate::fetourn::valid_car_entry, &[TOURNAMENT_MANAGER, info], 0x8001_85b8) // tTournamentManager::ValidCar
     })
 }
 

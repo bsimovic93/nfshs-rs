@@ -64,6 +64,7 @@ pub mod femission;
 pub mod fescreen;
 pub mod fetextrender;
 pub mod fetools;
+pub mod fetourn;
 pub mod fetracks;
 pub mod fetv;
 pub mod fevideowall;
@@ -74,6 +75,7 @@ pub mod newton;
 pub mod physics;
 pub mod schedule;
 pub mod screenaudio;
+pub mod screencongrats;
 pub mod screendisplay;
 pub mod screenmain;
 pub mod screenpinkslips;
@@ -510,6 +512,41 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_6bc8, "FeTools_init", fetools::abi_init),
     func(0x8002_6cb0, "FeTools_deinit", fetools::abi_deinit),
     func(0x8002_6d00, "FeTools_FormatMoney", fetools::abi_format_money),
+    func(0x8003_2378, "tTournamentManager::Initialize", fetourn::abi_initialize),
+    func(0x8003_244c, "tTournamentManager::LoadDescription", fetourn::abi_load_description),
+    func(0x8003_2698, "tTournamentManager::ReleaseDescription", fetourn::abi_release_description),
+    func(0x8003_26d4, "tTournamentManager::UpdateTrackList", fetourn::abi_update_track_list),
+    func_ret(0x8003_27a4, "tTournamentManager::GetTrackList", fetourn::abi_get_track_list),
+    func(0x8003_27dc, "tTournamentManager::GetTrackToRace", fetourn::abi_get_track_to_race),
+    func(0x8003_28d4, "tTournamentManager::StartNewTournament", fetourn::abi_start_new_tournament),
+    func_ret(0x8003_2b0c, "tTournamentManager::IsTournamentFinished", fetourn::abi_is_tournament_finished),
+    func_ret(0x8003_2ba0, "tournPointsCompare", fetourn::abi_tourn_points_compare),
+    func(0x8003_2c2c, "tTournamentManager::UpdateTournFinishMoney", fetourn::abi_update_tourn_finish_money),
+    func(0x8003_2d5c, "tTournamentManager::UpdateTrackFinishMoney", fetourn::abi_update_track_finish_money),
+    func(0x8003_2dbc, "tTournamentManager::CalcTrackFinishDamageBill", fetourn::abi_calc_track_finish_damage_bill),
+    func(0x8003_2f80, "tTournamentManager::UpdateTrackFinishPoints", fetourn::abi_update_track_finish_points),
+    func_ret(0x8003_3184, "tTournamentManager::AdvanceToNextTrack", fetourn::abi_advance_to_next_track),
+    func_ret(0x8003_35c8, "tTournamentManager::GetLastTrackRaced", fetourn::abi_get_last_track_raced),
+    func(0x8003_3638, "tTournamentManager::SaveTournament", fetourn::abi_save_tournament),
+    func(0x8003_3680, "tTournamentManager::LoadTournament", fetourn::abi_load_tournament),
+    func_ret(0x8003_36c8, "tTournamentManager::GetNumCompetitors", fetourn::abi_get_num_competitors),
+    func(0x8003_3714, "tTournamentManager::UpdateCarLineup", fetourn::abi_update_car_lineup),
+    func_ret(0x8003_37c4, "tTournamentManager::GetTrackFinishPrize", fetourn::abi_get_track_finish_prize),
+    func_ret(0x8003_399c, "tTournamentManager::GetTournamentFinishPrize", fetourn::abi_get_tournament_finish_prize),
+    func(0x8003_3a10, "tTournamentManager::GetAwardInformation", fetourn::abi_get_award_information),
+    func(0x8003_3a50, "tTournamentManager::UpdateAwardInformation", fetourn::abi_update_award_information),
+    func_ret(0x8003_3bc8, "tTournamentManager::TournPointTotal", fetourn::abi_tourn_point_total),
+    func_ret(0x8003_3be4, "tTournamentManager::PlayerRanking", fetourn::abi_player_ranking),
+    func(0x8003_3c74, "tTournamentManager::CalcTierFinishPrize", fetourn::abi_calc_tier_finish_prize),
+    func(0x8003_3ca0, "tTournamentManager::GetTrophyName", fetourn::abi_get_trophy_name),
+    func_ret(0x8003_3d60, "tTournamentManager::ValidCar", fetourn::abi_valid_car),
+    func_ret(0x8003_3ed8, "tListIteratorTournament::tListIteratorTournament", fetourn::abi_list_iterator_tournament),
+    func(0x8003_3f28, "tListIteratorTournament::~tListIteratorTournament", fetourn::abi_list_iterator_tournament_dtor),
+    func_ret(0x8003_3f50, "tListIteratorTournament::Value", fetourn::abi_value),
+    func_ret(0x8003_3f64, "tListIteratorTournament::TextValue", fetourn::abi_text_value),
+    func(0x8003_3fbc, "tListIteratorTournament::Increment", fetourn::abi_increment),
+    func(0x8003_405c, "tListIteratorTournament::Decrement", fetourn::abi_decrement),
+    func_ret(0x8003_40ec, "tListIteratorTournament::ValidTournament", fetourn::abi_valid_tournament),
     func(0x8003_4198, "tMissionManager::Initialize", femission::abi_initialize),
     func(0x8003_41b4, "tMissionManager::LoadDescription", femission::abi_load_description),
     func(0x8003_42e8, "tMissionManager::ReleaseDescription", femission::abi_release_description),
@@ -611,6 +648,34 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_658c, "tScreenAudio::Initialize", screenaudio::abi_initialize),
     func(0x8004_65ec, "tScreenAudio::Cleanup", screenaudio::abi_cleanup),
     func(0x8004_66e4, "~tScreenAudio", screenaudio::abi_destructor),
+    func(0x8004_82e0, "tScreenCongrats::Cleanup", screencongrats::abi_cleanup),
+    func(0x8004_830c, "tScreenCongrats::GetShapeInfo", screencongrats::abi_get_shape_info),
+    func_ret(0x8004_855c, "tScreenCongrats::GetCar", screencongrats::abi_get_car),
+    func(0x8004_85b4, "tScreenCongrats::DrawBackground", screencongrats::abi_draw_background),
+    func(0x8004_8e28, "tScreenCongrats::DrawForeground", screencongrats::abi_draw_foreground),
+    func(0x8004_8e30, "tScreenCongrats::CalculatePrizes", screencongrats::abi_calculate_prizes),
+    func(0x8004_8ea4, "tScreenCongrats::Initialize", screencongrats::abi_initialize),
+    func(0x8004_8f68, "tScreenCongrats::ProcessInput", screencongrats::abi_process_input),
+    func(0x8004_8fc0, "tScreenPinkSlipCongrats::DrawCongratsMessage", screencongrats::abi_pink_slip_draw_congrats_message),
+    func_ret(0x8004_90dc, "tScreenPinkSlipCongrats::GetCar", screencongrats::abi_pink_slip_get_car),
+    func(0x8004_9154, "tScreenPinkSlipCongrats::CalculatePrizes", screencongrats::abi_pink_slip_calculate_prizes),
+    func(0x8004_9264, "tScreenPinkSlipCongrats::Initialize", screencongrats::abi_pink_slip_initialize),
+    func(0x8004_92bc, "tScreenPinkSlipCongrats::Cleanup", screencongrats::abi_pink_slip_cleanup),
+    func(0x8004_92e8, "tScreenTournamentTrophy::ProcessInput", screencongrats::abi_trophy_process_input),
+    func_ret(0x8004_9330, "tScreenTournamentTrophy::GetCar", screencongrats::abi_trophy_get_car),
+    func(0x8004_93dc, "tScreenTournamentTrophy::DrawCongratsMessage", screencongrats::abi_trophy_draw_congrats_message),
+    func(0x8004_96c0, "tScreenTournamentTrophy::CalculatePrizes", screencongrats::abi_trophy_calculate_prizes),
+    func_ret(0x8004_9900, "tScreenBeTheCopCongrats::GetCar", screencongrats::abi_cop_get_car),
+    func(0x8004_9960, "tScreenBeTheCopCongrats::CalculatePrizes", screencongrats::abi_cop_calculate_prizes),
+    func(0x8004_99b0, "tScreenBeTheCopCongrats::DrawCongratsMessage", screencongrats::abi_cop_draw_congrats_message),
+    func_ret(0x8004_9a70, "tScreenTournamentCongrats::GetCar", screencongrats::abi_tier_get_car),
+    func(0x8004_9ac4, "tScreenTournamentCongrats::CalculatePrizes", screencongrats::abi_tier_calculate_prizes),
+    func(0x8004_9b5c, "tScreenTournamentCongrats::DrawCongratsMessage", screencongrats::abi_tier_draw_congrats_message),
+    func(0x8004_9c28, "~tScreenTournamentCongrats", screencongrats::abi_tier_destructor),
+    func(0x8004_9c48, "~tScreenBeTheCopCongrats", screencongrats::abi_cop_destructor),
+    func(0x8004_9c68, "~tScreenPinkSlipCongrats", screencongrats::abi_pink_slip_destructor),
+    func(0x8004_9c88, "~tScreenTournamentTrophy", screencongrats::abi_trophy_destructor),
+    func(0x8004_9ca8, "~tScreenCongrats", screencongrats::abi_destructor),
     func(0x8004_b468, "tScreenUserName::Initialize", screenusername::abi_initialize),
     func(0x8004_b528, "tScreenUserName::GetShapeInfo", screenusername::abi_get_shape_info),
     func(0x8004_b588, "tScreenUserName::DrawVerticalLine", screenusername::abi_draw_vertical_line),
