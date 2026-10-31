@@ -1090,3 +1090,17 @@
 80023168 InitTV
 80023378 TurnOffTV
 80023388 TurnOnTV
+
+# SCREENMAIN.CPP (retail = dev + 0x1f8; DrawDropShadow stays the host's)
+80037118 tScreenMain::SwapBackground
+800372d4 tScreenMain::DoneLoadingBackground
+80037350 tScreenMain::SetState
+80037624 tScreenMain::InitDynamicImages
+80037990 tScreenMain::ProcessInput
+80037b10 tScreenMain::DrawVideoLines
+80037bb8 tScreenMain::DrawBackground
+80038890 tScreenMain::GetShapeInfo
+800388c0 tScreenMain::PreLoad
+8003895c tScreenMain::Initialize
+80038cd0 tScreenMain::Cleanup
+80038d3c ~tScreenMain

@@ -70,6 +70,7 @@ pub mod mathnfs;
 pub mod newton;
 pub mod physics;
 pub mod schedule;
+pub mod screenmain;
 pub mod sim;
 pub mod simqueue;
 pub mod stats;
@@ -496,6 +497,18 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_6bc8, "FeTools_init", fetools::abi_init),
     func(0x8002_6cb0, "FeTools_deinit", fetools::abi_deinit),
     func(0x8002_6d00, "FeTools_FormatMoney", fetools::abi_format_money),
+    func(0x8003_7118, "tScreenMain::SwapBackground", screenmain::abi_swap_background),
+    func_ret(0x8003_72d4, "tScreenMain::DoneLoadingBackground", screenmain::abi_done_loading_background),
+    func(0x8003_7350, "tScreenMain::SetState", screenmain::abi_set_state),
+    func(0x8003_7624, "tScreenMain::InitDynamicImages", screenmain::abi_init_dynamic_images),
+    func(0x8003_7990, "tScreenMain::ProcessInput", screenmain::abi_process_input),
+    func(0x8003_7b10, "tScreenMain::DrawVideoLines", screenmain::abi_draw_video_lines),
+    func(0x8003_7bb8, "tScreenMain::DrawBackground", screenmain::abi_draw_background),
+    func(0x8003_8890, "tScreenMain::GetShapeInfo", screenmain::abi_get_shape_info),
+    func(0x8003_88c0, "tScreenMain::PreLoad", screenmain::abi_pre_load),
+    func(0x8003_895c, "tScreenMain::Initialize", screenmain::abi_initialize),
+    func(0x8003_8cd0, "tScreenMain::Cleanup", screenmain::abi_cleanup),
+    func(0x8003_8d3c, "~tScreenMain", screenmain::abi_destructor),
     func_ret(0x8004_bcd8, "CalcFadeVal(int,int,int)", fefades::abi_fade),
     func_ret(0x8004_bd68, "CalcFadeVal(int,int)", fefades::abi_fade_out),
     func_ret(0x8004_bd8c, "CalcFadeVal(int,int,int,int)", fefades::abi_fade_faded),
@@ -1328,6 +1341,9 @@ pub(crate) mod test_util {
         c
     }
 
+    /// What the videos answer in the tests: their state, a frame shown, a new video's handle.
+    pub const VIDEO_ANSWERS: u32 = 0x8014_8AF0;
+
     /// The game's host answers the library calls that aren't recompiled (pads, VSync, CD:
     /// from 0x800e0000 on, `src/ps1/host/system.rs`), and the race RAM's pointers into them
     /// are unset here; so is the pause menu's vtable when its race isn't paused. Such calls
@@ -1335,9 +1351,21 @@ pub(crate) mod test_util {
     /// that isn't recompiled below that (jumps into functions) is interpreted as usual, and so
     /// is the font's character reader (0x80107358, `currentfont`'s: reached only through its
     /// pointer, never recompiled; stubbed, every text would measure 0 pixels) and the tests' own
-    /// routines among their structures (0x80140000 on).
+    /// routines among their structures (0x80140000 on). The front end's videos
+    /// (`VIDEO_create` .. `VIDEO_updateframexy`) are the host's too: `VIDEO_state`,
+    /// `VIDEO_updateframexy` and `VIDEO_create` answer what the tests put at [`VIDEO_ANSWERS`],
+    /// the others 0.
     fn no_host(c: &mut Cpu, addr: u32) -> bool {
-        if addr != 0 && (addr < 0x800E_0000 || addr == 0x8010_7358 || (0x8014_0000..0x8015_0000).contains(&addr)) {
+        if (0x8005_11B0..=0x8005_1528).contains(&addr) {
+            c.r[2] = match addr {
+                0x8005_1480 => c.m.r32(VIDEO_ANSWERS),
+                0x8005_1528 => c.m.r32(VIDEO_ANSWERS + 4),
+                0x8005_11B0 => c.m.r32(VIDEO_ANSWERS + 8),
+                _ => 0,
+            };
+            return true;
+        }
+        if addr != 0 &&(addr < 0x800E_0000 || addr == 0x8010_7358 || (0x8014_0000..0x8015_0000).contains(&addr)) {
             return false;
         }
         if addr != 0 && (c.dispatch)(c, addr) {
