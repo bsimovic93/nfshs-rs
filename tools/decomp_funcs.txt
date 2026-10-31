@@ -1069,3 +1069,10 @@
 8001406c FreeHelpShapeCluts
 8001585c tFEApplication::RunFrontEnd
 
+# FEFADES.CPP (the front end)
+8004bcd8 CalcFadeVal(int,int,int)
+8004bd68 CalcFadeVal(int,int)
+8004bd8c CalcFadeVal(int,int,int,int)
+8004bdc0 CalcTextFadeUnselToSel
+8004be30 CalcTextFadeSelToHi
+8004beb4 CalcOnOffFade

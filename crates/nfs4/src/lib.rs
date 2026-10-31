@@ -52,6 +52,7 @@ pub mod feapp;
 pub mod fecars;
 pub mod fecheats;
 pub mod fedialog;
+pub mod fefades;
 pub mod feinput;
 pub mod femenu;
 pub mod femenuextended;
@@ -489,6 +490,12 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_6bc8, "FeTools_init", fetools::abi_init),
     func(0x8002_6cb0, "FeTools_deinit", fetools::abi_deinit),
     func(0x8002_6d00, "FeTools_FormatMoney", fetools::abi_format_money),
+    func_ret(0x8004_bcd8, "CalcFadeVal(int,int,int)", fefades::abi_fade),
+    func_ret(0x8004_bd68, "CalcFadeVal(int,int)", fefades::abi_fade_out),
+    func_ret(0x8004_bd8c, "CalcFadeVal(int,int,int,int)", fefades::abi_fade_faded),
+    func_ret(0x8004_bdc0, "CalcTextFadeUnselToSel", fefades::abi_text_fade_unsel_to_sel),
+    func_ret(0x8004_be30, "CalcTextFadeSelToHi", fefades::abi_text_fade_sel_to_hi),
+    func(0x8004_beb4, "CalcOnOffFade", fefades::abi_on_off_fade),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),
