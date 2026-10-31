@@ -307,7 +307,7 @@ pub fn abi_menu_text_positioned_justify_fade(c: &mut Cpu) {
     menu_text_positioned_justify_fade(c, c.r[4], c.r[5], c.r[6], c.r[7], justify, state, ty);
 }
 
-fn menu_text_positioned_justify_fade_entry(c: &mut Cpu) {
+pub(crate) fn menu_text_positioned_justify_fade_entry(c: &mut Cpu) {
     abi::leave_prologue(c, 0x8002_1334, None, &[]);
     abi_menu_text_positioned_justify_fade(c);
 }
@@ -492,7 +492,7 @@ pub fn abi_word_wrap_text_rgb_justify(c: &mut Cpu) {
     c.r[2] = word_wrap_text_rgb_justify(c, c.r[4], c.r[5], c.r[6], c.r[7], font, measure);
 }
 
-fn word_wrap_text_rgb_justify_entry(c: &mut Cpu) {
+pub(crate) fn word_wrap_text_rgb_justify_entry(c: &mut Cpu) {
     abi::leave_prologue(c, 0x8002_1404, None, &[]);
     abi_word_wrap_text_rgb_justify(c);
 }

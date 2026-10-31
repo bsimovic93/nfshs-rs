@@ -209,7 +209,7 @@ pub fn abi_get_key_from_player(c: &mut Cpu) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
     use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
@@ -234,6 +234,11 @@ mod tests {
     /// repeat's time and delay, the clock.
     fn shuffle(c: &mut Cpu, rng: &mut Rng) {
         base::shuffle(c, rng);
+        pads(c, rng);
+    }
+
+    /// The pads alone (`shuffle` without FEMENU's structures).
+    pub(crate) fn pads(c: &mut Cpu, rng: &mut Rng) {
         let m = &mut c.m;
         for p in 0..2 {
             let g = PAD_GLOBAL + 34 * p;

@@ -12,7 +12,7 @@ use crate::abi::{self, Saved};
 use crate::femenu::KEY_START;
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SET_ABR_MODE, SPRINTF, TEXT_WORD};
 use crate::globals::{FE_APP, FRONT_END, GAME_TICKS, PATHS, SONGS_SCREEN};
-use crate::{fefades, fescreen, fetextrender, fetv};
+use crate::{fecredits, fefades, fescreen, fetextrender, fetv};
 use ps1rt::{Cpu, Mem};
 
 // A main screen: a `tScreen` (+0 its permanent shapes, +40 its swapped ones), then +100 its
@@ -127,7 +127,7 @@ const DRAW_DROP_SHADOW: u32 = 0x8003_79FC;
 const DRAW_SQUARE: u32 = 0x8004_F12C;
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 /// `rand`, `GetClut`, `GetTPage`, `gettick`, `ScaleShapeExtended`, `FeAudio_systemtask`,
-/// `purgememadr`; the credits' `Init`, `DeInit`, `Draw`.
+/// `purgememadr`.
 const RAND: fn(&mut Cpu) = nfs4rc::f_800eb430;
 const GET_CLUT: fn(&mut Cpu) = nfs4rc::f_800f4dac;
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
@@ -135,9 +135,6 @@ const GETTICK: fn(&mut Cpu) = nfs4rc::f_800e8e0c;
 const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004ef70;
 const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_80015a70;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
-const CREDITS_INIT: fn(&mut Cpu) = nfs4rc::f_80035cb0;
-const CREDITS_DEINIT: fn(&mut Cpu) = nfs4rc::f_80035d90;
-const CREDITS_DRAW: fn(&mut Cpu) = nfs4rc::f_80035ddc;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
@@ -264,7 +261,7 @@ pub fn set_state(c: &mut Cpu, this: u32, state: u32) {
         c.m.w32(this + ABORTED, 1);
         c.m.w32(this + ABORTED_AT, ticks);
         if state != 4 && c.m.r32(CREDITS + CREDITS_ON) == 1 {
-            r.call_leaving(c, CREDITS_DEINIT, &[CREDITS], 0x8003_73c0);
+            port(c, &r, 0x8003_5d90, 0x8003_73c0, &[CREDITS], fecredits::abi_de_init);
         }
         let ticks = c.m.r32(GAME_TICKS);
         c.m.w32(this + STATE, state);
@@ -317,7 +314,7 @@ pub fn set_state(c: &mut Cpu, this: u32, state: u32) {
                     c.m.w32(image(this, k) + KIND, 4);
                 }
                 let at = c.m.r32(this + STATE_AT);
-                r.call_leaving(c, CREDITS_INIT, &[CREDITS, at], 0x8003_760c);
+                port(c, &r, 0x8003_5cb0, 0x8003_760c, &[CREDITS, at], fecredits::abi_init);
             }
             _ => {}
         }
@@ -484,7 +481,7 @@ pub fn abi_draw_background(c: &mut Cpu) {
             r.enter_leaving(c, 0x8003_7350, 0x8003_7d6c, |c| set_state(c, this, to));
         }
         let on = (c.m.r32(this + STATE) == 4) as u32;
-        r.call_leaving(c, CREDITS_DRAW, &[CREDITS, on], 0x8003_7d84);
+        port(c, &r, 0x8003_5ddc, 0x8003_7d84, &[CREDITS, on], fecredits::abi_draw);
         // the last item's picture
         let last = c.m.r8(MODE) == 6 || on_last_item(&mut c.m);
         let to = if c.m.r32(this + STATE) == 3 { (!last).then_some(1) } else { last.then_some(3) };
@@ -942,7 +939,7 @@ pub fn abi_destructor(c: &mut Cpu) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, TOP, pick, player, via_abi};
     use crate::globals::SHAPES;
@@ -1006,7 +1003,7 @@ mod tests {
     /// and the swapped shapes came about each limit, its fade, video and numbers; its TVs on or
     /// off, showing their images or others; the video's answers; the credits on or not; the
     /// player's menu the main, the credits' or the test's (on its last item or not); the clock.
-    fn shuffle(c: &mut Cpu, rng: &mut Rng) {
+    pub(crate) fn shuffle(c: &mut Cpu, rng: &mut Rng) {
         base::shuffle(c, rng);
         let tables = [background(c, rng), background(c, rng)];
         let permanent = permanent(c);

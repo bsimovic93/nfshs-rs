@@ -1091,6 +1091,29 @@
 80023378 TurnOffTV
 80023388 TurnOnTV
 
+# FECREDITS.CPP (retail = dev + 0x1b8; Update and DrawPage are unnamed statics)
+80035ca0 tCreditManager::Setup
+80035cb0 tCreditManager::Init
+80035d90 tCreditManager::DeInit
+80035d9c tCreditManager::RealDeInit
+80035ddc tCreditManager::Draw
+80035f20 tCreditManager::Update
+80036278 tCreditManager::DrawPage
+
+# FEVIDEOWALL.CPP
+80036988 tVideoWall::Initialize
+80036a38 tVideoWall::UpdateImages
+80036b84 tVideoWall::SetAvailableText
+80036ba0 tVideoWall::SetAvailableIcon
+80036bc0 tVideoWall::SetOffset
+80036bcc tVideoWall::SetAvailable
+80036bd4 tVideoWall::SetValid
+80036bdc tVideoWall::Update
+80036dac tVideoWall::Draw
+80037050 tVideoWall::TurnOff
+80037074 tVideoWall::TurnOffInstant
+800370f0 tVideoWall::TurnOn
+
 # SCREENMAIN.CPP (retail = dev + 0x1f8; DrawDropShadow stays the host's)
 80037118 tScreenMain::SwapBackground
 800372d4 tScreenMain::DoneLoadingBackground
@@ -1104,3 +1127,34 @@
 8003895c tScreenMain::Initialize
 80038cd0 tScreenMain::Cleanup
 80038d3c ~tScreenMain
+
+# SCREENPINKSLIPS.CPP (retail = dev + 0x1f8 to Cleanup, + 0x294 after; DrawBackground's entry is past a nop)
+80038d60 tScreenPinkSlips::DrawBackground
+80039378 tScreenPinkSlips::GetShapeInfo
+80039438 tScreenPinkSlips::Initialize
+80039580 tScreenPinkSlips::Cleanup
+800395fc tScreenPinkSlips::UpdateVideoWall
+800396a8 tScreenPinkSlips::DrawVideoWall
+80039924 tScreenPinkSlips::ProcessInput
+80039a60 ~tScreenPinkSlips
+
+# SCREENTROPHYINFO.CPP (retail = dev + 0x3e0)
+800413e8 tScreenTrophyInfo::GetShapeInfo
+80041518 tScreenTrophyInfo::DrawBackground
+800419c0 ~tScreenTrophyInfo
+
+# SCREENTRACKINFO.CPP (retail = dev + 0x3e0)
+800425d8 tScreenTrackInfo::GetShapeInfo
+80042678 tScreenTrackInfo::DrawBackground
+80042900 tScreenTrackInfo::Initialize
+8004296c tScreenTrackInfo::ProcessInput
+80042a08 ~tScreenTrackInfo
+
+# SCREENTRACKRECORDS.CPP (retail = dev + 0x3e0, + 0x3e8 from DrawRecords)
+80042a28 tScreenTrackRecords::GetShapeInfo
+80042a4c tScreenTrackRecords::Initialize
+80042aa4 tScreenTrackRecords::Cleanup
+80042ae0 tScreenTrackRecords::DrawOneRecord
+80042d50 tScreenTrackRecords::DrawRecords
+80042f30 tScreenTrackRecords::DrawBackground
+800434e0 ~tScreenTrackRecords

@@ -45,13 +45,14 @@ pub mod aiworld;
 pub mod bworld;
 pub mod bworldsm;
 pub mod cars;
-pub mod collide;
 pub mod check;
+pub mod collide;
 pub mod control;
 pub mod drawshp;
 pub mod feapp;
 pub mod fecars;
 pub mod fecheats;
+pub mod fecredits;
 pub mod fedialog;
 pub mod fefades;
 pub mod feinput;
@@ -64,6 +65,7 @@ pub mod fetextrender;
 pub mod fetools;
 pub mod fetracks;
 pub mod fetv;
+pub mod fevideowall;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
@@ -71,6 +73,10 @@ pub mod newton;
 pub mod physics;
 pub mod schedule;
 pub mod screenmain;
+pub mod screenpinkslips;
+pub mod screentrackinfo;
+pub mod screentrackrecords;
+pub mod screentrophyinfo;
 pub mod sim;
 pub mod simqueue;
 pub mod stats;
@@ -497,6 +503,25 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_6bc8, "FeTools_init", fetools::abi_init),
     func(0x8002_6cb0, "FeTools_deinit", fetools::abi_deinit),
     func(0x8002_6d00, "FeTools_FormatMoney", fetools::abi_format_money),
+    func(0x8003_5ca0, "tCreditManager::Setup", fecredits::abi_setup),
+    func(0x8003_5cb0, "tCreditManager::Init", fecredits::abi_init),
+    func(0x8003_5d90, "tCreditManager::DeInit", fecredits::abi_de_init),
+    func(0x8003_5d9c, "tCreditManager::RealDeInit", fecredits::abi_real_de_init),
+    func(0x8003_5ddc, "tCreditManager::Draw", fecredits::abi_draw),
+    func(0x8003_5f20, "tCreditManager::Update", fecredits::abi_update),
+    func(0x8003_6278, "tCreditManager::DrawPage", fecredits::abi_draw_page),
+    func(0x8003_6988, "tVideoWall::Initialize", fevideowall::abi_initialize),
+    func(0x8003_6a38, "tVideoWall::UpdateImages", fevideowall::abi_update_images),
+    func(0x8003_6b84, "tVideoWall::SetAvailableText", fevideowall::abi_set_available_text),
+    func(0x8003_6ba0, "tVideoWall::SetAvailableIcon", fevideowall::abi_set_available_icon),
+    func(0x8003_6bc0, "tVideoWall::SetOffset", fevideowall::abi_set_offset),
+    func(0x8003_6bcc, "tVideoWall::SetAvailable", fevideowall::abi_set_available),
+    func(0x8003_6bd4, "tVideoWall::SetValid", fevideowall::abi_set_valid),
+    func(0x8003_6bdc, "tVideoWall::Update", fevideowall::abi_update),
+    func(0x8003_6dac, "tVideoWall::Draw", fevideowall::abi_draw),
+    func(0x8003_7050, "tVideoWall::TurnOff", fevideowall::abi_turn_off),
+    func(0x8003_7074, "tVideoWall::TurnOffInstant", fevideowall::abi_turn_off_instant),
+    func(0x8003_70f0, "tVideoWall::TurnOn", fevideowall::abi_turn_on),
     func(0x8003_7118, "tScreenMain::SwapBackground", screenmain::abi_swap_background),
     func_ret(0x8003_72d4, "tScreenMain::DoneLoadingBackground", screenmain::abi_done_loading_background),
     func(0x8003_7350, "tScreenMain::SetState", screenmain::abi_set_state),
@@ -509,6 +534,29 @@ pub static FUNCS: &[Func] = &[
     func(0x8003_895c, "tScreenMain::Initialize", screenmain::abi_initialize),
     func(0x8003_8cd0, "tScreenMain::Cleanup", screenmain::abi_cleanup),
     func(0x8003_8d3c, "~tScreenMain", screenmain::abi_destructor),
+    func(0x8003_8d60, "tScreenPinkSlips::DrawBackground", screenpinkslips::abi_draw_background),
+    func(0x8003_9378, "tScreenPinkSlips::GetShapeInfo", screenpinkslips::abi_get_shape_info),
+    func(0x8003_9438, "tScreenPinkSlips::Initialize", screenpinkslips::abi_initialize),
+    func(0x8003_9580, "tScreenPinkSlips::Cleanup", screenpinkslips::abi_cleanup),
+    func(0x8003_95fc, "tScreenPinkSlips::UpdateVideoWall", screenpinkslips::abi_update_video_wall),
+    func(0x8003_96a8, "tScreenPinkSlips::DrawVideoWall", screenpinkslips::abi_draw_video_wall),
+    func(0x8003_9924, "tScreenPinkSlips::ProcessInput", screenpinkslips::abi_process_input),
+    func(0x8003_9a60, "~tScreenPinkSlips", screenpinkslips::abi_destructor),
+    func(0x8004_13e8, "tScreenTrophyInfo::GetShapeInfo", screentrophyinfo::abi_get_shape_info),
+    func(0x8004_1518, "tScreenTrophyInfo::DrawBackground", screentrophyinfo::abi_draw_background),
+    func(0x8004_19c0, "~tScreenTrophyInfo", screentrophyinfo::abi_destructor),
+    func(0x8004_25d8, "tScreenTrackInfo::GetShapeInfo", screentrackinfo::abi_get_shape_info),
+    func(0x8004_2678, "tScreenTrackInfo::DrawBackground", screentrackinfo::abi_draw_background),
+    func(0x8004_2900, "tScreenTrackInfo::Initialize", screentrackinfo::abi_initialize),
+    func(0x8004_296c, "tScreenTrackInfo::ProcessInput", screentrackinfo::abi_process_input),
+    func(0x8004_2a08, "~tScreenTrackInfo", screentrackinfo::abi_destructor),
+    func(0x8004_2a28, "tScreenTrackRecords::GetShapeInfo", screentrackrecords::abi_get_shape_info),
+    func(0x8004_2a4c, "tScreenTrackRecords::Initialize", screentrackrecords::abi_initialize),
+    func(0x8004_2aa4, "tScreenTrackRecords::Cleanup", screentrackrecords::abi_cleanup),
+    func(0x8004_2ae0, "tScreenTrackRecords::DrawOneRecord", screentrackrecords::abi_draw_one_record),
+    func(0x8004_2d50, "tScreenTrackRecords::DrawRecords", screentrackrecords::abi_draw_records),
+    func(0x8004_2f30, "tScreenTrackRecords::DrawBackground", screentrackrecords::abi_draw_background),
+    func(0x8004_34e0, "~tScreenTrackRecords", screentrackrecords::abi_destructor),
     func_ret(0x8004_bcd8, "CalcFadeVal(int,int,int)", fefades::abi_fade),
     func_ret(0x8004_bd68, "CalcFadeVal(int,int)", fefades::abi_fade_out),
     func_ret(0x8004_bd8c, "CalcFadeVal(int,int,int,int)", fefades::abi_fade_faded),
@@ -1482,6 +1530,10 @@ pub(crate) mod test_util {
                 c.decomp = trace;
             }
             original(&mut c);
+            // (an original the recompiler split ends by handing on its continuation)
+            if c.cont != 0 {
+                c.run_cont();
+            }
             c.decomp = plain;
             let want = (c.m.scratch, c.m.ram.clone());
             let want_seed = c.rand_seed;
