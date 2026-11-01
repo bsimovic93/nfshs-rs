@@ -83,12 +83,15 @@ pub mod screenpost;
 pub mod screentrackinfo;
 pub mod screentournselect;
 pub mod screentrackrecords;
+pub mod screentracks;
 pub mod screentrophyinfo;
 pub mod screentrophyroom;
 pub mod screenusername;
 pub mod sim;
 pub mod simqueue;
+pub mod statchk;
 pub mod stats;
+pub mod stattool;
 pub mod types;
 pub mod udff;
 pub mod vec;
@@ -625,6 +628,16 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_13e8, "tScreenTrophyInfo::GetShapeInfo", screentrophyinfo::abi_get_shape_info),
     func(0x8004_1518, "tScreenTrophyInfo::DrawBackground", screentrophyinfo::abi_draw_background),
     func(0x8004_19c0, "~tScreenTrophyInfo", screentrophyinfo::abi_destructor),
+    func(0x8004_19e0, "tScreenTrackSelect::DrawBackground", screentracks::abi_draw_background),
+    func(0x8004_1e8c, "tScreenTrackSelect::GetShapeInfo", screentracks::abi_get_shape_info),
+    func(0x8004_1f4c, "tScreenTrackSelect::Initialize", screentracks::abi_initialize),
+    func(0x8004_2108, "tScreenTrackSelect::Cleanup", screentracks::abi_cleanup),
+    func(0x8004_2148, "tScreenTrackSelect::SetBrightness", screentracks::abi_set_brightness),
+    func(0x8004_2178, "tScreenTrackSelect::UpdateBrightness", screentracks::abi_update_brightness),
+    func(0x8004_2268, "tScreenTrackSelect::UpdateVideoWall", screentracks::abi_update_video_wall),
+    func(0x8004_22dc, "tScreenTrackSelect::DrawVideoWall", screentracks::abi_draw_video_wall),
+    func(0x8004_23ec, "tScreenTrackSelect::ProcessInput", screentracks::abi_process_input),
+    func(0x8004_25b4, "~tScreenTrackSelect", screentracks::abi_destructor),
     func(0x8004_25d8, "tScreenTrackInfo::GetShapeInfo", screentrackinfo::abi_get_shape_info),
     func(0x8004_2678, "tScreenTrackInfo::DrawBackground", screentrackinfo::abi_draw_background),
     func(0x8004_2900, "tScreenTrackInfo::Initialize", screentrackinfo::abi_initialize),
@@ -676,6 +689,22 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_9c68, "~tScreenPinkSlipCongrats", screencongrats::abi_pink_slip_destructor),
     func(0x8004_9c88, "~tScreenTournamentTrophy", screencongrats::abi_trophy_destructor),
     func(0x8004_9ca8, "~tScreenCongrats", screencongrats::abi_destructor),
+    func_ret(0x8004_9cc8, "StatChk_IsRecordLapTime", statchk::abi_is_record_lap_time),
+    func(0x8004_a004, "StatChk_SaveRecordLapTime", statchk::abi_save_record_lap_time),
+    func_ret(0x8004_a194, "StatChk_IsTopTime", statchk::abi_is_top_time),
+    func(0x8004_a640, "StatChk_SaveTopTime", statchk::abi_save_top_time),
+    func(0x8004_ad14, "StatChk_ClearNewRecords", statchk::abi_clear_new_records),
+    func(0x8004_ad40, "Stattool_nCreateIndex", stattool::abi_n_create_index),
+    func(0x8004_ae74, "Stattool_ParseTime", stattool::abi_parse_time),
+    func(0x8004_af8c, "UserNameUpperCaseOneLetter", stattool::abi_user_name_upper_case_one_letter),
+    func(0x8004_b0ac, "Stattool_SamNelsonsUpperLowerStringConverterForRecords", stattool::abi_title_case),
+    func(0x8004_b128, "StatTool_UpperCaseItKeepingInMindThoseBloodySpecialCharacters", stattool::abi_upper_case),
+    func(0x8004_b174, "Stattool_GetAllDefaultRecords", stattool::abi_get_all_default_records),
+    func(0x8004_b26c, "Stattool_ReadDefaultRecords", stattool::abi_read_default_records),
+    func(0x8004_b2f4, "Stattool_GetRecords", stattool::abi_get_records),
+    func_ret(0x8004_b33c, "Stattool_ReturnRecordLapTime", stattool::abi_return_record_lap_time),
+    func_ret(0x8004_b3a0, "Stattool_CheckForHumanCar", stattool::abi_check_for_human_car),
+    func_ret(0x8004_b428, "Stattool_GetAINameFromPersonality", stattool::abi_get_ai_name_from_personality),
     func(0x8004_b468, "tScreenUserName::Initialize", screenusername::abi_initialize),
     func(0x8004_b528, "tScreenUserName::GetShapeInfo", screenusername::abi_get_shape_info),
     func(0x8004_b588, "tScreenUserName::DrawVerticalLine", screenusername::abi_draw_vertical_line),

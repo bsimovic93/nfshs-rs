@@ -1292,3 +1292,35 @@
 80049c68 ~tScreenPinkSlipCongrats
 80049c88 ~tScreenTournamentTrophy
 80049ca8 ~tScreenCongrats
+
+# STATCHK.CPP (retail = dev + 0x488)
+80049cc8 StatChk_IsRecordLapTime
+8004a004 StatChk_SaveRecordLapTime
+8004a194 StatChk_IsTopTime
+8004a640 StatChk_SaveTopTime
+8004ad14 StatChk_ClearNewRecords
+
+# STATTOOL.CPP (retail = dev + 0x4d8 to + 0x4dc)
+8004ad40 Stattool_nCreateIndex
+8004ae74 Stattool_ParseTime
+8004af8c UserNameUpperCaseOneLetter
+8004b0ac Stattool_SamNelsonsUpperLowerStringConverterForRecords
+8004b128 StatTool_UpperCaseItKeepingInMindThoseBloodySpecialCharacters
+8004b174 Stattool_GetAllDefaultRecords
+8004b26c Stattool_ReadDefaultRecords
+8004b2f4 Stattool_GetRecords
+8004b33c Stattool_ReturnRecordLapTime
+8004b3a0 Stattool_CheckForHumanCar
+8004b428 Stattool_GetAINameFromPersonality
+
+# SCREENTRACKS.CPP (retail = dev + 0x3e0)
+800419e0 tScreenTrackSelect::DrawBackground
+80041e8c tScreenTrackSelect::GetShapeInfo
+80041f4c tScreenTrackSelect::Initialize
+80042108 tScreenTrackSelect::Cleanup
+80042148 tScreenTrackSelect::SetBrightness
+80042178 tScreenTrackSelect::UpdateBrightness
+80042268 tScreenTrackSelect::UpdateVideoWall
+800422dc tScreenTrackSelect::DrawVideoWall
+800423ec tScreenTrackSelect::ProcessInput
+800425b4 ~tScreenTrackSelect
