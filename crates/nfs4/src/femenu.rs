@@ -1,25 +1,18 @@
-//! FEMENU.CPP: the front end's menus: the list iterators a menu item steps through (a value
-//! in a list of text ids, indexed by a byte or two, per player, or a range), the menu items
-//! (the base, the interactive ones, left-right choices and sliders, buttons that go to a menu)
-//! and the menus that hold them (the current item, moving up and down past disabled ones,
-//! accept, back, options and help).
+//! FEMENU.CPP: the front end's menus. Three families of classes:
+//! - list iterators: the value a menu item steps through, a byte into a list of text ids
+//!   (`tListIterator`), indexed by one or two other bytes, one per player, or a plain range;
+//! - menu items: the base (`tMenuItem`), interactive ones, left-right choices and sliders, and
+//!   buttons that go to a menu;
+//! - menus (`tMenu`): a list of items with a current one that up and down move past disabled
+//!   items, and what accept, back, options, help and start do.
 //!
-//! Reading the ports (the front end's other modules follow the same pattern):
-//! - Each C++ object is a typed view over PS1 RAM (`crate::types`): `item.flags(m)`,
-//!   `menu.set_current_item(m, 0)`. A derived class's view reaches its base class's members
-//!   (`Deref`), and `base()` is the base class's view of the same object.
-//! - Each `pub fn` is the original function; `abi_*` is its entry from the game (arguments
-//!   from the registers, the result in v0).
-//! - The calling-convention bookkeeping that keeps the stack bit-exact with the original's is
-//!   kept apart from the logic as far as it can be: `abi::frame(c, size, ..)` is the
-//!   original's stack frame, `Saved` (`r`) its saved registers (`r.0[k]` is s`k` as the
-//!   original sets it before a call), and the last argument of a call is the original's
-//!   return address there.
-//! - Virtual calls go through the vtable (`method`) and get the registers the original's
-//!   caller has at its `jalr`, those it doesn't set from the calls before
-//!   (`Saved::call_ptr_leaving`).
+//! Each object is a typed view over PS1 RAM (`crate::types`): `item.flags(m)`,
+//! `menu.set_current_item(m, 0)`; a derived class's view reaches its base class's members, and
+//! `base()` is the base class's view. Each `pub fn` is the original function; `abi_*` is its
+//! entry from the game (arguments from the registers, the result in v0). Calls into the game go
+//! through `crate::call`, virtual ones through the object's vtable.
 
-use crate::abi::{self, Reg, Saved};
+use crate::call::{call, call_addr, call_virtual};
 use crate::globals::{FE_APP, SUB_MENU_PLAYER};
 use crate::types::{
     ListIterator, ListIteratorDoubleIndexed, ListIteratorIndexed, ListIteratorRange, ListIteratorRangeIndexed, Menu, MenuCommand,
@@ -91,52 +84,55 @@ const MENU_EXIT: u32 = 2;
 const MENU_BACK_ACCEPTS: u32 = 4;
 const MENU_ACCEPT_BACKS: u32 = 0x1_0000;
 
-/// The library's `__builtin_delete` (0x800a4910), and the front end's sounds.
-const DELETE: fn(&mut Cpu) = nfs4rc::f_800a4910;
+/// The front end's sounds: up, down, left, right (`AudioCmn_PlayFESFX`); the slider's tick
+/// (`AudioCmn_PlayFESFXVol`, hooked by the host: called by address).
 pub(crate) const PLAY_FE_SFX: fn(&mut Cpu) = nfs4rc::f_8007a08c;
-/// `AudioCmn_PlayFESFXVol` (the host watches it: called by address).
 const PLAY_FE_SFX_VOL: u32 = 0x8007_A0AC;
+const SOUND_UP: u32 = 3;
+const SOUND_DOWN: u32 = 4;
+const SOUND_LEFT: u32 = 5;
+const SOUND_RIGHT: u32 = 6;
+const SOUND_TICK: u32 = 21;
+/// The library's `__builtin_delete`.
+const DELETE: fn(&mut Cpu) = nfs4rc::f_800a4910;
 /// `TextSys_WordX`, `TextSys_WordY`: a text id's place on the screen.
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
-/// `FETextRender_MenuTextPositioned` (FETEXTRENDER.CPP), `FETextRender_Title`.
+/// `FETextRender_MenuTextPositioned(text, x, y, selected, type)`, `FETextRender_Title`.
 const MENU_TEXT_POSITIONED: fn(&mut Cpu) = crate::fetextrender::menu_text_positioned_entry;
 pub(crate) const TITLE: fn(&mut Cpu) = crate::fetextrender::title_entry;
-/// `tFEApplication::DisplayHelp` (FEAPP.CPP).
+/// The text type of a menu item's text and value.
+const ITEM_TEXT: u32 = 6;
+/// `tFEApplication::DisplayHelp(app, page)`.
 const DISPLAY_HELP: fn(&mut Cpu) = nfs4rc::f_80014048;
-/// `DrawSlider` (the host captures its primitives: called by address).
+/// `DrawSlider(value, min, max, x, y, w, h, ...)`, hooked by the host: called by address.
 const DRAW_SLIDER: u32 = 0x8002_4C4C;
 
 /// The virtual function at `slot` of the object `this` whose vtable pointer is at
-/// `this + vptr`: `this` adjusted by the entry's offset, and the function.
+/// `this + vptr`: `this` adjusted by the entry's offset, and the function. (For the modules
+/// not rewritten yet; `crate::call::virtual_fn` is the same.)
 pub(crate) fn method(m: &mut Mem, this: u32, vptr: u32, slot: u32) -> (u32, u32) {
     let vt = m.r32(this.wrapping_add(vptr));
     let delta = m.r16(vt.wrapping_add(slot)) as i16 as i32 as u32;
     (this.wrapping_add(delta), m.r32(vt.wrapping_add(slot + 4)))
 }
 
-/// A destructor: the vtable set back to the class's (`vptr` its place), then the base class's
-/// destructor (`base`, at `base_addr`), given the caller's flags; the return address `ra`.
-fn destroy(c: &mut Cpu, this: u32, vptr: u32, vtable: u32, base_addr: u32, ra: u32, base: fn(&mut Cpu, u32, u32)) {
-    abi::frame(c, 24, |c, _| {
-        c.m.w32(this.wrapping_add(vptr), vtable);
-        let flags = c.r[5];
-        Saved::of(c).enter(c, base_addr, ra, |c| base(c, this, flags));
-    })
+/// A destructor: the class's vtable put back (its pointer at `vptr`), then the base class's
+/// destructor `base` with the caller's `flags`.
+fn destroy(c: &mut Cpu, this: u32, flags: u32, vptr: u32, vtable: u32, base: fn(&mut Cpu, u32, u32)) {
+    c.m.w32(this.wrapping_add(vptr), vtable);
+    base(c, this, flags);
 }
 
-/// A root class's destructor: the vtable set back to the class's, the object deleted when
-/// `flags & 1`.
-fn destroy_root(c: &mut Cpu, this: u32, flags: u32, vptr: u32, vtable: u32, ra: u32) {
-    abi::frame(c, 24, |c, _| {
-        c.m.w32(this.wrapping_add(vptr), vtable);
-        if flags & 1 != 0 {
-            Saved::of(c).call(c, DELETE, &[this, 1], ra);
-        }
-    })
+/// A root class's destructor: its vtable put back, the object freed when `flags & 1`.
+fn destroy_root(c: &mut Cpu, this: u32, flags: u32, vptr: u32, vtable: u32) {
+    c.m.w32(this.wrapping_add(vptr), vtable);
+    if flags & 1 != 0 {
+        call(c, DELETE, &[this, 1]);
+    }
 }
 
-// tListIterator: the value is a byte `*fValue`, an index into `fSelectionList`, a list of
+// ---- tListIterator: the value is a byte `*fValue`, an index into `fSelectionList`, a list of
 // text ids that a 0 ends.
 
 /// The text id at `k` in the iterator's list.
@@ -161,7 +157,7 @@ pub fn abi_list_iterator(c: &mut Cpu) {
 
 /// `tListIterator::~tListIterator` (FEMENU.CPP, 0x80023e14).
 pub fn list_iterator_dtor(c: &mut Cpu, this: u32, flags: u32) {
-    destroy_root(c, this, flags, ITERATOR_VPTR, LIST_ITERATOR_VT, 0x8002_3e38);
+    destroy_root(c, this, flags, ITERATOR_VPTR, LIST_ITERATOR_VT);
 }
 
 pub fn abi_list_iterator_dtor(c: &mut Cpu) {
@@ -178,29 +174,23 @@ pub fn abi_value(c: &mut Cpu) {
     c.r[2] = value(&mut c.m, ListIterator(c.r[4]));
 }
 
-/// A `TextValue`: the text id at the value (`Value` for `player`, through the vtable) in the
-/// list; `ra` the virtual call's return.
-fn text_value_of(c: &mut Cpu, this: ListIterator, player: u32, ra: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this.0;
-        let (obj, f) = method(&mut c.m, this.0, ITERATOR_VPTR, VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, player], ra);
-        list_entry(&mut c.m, this, v & 0xFF) as u32
-    })
+/// Every iterator's `TextValue`: the text id at its value (its virtual `Value` for `player`).
+fn text_value_of(c: &mut Cpu, this: ListIterator, player: u32) -> u32 {
+    let v = call_virtual(c, this.0, ITERATOR_VPTR, VALUE, &[player]);
+    list_entry(&mut c.m, this, v & 0xFF) as u32
 }
 
 /// `tListIterator::TextValue` (FEMENU.CPP, 0x80023e5c): the value's text id.
 pub fn text_value(c: &mut Cpu, this: ListIterator) -> u32 {
-    text_value_of(c, this, u32::MAX, 0x8002_3e88)
+    text_value_of(c, this, u32::MAX)
 }
 
 pub fn abi_text_value(c: &mut Cpu) {
     c.r[2] = text_value(c, ListIterator(c.r[4]));
 }
 
-/// The next value in the list (round to the first after the last): `Increment`'s. `at` gives
-/// the value's place, read again after the step as the original does.
+/// The next value in the list, round to the first after the last: every `Increment`. `at`
+/// gives the value's place (read again after the step, as the original does).
 fn step_up(m: &mut Mem, this: ListIterator, at: impl Fn(&mut Mem) -> u32) {
     let a = at(m);
     let v = m.r8(a).wrapping_add(1);
@@ -212,8 +202,8 @@ fn step_up(m: &mut Mem, this: ListIterator, at: impl Fn(&mut Mem) -> u32) {
     }
 }
 
-/// The previous value (round to the last: on while the list goes on): `Decrement`'s. `at`
-/// gives the value's place; `first` is it as the original first read it.
+/// The previous value, round to the last: every `Decrement`. `first` is the value's place as
+/// first read, `at` gives it again.
 fn step_down(m: &mut Mem, this: ListIterator, first: u32, at: impl Fn(&mut Mem) -> u32) {
     let v = m.r8(first);
     if v != 0 {
@@ -223,6 +213,7 @@ fn step_down(m: &mut Mem, this: ListIterator, first: u32, at: impl Fn(&mut Mem) 
     if list_entry(m, this, 1) <= 0 {
         return;
     }
+    // from the first, up to the last
     let mut a = first;
     loop {
         let v = m.r8(a).wrapping_add(1);
@@ -254,9 +245,9 @@ pub fn abi_decrement(c: &mut Cpu) {
     decrement(&mut c.m, ListIterator(c.r[4]));
 }
 
-// tListIteratorIndexed: the value is `fValue[*fIndex]`.
+// ---- tListIteratorIndexed: the value is `fValue[*fIndex]`.
 
-/// The value's place `fValue[*index]` of an iterator indexed by the byte at `index`.
+/// The value's place `fValue[*index]`, for an iterator indexed by the byte at `index`.
 fn at_index(m: &mut Mem, this: ListIterator, index: u32) -> u32 {
     let k = m.r8(index) as u32;
     this.value(m).wrapping_add(k)
@@ -270,14 +261,11 @@ fn indexed_at(m: &mut Mem, this: ListIteratorIndexed) -> u32 {
 /// `tListIteratorIndexed::tListIteratorIndexed` (FEMENU.CPP, 0x80023f80): over `list`, the
 /// values at `value`, the one at `*index`.
 pub fn indexed(c: &mut Cpu, this: ListIteratorIndexed, list: u32, value: u32, index: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..2].copy_from_slice(&[this.0, index]);
-        r.enter(c, 0x8002_3df0, 0x8002_3f9c, |c| list_iterator(&mut c.m, this.base(), list, value));
-        this.set_vtable(&mut c.m, INDEXED_VT);
-        this.set_index(&mut c.m, index);
-        this.0
-    })
+    let m = &mut c.m;
+    list_iterator(m, this.base(), list, value);
+    this.set_vtable(m, INDEXED_VT);
+    this.set_index(m, index);
+    this.0
 }
 
 pub fn abi_indexed(c: &mut Cpu) {
@@ -286,7 +274,7 @@ pub fn abi_indexed(c: &mut Cpu) {
 
 /// `tListIteratorIndexed::~tListIteratorIndexed` (FEMENU.CPP, 0x80023fc4).
 pub fn abi_indexed_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], ITERATOR_VPTR, INDEXED_VT, 0x8002_3e14, 0x8002_3fdc, list_iterator_dtor);
+    destroy(c, c.r[4], c.r[5], ITERATOR_VPTR, INDEXED_VT, list_iterator_dtor);
 }
 
 /// `tListIteratorIndexed::Value` (FEMENU.CPP, 0x80023fec).
@@ -301,7 +289,7 @@ pub fn abi_indexed_value(c: &mut Cpu) {
 
 /// `tListIteratorIndexed::TextValue` (FEMENU.CPP, 0x80024010).
 pub fn abi_indexed_text_value(c: &mut Cpu) {
-    c.r[2] = text_value_of(c, ListIterator(c.r[4]), u32::MAX, 0x8002_403c);
+    c.r[2] = text_value_of(c, ListIterator(c.r[4]), u32::MAX);
 }
 
 /// `tListIteratorIndexed::Increment` (FEMENU.CPP, 0x80024060).
@@ -323,19 +311,19 @@ pub fn abi_indexed_decrement(c: &mut Cpu) {
     indexed_decrement(&mut c.m, ListIteratorIndexed(c.r[4]));
 }
 
-// tListIteratorDoubleIndexed: the value is `fValue[*fIndex1 * index1multiplier + *fIndex2]`.
+// ---- tListIteratorDoubleIndexed: the value is `fValue[*fIndex1 * index1multiplier + *fIndex2]`.
 
 fn double_indexed_at(m: &mut Mem, this: ListIteratorDoubleIndexed) -> u32 {
     let index1 = this.index1(m);
     let row = (m.r8(index1) as u32).wrapping_mul(this.index1multiplier(m) as u32);
     let index2 = this.index2(m);
-    let k = m.r8(index2) as u32;
-    this.value(m).wrapping_add(row.wrapping_add(k))
+    let column = m.r8(index2) as u32;
+    this.value(m).wrapping_add(row.wrapping_add(column))
 }
 
 /// `tListIteratorDoubleIndexed::~tListIteratorDoubleIndexed` (FEMENU.CPP, 0x80024174).
 pub fn abi_double_indexed_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], ITERATOR_VPTR, DOUBLE_INDEXED_VT, 0x8002_3e14, 0x8002_418c, list_iterator_dtor);
+    destroy(c, c.r[4], c.r[5], ITERATOR_VPTR, DOUBLE_INDEXED_VT, list_iterator_dtor);
 }
 
 /// `tListIteratorDoubleIndexed::Value` (FEMENU.CPP, 0x8002419c).
@@ -350,7 +338,7 @@ pub fn abi_double_indexed_value(c: &mut Cpu) {
 
 /// `tListIteratorDoubleIndexed::TextValue` (FEMENU.CPP, 0x800241d8).
 pub fn abi_double_indexed_text_value(c: &mut Cpu) {
-    c.r[2] = text_value_of(c, ListIterator(c.r[4]), u32::MAX, 0x8002_4204);
+    c.r[2] = text_value_of(c, ListIterator(c.r[4]), u32::MAX);
 }
 
 /// `tListIteratorDoubleIndexed::Increment` (FEMENU.CPP, 0x80024228).
@@ -372,7 +360,7 @@ pub fn abi_double_indexed_decrement(c: &mut Cpu) {
     double_indexed_decrement(&mut c.m, ListIteratorDoubleIndexed(c.r[4]));
 }
 
-// tListIteratorMultiPlayer: a value per player, `fValue[player]` (player -1, all of them:
+// ---- tListIteratorMultiPlayer: a value per player, `fValue[player]` (player -1, any of them:
 // the first's).
 
 fn multi_player_at(m: &mut Mem, this: ListIterator, player: u32) -> u32 {
@@ -382,7 +370,7 @@ fn multi_player_at(m: &mut Mem, this: ListIterator, player: u32) -> u32 {
 
 /// `tListIteratorMultiPlayer::~tListIteratorMultiPlayer` (FEMENU.CPP, 0x800243b0).
 pub fn abi_multi_player_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], ITERATOR_VPTR, MULTI_PLAYER_VT, 0x8002_3e14, 0x8002_43c8, list_iterator_dtor);
+    destroy(c, c.r[4], c.r[5], ITERATOR_VPTR, MULTI_PLAYER_VT, list_iterator_dtor);
 }
 
 /// `tListIteratorMultiPlayer::Value` (FEMENU.CPP, 0x800243d8): `player`'s value.
@@ -397,7 +385,7 @@ pub fn abi_multi_player_value(c: &mut Cpu) {
 
 /// `tListIteratorMultiPlayer::TextValue` (FEMENU.CPP, 0x80024400): `player`'s text id.
 pub fn abi_multi_player_text_value(c: &mut Cpu) {
-    c.r[2] = text_value_of(c, ListIterator(c.r[4]), c.r[5], 0x8002_442c);
+    c.r[2] = text_value_of(c, ListIterator(c.r[4]), c.r[5]);
 }
 
 /// `tListIteratorMultiPlayer::Increment` (FEMENU.CPP, 0x80024450).
@@ -419,20 +407,16 @@ pub fn abi_multi_player_decrement(c: &mut Cpu) {
     multi_player_decrement(&mut c.m, ListIterator(c.r[4]), c.r[5]);
 }
 
-// tListIteratorRange: a value from `fMinValue` to `fMaxValue` (no list, no text).
+// ---- tListIteratorRange: a value from `fMinValue` to `fMaxValue` (no list, no text).
 
 /// `tListIteratorRange::tListIteratorRange` (FEMENU.CPP, 0x80024554).
 pub fn range(c: &mut Cpu, this: ListIteratorRange, min: u32, max: u32, value: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[this.0, min, max]);
-        r.enter(c, 0x8002_3df0, 0x8002_4580, |c| list_iterator(&mut c.m, this.base(), 0, value));
-        let m = &mut c.m;
-        this.set_vtable(m, RANGE_VT);
-        this.set_min_value(m, min as u8);
-        this.set_max_value(m, max as u8);
-        this.0
-    })
+    let m = &mut c.m;
+    list_iterator(m, this.base(), 0, value);
+    this.set_vtable(m, RANGE_VT);
+    this.set_min_value(m, min as u8);
+    this.set_max_value(m, max as u8);
+    this.0
 }
 
 pub fn abi_range(c: &mut Cpu) {
@@ -440,8 +424,8 @@ pub fn abi_range(c: &mut Cpu) {
 }
 
 /// `tListIteratorRange::~tListIteratorRange` (FEMENU.CPP, 0x800245b0).
-pub fn range_dtor(c: &mut Cpu, this: u32, _flags: u32) {
-    destroy(c, this, ITERATOR_VPTR, RANGE_VT, 0x8002_3e14, 0x8002_45c8, list_iterator_dtor);
+pub fn range_dtor(c: &mut Cpu, this: u32, flags: u32) {
+    destroy(c, this, flags, ITERATOR_VPTR, RANGE_VT, list_iterator_dtor);
 }
 
 pub fn abi_range_dtor(c: &mut Cpu) {
@@ -494,7 +478,7 @@ pub fn abi_range_decrement(c: &mut Cpu) {
     range_decrement(&mut c.m, ListIteratorRange(c.r[4]));
 }
 
-// tListIteratorRangeIndexed: a range, the value `fValue[*fIndex]`.
+// ---- tListIteratorRangeIndexed: a range, the value `fValue[*fIndex]`.
 
 fn range_indexed_at(m: &mut Mem, this: ListIteratorRangeIndexed) -> u32 {
     let index = this.index(m);
@@ -503,24 +487,20 @@ fn range_indexed_at(m: &mut Mem, this: ListIteratorRangeIndexed) -> u32 {
 
 /// `tListIteratorRangeIndexed::tListIteratorRangeIndexed` (FEMENU.CPP, 0x80024644).
 pub fn range_indexed(c: &mut Cpu, this: ListIteratorRangeIndexed, min: u32, max: u32, value: u32, index: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..2].copy_from_slice(&[this.0, index]);
-        r.enter(c, 0x8002_4554, 0x8002_4668, |c| range(c, this.base(), min & 0xFF, max & 0xFF, value));
-        this.set_vtable(&mut c.m, RANGE_INDEXED_VT);
-        this.set_index(&mut c.m, index);
-        this.0
-    })
+    range(c, this.base(), min & 0xFF, max & 0xFF, value);
+    this.set_vtable(&mut c.m, RANGE_INDEXED_VT);
+    this.set_index(&mut c.m, index);
+    this.0
 }
 
 pub fn abi_range_indexed(c: &mut Cpu) {
-    let index = abi::arg(c, 4);
+    let index = crate::abi::arg(c, 4);
     c.r[2] = range_indexed(c, ListIteratorRangeIndexed(c.r[4]), c.r[5], c.r[6], c.r[7], index);
 }
 
 /// `tListIteratorRangeIndexed::~tListIteratorRangeIndexed` (FEMENU.CPP, 0x80024690).
 pub fn abi_range_indexed_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], ITERATOR_VPTR, RANGE_INDEXED_VT, 0x8002_45b0, 0x8002_46a8, range_dtor);
+    destroy(c, c.r[4], c.r[5], ITERATOR_VPTR, RANGE_INDEXED_VT, range_dtor);
 }
 
 /// `tListIteratorRangeIndexed::Value` (FEMENU.CPP, 0x800246b8).
@@ -553,7 +533,7 @@ pub fn abi_range_indexed_decrement(c: &mut Cpu) {
     range_indexed_decrement(&mut c.m, ListIteratorRangeIndexed(c.r[4]));
 }
 
-// tMenuItem: its flags (`ITEM_*`), its text id, the selection's fade (0..128).
+// ---- tMenuItem: its flags (`ITEM_*`), its text id, the selection's fade (0..128).
 
 /// `tMenuItem::tMenuItem` (FEMENU.CPP, 0x80024754): an item showing `text`.
 pub fn menu_item(m: &mut Mem, this: MenuItem, text: u32) -> u32 {
@@ -573,7 +553,7 @@ pub fn abi_menu_item(c: &mut Cpu) {
 
 /// `tMenuItem::~tMenuItem` (FEMENU.CPP, 0x80024784).
 pub fn menu_item_dtor(c: &mut Cpu, this: u32, flags: u32) {
-    destroy_root(c, this, flags, ITEM_VPTR, MENU_ITEM_VT, 0x8002_47a8);
+    destroy_root(c, this, flags, ITEM_VPTR, MENU_ITEM_VT);
 }
 
 pub fn abi_menu_item_dtor(c: &mut Cpu) {
@@ -592,7 +572,7 @@ pub fn abi_nothing(_: &mut Cpu) {}
 
 /// `tMenuItem::UpdateTransition` (FEMENU.CPP, 0x800247c8): the selection's fade.
 pub fn menu_item_update_transition(c: &mut Cpu, this: MenuItem, selected: u32) {
-    abi::frame(c, 24, |c, _| update_sel_fade(&mut c.m, this, selected));
+    update_sel_fade(&mut c.m, this, selected);
 }
 
 pub fn abi_menu_item_update_transition(c: &mut Cpu) {
@@ -622,35 +602,26 @@ pub fn abi_update_sel_fade(c: &mut Cpu) {
     update_sel_fade(&mut c.m, MenuItem(c.r[4]), c.r[5]);
 }
 
-/// `tMenuItem::Draw(int, int, bool)` (FEMENU.CPP, 0x80024848): `Draw(bool)` (the place given
-/// is not used).
+/// `tMenuItem::Draw(int, int, bool)` (FEMENU.CPP, 0x80024848): the plain `Draw(bool)`; the
+/// place given isn't used.
 pub fn abi_menu_item_draw_at(c: &mut Cpu) {
     let (this, selected) = (c.r[4], c.r[7]);
-    abi::frame(c, 24, |c, _| {
-        let (obj, f) = method(&mut c.m, this, ITEM_VPTR, DRAW);
-        Saved::of(c).call_ptr_leaving(c, f, &[obj, selected], 0x8002_4874);
-    });
+    call_virtual(c, this, ITEM_VPTR, DRAW, &[selected]);
 }
 
-/// `tMenuItem::Draw(int, int, int, bool)` (FEMENU.CPP, 0x80024884): the three-argument
-/// `Draw` (its first argument the bool, its fifth 0).
+/// `tMenuItem::Draw(int, int, int, bool)` (FEMENU.CPP, 0x80024884): the virtual `Draw` at a
+/// place, given the bool first and a 0 last.
 pub fn abi_menu_item_draw_at3(c: &mut Cpu) {
     let (this, a, b) = (c.r[4], c.r[5], c.r[6]);
-    let selected = abi::arg(c, 4);
-    abi::frame(c, 32, |c, sp| {
-        c.m.w32(sp + 16, 0);
-        let (obj, f) = method(&mut c.m, this, ITEM_VPTR, DRAW_AT);
-        Saved::of(c).call_ptr_leaving(c, f, &[obj, selected, a, b], 0x8002_48b8);
-    });
+    let selected = crate::abi::arg(c, 4);
+    call_virtual(c, this, ITEM_VPTR, DRAW_AT, &[selected, a, b, 0]);
 }
 
 /// `tMenuItemInteractive::tMenuItemInteractive` (FEMENU.CPP, 0x800248c8).
 pub fn interactive(c: &mut Cpu, this: MenuItemInteractive, text: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        menu_item(&mut c.m, this.base(), text);
-        this.set_vtable(&mut c.m, INTERACTIVE_VT);
-        this.0
-    })
+    menu_item(&mut c.m, this.base(), text);
+    this.set_vtable(&mut c.m, INTERACTIVE_VT);
+    this.0
 }
 
 pub fn abi_interactive(c: &mut Cpu) {
@@ -658,34 +629,24 @@ pub fn abi_interactive(c: &mut Cpu) {
 }
 
 /// `tMenuItemInteractive::~tMenuItemInteractive` (FEMENU.CPP, 0x800248fc).
-pub fn interactive_dtor(c: &mut Cpu, this: u32, _flags: u32) {
-    destroy(c, this, ITEM_VPTR, INTERACTIVE_VT, 0x8002_4784, 0x8002_4914, menu_item_dtor);
+pub fn interactive_dtor(c: &mut Cpu, this: u32, flags: u32) {
+    destroy(c, this, flags, ITEM_VPTR, INTERACTIVE_VT, menu_item_dtor);
 }
 
 pub fn abi_interactive_dtor(c: &mut Cpu) {
     interactive_dtor(c, c.r[4], c.r[5]);
 }
 
-/// The left-right choice's and slider's constructors start with the interactive item's
-/// (`ra` its return), their iterator `data` in s1 meanwhile.
-fn interactive_with(c: &mut Cpu, this: MenuItemInteractive, text: u32, data: u32, ra: u32) {
-    let mut r = Saved::of(c);
-    r.0[..2].copy_from_slice(&[this.0, data]);
-    r.enter(c, 0x8002_48c8, ra, |c| interactive(c, this, text));
-}
-
 /// `tMenuItemLeftRightChoice::tMenuItemLeftRightChoice` (FEMENU.CPP, 0x80024924): an item
 /// choosing through `data` with left and right.
 pub fn left_right_choice(c: &mut Cpu, this: MenuItemLeftRightChoice, text: u32, data: ListIterator) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        interactive_with(c, this.base(), text, data.0, 0x8002_4940);
-        let m = &mut c.m;
-        let flags = this.flags(m);
-        this.set_vtable(m, LEFT_RIGHT_CHOICE_VT);
-        this.set_data(m, data);
-        this.set_flags(m, flags | ITEM_LEFT_RIGHT);
-        this.0
-    })
+    interactive(c, this.base(), text);
+    let m = &mut c.m;
+    let flags = this.flags(m);
+    this.set_vtable(m, LEFT_RIGHT_CHOICE_VT);
+    this.set_data(m, data);
+    this.set_flags(m, flags | ITEM_LEFT_RIGHT);
+    this.0
 }
 
 pub fn abi_left_right_choice(c: &mut Cpu) {
@@ -694,75 +655,54 @@ pub fn abi_left_right_choice(c: &mut Cpu) {
 
 /// `tMenuItemLeftRightChoice::~tMenuItemLeftRightChoice` (FEMENU.CPP, 0x80024974).
 pub fn abi_left_right_choice_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], ITEM_VPTR, LEFT_RIGHT_CHOICE_VT, 0x8002_48fc, 0x8002_498c, interactive_dtor);
+    destroy(c, c.r[4], c.r[5], ITEM_VPTR, LEFT_RIGHT_CHOICE_VT, interactive_dtor);
 }
 
-/// Left or right on an enabled item steps its iterator (`data`, read after the key):
-/// `Decrement` or `Increment` for `player` (returning to `ras[0]` or `ras[1]`). Whether it did.
-fn left_right(c: &mut Cpu, r: &Saved, this: MenuItemInteractive, data: impl Fn(&mut Mem) -> ListIterator, player: u32, key: u32, ras: [u32; 2]) -> bool {
+/// Left or right on an enabled item steps its iterator (`data`, read after the key) down or up
+/// for `player`. Whether it did.
+fn left_right(c: &mut Cpu, this: MenuItemInteractive, data: impl Fn(&mut Mem) -> ListIterator, player: u32, key: u32) -> bool {
     let m = &mut c.m;
     if this.flags(m) & ITEM_DISABLED != 0 {
         return false;
     }
-    let (slot, ra) = match m.r32(key) {
-        KEY_LEFT => (DECREMENT, ras[0]),
-        KEY_RIGHT => (INCREMENT, ras[1]),
+    let step = match m.r32(key) {
+        KEY_LEFT => DECREMENT,
+        KEY_RIGHT => INCREMENT,
         _ => return false,
     };
     let data = data(m);
-    let (obj, f) = method(m, data.0, ITERATOR_VPTR, slot);
-    r.call_ptr_leaving(c, f, &[obj, player], ra);
+    call_virtual(c, data.0, ITERATOR_VPTR, step, &[player]);
     true
 }
 
 /// `tMenuItemLeftRightChoice::ProcessInput` (FEMENU.CPP, 0x8002499c): left and right step the
 /// choice (with a sound) and are used up.
 pub fn left_right_choice_process_input(c: &mut Cpu, this: MenuItemLeftRightChoice, player: u32, key: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = key;
-        let left = c.m.r32(key) == KEY_LEFT;
-        if left_right(c, &r, this.base(), |m| this.data(m), player, key, [0x8002_4a00, 0x8002_4a2c]) {
-            c.m.w32(key, KEY_NONE);
-            r.call_leaving(c, PLAY_FE_SFX, &[if left { 5 } else { 6 }], 0x8002_4a3c);
-        }
-    })
+    let left = c.m.r32(key) == KEY_LEFT;
+    if left_right(c, this.base(), |m| this.data(m), player, key) {
+        c.m.w32(key, KEY_NONE);
+        call(c, PLAY_FE_SFX, &[if left { SOUND_LEFT } else { SOUND_RIGHT }]);
+    }
 }
 
 pub fn abi_left_right_choice_process_input(c: &mut Cpu) {
     left_right_choice_process_input(c, MenuItemLeftRightChoice(c.r[4]), c.r[5], c.r[6]);
 }
 
-/// `tMenuItemLeftRightChoice::Draw` (FEMENU.CPP, 0x80024a4c): the item's text, and the
-/// choice's 180 to its right (for the sub-menu's player).
+/// `tMenuItemLeftRightChoice::Draw` (FEMENU.CPP, 0x80024a4c): the item's text where its text
+/// id places it, and the choice's text (for the sub-menu's player) 180 to its right.
 pub fn left_right_choice_draw(c: &mut Cpu, this: MenuItemLeftRightChoice, selected: u32) {
-    abi::frame(c, 48, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this.0;
-        r.0[3] = selected;
-        let text = this.text_description(&mut c.m);
-        let x = r.call_leaving(c, WORD_X, &[text], 0x8002_4a78);
-        r.0[0] = x;
-        let text = this.text_description(&mut c.m);
-        let y = r.call_leaving(c, WORD_Y, &[text], 0x8002_4a84);
-        let (x16, y16) = ((x as i16).reg(), (y as i16).reg());
-        let on = (selected != 0).reg();
-        r.0[2] = y16;
-        r.0[3] = on;
-        r.0[4] = 6;
-        c.m.w32(sp + 16, 6);
-        let id = (this.text_description(&mut c.m) as i16).reg();
-        r.call_leaving(c, MENU_TEXT_POSITIONED, &[id, x16, y16, on], 0x8002_4ab0);
-        let data = this.data(&mut c.m);
-        let player = c.m.r32(SUB_MENU_PLAYER);
-        let (obj, f) = method(&mut c.m, data.0, ITERATOR_VPTR, TEXT_VALUE);
-        let choice = r.call_ptr_leaving(c, f, &[obj, player, data.0], 0x8002_4ad4);
-        let x = x.wrapping_add(180);
-        // (s0 holds it shifted up for the sign extension)
-        r.0[0] = x << 16;
-        c.m.w32(sp + 16, 6);
-        r.call_leaving(c, MENU_TEXT_POSITIONED, &[(choice as i16).reg(), (x as i16).reg(), y16, on], 0x8002_4af8);
-    })
+    let text = this.text_description(&mut c.m);
+    let x = call(c, WORD_X, &[text]) as i16;
+    let y = call(c, WORD_Y, &[text]) as i16 as i32 as u32;
+    let selected = (selected != 0) as u32;
+    let id = text as i16 as i32 as u32;
+    call(c, MENU_TEXT_POSITIONED, &[id, x as i32 as u32, y, selected, ITEM_TEXT]);
+    let data = this.data(&mut c.m);
+    let player = c.m.r32(SUB_MENU_PLAYER);
+    let choice = call_virtual(c, data.0, ITERATOR_VPTR, TEXT_VALUE, &[player]) as i16 as i32 as u32;
+    let x = x.wrapping_add(180) as i32 as u32;
+    call(c, MENU_TEXT_POSITIONED, &[choice, x, y, selected, ITEM_TEXT]);
 }
 
 pub fn abi_left_right_choice_draw(c: &mut Cpu) {
@@ -772,18 +712,13 @@ pub fn abi_left_right_choice_draw(c: &mut Cpu) {
 /// `tMenuItemLeftRightSlider::tMenuItemLeftRightSlider` (FEMENU.CPP, 0x80024b18): a slider
 /// through `data`.
 pub fn left_right_slider(c: &mut Cpu, this: MenuItemLeftRightSlider, text: u32, data: ListIterator) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        interactive_with(c, this.base(), text, data.0, 0x8002_4b34);
-        let m = &mut c.m;
-        // (the slider flag set twice, as the original does)
-        let flags = this.flags(m);
-        this.set_data(m, data);
-        this.set_flags(m, flags | ITEM_SLIDER);
-        let flags = this.flags(m);
-        this.set_vtable(m, LEFT_RIGHT_SLIDER_VT);
-        this.set_flags(m, flags | ITEM_SLIDER);
-        this.0
-    })
+    interactive(c, this.base(), text);
+    let m = &mut c.m;
+    this.set_data(m, data);
+    this.set_vtable(m, LEFT_RIGHT_SLIDER_VT);
+    let flags = this.flags(m);
+    this.set_flags(m, flags | ITEM_SLIDER);
+    this.0
 }
 
 pub fn abi_left_right_slider(c: &mut Cpu) {
@@ -792,7 +727,7 @@ pub fn abi_left_right_slider(c: &mut Cpu) {
 
 /// `tMenuItemLeftRightSlider::~tMenuItemLeftRightSlider` (FEMENU.CPP, 0x80024b74).
 pub fn abi_left_right_slider_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], ITEM_VPTR, LEFT_RIGHT_SLIDER_VT, 0x8002_48fc, 0x8002_4b8c, interactive_dtor);
+    destroy(c, c.r[4], c.r[5], ITEM_VPTR, LEFT_RIGHT_SLIDER_VT, interactive_dtor);
 }
 
 /// `tMenuItemLeftRightSlider::DebounceKeys` (FEMENU.CPP, 0x80024b9c): left and right repeat.
@@ -803,56 +738,42 @@ pub fn abi_left_right_slider_debounce_keys(c: &mut Cpu) {
 /// `tMenuItemLeftRightSlider::ProcessInput` (FEMENU.CPP, 0x80024ba4): left and right step the
 /// slider (with a tick) and are used up.
 pub fn left_right_slider_process_input(c: &mut Cpu, this: MenuItemLeftRightSlider, player: u32, key: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = key;
-        if left_right(c, &r, this.base(), |m| this.data(m), player, key, [0x8002_4c28, 0x8002_4c28]) {
-            c.m.w32(key, KEY_NONE);
-            r.call_ptr_leaving(c, PLAY_FE_SFX_VOL, &[21, 64], 0x8002_4c3c);
-        }
-    })
+    if left_right(c, this.base(), |m| this.data(m), player, key) {
+        c.m.w32(key, KEY_NONE);
+        call_addr(c, PLAY_FE_SFX_VOL, &[SOUND_TICK, 64]);
+    }
 }
 
 pub fn abi_left_right_slider_process_input(c: &mut Cpu) {
     left_right_slider_process_input(c, MenuItemLeftRightSlider(c.r[4]), c.r[5], c.r[6]);
 }
 
-/// `tMenuItemLeftRightSlider::Draw` (FEMENU.CPP, 0x80025204): the item's text (its place kept
-/// from the text the first time), and the slider at the value 115 to its right.
+/// `tMenuItemLeftRightSlider::Draw` (FEMENU.CPP, 0x80025204): the item's text (its place taken
+/// from the text id the first time), and the slider 115 to its right at the iterator's value
+/// between its bounds, bright when selected.
 pub fn left_right_slider_draw(c: &mut Cpu, this: MenuItemLeftRightSlider, selected: u32) {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this.0;
-        r.0[2] = selected;
-        // no place yet (the original reads x and y as one word)
-        if this.x(&mut c.m) == 0 && this.y(&mut c.m) == 0 {
-            let text = this.text_description(&mut c.m);
-            let x = r.call_leaving(c, WORD_X, &[text], 0x8002_5238);
-            this.set_x(&mut c.m, x as i16);
-            let text = this.text_description(&mut c.m);
-            let y = r.call_leaving(c, WORD_Y, &[text], 0x8002_5244);
-            this.set_y(&mut c.m, y as i16);
-        }
-        let on = (selected != 0).reg();
-        let m = &mut c.m;
-        let id = (this.text_description(m) as i16).reg();
-        let x = this.x(m).wrapping_add(8).reg();
-        let y = this.y(m).wrapping_add(3).reg();
-        r.0[0] = 6;
-        m.w32(sp + 16, 6);
-        r.call_leaving(c, MENU_TEXT_POSITIONED, &[id, x, y, on], 0x8002_527c);
-        let data = this.data(&mut c.m);
-        let (obj, f) = method(&mut c.m, data.0, ITERATOR_VPTR, VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8002_52a0) & 0xFF;
-        let m = &mut c.m;
-        let data = this.data(m);
-        let (min, max) = (data.min_value(m).reg(), data.max_value(m).reg());
-        let x = this.x(m).wrapping_add(115).reg();
-        let y = this.y(m).wrapping_add(4).reg();
-        let (w, h) = (this.width(m).reg(), this.height(m).reg());
-        let fade = if selected != 0 { 128 } else { 0 };
-        r.call_ptr_leaving(c, DRAW_SLIDER, &[v, min, max, x, y, w, h, 6, 4, 0, 0, fade, 0], 0x8002_5318);
-    })
+    if this.x(&mut c.m) == 0 && this.y(&mut c.m) == 0 {
+        let text = this.text_description(&mut c.m);
+        let x = call(c, WORD_X, &[text]);
+        this.set_x(&mut c.m, x as i16);
+        let y = call(c, WORD_Y, &[text]);
+        this.set_y(&mut c.m, y as i16);
+    }
+    let selected = (selected != 0) as u32;
+    let m = &mut c.m;
+    let id = this.text_description(m) as i16 as i32 as u32;
+    let (x, y) = (this.x(m), this.y(m));
+    let text_at = [x.wrapping_add(8) as i32 as u32, y.wrapping_add(3) as i32 as u32];
+    call(c, MENU_TEXT_POSITIONED, &[id, text_at[0], text_at[1], selected, ITEM_TEXT]);
+    let data = this.data(&mut c.m);
+    let value = call_virtual(c, data.0, ITERATOR_VPTR, VALUE, &[u32::MAX]) & 0xFF;
+    let m = &mut c.m;
+    let data = this.data(m);
+    let (min, max) = (data.min_value(m) as u32, data.max_value(m) as u32);
+    let (x, y) = (this.x(m).wrapping_add(115) as i32 as u32, this.y(m).wrapping_add(4) as i32 as u32);
+    let (w, h) = (this.width(m) as i32 as u32, this.height(m) as i32 as u32);
+    let brightness = if selected != 0 { 128 } else { 0 };
+    call_addr(c, DRAW_SLIDER, &[value, min, max, x, y, w, h, 6, 4, 0, 0, brightness, 0]);
 }
 
 pub fn abi_left_right_slider_draw(c: &mut Cpu) {
@@ -869,23 +790,19 @@ pub fn set_dimensions(m: &mut Mem, this: MenuItemLeftRightSlider, x: u32, y: u32
 }
 
 pub fn abi_set_dimensions(c: &mut Cpu) {
-    let h = abi::arg(c, 4);
+    let h = crate::abi::arg(c, 4);
     set_dimensions(&mut c.m, MenuItemLeftRightSlider(c.r[4]), c.r[5], c.r[6], c.r[7], h);
 }
 
 /// `tMenuItemGoToMenuButton::tMenuItemGoToMenuButton` (FEMENU.CPP, 0x80025348): a button
 /// going to `menu` and calling `on_press`.
 pub fn go_to_menu_button(c: &mut Cpu, this: MenuItemGoToMenuButton, text: u32, menu: Menu, on_press: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[this.0, menu.0, on_press]);
-        r.enter(c, 0x8002_48c8, 0x8002_536c, |c| interactive(c, this.base(), text));
-        let m = &mut c.m;
-        this.set_vtable(m, GO_TO_MENU_BUTTON_VT);
-        this.set_new_menu(m, menu);
-        this.set_on_button_press(m, on_press);
-        this.0
-    })
+    interactive(c, this.base(), text);
+    let m = &mut c.m;
+    this.set_vtable(m, GO_TO_MENU_BUTTON_VT);
+    this.set_new_menu(m, menu);
+    this.set_on_button_press(m, on_press);
+    this.0
 }
 
 pub fn abi_go_to_menu_button(c: &mut Cpu) {
@@ -894,41 +811,39 @@ pub fn abi_go_to_menu_button(c: &mut Cpu) {
 
 /// `tMenuItemGoToMenuButton::~tMenuItemGoToMenuButton` (FEMENU.CPP, 0x8002539c).
 pub fn abi_go_to_menu_button_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], ITEM_VPTR, GO_TO_MENU_BUTTON_VT, 0x8002_48fc, 0x8002_53b4, interactive_dtor);
+    destroy(c, c.r[4], c.r[5], ITEM_VPTR, GO_TO_MENU_BUTTON_VT, interactive_dtor);
 }
 
-/// `tMenuItemGoToMenuButton::ProcessInput` (FEMENU.CPP, 0x800253c4): accept goes to the menu
-/// (as an accept or a go-to, by the item's flags) and calls the button's function; used up.
+/// `tMenuItemGoToMenuButton::ProcessInput` (FEMENU.CPP, 0x800253c4): accept on an enabled
+/// button goes to its menu (as an accept or a go-to, by its flags) and calls its function; the
+/// key is used up.
 pub fn go_to_menu_button_process_input(c: &mut Cpu, this: MenuItemGoToMenuButton, key: u32, command: MenuCommand) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = key;
-        let m = &mut c.m;
-        let flags = this.flags(m);
-        if flags & ITEM_DISABLED != 0 || m.r32(key) != KEY_ACCEPT {
-            return;
-        }
-        if this.new_menu(m).0 != 0 {
-            command.set_type_(m, (if flags & ITEM_GO_AS_ACCEPT != 0 { COMMAND_ACCEPT } else { COMMAND_GO_TO }) as i32);
-            let menu = this.new_menu(m);
-            command.set_next_menu(m, menu);
-        }
-        let on_press = this.on_button_press(m);
-        if on_press != 0 {
-            r.call_ptr_leaving(c, on_press, &[command.0, flags, key, command.0], 0x8002_543c);
-        }
-        c.m.w32(key, KEY_NONE);
-    })
+    let m = &mut c.m;
+    let flags = this.flags(m);
+    if flags & ITEM_DISABLED != 0 || m.r32(key) != KEY_ACCEPT {
+        return;
+    }
+    if this.new_menu(m).0 != 0 {
+        let kind = if flags & ITEM_GO_AS_ACCEPT != 0 { COMMAND_ACCEPT } else { COMMAND_GO_TO };
+        command.set_type_(m, kind as i32);
+        let menu = this.new_menu(m);
+        command.set_next_menu(m, menu);
+    }
+    let on_press = this.on_button_press(m);
+    if on_press != 0 {
+        call_addr(c, on_press, &[command.0]);
+    }
+    c.m.w32(key, KEY_NONE);
 }
 
 pub fn abi_go_to_menu_button_process_input(c: &mut Cpu) {
     go_to_menu_button_process_input(c, MenuItemGoToMenuButton(c.r[4]), c.r[6], MenuCommand(c.r[7]));
 }
 
-// tMenu: its flags (`MENU_*`), its title, its items (to a null), the current one, the menus
-// after it and for options, the function for back.
+// ---- tMenu: its flags (`MENU_*`), its title, its items (to a null), the current one, the
+// menus after it and for options, the function for back.
 
-/// The menu's `k`th item. (Not through `item_list`: a list of 16 has no null, and the
+/// The menu's `k`th item. (Not through `item_list`: a list of 16 has no null after it, and the
 /// original reads on past its end.)
 fn item(m: &mut Mem, this: Menu, k: u32) -> MenuItem {
     MenuItem(m.r32(this.0.wrapping_add(0x10).wrapping_add(k.wrapping_mul(4))))
@@ -950,8 +865,14 @@ fn set_current(m: &mut Mem, this: Menu, k: u32) {
     this.set_current_item(m, k as i32)
 }
 
+fn current_is_disabled(m: &mut Mem, this: Menu) -> bool {
+    let k = current(m, this);
+    let it = item(m, this, k);
+    is_disabled(m, it)
+}
+
 /// `tMenu::tMenuConstructor` (FEMENU.CPP, 0x80025454): the items: `first`, then those in the
-/// list at `rest` to a null (stored too).
+/// list at `rest`, to (and with) a null.
 pub fn menu_constructor(m: &mut Mem, this: Menu, first: u32, rest: u32) {
     this.set_vert_help(m, 0);
     set_item(m, this, 0, first);
@@ -971,8 +892,8 @@ pub fn abi_menu_constructor(c: &mut Cpu) {
     menu_constructor(&mut c.m, Menu(c.r[4]), c.r[5], c.r[6]);
 }
 
-/// `tMenu::tMenu` (FEMENU.CPP, 0x8002548c): a menu of `screen`, its flags, the menus after and
-/// for options, the function for back, its title.
+/// `tMenu::tMenu` (FEMENU.CPP, 0x8002548c): a menu of `screen`, its flags, the menus after it
+/// and for options, the function for back, its title.
 #[allow(clippy::too_many_arguments)]
 pub fn menu(m: &mut Mem, this: Menu, flags: u32, screen: u32, next: u32, options: u32, on_back: u32, title: u32) -> u32 {
     this.set_vtable(m, MENU_VT);
@@ -989,34 +910,23 @@ pub fn menu(m: &mut Mem, this: Menu, flags: u32, screen: u32, next: u32, options
 }
 
 pub fn abi_menu(c: &mut Cpu) {
-    let (options, on_back, title) = (abi::arg(c, 4), abi::arg(c, 5), abi::arg(c, 6));
+    let (options, on_back, title) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
     c.r[2] = menu(&mut c.m, Menu(c.r[4]), c.r[5], c.r[6], c.r[7], options, on_back, title);
-    // (a0 left holding the fifth argument, as the original leaves it)
-    c.r[4] = options;
 }
 
 /// `tMenu::~tMenu` (FEMENU.CPP, 0x800254d0).
 pub fn abi_menu_dtor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    destroy_root(c, this, flags, MENU_VPTR, MENU_VT, 0x8002_54f4);
+    destroy_root(c, c.r[4], c.r[5], MENU_VPTR, MENU_VT);
 }
 
-/// `tMenu::Initialize` (FEMENU.CPP, 0x80025504): the current item moved on past disabled ones
-/// (round to the first, at most once round).
+/// `tMenu::Initialize` (FEMENU.CPP, 0x80025504): the current item moved on past disabled ones,
+/// round to the first, at most once round.
 pub fn initialize(m: &mut Mem, this: Menu) {
     let start = current(m, this);
-    let it = item(m, this, start);
-    if !is_disabled(m, it) {
-        return;
-    }
-    loop {
-        let k = current(m, this);
-        let it = item(m, this, k);
-        if !is_disabled(m, it) {
-            return;
-        }
-        set_current(m, this, k + 1);
-        if item(m, this, k + 1).0 == 0 {
+    while current_is_disabled(m, this) {
+        let k = current(m, this) + 1;
+        set_current(m, this, k);
+        if item(m, this, k).0 == 0 {
             set_current(m, this, 0);
         }
         if current(m, this) == start {
@@ -1029,112 +939,101 @@ pub fn abi_initialize(c: &mut Cpu) {
     initialize(&mut c.m, Menu(c.r[4]));
 }
 
-/// `tMenu::ProcessInput` (FEMENU.CPP, 0x80025598): the current item's input first; then up and
-/// down move the current item (past disabled ones, round, with a sound when it moves), accept
-/// goes to the menu after, back calls the menu's function (or backs out), options goes to the
-/// options menu, help shows the help, start starts. A key the menu takes is used up.
-pub fn process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: MenuCommand) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[this.0, command.0, key]);
-        let m = &mut c.m;
-        if this.flags(m) & MENU_BACK_ACCEPTS != 0 && m.r32(key) == KEY_BACK {
-            m.w32(key, KEY_ACCEPT);
-        }
-        if this.flags(m) & MENU_ACCEPT_BACKS != 0 && m.r32(key) == KEY_ACCEPT {
-            m.w32(key, KEY_BACK);
-        }
+/// Up: the current item moves to the one before, round to the last, past disabled ones.
+fn move_up(m: &mut Mem, this: Menu) {
+    loop {
         let k = current(m, this);
-        let it = item(m, this, k);
-        if it.0 != 0 {
-            let (obj, f) = method(m, it.0, ITEM_VPTR, PROCESS_INPUT);
-            r.call_ptr_leaving(c, f, &[obj, player, key, command.0], 0x8002_5640);
+        if (k as i32) > 0 {
+            set_current(m, this, k - 1);
+        } else if item(m, this, k.wrapping_add(1)).0 != 0 {
+            // round to the last
+            let mut k = k;
+            loop {
+                set_current(m, this, k.wrapping_add(1));
+                if item(m, this, k.wrapping_add(2)).0 == 0 {
+                    break;
+                }
+                k = current(m, this);
+            }
         }
-        let m = &mut c.m;
-        // (the command's type is written before the menu is read again, as the original does)
-        let go_to = |m: &mut Mem, menu: fn(Menu, &mut Mem) -> Menu| {
-            command.set_type_(m, COMMAND_GO_TO as i32);
-            let menu = menu(this, m);
-            command.set_next_menu(m, menu);
-            m.w32(key, KEY_NONE);
-        };
-        match m.r32(key) {
-            KEY_START => {
-                command.set_type_(m, COMMAND_START as i32);
-                m.w32(key, KEY_NONE);
-            }
-            KEY_UP => {
-                let was = current(m, this);
-                loop {
-                    let k = current(m, this);
-                    if (k as i32) > 0 {
-                        set_current(m, this, k - 1);
-                    } else if item(m, this, k.wrapping_add(1)).0 != 0 {
-                        // round to the last
-                        let mut k = k;
-                        loop {
-                            set_current(m, this, k.wrapping_add(1));
-                            if item(m, this, k.wrapping_add(2)).0 == 0 {
-                                break;
-                            }
-                            k = current(m, this);
-                        }
-                    }
-                    let k = current(m, this);
-                    let it = item(m, this, k);
-                    if !is_disabled(m, it) {
-                        break;
-                    }
-                }
-                if current(m, this) != was {
-                    r.call_leaving(c, PLAY_FE_SFX, &[3], 0x8002_5768);
-                }
-                c.m.w32(key, KEY_NONE);
-            }
-            KEY_DOWN => {
-                let was = current(m, this);
-                loop {
-                    let k = current(m, this).wrapping_add(1);
-                    set_current(m, this, k);
-                    if item(m, this, k).0 == 0 {
-                        set_current(m, this, 0);
-                    }
-                    let k = current(m, this);
-                    let it = item(m, this, k);
-                    if !is_disabled(m, it) {
-                        break;
-                    }
-                }
-                if current(m, this) != was {
-                    r.call_leaving(c, PLAY_FE_SFX, &[4], 0x8002_57dc);
-                }
-                c.m.w32(key, KEY_NONE);
-            }
-            KEY_ACCEPT if this.next_menu(m).0 != 0 => go_to(m, Menu::next_menu),
-            KEY_BACK => {
-                let on_back = this.on_button_press(m);
-                if on_back != 0 {
-                    r.call_ptr_leaving(c, on_back, &[command.0], 0x8002_581c);
-                    c.m.w32(key, KEY_NONE);
-                } else {
-                    let flags = this.flags(m);
-                    if flags & MENU_BACK != 0 {
-                        command.set_type_(m, COMMAND_BACK as i32);
-                        m.w32(key, KEY_NONE);
-                    } else if flags & MENU_EXIT != 0 {
-                        command.set_type_(m, COMMAND_EXIT as i32);
-                        m.w32(key, KEY_NONE);
-                    }
-                }
-            }
-            KEY_HELP => {
-                let app = m.r32(FE_APP);
-                r.call_leaving(c, DISPLAY_HELP, &[app, 0], 0x8002_585c);
-            }
-            KEY_OPTIONS if this.options_menu(m).0 != 0 => go_to(m, Menu::options_menu),
-            _ => {}
+        if !current_is_disabled(m, this) {
+            return;
         }
-    })
+    }
+}
+
+/// Down: the current item moves to the one after, round to the first, past disabled ones.
+fn move_down(m: &mut Mem, this: Menu) {
+    loop {
+        let k = current(m, this).wrapping_add(1);
+        set_current(m, this, k);
+        if item(m, this, k).0 == 0 {
+            set_current(m, this, 0);
+        }
+        if !current_is_disabled(m, this) {
+            return;
+        }
+    }
+}
+
+/// `tMenu::ProcessInput` (FEMENU.CPP, 0x80025598): the current item's input first; then up and
+/// down move the current item (with a sound when it moves), accept goes to the menu after,
+/// back calls the menu's function (or goes back, or backs out), options goes to the options
+/// menu, help shows the help, start starts. A key the menu takes is used up.
+pub fn process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: MenuCommand) {
+    let m = &mut c.m;
+    if this.flags(m) & MENU_BACK_ACCEPTS != 0 && m.r32(key) == KEY_BACK {
+        m.w32(key, KEY_ACCEPT);
+    }
+    if this.flags(m) & MENU_ACCEPT_BACKS != 0 && m.r32(key) == KEY_ACCEPT {
+        m.w32(key, KEY_BACK);
+    }
+    let k = current(m, this);
+    let it = item(m, this, k);
+    if it.0 != 0 {
+        call_virtual(c, it.0, ITEM_VPTR, PROCESS_INPUT, &[player, key, command.0]);
+    }
+    let m = &mut c.m;
+    // (the command's type is written before the menu is read again, as the original does)
+    let go_to = |m: &mut Mem, menu: fn(Menu, &mut Mem) -> Menu| {
+        command.set_type_(m, COMMAND_GO_TO as i32);
+        let menu = menu(this, m);
+        command.set_next_menu(m, menu);
+        m.w32(key, KEY_NONE);
+    };
+    let take = |m: &mut Mem, kind: u32| {
+        command.set_type_(m, kind as i32);
+        m.w32(key, KEY_NONE);
+    };
+    match m.r32(key) {
+        KEY_START => take(m, COMMAND_START),
+        KEY_UP | KEY_DOWN => {
+            let (was, up) = (current(m, this), m.r32(key) == KEY_UP);
+            if up { move_up(m, this) } else { move_down(m, this) }
+            if current(m, this) != was {
+                call(c, PLAY_FE_SFX, &[if up { SOUND_UP } else { SOUND_DOWN }]);
+            }
+            c.m.w32(key, KEY_NONE);
+        }
+        KEY_ACCEPT if this.next_menu(m).0 != 0 => go_to(m, Menu::next_menu),
+        KEY_BACK => {
+            let on_back = this.on_button_press(m);
+            if on_back != 0 {
+                call_addr(c, on_back, &[command.0]);
+                c.m.w32(key, KEY_NONE);
+            } else if this.flags(m) & MENU_BACK != 0 {
+                take(m, COMMAND_BACK);
+            } else if this.flags(m) & MENU_EXIT != 0 {
+                take(m, COMMAND_EXIT);
+            }
+        }
+        KEY_HELP => {
+            let app = m.r32(FE_APP);
+            call(c, DISPLAY_HELP, &[app, 0]);
+        }
+        KEY_OPTIONS if this.options_menu(m).0 != 0 => go_to(m, Menu::options_menu),
+        _ => {}
+    }
 }
 
 pub fn abi_process_input(c: &mut Cpu) {
@@ -1148,12 +1047,11 @@ pub fn get_number_enabled_items(m: &mut Mem, this: Menu) -> u32 {
         return 0;
     }
     // (both counters are shorts)
-    let mut n = 0i16;
-    let mut k = 0i16;
+    let (mut n, mut k) = (0i16, 0i16);
     loop {
-        let it = item(m, this, k.reg());
+        let it = item(m, this, k as i32 as u32);
         if it.0 == 0 {
-            return n.reg();
+            return n as i32 as u32;
         }
         if !is_disabled(m, it) {
             n = n.wrapping_add(1);
@@ -1167,41 +1065,29 @@ pub fn abi_get_number_enabled_items(c: &mut Cpu) {
 }
 
 /// Each item's virtual `slot` (`Draw(bool)`, `UpdateTransition(bool)`), told whether it is
-/// the current one (`Draw`'s and `UpdateTransition`'s loop); `ra` the call's return.
-fn each_item(c: &mut Cpu, r: &mut Saved, this: Menu, slot: u32, ra: u32) {
-    if item(&mut c.m, this, 0).0 == 0 {
-        return;
-    }
-    // (the counter is a short, s0)
+/// the current one.
+fn each_item(c: &mut Cpu, this: Menu, slot: u32) {
+    // (the counter is a short)
     let mut k = 0i16;
     loop {
-        r.0[0] = k as u16 as u32;
         let m = &mut c.m;
-        let it = item(m, this, k.reg());
-        let selected = (k.reg() == current(m, this)).reg();
-        // (a2 left holding the item's vtable)
-        let vt = m.r32(it.0 + ITEM_VPTR);
-        let (obj, f) = method(m, it.0, ITEM_VPTR, slot);
-        r.call_ptr_leaving(c, f, &[obj, selected, vt], ra);
-        k = k.wrapping_add(1);
-        if item(&mut c.m, this, k.reg()).0 == 0 {
+        let it = item(m, this, k as i32 as u32);
+        if it.0 == 0 {
             return;
         }
+        let selected = (k as i32 as u32 == current(m, this)) as u32;
+        call_virtual(c, it.0, ITEM_VPTR, slot, &[selected]);
+        k = k.wrapping_add(1);
     }
 }
 
 /// `tMenu::Draw` (FEMENU.CPP, 0x8002591c): its title (if it has one) and its items.
 pub fn draw(c: &mut Cpu, this: Menu) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this.0;
-        let title = this.title(&mut c.m);
-        if title >= 0 {
-            r.call_leaving(c, TITLE, &[title.reg()], 0x8002_5948);
-        }
-        r.0[0] = 0;
-        each_item(c, &mut r, this, DRAW, 0x8002_5994);
-    })
+    let title = this.title(&mut c.m);
+    if title >= 0 {
+        call(c, TITLE, &[title as i32 as u32]);
+    }
+    each_item(c, this, DRAW);
 }
 
 pub fn abi_draw(c: &mut Cpu) {
@@ -1210,12 +1096,7 @@ pub fn abi_draw(c: &mut Cpu) {
 
 /// `tMenu::UpdateTransition` (FEMENU.CPP, 0x800259c8): each item's.
 pub fn update_transition(c: &mut Cpu, this: Menu) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this.0;
-        r.0[0] = 0;
-        each_item(c, &mut r, this, UPDATE_TRANSITION, 0x8002_5a28);
-    })
+    each_item(c, this, UPDATE_TRANSITION);
 }
 
 pub fn abi_update_transition(c: &mut Cpu) {
@@ -1229,12 +1110,9 @@ pub fn abi_is_sub_menu(c: &mut Cpu) {
 
 /// `tMenu::DebounceKeys` (FEMENU.CPP, 0x80025a7c): the current item's.
 pub fn debounce_keys(c: &mut Cpu, this: Menu) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let k = current(&mut c.m, this);
-        let it = item(&mut c.m, this, k);
-        let (obj, f) = method(&mut c.m, it.0, ITEM_VPTR, DEBOUNCE_KEYS);
-        Saved::of(c).call_ptr_leaving(c, f, &[obj], 0x8002_5ab8)
-    })
+    let k = current(&mut c.m, this);
+    let it = item(&mut c.m, this, k);
+    call_virtual(c, it.0, ITEM_VPTR, DEBOUNCE_KEYS, &[])
 }
 
 pub fn abi_debounce_keys(c: &mut Cpu) {
@@ -1244,7 +1122,7 @@ pub fn abi_debounce_keys(c: &mut Cpu) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
     use std::cell::Cell;
 
     /// The test's structures, in RAM the front end leaves zero: a list of text ids, values,
@@ -1273,8 +1151,6 @@ pub(crate) mod tests {
     pub(crate) const FAKE_ITEM: u32 = ITEMS + 5 * ITEM_SIZE;
     /// A function the menus may call (does nothing): `tMenuItem::ProcessInput`.
     pub(crate) const NOTHING: u32 = 0x8002_47C0;
-    /// The stack's top in the front end's tests (main RAM).
-    pub(crate) const TOP: u32 = 0x801F_FE00;
 
     pub(crate) fn pick(rng: &mut Rng, n: u32) -> u32 {
         (rng.next() % n as u64) as u32
@@ -1523,20 +1399,6 @@ pub(crate) mod tests {
             ADDR.set(addr);
             let args_rng = std::cell::RefCell::new(Rng(0xFE30 ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
             against_original_in(&ram, name, 400, 0xFE31 + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), via_abi);
-        }
-    }
-
-    /// The functions with frames leave the stack as the original does (their callees' frames
-    /// and saved registers, the registers the virtual calls get).
-    #[test]
-    fn femenu_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            let frame = (0..8).map(|i| ram[(addr & 0x1F_FFFF) as usize + 4 * i..][..4].to_vec()).any(|w| w[2..4] == [0xBD, 0x27]);
-            if !frame || std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 200, 0xFE51 + k as u64, shuffle, &args);
         }
     }
 }

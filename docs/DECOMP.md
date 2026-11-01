@@ -98,6 +98,32 @@ collisions, AI), then the front end.
    isn't there.
 5. Check it (below) until it matches. Commit one function or a small group at a time.
 
+## The readable front end
+
+The front end is being rewritten as readable Rust (decided 2026-11-01), module by module:
+the game's data in RAM stays exactly the original's, but the stack and the registers no longer
+reproduce the original's layout and leftovers. `NFSHS_DECOMP_SCRAMBLE=1` (below) measured what
+that costs: nothing the game does depends on them but three places, now handled (the controller
+screen's label buffer, the save's unfilled bytes, which load the same, and the host's autosave
+sounds, now found through `tDialog::Display`/`Hide`'s hooks).
+
+- Objects are typed views (`crate::types`); a derived class's view reaches its base class's
+  members, `base()` is its base class's view.
+- Calls into the game go through `crate::call`: `call(c, f, args)` for a function,
+  `call_addr` for a hooked function or a pointer, `call_virtual(c, obj, vptr, slot, args)` for a
+  virtual one, `with_buffer` for stack space the game's code takes by address. No frames of the
+  original's size, no saved registers, no return addresses: `crate::abi` stays for the code not
+  rewritten yet (and the race's, which keeps its fidelity).
+- A rewritten module keeps the original's writes to the game's RAM and their order where data
+  can overlap (the fuzz tests place objects anywhere); reads that nothing in between can change
+  may be merged.
+- Checks: its fuzz tests (`against_original`: RAM but the dead stack, the result, the random
+  state), `decomp-check --main` with and without `NFSHS_DECOMP_SCRAMBLE=1`, `tools/tourshots.py`
+  (pictures; cards that differ must load the same) and `tools/hookaudit.py`. The front end's
+  stack tests are gone: they checked the fidelity this drops.
+
+Rewritten so far: FEMENU.CPP.
+
 ## Checking
 
 - **Unit tests** (`cargo test -p nfs4 --release`: in release, since fuzzed pointers and counts trip a debug build's overflow checks where the original wraps) compare pure functions with their recompiled
