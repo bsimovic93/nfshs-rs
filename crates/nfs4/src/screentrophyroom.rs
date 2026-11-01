@@ -57,7 +57,7 @@ const GET_TROPHY_NAME: fn(&mut Cpu) = fetourn::get_trophy_name_entry;
 const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_800e77f0;
 const LOAD_PMX: fn(&mut Cpu) = nfs4rc::f_8004f5e8;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
-const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004ef70;
+const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended_entry;
 
 fn lh(m: &mut Mem, at: u32) -> i32 {
     m.r16(at) as i16 as i32

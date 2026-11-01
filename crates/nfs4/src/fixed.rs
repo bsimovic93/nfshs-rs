@@ -15,6 +15,11 @@ pub fn div(a: i32, b: i32) -> i32 {
     }
 }
 
+/// `a % b` as the R3000's `div` leaves it in HI: by 0, `a`; `i32::MIN % -1`, 0.
+pub fn rem(a: i32, b: i32) -> i32 {
+    if b == 0 { a } else { a.wrapping_rem(b) }
+}
+
 /// `fixedmult` (0x800e4f14): `a * b` in 16.16, rounded to nearest (halves up).
 pub fn fixedmult(a: i32, b: i32) -> i32 {
     ((a as i64 * b as i64 + 0x8000) >> 16) as i32

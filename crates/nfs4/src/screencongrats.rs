@@ -121,8 +121,8 @@ const DRAW_CAR: u32 = 0x8003_AC64;
 /// The 3D cars released, `ScaleShapeExtended`, `SetLicensePlate`, `PlayerName`, `TextSys_WordX`
 /// and `TextSys_WordY`, `FeAudio_AsyncPlaySpeech`, the licence plates, `PAD_buttons`,
 /// `blockmove`.
-const RELEASE_CARS: fn(&mut Cpu) = nfs4rc::f_8004dfac;
-const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004ef70;
+const RELEASE_CARS: fn(&mut Cpu) = crate::psxfront::cleanup_spinning_cars_menu_entry;
+const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended_entry;
 const SET_LICENSE_PLATE: fn(&mut Cpu) = nfs4rc::f_8002b84c;
 const PLAYER_NAME: fn(&mut Cpu) = nfs4rc::f_8002ba7c;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
@@ -463,12 +463,12 @@ fn draw_counting(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) {
     }
     match m.r32(this + PICTURE) {
         1 => {
-            let frame = (ticks(m) as i32 >> 3) % m.r32(this + FRAMES) as i32;
+            let frame = crate::fixed::rem(ticks(m) as i32 >> 3, m.r32(this + FRAMES) as i32);
             r.call_leaving(c, SCALE_SHAPE_EXTENDED, &[frame as u32, 1552, 41, 190, 0, 0, sp + 64], 0x8004_8b40);
         }
         2 => {
             m.w32(sp + 44, 0x0055_1E00);
-            let frame = (ticks(m) as i32 / 20) % m.r32(this + FRAMES) as i32;
+            let frame = crate::fixed::rem(ticks(m) as i32 / 20, m.r32(this + FRAMES) as i32);
             r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[frame as u32, 1552, (-193i32) as u32, 86, 0, 0, sp + 40], 0x8004_8bc4);
         }
         _ => {}

@@ -46,7 +46,7 @@ const GREY: u32 = 0x0050_5050;
 
 /// `tTournamentManager::GetTrophyName` (FETOURN.CPP's port), `ScaleShapeExtended`.
 const GET_TROPHY_NAME: fn(&mut Cpu) = fetourn::get_trophy_name_entry;
-const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004ef70;
+const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended_entry;
 
 /// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).
 fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {

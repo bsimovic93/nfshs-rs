@@ -1324,3 +1324,27 @@
 800422dc tScreenTrackSelect::DrawVideoWall
 800423ec tScreenTrackSelect::ProcessInput
 800425b4 ~tScreenTrackSelect
+
+# MMEFFECT.CPP
+8004dbc0 FeDraw_SetABRMode
+
+# PSXFRONT.CPP (retail = dev + 0x4e8)
+8004dc60 Quick_DD
+8004dca4 PSXFront_AllocateDrawMemory
+8004dd18 PSXFront_FreeDrawMemory
+8004dd38 InitializeSpinningCars
+8004deb4 CleanupSpinningCars
+8004dfac CleanupSpinningCarsMenu
+8004e11c DoLanguageScreen
+8004e158 PSXExitFrontend
+8004e1b0 PSX_AllocShapes
+8004e1f4 Init_RenderingEnvironment
+8004e2e0 Init_PSX_FrontEnd
+8004e420 AdjustShapeDrawing
+8004eb20 DrawFlatShape
+8004eb60 DrawShapeExtended
+8004ec64 ScaleGouraudShape
+8004ef20 ScaleFlatShape
+8004ef70 ScaleShapeExtended
+8004f09c LoadAllHelpShapes
+8004f49c FontUpsideDownBlit

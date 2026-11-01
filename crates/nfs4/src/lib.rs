@@ -71,8 +71,10 @@ pub mod fevideowall;
 pub mod fixed;
 pub mod globals;
 pub mod mathnfs;
+pub mod mmeffect;
 pub mod newton;
 pub mod physics;
+pub mod psxfront;
 pub mod schedule;
 pub mod screenaudio;
 pub mod screencongrats;
@@ -722,6 +724,26 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_c490, "DrawShape_NFS4RoundRectangle", drawshp::abi_round_rectangle),
     func(0x8004_c69c, "DrawShape_NFS4Rectangle", drawshp::abi_rectangle),
     func(0x8004_c9bc, "DrawShape_NFS4TransRectangle", drawshp::abi_trans_rectangle),
+    func(0x8004_dbc0, "FeDraw_SetABRMode", mmeffect::abi_set_abr_mode),
+    func(0x8004_dc60, "Quick_DD", psxfront::abi_quick_dd),
+    func(0x8004_dca4, "PSXFront_AllocateDrawMemory", psxfront::abi_allocate_draw_memory),
+    func(0x8004_dd18, "PSXFront_FreeDrawMemory", psxfront::abi_free_draw_memory),
+    func(0x8004_dd38, "InitializeSpinningCars", psxfront::abi_initialize_spinning_cars),
+    func(0x8004_deb4, "CleanupSpinningCars", psxfront::abi_cleanup_spinning_cars),
+    func(0x8004_dfac, "CleanupSpinningCarsMenu", psxfront::abi_cleanup_spinning_cars_menu),
+    func(0x8004_e11c, "DoLanguageScreen", psxfront::abi_do_language_screen),
+    func(0x8004_e158, "PSXExitFrontend", psxfront::abi_psx_exit_frontend),
+    func(0x8004_e1b0, "PSX_AllocShapes", psxfront::abi_psx_alloc_shapes),
+    func(0x8004_e1f4, "Init_RenderingEnvironment", psxfront::abi_init_rendering_environment),
+    func(0x8004_e2e0, "Init_PSX_FrontEnd", psxfront::abi_init_psx_front_end),
+    func(0x8004_e420, "AdjustShapeDrawing", psxfront::abi_adjust_shape_drawing),
+    func(0x8004_eb20, "DrawFlatShape", psxfront::abi_draw_flat_shape),
+    func(0x8004_eb60, "DrawShapeExtended", psxfront::abi_draw_shape_extended),
+    func(0x8004_ec64, "ScaleGouraudShape", psxfront::abi_scale_gouraud_shape),
+    func(0x8004_ef20, "ScaleFlatShape", psxfront::abi_scale_flat_shape),
+    func(0x8004_ef70, "ScaleShapeExtended", psxfront::abi_scale_shape_extended),
+    func(0x8004_f09c, "LoadAllHelpShapes", psxfront::abi_load_all_help_shapes),
+    func(0x8004_f49c, "FontUpsideDownBlit", psxfront::abi_font_upside_down_blit),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),

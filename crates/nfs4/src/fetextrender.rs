@@ -35,7 +35,7 @@ const WORD_FLAGS: fn(&mut Cpu) = nfs4rc::f_800b9f38;
 /// `CalcFadeVal` (the colour and a fade), `FeDraw_SetABRMode`; `PSXDrawTransSquare` (called
 /// by address, as FEMENUEXTENDED's callers do).
 const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
-const SET_ABR_MODE: fn(&mut Cpu) = nfs4rc::f_8004dbc0;
+const SET_ABR_MODE: fn(&mut Cpu) = crate::mmeffect::set_abr_mode_entry;
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 /// "%s".
 const TEXT_FORMAT: u32 = 0x8001_0FBC;

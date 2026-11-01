@@ -53,11 +53,11 @@ pub(crate) const TEXT_PIXELS: fn(&mut Cpu) = nfs4rc::f_800e4a2c;
 pub(crate) const STRLEN: fn(&mut Cpu) = nfs4rc::f_800ea8d0;
 const FULL_TEXT_RGB: fn(&mut Cpu) = fetextrender::full_text_rgb_entry;
 const MENU_TEXT_POSITIONED_JUSTIFY: fn(&mut Cpu) = fetextrender::menu_text_positioned_justify_entry;
-pub(crate) const DRAW_SHAPE_EXTENDED: fn(&mut Cpu) = nfs4rc::f_8004eb60;
+pub(crate) const DRAW_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::draw_shape_extended_entry;
 pub(crate) const ROUND_RECTANGLE: fn(&mut Cpu) = nfs4rc::f_8004c490;
 pub(crate) const SET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc52c;
 pub(crate) const RESET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc538;
-pub(crate) const SET_ABR_MODE: fn(&mut Cpu) = nfs4rc::f_8004dbc0;
+pub(crate) const SET_ABR_MODE: fn(&mut Cpu) = crate::mmeffect::set_abr_mode_entry;
 /// Called by address (the host watches or replaces them): `DrawShape_SubtractNFS4RectEdges`,
 /// `SetDrawArea`, `PSXDrawSquare`, `PSXDrawTransSquare`.
 const SUBTRACT_RECT_EDGES: u32 = 0x8004_C2E0;
