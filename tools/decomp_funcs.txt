@@ -1408,3 +1408,26 @@
 80027dec OutputDisplaySettings
 8002bb74 tAllScreens::tAllScreens
 8002bf8c tAllScreens::~tAllScreens
+
+# MEMCARD.C
+8004f8c8 MCRD_init
+8004f968 iMCRD_InitCard
+8004f9c0 MCRD_restore
+8004fa04 MCRD_getopts
+8004fa7c MCRD_setopts
+8004fba0 MCRD_loadfile
+8004fc8c iMCRD_DoFileLoad
+8004ff34 MCRD_savefile
+80050170 iMCRD_DoFileWrite
+800502d4 iMCRD_DoFileDelete
+80050368 MCRD_handlecardevents
+800506b4 MCRD_fileexists
+8005072c MCRD_getcard
+80050774 iMCRD_timersub
+800507a4 garyMemCardGrabBlocks
+8005082c iMCRD_LoadCard
+80050928 iMCRD_FormatCard
+800509b4 iMCRD_HandleError
+80050bd0 iMCRD_DefaultCBProc1
+80050bd8 ascii2sjis
+80050cf8 sjis2ascii

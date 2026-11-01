@@ -78,8 +78,8 @@ const BLOCKMOVE: fn(&mut Cpu) = nfs4rc::f_800e6ec8;
 const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
 const GET_KEY: fn(&mut Cpu) = nfs4rc::f_80023ca8;
 const FRONT_END_FRAME: fn(&mut Cpu) = nfs4rc::f_80013894;
-const CARD_EVENTS: fn(&mut Cpu) = nfs4rc::f_80050368;
-const GET_CARD: fn(&mut Cpu) = nfs4rc::f_8005072c;
+const CARD_EVENTS: fn(&mut Cpu) = crate::memcard::handlecardevents_entry;
+const GET_CARD: fn(&mut Cpu) = crate::memcard::getcard_entry;
 const SCREEN: fn(&mut Cpu) = nfs4rc::f_80026040;
 const SCREEN_DESTRUCTOR: fn(&mut Cpu) = nfs4rc::f_80026098;
 

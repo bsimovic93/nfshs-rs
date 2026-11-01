@@ -74,6 +74,7 @@ pub mod fixed;
 pub mod front;
 pub mod globals;
 pub mod mathnfs;
+pub mod memcard;
 pub mod mmeffect;
 pub mod newton;
 pub mod physics;
@@ -801,6 +802,27 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_f49c, "FontUpsideDownBlit", psxfront::abi_font_upside_down_blit),
     func(0x8004_f5e8, "FETexture_LoadPmxAtOffset", fetexture::abi_load_pmx_at_offset),
     func(0x8004_f8a0, "FETexture_LoadPmx", fetexture::abi_load_pmx),
+    func(0x8004_f8c8, "MCRD_init", memcard::abi_init),
+    func_ret(0x8004_f968, "iMCRD_InitCard", memcard::abi_init_card),
+    func(0x8004_f9c0, "MCRD_restore", memcard::abi_restore),
+    func(0x8004_fa04, "MCRD_getopts", memcard::abi_getopts),
+    func(0x8004_fa7c, "MCRD_setopts", memcard::abi_setopts),
+    func(0x8004_fba0, "MCRD_loadfile", memcard::abi_loadfile),
+    func_ret(0x8004_fc8c, "iMCRD_DoFileLoad", memcard::abi_do_file_load),
+    func_ret(0x8004_ff34, "MCRD_savefile", memcard::abi_savefile),
+    func_ret(0x8005_0170, "iMCRD_DoFileWrite", memcard::abi_do_file_write),
+    func_ret(0x8005_02d4, "iMCRD_DoFileDelete", memcard::abi_do_file_delete),
+    func_ret(0x8005_0368, "MCRD_handlecardevents", memcard::abi_handlecardevents),
+    func_ret(0x8005_06b4, "MCRD_fileexists", memcard::abi_fileexists),
+    func_ret(0x8005_072c, "MCRD_getcard", memcard::abi_getcard),
+    func(0x8005_0774, "iMCRD_timersub", memcard::abi_timersub),
+    func_ret(0x8005_07a4, "garyMemCardGrabBlocks", memcard::abi_grab_blocks),
+    func_ret(0x8005_082c, "iMCRD_LoadCard", memcard::abi_load_card),
+    func_ret(0x8005_0928, "iMCRD_FormatCard", memcard::abi_format_card),
+    func_ret(0x8005_09b4, "iMCRD_HandleError", memcard::abi_handle_error),
+    func_ret(0x8005_0bd0, "iMCRD_DefaultCBProc1", memcard::abi_default_cb),
+    func_ret(0x8005_0bd8, "ascii2sjis", memcard::abi_ascii2sjis),
+    func_ret(0x8005_0cf8, "sjis2ascii", memcard::abi_sjis2ascii),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),
@@ -1660,10 +1682,33 @@ pub(crate) mod test_util {
             // `PadInfoMode`: the modes' count (a2 -1), else mode a2, from PAD_MODES
             0x800F_08BC if c.r[6] as i32 == -1 => c.m.r32(PAD_MODES),
             0x800F_08BC => c.m.r32(PAD_MODES + 4 + 4 * (c.r[6] % 7)),
+            // libmcrd: `MemCardSync` its command and result through a1 and a2 too
+            0x800F_C4A8 => {
+                for (k, at) in [(5, 4), (6, 8)] {
+                    if c.r[k] != 0 {
+                        let v = c.m.r32(CARD_ANSWERS + at);
+                        c.m.w32(c.r[k], v);
+                    }
+                }
+                c.m.r32(CARD_ANSWERS)
+            }
+            0x800F_B770 => c.m.r32(CARD_ANSWERS + 12),
+            0x800F_B534 => c.m.r32(CARD_ANSWERS + 16),
+            0x800F_BDF4 => c.m.r32(CARD_ANSWERS + 20),
+            0x800F_C014 => c.m.r32(CARD_ANSWERS + 24),
+            0x800F_C5C4 => c.m.r32(CARD_ANSWERS + 28),
+            0x800F_C7CC => c.m.r32(CARD_ANSWERS + 32),
+            0x800F_C988 => c.m.r32(CARD_ANSWERS + 36),
+            0x800F_C234 => c.m.r32(CARD_ANSWERS + 40),
             _ => 0,
         };
         true
     }
+
+    /// Where the test CPUs answer libmcrd from: `MemCardSync`'s result, command and result,
+    /// then `MemCardAccept`, `Exist`, `ReadFile`, `WriteFile`, `CreateFile`, `DeleteFile`,
+    /// `Format`, `GetDirentry`.
+    pub const CARD_ANSWERS: u32 = 0x8014_8A90;
 
     /// Where the test CPUs answer `PadInfoMode` from: the count, then seven modes.
     pub const PAD_MODES: u32 = 0x8014_8AD0;
