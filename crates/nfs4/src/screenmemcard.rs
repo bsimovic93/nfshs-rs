@@ -1033,6 +1033,11 @@ mod tests {
         if pick(rng, 4) == 0 {
             m.w32(LINE_T, 0);
         }
+        if pick(rng, 8) == 0 {
+            m.w32(GRID_H, 0xFFF0 + pick(rng, 16));
+        }
+        let app = m.r32(FE_APP);
+        m.w8(app + 557, pick(rng, 2) as u8);
         m.w32(ICONS, BUFFER);
         for k in 0..45 {
             let s = BUFFER + 192 * k;
@@ -1105,7 +1110,7 @@ mod tests {
             m.w8(s + FRAMES + k, 1 + pick(rng, 3) as u8);
             m.w8(s + BLOCKS + k, pick(rng, 4) as u8);
             m.w16(s + CLUTS + 2 * k, [0, 0x7C00 + pick(rng, 64), 0x7800][pick(rng, 3) as usize] as u16);
-            m.w16(s + FADES + 2 * k, [0, 4, 8, 120, 121, 124, 128, 136, 0xFFF8, pick(rng, 200)][pick(rng, 10) as usize] as u16);
+            m.w16(s + FADES + 2 * k, [0, 1, 4, 8, 120, 121, 124, 127, 128, 136, 0xFFF8, pick(rng, 200)][pick(rng, 12) as usize] as u16);
         }
         for f in [ALL_IN, UP, FADING_OUT, RELEASE] {
             m.w32(s + f, (pick(rng, 3) == 0) as u32);

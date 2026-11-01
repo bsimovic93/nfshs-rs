@@ -1492,3 +1492,27 @@
 80045c44 tScreenControllerConfig::tScreenControllerConfig
 80045c94 tScreenControllerConfig::GetHelpText
 80045cf4 ~tScreenControllerConfig
+
+# SCREENCARSELECT.CPP
+8003ab80 TransformVector
+8003ac64 DrawCar
+8003ae58 tScreenCarSelect::tScreenCarSelect
+8003af68 ~tScreenCarSelect
+8003af90 tScreenCarSelect::Cleanup
+8003afd8 tScreenCarSelect::DrawOverlay
+8003b874 tScreenCarSelect::SetState
+8003baf8 tScreenCarSelect::CalcSplinePosition
+8003bdb8 tScreenCarSelect::GetShapeInfo
+8003be7c tScreenCarSelect::UpdateVideoWall
+8003bf4c tScreenCarSelect::AllocateAsyncBuffer
+8003bf80 tScreenCarSelect::FreeAsyncBuffer
+8003bfa8 tScreenCarSelect::InitializeVideoWall
+8003c060 tScreenCarSelect::Initialize
+8003c268 tScreenCarSelect::ProcessInput
+8003c424 tScreenCarSelect::DrawVideoWall
+8003c530 tScreenCarSelect::GetCar
+8003c7b0 tScreenCarSelect::SetBrightness
+8003c7c4 tScreenCarSelect::UpdateBrightness
+8003c848 tScreenCarSelect::DrawBackground
+8003c978 tScreenCarSelect::DrawSliders
+8003cae4 tScreenCarSelect::DrawForeground

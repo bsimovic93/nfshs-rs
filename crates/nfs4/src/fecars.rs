@@ -548,23 +548,26 @@ pub fn get_stock_car(c: &mut Cpu, this: CarManager, id: u32, out: u32) {
         r.0[..3].copy_from_slice(&[out, this.0, id]);
         let i = short(id) as u32;
         if i >= this.num_cars(&mut c.m) {
-            r.enter(c, 0x8001_7094, 0x8001_7018, |c| get_garage_car(c, this, i, out, 0));
+            c.r[7] = 0;
+            r.enter_leaving(c, 0x8001_7094, 0x8001_7018, |c| get_garage_car(c, this, i, out, 0));
             CarInfo(out).set_car_index(&mut c.m, id as u8);
             return;
         }
         let from = this.cars(&mut c.m).at(i).0;
-        r.call(c, BLOCKMOVE, &[from, out, CarInfo::SIZE], 0x8001_7048);
+        // (`blockmove`'s scratch registers left, as the original leaves them)
+        r.call_leaving(c, BLOCKMOVE, &[from, out, CarInfo::SIZE], 0x8001_7048);
         let m = &mut c.m;
         let info = CarInfo(out);
         let model = info.car_id(m) as i32 as u32;
-        let v = m.r8(this.0.wrapping_add(AVAILABLE).wrapping_add(model));
-        info.set_available(m, v);
+        let available = m.r8(this.0.wrapping_add(AVAILABLE).wrapping_add(model));
+        info.set_available(m, available);
         let model = info.car_id(m) as i32 as u32;
         let v = m.r8(this.0.wrapping_add(VIEWABLE).wrapping_add(model));
         info.set_upgrades(m, 0);
         info.set_country(m, 0);
         info.set_viewable(m, v);
         info.set_car_index(m, id as u8);
+        (c.r[2], c.r[3]) = (v as u32, available as u32);
     })
 }
 

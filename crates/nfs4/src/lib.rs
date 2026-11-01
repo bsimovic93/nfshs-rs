@@ -82,6 +82,7 @@ pub mod physics;
 pub mod psxfront;
 pub mod schedule;
 pub mod screenaudio;
+pub mod screencarselect;
 pub mod screencongrats;
 pub mod screencontroller;
 pub mod screendisplay;
@@ -686,6 +687,28 @@ pub static FUNCS: &[Func] = &[
     func(0x8003_ab1c, "~tScreenPinkSlipStandings", screenpost::abi_pink_slip_destructor),
     func(0x8003_ab3c, "~tScreenTournamentStandings3item", screenpost::abi_destructor3),
     func(0x8003_ab5c, "~tScreenTournamentStandings", screenpost::abi_destructor),
+    func(0x8003_ab80, "TransformVector", screencarselect::abi_transform_vector),
+    func(0x8003_ac64, "DrawCar", screencarselect::abi_draw_car),
+    func_ret(0x8003_ae58, "tScreenCarSelect::tScreenCarSelect", screencarselect::abi_screen_car_select),
+    func(0x8003_af68, "~tScreenCarSelect", screencarselect::abi_screen_car_select_destructor),
+    func(0x8003_af90, "tScreenCarSelect::Cleanup", screencarselect::abi_cleanup),
+    func(0x8003_afd8, "tScreenCarSelect::DrawOverlay", screencarselect::abi_draw_overlay),
+    func(0x8003_b874, "tScreenCarSelect::SetState", screencarselect::abi_set_state),
+    func(0x8003_baf8, "tScreenCarSelect::CalcSplinePosition", screencarselect::abi_calc_spline_position),
+    func(0x8003_bdb8, "tScreenCarSelect::GetShapeInfo", screencarselect::abi_get_shape_info),
+    func(0x8003_be7c, "tScreenCarSelect::UpdateVideoWall", screencarselect::abi_update_video_wall),
+    func(0x8003_bf4c, "tScreenCarSelect::AllocateAsyncBuffer", screencarselect::abi_allocate_async_buffer),
+    func(0x8003_bf80, "tScreenCarSelect::FreeAsyncBuffer", screencarselect::abi_free_async_buffer),
+    func(0x8003_bfa8, "tScreenCarSelect::InitializeVideoWall", screencarselect::abi_initialize_video_wall),
+    func(0x8003_c060, "tScreenCarSelect::Initialize", screencarselect::abi_initialize),
+    func(0x8003_c268, "tScreenCarSelect::ProcessInput", screencarselect::abi_process_input),
+    func(0x8003_c424, "tScreenCarSelect::DrawVideoWall", screencarselect::abi_draw_video_wall),
+    func_ret(0x8003_c530, "tScreenCarSelect::GetCar", screencarselect::abi_get_car),
+    func(0x8003_c7b0, "tScreenCarSelect::SetBrightness", screencarselect::abi_set_brightness),
+    func(0x8003_c7c4, "tScreenCarSelect::UpdateBrightness", screencarselect::abi_update_brightness),
+    func(0x8003_c848, "tScreenCarSelect::DrawBackground", screencarselect::abi_draw_background),
+    func(0x8003_c978, "tScreenCarSelect::DrawSliders", screencarselect::abi_draw_sliders),
+    func(0x8003_cae4, "tScreenCarSelect::DrawForeground", screencarselect::abi_draw_foreground),
     func_ret(0x8003_fb48, "tScreenTournSelect::tScreenTournSelect", screentournselect::abi_screen_tourn_select),
     func(0x8003_fb7c, "~tScreenTournSelect", screentournselect::abi_destructor),
     func(0x8003_fba4, "tScreenTournSelect::GetShapeInfo", screentournselect::abi_get_shape_info),
