@@ -444,7 +444,7 @@ const READ_E_MAP_DATA: fn(&mut Cpu) = nfs4rc::f_800bf67c;
 const INIT_SHOWROOM: fn(&mut Cpu) = nfs4rc::f_800128e8;
 const ASYNC_LOAD_FILE_AT: fn(&mut Cpu) = nfs4rc::f_800f2170;
 const READ_STATUS: fn(&mut Cpu) = nfs4rc::f_800f240c;
-const FRONT_END_DEFAULTS: fn(&mut Cpu) = nfs4rc::f_80027968;
+const INITIAL_MEM_CARD_CHECK: fn(&mut Cpu) = nfs4rc::f_80027968;
 const DEL_TIMER: fn(&mut Cpu) = nfs4rc::f_800eb9a4;
 const ADD_TIMER: fn(&mut Cpu) = nfs4rc::f_800eb944;
 const AUDIO_DEINIT_DRIVER: fn(&mut Cpu) = nfs4rc::f_800bca4c;
@@ -455,11 +455,11 @@ const INIT_MENU_CLUT: fn(&mut Cpu) = nfs4rc::f_800e111c;
 const MOVIE_PLAY: fn(&mut Cpu) = nfs4rc::f_8004d3dc;
 const INIT_LINK_MODE: fn(&mut Cpu) = nfs4rc::f_800f1328;
 const LOAD_WORDS: fn(&mut Cpu) = nfs4rc::f_800b9ef0;
-const FIRST_START: fn(&mut Cpu) = nfs4rc::f_800279cc;
+const SECONDARY_MEM_CARD_CHECK: fn(&mut Cpu) = nfs4rc::f_800279cc;
 const SET_PLAY_LIST: fn(&mut Cpu) = nfs4rc::f_8002b8f4;
 const LOAD_FE_SAMPLES: fn(&mut Cpu) = nfs4rc::f_800780f0;
 const LOAD_SHAPE: fn(&mut Cpu) = nfs4rc::f_800f2970;
-const LOAD_PMX: fn(&mut Cpu) = nfs4rc::f_8004f8a0;
+const LOAD_PMX: fn(&mut Cpu) = crate::fetexture::load_pmx_entry;
 /// `DrawSync`, `systemtask` (the host's), `DoTitleScreen` (the host shows the title).
 const DRAW_SYNC: u32 = 0x800E_E1D8;
 const SYSTEM_TASK: u32 = 0x800E_77F0;
@@ -622,12 +622,12 @@ pub fn abi_cleanup_spinning_cars_menu(c: &mut Cpu) {
     })
 }
 
-/// `DoLanguageScreen` (PSXFRONT.CPP, 0x8004e11c): no screen in this release: the front end's
-/// defaults (0x80027968: the records, the front end's structure, language 0); none chosen (255)
-/// made the first.
+/// `DoLanguageScreen` (PSXFRONT.CPP, 0x8004e11c): no screen in this release:
+/// `Front_InitialMemCardCheck` (FRONT.CPP: the records' defaults, the front end's structure,
+/// language 0); none chosen (255) made the first.
 pub fn abi_do_language_screen(c: &mut Cpu) {
     abi::frame(c, 24, |c, _| {
-        Saved::of(c).call_leaving(c, FRONT_END_DEFAULTS, &[], 0x8004_e12c);
+        Saved::of(c).call_leaving(c, INITIAL_MEM_CARD_CHECK, &[], 0x8004_e12c);
         let language = c.m.r8(LANGUAGE) as u32;
         if language == 255 {
             c.m.w8(LANGUAGE, 0);
@@ -700,7 +700,7 @@ pub fn abi_init_rendering_environment(c: &mut Cpu) {
 /// `Init_PSX_FrontEnd` (PSXFRONT.CPP, 0x8004e2e0): the timer, the geometry, the help's shapes,
 /// the menus' CLUT, a 512-wide 16-bit screen; the first time, the intro movies (the second
 /// unless the first was skipped), the environment, the defaults, the language's words, the
-/// title (the host's), the first start's set-up (0x800279cc); else the environment and the
+/// title (the host's), `Front_SecondaryMemCardCheck` (FRONT.CPP); else the environment and the
 /// words; then the fonts, the sound driver, the music's list, the samples, the help's shapes
 /// loaded.
 pub fn abi_init_psx_front_end(c: &mut Cpu) {
@@ -725,7 +725,7 @@ pub fn abi_init_psx_front_end(c: &mut Cpu) {
             r.call_leaving(c, LOAD_WORDS, &[language], 0x8004_e398);
             r.call_ptr_leaving(c, DO_TITLE_SCREEN, &[], 0x8004_e3a0);
             r.call_leaving(c, INIT_LINK_MODE, &[0, 1, 1], 0x8004_e3b0);
-            r.call_leaving(c, FIRST_START, &[], 0x8004_e3b8);
+            r.call_leaving(c, SECONDARY_MEM_CARD_CHECK, &[], 0x8004_e3b8);
         } else {
             r.enter_leaving(c, 0x8004_e1f4, 0x8004_e3c8, abi_init_rendering_environment);
             let language = c.m.r8(LANGUAGE) as u32;

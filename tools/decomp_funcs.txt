@@ -1348,3 +1348,19 @@
 8004ef70 ScaleShapeExtended
 8004f09c LoadAllHelpShapes
 8004f49c FontUpsideDownBlit
+
+# FETEXTURE.CPP
+8004f5e8 FETexture_LoadPmxAtOffset
+8004f8a0 FETexture_LoadPmx
+
+# FEAUDIO.CPP (retail = dev + 0x128)
+800158a8 FEAudio_StartLoadPatch
+8001594c Feaudio_StartPatch
+80015a70 FeAudio_systemtask
+80015cf4 FeAudio_AsyncPlayCommentary
+80015de0 FeAudio_AsyncPlaySpeech
+80015e5c FeAudio_StartBigfileRead
+80015ef4 FeAudio_LocateBigfile
+8001604c FeAudio_InitViv
+80016200 FeAudio_InitCommentary
+800162a0 FeAudio_DeInitCommentary

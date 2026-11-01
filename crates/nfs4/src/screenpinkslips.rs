@@ -91,7 +91,7 @@ const HALO_2D: fn(&mut Cpu) = nfs4rc::f_800cecd0;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 const BUFFERED: fn(&mut Cpu) = nfs4rc::f_8007aa48;
 const THRESHOLD: fn(&mut Cpu) = nfs4rc::f_8007a9c4;
-const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_80015a70;
+const SYSTEM_TASK: fn(&mut Cpu) = crate::feaudio::systemtask_entry;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32

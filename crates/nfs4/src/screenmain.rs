@@ -133,7 +133,7 @@ const GET_CLUT: fn(&mut Cpu) = nfs4rc::f_800f4dac;
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
 const GETTICK: fn(&mut Cpu) = nfs4rc::f_800e8e0c;
 const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended_entry;
-const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_80015a70;
+const SYSTEM_TASK: fn(&mut Cpu) = crate::feaudio::systemtask_entry;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 
 fn sx(v: u32) -> u32 {

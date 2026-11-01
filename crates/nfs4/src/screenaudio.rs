@@ -74,9 +74,9 @@ const SET_OPTS: fn(&mut Cpu) = nfs4rc::f_800f0c14;
 const SND_OVER: fn(&mut Cpu) = nfs4rc::f_800e8700;
 const SND_STOP: fn(&mut Cpu) = nfs4rc::f_800e8a6c;
 const RAND: fn(&mut Cpu) = nfs4rc::f_800eb430;
-const PLAY_SPEECH: fn(&mut Cpu) = nfs4rc::f_80015de0;
+const PLAY_SPEECH: fn(&mut Cpu) = crate::feaudio::async_play_speech_entry;
 const PLAY_SOUND: fn(&mut Cpu) = nfs4rc::f_80078d5c;
-const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_80015a70;
+const SYSTEM_TASK: fn(&mut Cpu) = crate::feaudio::systemtask_entry;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 

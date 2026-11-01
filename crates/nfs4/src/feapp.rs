@@ -76,7 +76,7 @@ const RELEASE_CLUT: fn(&mut Cpu) = nfs4rc::f_800e05b0;
 
 /// The frame's drawing (`FeAudio_systemtask`, `Draw_StartFrameRender`,
 /// `Draw_StartRenderingView`, `Draw_StopRenderingView`, the frame shown).
-const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_80015a70;
+const SYSTEM_TASK: fn(&mut Cpu) = crate::feaudio::systemtask_entry;
 const START_FRAME: fn(&mut Cpu) = nfs4rc::f_800bf044;
 const START_VIEW: fn(&mut Cpu) = nfs4rc::f_800bedac;
 const STOP_VIEW: fn(&mut Cpu) = nfs4rc::f_800bee9c;

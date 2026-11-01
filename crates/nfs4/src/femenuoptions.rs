@@ -63,7 +63,7 @@ const PAD_DUAL_SHOCK: u32 = 0x73;
 const ACTIVATE_CHEAT: fn(&mut Cpu) = nfs4rc::f_80023634;
 const ACTIVATE_BONUS: fn(&mut Cpu) = nfs4rc::f_80023800;
 const CASE_FOR_RECORDS: fn(&mut Cpu) = nfs4rc::f_8004b0ac;
-const PLAY_SPEECH: fn(&mut Cpu) = nfs4rc::f_80015de0;
+const PLAY_SPEECH: fn(&mut Cpu) = crate::feaudio::async_play_speech_entry;
 /// The name grid: its rows' texts (from 508), how many rows each language has (6 shorts), the
 /// rows now (`gNameRows`) and the grid's top; the accented letters' jump table.
 const GRID_TEXTS: u32 = 508;

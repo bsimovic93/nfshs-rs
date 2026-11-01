@@ -50,6 +50,7 @@ pub mod collide;
 pub mod control;
 pub mod drawshp;
 pub mod feapp;
+pub mod feaudio;
 pub mod fecars;
 pub mod fecheats;
 pub mod fecredits;
@@ -63,6 +64,7 @@ pub mod femenuoptions;
 pub mod femission;
 pub mod fescreen;
 pub mod fetextrender;
+pub mod fetexture;
 pub mod fetools;
 pub mod fetourn;
 pub mod fetracks;
@@ -137,6 +139,16 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x8001_43c8, "tFEApplication::MainLoop", feapp::abi_main_loop),
     func(0x8001_585c, "tFEApplication::RunFrontEnd", feapp::abi_run_front_end),
     func(0x8001_5884, "tDialogMessageStringWithTimeout::~tDialogMessageStringWithTimeout", fedialog::abi_message_with_timeout_destructor),
+    func_ret(0x8001_58a8, "FEAudio_StartLoadPatch", feaudio::abi_start_load_patch),
+    func(0x8001_594c, "Feaudio_StartPatch", feaudio::abi_start_patch),
+    func(0x8001_5a70, "FeAudio_systemtask", feaudio::abi_systemtask),
+    func_ret(0x8001_5cf4, "FeAudio_AsyncPlayCommentary", feaudio::abi_async_play_commentary),
+    func_ret(0x8001_5de0, "FeAudio_AsyncPlaySpeech", feaudio::abi_async_play_speech),
+    func_ret(0x8001_5e5c, "FeAudio_StartBigfileRead", feaudio::abi_start_bigfile_read),
+    func(0x8001_5ef4, "FeAudio_LocateBigfile", feaudio::abi_locate_bigfile),
+    func_ret(0x8001_604c, "FeAudio_InitViv", feaudio::abi_init_viv),
+    func(0x8001_6200, "FeAudio_InitCommentary", feaudio::abi_init_commentary),
+    func(0x8001_62a0, "FeAudio_DeInitCommentary", feaudio::abi_deinit_commentary),
     func(0x8001_62d8, "tCarManager::Initialize", fecars::abi_initialize),
     func_ret(0x8001_6374, "tCarManager::GetCarFromID", fecars::abi_get_car_from_id),
     func_ret(0x8001_63e4, "tCarManager::GetCarFromSimID", fecars::abi_get_car_from_sim_id),
@@ -744,6 +756,8 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_ef70, "ScaleShapeExtended", psxfront::abi_scale_shape_extended),
     func(0x8004_f09c, "LoadAllHelpShapes", psxfront::abi_load_all_help_shapes),
     func(0x8004_f49c, "FontUpsideDownBlit", psxfront::abi_font_upside_down_blit),
+    func(0x8004_f5e8, "FETexture_LoadPmxAtOffset", fetexture::abi_load_pmx_at_offset),
+    func(0x8004_f8a0, "FETexture_LoadPmx", fetexture::abi_load_pmx),
     func(0x8005_816c, "AI_StartUp", ai::abi_nothing),
     func(0x8005_8174, "AI_CleanUp", ai::abi_nothing),
     func(0x8005_817c, "AI_Main_OverallSetup", ai::abi_nothing),
