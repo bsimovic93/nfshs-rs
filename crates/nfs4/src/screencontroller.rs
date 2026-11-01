@@ -97,7 +97,8 @@ const TEXT_PIXELS: fn(&mut Cpu) = nfs4rc::f_800e4a2c;
 const RAND: fn(&mut Cpu) = nfs4rc::f_800eb430;
 const GET_DEVICE: fn(&mut Cpu) = nfs4rc::f_800dd940;
 const SETTRANS: fn(&mut Cpu) = nfs4rc::f_800f1440;
-const HALO: fn(&mut Cpu) = nfs4rc::f_800cecd0;
+/// `Flare_2DHalo`, hooked (the host captures its primitives): called by address.
+const HALO: u32 = 0x800C_ECD0;
 const PLAY_SFX: fn(&mut Cpu) = nfs4rc::f_8007a08c;
 /// The float library's: int to float, float division, float to double, double product,
 /// double to int.
@@ -825,7 +826,7 @@ pub fn abi_draw_controller(c: &mut Cpu) {
                 let x = b(m, at).wrapping_add(r.0[3]);
                 let y = b(m, at + 1).wrapping_add(k + 63).wrapping_add(r.0[2]);
                 let q = (if (size as i32) < 0 { size.wrapping_add(3) } else { size } as i32 >> 2) as u32;
-                r.call_leaving(c, HALO, &[x, y, size, q, 21], 0x8004_4628);
+                r.call_ptr_leaving(c, HALO, &[x, y, size, q, 21], 0x8004_4628);
             }
             r.0[0] = 2;
         }

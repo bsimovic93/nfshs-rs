@@ -79,6 +79,8 @@ const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 /// `GetTPage`, `purgememadr`, `Front_EnableLocalSpeech`.
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
+/// `DrawVideoWall`: hooked (the host records the spinning track's quads), so called by address.
+const DRAW_VIDEO_WALL: u32 = 0x8004_22DC;
 const LOCAL_SPEECH: fn(&mut Cpu) = crate::front::enable_local_speech_entry;
 
 fn sx(v: u32) -> u32 {
@@ -228,7 +230,7 @@ pub fn abi_draw_background(c: &mut Cpu) {
             r.0[0] &= prim;
             video_half(c, &mut r, this, [313, 473], 16, 576, 0x8004_1e4c);
         }
-        port(c, &r, 0x8004_22dc, 0x8004_1e5c, &[this], abi_draw_video_wall);
+        r.call_ptr_leaving(c, DRAW_VIDEO_WALL, &[this], 0x8004_1e5c);
     })
 }
 

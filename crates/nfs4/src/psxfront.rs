@@ -192,10 +192,8 @@ fn draw_flat_shape_entry(c: &mut Cpu) {
     abi_draw_flat_shape(c);
 }
 
-fn scale_gouraud_shape_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8004_ec64, None, &[]);
-    abi_scale_gouraud_shape(c);
-}
+/// `ScaleGouraudShape`: hooked (the host captures its primitives), so called by address.
+const SCALE_GOURAUD_SHAPE: u32 = 0x8004_EC64;
 
 fn scale_flat_shape_entry(c: &mut Cpu) {
     abi::leave_prologue(c, 0x8004_ef20, None, &[]);
@@ -336,7 +334,7 @@ pub fn abi_scale_flat_shape(c: &mut Cpu) {
         for k in [12, 8, 4] {
             c.m.w32(colours + k, v);
         }
-        Saved::of(c).call_leaving(c, scale_gouraud_shape_entry, &args, 0x8004_ef60);
+        Saved::of(c).call_ptr_leaving(c, SCALE_GOURAUD_SHAPE, &args, 0x8004_ef60);
     })
 }
 
@@ -364,7 +362,7 @@ pub fn abi_scale_shape_extended(c: &mut Cpu) {
         let (flags, x, y) = (m.r32(sp + 76), m.r32(sp + 80), m.r32(sp + 84));
         let args = [shape, flags, x, y, 0x2_0000, 0x1_0000, colours, abr];
         if flags & (GRADIENT | CORNERS) != 0 {
-            r.call_leaving(c, scale_gouraud_shape_entry, &args, 0x8004_f058);
+            r.call_ptr_leaving(c, SCALE_GOURAUD_SHAPE, &args, 0x8004_f058);
         } else {
             r.call_leaving(c, scale_flat_shape_entry, &args, 0x8004_f07c);
         }

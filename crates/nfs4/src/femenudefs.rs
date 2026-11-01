@@ -22,6 +22,9 @@ const YES_NO_VT: u32 = 0x8001_02A8;
 const TEXT_WORD: fn(&mut Cpu) = nfs4rc::f_800b9f18;
 
 /// A port called from a port with `args` in a0.. (stack ones written by the caller first).
+/// `AskTheUserToSaveTheGame`: hooked (the host autosaves in its place), so called by address.
+const ASK_TO_SAVE: u32 = 0x8002_C49C;
+
 fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
     r.enter_leaving(c, addr, ra, |c| {
         let n = args.len().min(4);
@@ -227,7 +230,7 @@ pub fn abi_transition_from_post_game_to_main_menu_and_save_game(c: &mut Cpu) {
     abi::frame(c, 24, |c, _| {
         let mut r = Saved::of(c);
         r.0[0] = cmd;
-        if port(c, &r, 0x8002_c49c, 0x8002_c544, &[], abi_ask_the_user_to_save_the_game) != 0 {
+        if r.call_ptr_leaving(c, ASK_TO_SAVE, &[], 0x8002_c544) != 0 {
             command(&mut c.m, cmd, 2, 15000);
         } else {
             port(c, &r, 0x8002_c514, 0x8002_c56c, &[cmd], abi_transition_from_post_game_to_main_menu);
@@ -993,7 +996,7 @@ pub fn abi_tier_finished(c: &mut Cpu) {
         port(c, &r, 0x8003_3a10, 0x8002_da50, &[TOURNAMENT_MANAGER, sp + 16], crate::fetourn::abi_get_award_information);
         let menu = if c.m.r32(sp + 64) != 0 {
             14708
-        } else if port(c, &r, 0x8002_c49c, 0x8002_da74, &[], abi_ask_the_user_to_save_the_game) != 0 {
+        } else if r.call_ptr_leaving(c, ASK_TO_SAVE, &[], 0x8002_da74) != 0 {
             15000
         } else {
             176

@@ -212,7 +212,8 @@ pub struct Cpu {
     pub host: Option<Box<dyn Host>>,
     pub calls: u64,
     pub trace: bool,
-    /// Recompiled-function call stack (entry addresses), for diagnostics.
+    /// Recompiled-function call stack (entry addresses), for diagnostics and the host's checks of
+    /// what the game is doing; the decompiled functions push themselves too (`nfs4::abi::on_stack`).
     pub stack: Vec<u32>,
     /// Entry point into recompiled code: returns false if `addr` is not a known function.
     pub dispatch: fn(&mut Cpu, u32) -> bool,

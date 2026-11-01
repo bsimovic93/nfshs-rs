@@ -77,7 +77,9 @@ const PAD_UPDATE: fn(&mut Cpu) = nfs4rc::f_800e4e08;
 const BLOCKMOVE: fn(&mut Cpu) = nfs4rc::f_800e6ec8;
 const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
 const GET_KEY: fn(&mut Cpu) = nfs4rc::f_80023ca8;
-const FRONT_END_FRAME: fn(&mut Cpu) = nfs4rc::f_80013894;
+/// `tFEApplication::Redraw`, hooked (the host autosaves between front-end frames): called by
+/// address; `Cpu::call` routes it to the port after the host.
+const FRONT_END_FRAME: u32 = 0x8001_3894;
 const CARD_EVENTS: fn(&mut Cpu) = crate::memcard::handlecardevents_entry;
 const GET_CARD: fn(&mut Cpu) = crate::memcard::getcard_entry;
 const SCREEN: fn(&mut Cpu) = nfs4rc::f_80026040;
@@ -768,12 +770,12 @@ pub fn run(c: &mut Cpu, this: u32) -> u32 {
                 r.0[1] = player.wrapping_add(1);
             }
             let app = c.m.r32(FE_APP);
-            r.call_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ab8);
+            r.call_ptr_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ab8);
         }
         r.call_leaving(c, PLAY_FE_SFX, &[0], 0x8001_9ac8);
         r.enter(c, 0x8001_8a44, 0x8001_9ad0, |c| hide(c, this));
         let app = c.m.r32(FE_APP);
-        r.call_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ae0);
+        r.call_ptr_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ae0);
         let answer = lh(&mut c.m, this + ANSWER);
         c.m.w32(this + 156, 0);
         answer
@@ -884,7 +886,9 @@ pub fn draw_yes_no(c: &mut Cpu, this: u32) {
                 r.0[4] = r.0[4].wrapping_add((w >> 1) as i32 as u32);
             }
         }
-        r.enter(c, 0x8001_976c, 0x8001_9de0, |c| draw_message(c, this));
+        // `tDialogMessageString::Draw` is hooked (the host hides the save message when autosaving):
+        // called by address, `Cpu::call` routing it to the port after the host
+        r.call_ptr(c, 0x8001_976C, &[this], 0x8001_9de0);
     })
 }
 

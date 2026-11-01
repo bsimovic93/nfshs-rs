@@ -54,7 +54,8 @@ const NAMES: u32 = 853;
 /// `GetTrophyName`, `systemtask`, `FETexture_LoadPmxAtOffset`, `purgememadr`,
 /// `ScaleShapeExtended`.
 const GET_TROPHY_NAME: fn(&mut Cpu) = fetourn::get_trophy_name_entry;
-const SYSTEM_TASK: fn(&mut Cpu) = nfs4rc::f_800e77f0;
+/// `systemtask`, hooked (the host lets time pass in wait loops): called by address.
+const SYSTEM_TASK: u32 = 0x800E_77F0;
 const LOAD_PMX: fn(&mut Cpu) = crate::fetexture::load_pmx_at_offset_entry;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended_entry;
@@ -237,7 +238,7 @@ pub fn abi_initialize(c: &mut Cpu) {
         r.0[0] = this;
         port(c, &r, 0x8002_60cc, 0x8004_0d10, &[this], fescreen::abi_initialize);
         loop {
-            r.call_leaving(c, SYSTEM_TASK, &[0], 0x8004_0d18);
+            r.call_ptr_leaving(c, SYSTEM_TASK, &[0], 0x8004_0d18);
             if port(c, &r, 0x8002_5e2c, 0x8004_0d24, &[this, this + TROPHIES], fescreen::abi_is_shape_file_loaded) == 1 {
                 break;
             }

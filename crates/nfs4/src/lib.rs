@@ -1729,7 +1729,7 @@ pub fn decomp(c: &mut Cpu, addr: u32) -> bool {
     if check::wanted(i) {
         check::run(c, i);
     } else {
-        (FUNCS[i].run)(c);
+        abi::on_stack(c, FUNCS[i].addr, FUNCS[i].run);
     }
     true
 }

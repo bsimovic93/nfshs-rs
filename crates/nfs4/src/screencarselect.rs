@@ -952,7 +952,11 @@ const SLIDER_STATS: u32 = 0x8005_23E8;
 const WORD_KINDS: u32 = 0x8005_1AA0;
 const SHOWROOM_DRAW: u32 = 0x8005_1748;
 
-const DRAW_SLIDER: fn(&mut Cpu) = nfs4rc::f_80024c4c;
+/// `DrawCar`: hooked (the host notes the showroom's car), so called by address, never
+/// `abi_draw_car` directly: `Cpu::call` lets the host see it, then routes to the port.
+const DRAW_CAR: u32 = 0x8003_AC64;
+/// Hooked (the host captures its primitives): called by address, never `nfs4rc::f_80024c4c`.
+const DRAW_SLIDER: u32 = 0x8002_4C4C;
 const FMUL: fn(&mut Cpu) = nfs4rc::f_800f3e0c;
 const I2F: fn(&mut Cpu) = nfs4rc::f_800f6b80;
 const WORD_FLAGS: fn(&mut Cpu) = nfs4rc::f_800b9f38;
@@ -1027,7 +1031,7 @@ pub fn abi_draw_sliders(c: &mut Cpu) {
                     v = v.wrapping_add(b(m, at + o));
                 }
             }
-            r.call_leaving(c, DRAW_SLIDER, &[sx(v), 0, 11, x, sx(yy), 104, 3, 7, 3, 0, 0, 128, 0], 0x8003_cab0);
+            r.call_ptr_leaving(c, DRAW_SLIDER, &[sx(v), 0, 11, x, sx(yy), 104, 3, 7, 3, 0, 0, 128, 0], 0x8003_cab0);
             r.0[1] = r.0[1].wrapping_add(15);
             r.0[2] = r.0[2].wrapping_add(1);
         }
@@ -1188,7 +1192,7 @@ pub fn abi_draw_foreground(c: &mut Cpu) {
             let turn = m.r32(this + 924).wrapping_add(3);
             m.w32(this + 924, turn);
             let shade = b(m, this + 884);
-            port(c, &r, 0x8003_ac64, 0x8003_cf28, &[sp + 48, 314, 84, 0x4080_0000, 0xC0F0_0000, shade, 1, turn, 0], abi_draw_car);
+            r.call_ptr_leaving(c, DRAW_CAR, &[sp + 48, 314, 84, 0x4080_0000, 0xC0F0_0000, shade, 1, turn, 0], 0x8003_cf28);
         } else {
             showroom(c, &mut r, this, sp, ok);
         }
@@ -1305,7 +1309,7 @@ fn showroom(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32, ok: u32) {
     let fy = r.call_leaving(c, FMUL, &[f, 0x3780_0000], 0x8003_d294);
     let m = &mut c.m;
     let (a1, a2, shade, turn) = (hs(m, sp + 288), hs(m, sp + 292), b(m, this + 884), m.r32(sp + 296));
-    port(c, r, 0x8003_ac64, 0x8003_d2c4, &[sp + 48, a1, a2, fx, fy, shade, 1, turn, 0], abi_draw_car);
+    r.call_ptr_leaving(c, DRAW_CAR, &[sp + 48, a1, a2, fx, fy, shade, 1, turn, 0], 0x8003_d2c4);
     if ok != 0 {
         let now = r.call_leaving(c, GETTICK, &[], 0x8003_d2d4);
         let m = &mut c.m;
@@ -1753,7 +1757,8 @@ const DRAW_ENV_B: u32 = 0x8013_EA9C;
 const SCREEN_HEIGHT: u32 = 0x8013_EF6C;
 const DUEL_LABELS: u32 = 0x8005_2408;
 const GET_DRAWENV: fn(&mut Cpu) = nfs4rc::f_800beb84;
-const SET_DRAW_AREA: fn(&mut Cpu) = nfs4rc::f_800eec70;
+/// Hooked (the host records the clipping): called by address.
+const SET_DRAW_AREA: u32 = 0x800E_EC70;
 
 /// A drawing area primitive (12 bytes) linked into the OT and set to the screen's band from
 /// `env`'s top plus `dy` (the screen's height less `dy` high), as the original's inline
@@ -1769,7 +1774,7 @@ fn draw_area(c: &mut Cpu, r: &Saved, env: u32, sp: u32, dy: u32, ra: u32) {
     let ot = m.r32(0x1F80_0000);
     let prim = crate::mmeffect::add_prim(m, 12);
     (c.r[6], c.r[7], c.r[8], c.r[9]) = (ot, 0xFF_FFFF, 0xFF00_0000, 0x1F80_0004);
-    r.call_leaving(c, SET_DRAW_AREA, &[prim, sp + 256], ra);
+    r.call_ptr_leaving(c, SET_DRAW_AREA, &[prim, sp + 256], ra);
 }
 
 /// Whether a wall's video shapes can go up: read (`data` at `info + 4`), a shown car's
@@ -1841,7 +1846,7 @@ pub fn abi_duel_draw_background(c: &mut Cpu) {
         let m = &mut c.m;
         m.w32(SHOWROOM_DRAW, 0);
         let (shade, turn) = (b(m, this + 886), m.r32(this + 924));
-        port(c, &r, 0x8003_ac64, 0x8003_ddbc, &[car, 278, 184, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, 1], abi_draw_car);
+        r.call_ptr_leaving(c, DRAW_CAR, &[car, 278, 184, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, 1], 0x8003_ddbc);
         let m = &mut c.m;
         let o = m.r32(CAR_OBJECTS + 4);
         if m.r32(o + 2264) == 0
@@ -1885,7 +1890,7 @@ pub fn abi_duel_draw_background(c: &mut Cpu) {
         let m = &mut c.m;
         m.w32(SHOWROOM_DRAW, 0);
         let (shade, turn) = (b(m, this + 884), m.r32(this + 924));
-        port(c, &r, 0x8003_ac64, 0x8003_e034, &[car, 278, 79, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, 0], abi_draw_car);
+        r.call_ptr_leaving(c, DRAW_CAR, &[car, 278, 79, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, 0], 0x8003_e034);
         let m = &mut c.m;
         let o = m.r32(CAR_OBJECTS);
         if m.r32(o + 2264) == 0
@@ -1947,7 +1952,7 @@ pub fn abi_duel_draw_foreground(c: &mut Cpu) {
                 port(c, &r, 0x8002_12e0, 0x8003_e24c, &[label, 500, y, 1, 0, 4], crate::fetextrender::abi_menu_text_positioned_justify);
                 let v = if ok != 0 { sx(stat(&mut c.m, car, k)) } else { 0 };
                 let y = sx(r.0[2]);
-                r.call_leaving(c, DRAW_SLIDER, &[v, 0, 11, 417, y, 73, 3, 4, 3, 1, 0, 128, 0], 0x8003_e310);
+                r.call_ptr_leaving(c, DRAW_SLIDER, &[v, 0, 11, 417, y, 73, 3, 4, 3, 1, 0, 128, 0], 0x8003_e310);
                 r.0[2] = r.0[2].wrapping_add(15);
                 r.0[1] = k + 1;
             }
@@ -2137,7 +2142,7 @@ fn link_area(c: &mut Cpu, r: &Saved, sp: u32, ra: u32) {
     let ot = m.r32(0x1F80_0000);
     let prim = crate::mmeffect::add_prim(m, 12);
     (c.r[6], c.r[7], c.r[8], c.r[9]) = (ot, 0xFF_FFFF, 0xFF00_0000, 0x1F80_0004);
-    r.call_leaving(c, SET_DRAW_AREA, &[prim, sp + 256], ra);
+    r.call_ptr_leaving(c, SET_DRAW_AREA, &[prim, sp + 256], ra);
 }
 
 /// `tScreenCarSelectTwoPlayer::DrawBackground` (SCREENCARSELECT.CPP, 0x8003e83c): the
@@ -2203,14 +2208,14 @@ pub fn abi_two_player_draw_background(c: &mut Cpu) {
             m.w32(SHOWROOM_DRAW, 0);
             let (p, shade, turn) = (player(m), b(m, this + 884), m.r32(this + 924));
             let y = r.0[4];
-            port(c, &r, 0x8003_ac64, 0x8003_eaf4, &[car, 278, y, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, p], abi_draw_car);
+            r.call_ptr_leaving(c, DRAW_CAR, &[car, 278, y, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, p], 0x8003_eaf4);
         } else {
             c.m.w8(car, 0xFF);
             virtual_call(c, &r, this, 100, &[car], 0x8003_eb20);
             let m = &mut c.m;
             m.w32(SHOWROOM_DRAW, 0);
             let (p, shade, turn) = (player(m), b(m, this + 884), m.r32(this + 924));
-            port(c, &r, 0x8003_ac64, 0x8003_eb6c, &[car, 278, 79, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, p], abi_draw_car);
+            r.call_ptr_leaving(c, DRAW_CAR, &[car, 278, 79, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, p], 0x8003_eb6c);
             virtual_call(c, &r, this, 132, &[], 0x8003_eb88);
         }
         port(c, &r, 0x8002_5e2c, 0x8003_eb94, &[this, this + 40], crate::fescreen::abi_is_shape_file_loaded);
@@ -2278,7 +2283,7 @@ pub fn abi_two_player_draw_foreground(c: &mut Cpu) {
             port(c, &r, 0x8002_12e0, 0x8003_eed8, &[label, 500, y, 1, 0, 14], crate::fetextrender::abi_menu_text_positioned_justify);
             let v = if ok != 0 { sx(stat(&mut c.m, car, k)) } else { 0 };
             let y = sx(r.0[1]);
-            r.call_leaving(c, DRAW_SLIDER, &[v, 0, 11, 417, y, 73, 3, 4, 3, 1, 0, 128, 0], 0x8003_ef9c);
+            r.call_ptr_leaving(c, DRAW_SLIDER, &[v, 0, 11, 417, y, 73, 3, 4, 3, 1, 0, 128, 0], 0x8003_ef9c);
             r.0[1] = r.0[1].wrapping_add(15);
             r.0[2] = k + 1;
         }

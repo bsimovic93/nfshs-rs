@@ -87,7 +87,8 @@ const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 /// `GetTPage`, `Flare_2DHalo`, `purgememadr`, `AudioMus_Buffered`, `AudioMus_Threshold`,
 /// `FeAudio_systemtask`.
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
-const HALO_2D: fn(&mut Cpu) = nfs4rc::f_800cecd0;
+/// `Flare_2DHalo`, hooked (the host captures its primitives): called by address.
+const HALO_2D: u32 = 0x800C_ECD0;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 const BUFFERED: fn(&mut Cpu) = nfs4rc::f_8007aa48;
 const THRESHOLD: fn(&mut Cpu) = nfs4rc::f_8007a9c4;
@@ -166,7 +167,7 @@ pub fn abi_draw_background(c: &mut Cpu) {
                     let (x, y) = (lh(m, rect) as u32, lh(m, rect + 2) as u32);
                     r.0[0] = x;
                     r.0[1] = y;
-                    r.call_leaving(c, HALO_2D, &[x.wrapping_sub(15), y.wrapping_add(6), (size / 2) as u32, (size.wrapping_mul(2) / 3) as u32, 23], 0x8003_8f20);
+                    r.call_ptr_leaving(c, HALO_2D, &[x.wrapping_sub(15), y.wrapping_add(6), (size / 2) as u32, (size.wrapping_mul(2) / 3) as u32, 23], 0x8003_8f20);
                     let fade = lh(&mut c.m, this + FADE) as u32;
                     r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[56, 0, x.wrapping_sub(18), y, fade, 1, 0], 0x8003_8f48);
                 }

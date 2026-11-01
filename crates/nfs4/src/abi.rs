@@ -142,13 +142,14 @@ impl Saved {
 
     /// Run the decompiled function `f` (the original at `addr`) as called from the call site
     /// returning to `ra`, with these registers: its prologue's stores left as the original's
-    /// would be, and the registers as before afterwards.
+    /// would be, and the registers as before afterwards. `addr` is on [`Cpu::stack`] meanwhile
+    /// (see [`on_stack`]).
     pub fn enter<R>(&self, c: &mut Cpu, addr: u32, ra: u32, f: impl FnOnce(&mut Cpu) -> R) -> R {
         let r = c.r;
         self.load(c);
         c.r[31] = ra;
         leave_prologue(c, addr, None, &[]);
-        let v = f(c);
+        let v = on_stack(c, addr, f);
         c.r = r;
         v
     }
@@ -161,12 +162,24 @@ impl Saved {
         self.load(c);
         c.r[31] = ra;
         leave_prologue(c, addr, None, &[]);
-        let v = f(c);
+        let v = on_stack(c, addr, f);
         for k in (16..24).chain([28, 29, 30, 31]) {
             c.r[k] = r[k];
         }
         v
     }
+}
+
+/// Run `f`, a decompiled function (the original at `addr`), with `addr` on [`Cpu::stack`] as
+/// the recompiled original would have it: the host reads the stack to know what the game is
+/// doing (the save the host started is `GenericMenuSaveGame` on it, a dialog's sound
+/// `tDialog::Display` calling the sound), and without this a port's frames are missing.
+pub fn on_stack<R>(c: &mut Cpu, addr: u32, f: impl FnOnce(&mut Cpu) -> R) -> R {
+    let depth = c.stack.len();
+    c.stack.push(addr);
+    let v = f(c);
+    c.stack.truncate(depth);
+    v
 }
 
 /// Call the function at `addr` (a function pointer the original calls with `jalr`), wherever

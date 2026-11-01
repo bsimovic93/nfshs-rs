@@ -58,7 +58,8 @@ const DRAW_SQUARE: u32 = 0x8004_F12C;
 /// (0x80028004: 2 metric), `reservememadr`, `purgememadr`.
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
-const HALO_2D: fn(&mut Cpu) = nfs4rc::f_800cecd0;
+/// `Flare_2DHalo`, hooked (the host captures its primitives): called by address.
+const HALO_2D: u32 = 0x800C_ECD0;
 const PARSE_TIME: fn(&mut Cpu) = nfs4rc::f_8004ae74;
 const GET_RECORDS: fn(&mut Cpu) = nfs4rc::f_8004b2f4;
 const RECORDS_DONE: fn(&mut Cpu) = nfs4rc::f_8004ad14;
@@ -155,7 +156,7 @@ pub fn draw_one_record(c: &mut Cpu, this: u32, k: u32, lit: u32, y: u32) {
         if lit != 0 {
             let x = r.call_leaving(c, WORD_X, &[HALO_AT], 0x8004_2b4c);
             let size = c.m.r32(this + HALO) as i32;
-            r.call_leaving(c, HALO_2D, &[x.wrapping_add(3), y.wrapping_add(4), (size / 2) as u32, (size.wrapping_mul(2) / 3) as u32, 23], 0x8004_2b8c);
+            r.call_ptr_leaving(c, HALO_2D, &[x.wrapping_add(3), y.wrapping_add(4), (size / 2) as u32, (size.wrapping_mul(2) / 3) as u32, 23], 0x8004_2b8c);
             let x = r.call_leaving(c, WORD_X, &[HALO_AT], 0x8004_2b94);
             r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[0, 0, x, y, 0, 0, 0], 0x8004_2bb4);
         }

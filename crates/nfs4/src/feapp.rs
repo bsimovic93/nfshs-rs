@@ -113,6 +113,10 @@ fn current(m: &mut Mem, this: u32, field: u32) -> u32 {
 
 /// A call to a function that is ported too (its port entered as the original's caller enters
 /// it): `f`, the original at `addr`, with `args` in a0.. (four at most), returning to `ra`.
+/// `Redraw`: hooked (the host autosaves between front-end frames), so called by address;
+/// `Cpu::call` routes it to the port after the host.
+const REDRAW: u32 = 0x8001_3894;
+
 fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
     r.enter_leaving(c, addr, ra, |c| {
         c.r[4..4 + args.len()].copy_from_slice(args);
@@ -914,7 +918,7 @@ pub fn main_loop(c: &mut Cpu, this: u32, first: u32) -> u32 {
                 c.m.w8(this + PLAYER, next);
             }
             if c.m.r32(draw_at) != 0 {
-                r.enter_leaving(c, 0x8001_3894, 0x8001_54f0, |c| redraw(c, this));
+                r.call_ptr_leaving(c, REDRAW, &[this], 0x8001_54f0);
             }
             let idle = c.m.r32(frame_at).wrapping_sub(c.m.r32(active_at)) as i32;
             if idle > IDLE {
@@ -1167,7 +1171,7 @@ fn save_pink_slips(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> bool {
             if c.m.r32(app + 852) == 1 {
                 break;
             }
-            r.enter_leaving(c, 0x8001_3894, 0x8001_52c0, |c| redraw(c, app));
+            r.call_ptr_leaving(c, REDRAW, &[app], 0x8001_52c0);
         }
         let car = c.m.r8(FRONT_END + 293 + k) as u32;
         r.0[3] = r.call_leaving(c, SAVE_PINK_SLIPS, &[sx(k), 0, car], 0x8001_52e4);
@@ -1275,7 +1279,7 @@ pub fn abi_run_demo_video(c: &mut Cpu) {
                 break;
             }
             r.0[0] = 1;
-            r.call_ptr_leaving(c, 0x8001_3894, &[this], 0x8001_41d4);
+            r.call_ptr_leaving(c, REDRAW, &[this], 0x8001_41d4);
             port(c, &r, 0x8001_5a70, 0x8001_41dc, &[0], crate::feaudio::abi_systemtask);
             c.tick();
         }

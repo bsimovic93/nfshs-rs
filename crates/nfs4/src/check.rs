@@ -126,7 +126,7 @@ pub fn run(c: &mut Cpu, i: usize) {
     // the decompiled function, from the same state
     entry.restore(c);
     if needed == 0 {
-        (f.run)(c);
+        crate::abi::on_stack(c, f.addr, f.run);
     }
 
     ACTIVE.with(|a| a.set(false));
