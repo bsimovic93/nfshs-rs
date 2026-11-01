@@ -19,6 +19,8 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else '../crates/nfs4/src/types.rs'
 # The structures the ported code uses; whatever they hold by value comes with them.
 ROOTS = ['Car_tObj', 'Physics_tWheelAccStruct', 'Car_tSpecs', 'Udff_tInfo', 'BWorldSm_Pos', 'Trk_NewSlice', 'GameSetup_tData', 'Chunk', 'Trk_NewStrip', 'Trk_NewSimSlice', 'Trk_NewSimQuad', 'tNormalCacheEntry', 'AICop_spikeBelt_t',
          'GameSetup_tCarData', 'AIPerson_t', 'AIDataRecord_t', 'AISpeeds_tSlotInfo', 'AISpeeds_tLeaderBoard', 'AIPhysic_BrakeInfo', 'AIPhysic_Config_t', 'AIDelayCar', 'AITrigger_TriggerManager', 'trigger_t', 'AIState_Chase', 'AIState_Idle', 'AIState_Offroad', 'AIState_Purgatory', 'AIState_RovingTraffic', 'AIState_Donuts', 'AIState_GotoSlice', 'AIState_Cruise', 'AIState_Normal', 'AIState_NonActive', 'AIState_None', 'AIHigh_Base', 'AIHigh_None', 'AIHigh_BasicPerp', 'AIHigh_BasicCop', 'AIHigh_BTC_Cop', 'AIHigh_BTC_HumanCop', 'AIHigh_BTC_Wingman', 'AIHigh_BTC_Perp', 'AIHigh_BTC_HumanPerp', 'AIHigh_BTC_AIPerp', 'AIHigh_Player', 'AIHigh_Human', 'AIHigh_Opponent', 'AIHigh_Cop', 'AIHigh_Traffic', 'Input_tResults', 'Sched_tSchedule', 'sim_queue', 'Sim_tSimGlobalVar', 'Sim_tSimSystemVar', 'tReplayInterface', 'tCarManager', 'tCarInfo', 'tSaveCarInfo', 'tListIteratorCar', 'tListIteratorCarColor', 'tfrontEnd']
+# The front end's classes (tMenu, tScreenCarSelect...): all of them.
+FRONT_END_CLASSES = r't[A-Z]'
 
 # Rust names for some structures (others: underscores and the `_t` type prefix dropped).
 NAMES = {'coorddef': 'Coord', 'matrixtdef': 'Matrix', 'BO_tNewtonObj': 'NewtonObj',
@@ -28,7 +30,10 @@ NAMES = {'coorddef': 'Coord', 'matrixtdef': 'Matrix', 'BO_tNewtonObj': 'NewtonOb
 
 # (struct, field) -> (offset, type) where retail differs from the development build, or the
 # SYM's type reads wrong (the trigger manager's `trigger_t *triggers_[100]`, 100 addresses).
-OVERRIDES = {('AITrigger_TriggerManager', 'triggers_'): (0x8, 'ulong[100]')}
+# The list iterators' bounds are `char` in the SYM, but the original loads and compares them
+# unsigned (`lbu`, `sltu`).
+OVERRIDES = {('AITrigger_TriggerManager', 'triggers_'): (0x8, 'ulong[100]'),
+             ('tListIterator', 'fMinValue'): (0x8, 'uchar'), ('tListIterator', 'fMaxValue'): (0x9, 'uchar')}
 
 SCALARS = {'char': ('i8', 1), 'uchar': ('u8', 1), 'short': ('i16', 2), 'ushort': ('u16', 2),
            'int': ('i32', 4), 'uint': ('u32', 4), 'long': ('i32', 4), 'ulong': ('u32', 4),
@@ -52,9 +57,11 @@ def parse(path):
         if line.startswith('};'):
             cur = None
             continue
-        m = re.match(r'\s+/\* \+0x([0-9a-f]+) \*/ (.+) (\w+);', line)
+        m = re.match(r'\s+/\* \+0x([0-9a-f]+) \*/ (.+) (\w+|\.vf);', line)
         if m and cur:
-            structs[cur]['fields'].append((int(m[1], 16), m[2].strip(), m[3]))
+            # a C++ class's vtable pointer (`.vf`): its address
+            name, t = ('vtable', 'ulong') if m[3] == '.vf' else (m[3], m[2].strip())
+            structs[cur]['fields'].append((int(m[1], 16), t, name))
     return structs
 
 
@@ -97,7 +104,7 @@ def classify(t, structs):
 
 def closure(structs):
     want = []
-    stack = list(ROOTS)
+    stack = list(ROOTS) + sorted(s for s in structs if re.match(FRONT_END_CLASSES, s))
     while stack:
         s = stack.pop()
         if s in want or s not in structs:
@@ -110,6 +117,16 @@ def closure(structs):
     return sorted(want, key=rust_name)
 
 
+def base_class(s, info, have):
+    """The C++ base class of `s` (its first member, at +0, named as its type), if any."""
+    if not info['fields']:
+        return None
+    off, t, name = info['fields'][0]
+    if off == 0 and t == f'struct {name}' and name in have and re.match(FRONT_END_CLASSES, s):
+        return name
+    return None
+
+
 def main():
     structs = parse(HEADER)
     want = closure(structs)
@@ -118,7 +135,8 @@ def main():
            '//! the development build\'s layouts). Do not edit by hand.',
            '//!',
            '//! A view is the address of one structure; its accessors read and write PS1 RAM, so the',
-           '//! recompiled code still running sees every change.',
+           "//! recompiled code still running sees every change. A C++ class's view dereferences to",
+           "//! its base class's (`Deref`), so the members it inherits are reachable on it.",
            '#![allow(dead_code, clippy::all)]',
            'use ps1rt::Mem;',
            '']
@@ -128,7 +146,22 @@ def main():
         rn = rust_name(s)
         out.append(f'/// `{s}` ({info["size"]:#x} bytes).')
         out.append('#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]')
+        out.append('#[repr(transparent)]')
         out.append(f'pub struct {rn}(pub u32);')
+        base = base_class(s, info, have)
+        if base:
+            # a C++ class's base class is its first member, named as its type: the derived
+            # view dereferences to the base's (same address), so its members are reachable
+            br = rust_name(base)
+            out.append(f'/// `{s}` derives from `{base}`: its members are reachable through it.')
+            out.append(f'impl core::ops::Deref for {rn} {{')
+            out.append(f'    type Target = {br};')
+            out.append(f'    fn deref(&self) -> &{br} {{ unsafe {{ &*(self as *const Self as *const {br}) }} }}')
+            out.append('}')
+            out.append(f'impl {rn} {{')
+            out.append(f'    /// The `{base}` it derives from (the same address).')
+            out.append(f'    pub fn base(self) -> {br} {{ {br}(self.0) }}')
+            out.append('}')
         out.append(f'impl {rn} {{')
         out.append(f'    pub const SIZE: u32 = {info["size"]:#x};')
         out.append(f'    /// Element `i` of an array of `{s}` starting here.')
@@ -138,6 +171,11 @@ def main():
         for off, t, name in info['fields']:
             off, t = OVERRIDES.get((s, name), (off, t))
             kind, base, dims = classify(t, structs)
+            # the SYM dump writes an array of pointers `X *f[n]` as `X[n]* f` (tMenu's 16 items,
+            # tFEApplication's menus per player): the front end's classes get them as arrays
+            pa = re.fullmatch(r'struct (\w+)((?:\[\d+\])+)\*', t)
+            if pa and re.match(FRONT_END_CLASSES, s):
+                kind, base, dims = 'ptr', pa[1], [int(d) for d in re.findall(r'\d+', pa[2])]
             # (the front end's classes name their members fName)
             fn = snake(name[1:] if re.match(r't[A-Z]', s) and re.match(r'f[A-Z]', name) else name)
             while fn in seen_names:

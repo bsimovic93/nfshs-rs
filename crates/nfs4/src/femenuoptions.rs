@@ -223,7 +223,7 @@ fn fade_update_transition(c: &mut Cpu, this: u32, at: u32, selected: u32, ras: [
         m.w16(this + at, v as u16);
         let (obj, f) = method(m, this, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED);
         r.call_ptr_leaving(c, f, &[obj], ras[0]);
-        r.enter(c, 0x8002_47c8, ras[1], |c| femenu::menu_item_update_transition(c, this, selected));
+        r.enter(c, 0x8002_47c8, ras[1], |c| femenu::menu_item_update_transition(c, crate::types::MenuItem(this), selected));
     })
 }
 
@@ -258,7 +258,7 @@ pub fn left_right_fade(c: &mut Cpu, this: u32, text: u32, data: u32) -> u32 {
     abi::frame(c, 24, |c, _| {
         let mut r = Saved::of(c);
         r.0[0] = this;
-        r.enter(c, 0x8002_4924, 0x8001_c4cc, |c| femenu::left_right_choice(c, this, text, data));
+        r.enter(c, 0x8002_4924, 0x8001_c4cc, |c| femenu::left_right_choice(c, crate::types::MenuItemLeftRightChoice(this), text, crate::types::ListIterator(data)));
         let m = &mut c.m;
         m.w32(this + ITEM_VPTR, LEFT_RIGHT_FADE_VT);
         m.w32(this + 40, 0);
@@ -318,9 +318,9 @@ pub fn abi_options_menu(c: &mut Cpu) {
         m.w32(sp + 16, options);
         m.w32(sp + 20, on_back);
         m.w32(sp + 24, title);
-        r.enter(c, 0x8002_548c, 0x8001_c65c, |c| femenu::menu(&mut c.m, this, flags, screen, next, options, on_back, title));
+        r.enter(c, 0x8002_548c, 0x8001_c65c, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
         c.m.w32(this + MENU_VPTR, OPTIONS_MENU_VT);
-        r.enter(c, 0x8002_5454, 0x8001_c678, |c| femenu::menu_constructor(&mut c.m, this, first, args + 24));
+        r.enter(c, 0x8002_5454, 0x8001_c678, |c| femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, args + 24));
         let m = &mut c.m;
         m.w32(this + 116, 0);
         m.w16(this + 114, 0);
@@ -632,7 +632,7 @@ pub fn options_menu_process_input(c: &mut Cpu, this: u32, player: u32, key: u32,
     abi::frame(c, 40, |c, _| {
         let mut r = Saved::of(c);
         r.0[..4].copy_from_slice(&[this, key, player, command]);
-        let n = r.enter(c, 0x8002_58b4, 0x8001_ce94, |c| femenu::get_number_enabled_items(&mut c.m, this));
+        let n = r.enter(c, 0x8002_58b4, 0x8001_ce94, |c| femenu::get_number_enabled_items(&mut c.m, crate::types::Menu(this)));
         if n & 0xFFFF == 0 {
             let m = &mut c.m;
             m.w32(this + 8, 0);
@@ -641,7 +641,7 @@ pub fn options_menu_process_input(c: &mut Cpu, this: u32, player: u32, key: u32,
                 m.w32(key, femenu::KEY_NONE);
             }
         }
-        r.enter(c, 0x8002_5598, 0x8001_ced4, |c| femenu::process_input(c, this, player, key, command));
+        r.enter(c, 0x8002_5598, 0x8001_ced4, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
     })
 }
 
@@ -665,9 +665,9 @@ pub fn abi_inside_box_menu(c: &mut Cpu) {
         m.w32(sp + 16, options);
         m.w32(sp + 20, on_back);
         m.w32(sp + 24, title);
-        r.enter(c, 0x8002_548c, 0x8001_cf28, |c| femenu::menu(&mut c.m, this, flags, screen, next, options, on_back, title));
+        r.enter(c, 0x8002_548c, 0x8001_cf28, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
         c.m.w32(this + MENU_VPTR, INSIDE_BOX_MENU_VT);
-        r.enter(c, 0x8002_5454, 0x8001_cf44, |c| femenu::menu_constructor(&mut c.m, this, first, args + 16));
+        r.enter(c, 0x8002_5454, 0x8001_cf44, |c| femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, args + 16));
         let m = &mut c.m;
         m.w16(this + 108, 0);
         m.w16(this + 110, 0);
@@ -702,7 +702,7 @@ pub fn inside_box_menu_process_input(c: &mut Cpu, this: u32, player: u32, key: u
         if k == femenu::KEY_DOWN && m.r32(this.wrapping_add(cur.wrapping_add(1) << 2).wrapping_add(16)) == 0 {
             return;
         }
-        Saved::of(c).enter(c, 0x8002_5598, 0x8001_d04c, |c| femenu::process_input(c, this, player, key, command));
+        Saved::of(c).enter(c, 0x8002_5598, 0x8001_d04c, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
     })
 }
 
@@ -793,7 +793,7 @@ pub fn sliding_menu(c: &mut Cpu, this: u32, text: u32, w: u32, h: u32, dx: u32, 
     abi::frame(c, 48, |c, _| {
         let mut r = Saved::of(c);
         r.0[..6].copy_from_slice(&[this, dx, dy, fill, w, h]);
-        r.enter(c, 0x8002_4754, 0x8001_d2fc, |c| femenu::menu_item(&mut c.m, this, text));
+        r.enter(c, 0x8002_4754, 0x8001_d2fc, |c| femenu::menu_item(&mut c.m, crate::types::MenuItem(this), text));
         let m = &mut c.m;
         let flags = m.r32(this);
         m.w32(this + 28, 0);
@@ -1446,7 +1446,7 @@ pub fn audio_slider(c: &mut Cpu, this: u32, text: u32, data: u32, art: u32) -> u
         let mut r = Saved::of(c);
         r.0[0] = this;
         r.0[1] = art;
-        r.enter(c, 0x8002_4b18, 0x8001_e678, |c| femenu::left_right_slider(c, this, text, data));
+        r.enter(c, 0x8002_4b18, 0x8001_e678, |c| femenu::left_right_slider(c, crate::types::MenuItemLeftRightSlider(this), text, crate::types::ListIterator(data)));
         let m = &mut c.m;
         m.w32(this + ITEM_VPTR, AUDIO_SLIDER_VT);
         m.w16(this + 48, art as u16);
@@ -1589,7 +1589,7 @@ pub fn audio_slider_update_transition(c: &mut Cpu, this: u32, selected: u32) {
         let m = &mut c.m;
         let v = (m.r16(this + AUDIO_FADE) as i16 as i32 + m.r16(this + AUDIO_FADE + 2) as i16 as i32).clamp(0, 128);
         m.w16(this + AUDIO_FADE, v as u16);
-        Saved::of(c).enter(c, 0x8002_47c8, 0x8001_ea70, |c| femenu::menu_item_update_transition(c, this, selected));
+        Saved::of(c).enter(c, 0x8002_47c8, 0x8001_ea70, |c| femenu::menu_item_update_transition(c, crate::types::MenuItem(this), selected));
     })
 }
 
@@ -1626,14 +1626,14 @@ pub fn abi_song_menu(c: &mut Cpu) {
         m.w32(sp + 16, options);
         m.w32(sp + 20, on_back);
         m.w32(sp + 24, title);
-        r.enter(c, 0x8002_548c, 0x8001_eab8, |c| femenu::menu(&mut c.m, this, flags, screen, next, options, on_back, title));
+        r.enter(c, 0x8002_548c, 0x8001_eab8, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
         let m = &mut c.m;
         m.w32(this + MENU_VPTR, SONG_MENU_VT);
         for k in 0..5 {
             m.w16(this + 126 + 2 * k, 0);
             m.w16(this + 116 + 2 * k, 0);
         }
-        r.enter(c, 0x8002_5454, 0x8001_eaf4, |c| femenu::menu_constructor(&mut c.m, this, first, args + 16));
+        r.enter(c, 0x8002_5454, 0x8001_eaf4, |c| femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, args + 16));
         let m = &mut c.m;
         m.w16(this + 110, 0);
         m.w16(this + 112, 0);
@@ -1926,7 +1926,7 @@ pub fn inside_slider(c: &mut Cpu, this: u32, text: u32, data: u32) -> u32 {
     abi::frame(c, 24, |c, _| {
         let mut r = Saved::of(c);
         r.0[0] = this;
-        r.enter(c, 0x8002_4b18, 0x8001_f3fc, |c| femenu::left_right_slider(c, this, text, data));
+        r.enter(c, 0x8002_4b18, 0x8001_f3fc, |c| femenu::left_right_slider(c, crate::types::MenuItemLeftRightSlider(this), text, crate::types::ListIterator(data)));
         let m = &mut c.m;
         m.w32(this + ITEM_VPTR, INSIDE_SLIDER_VT);
         m.w16(this + 8, 0);
@@ -2003,7 +2003,7 @@ pub fn two_way_slider(c: &mut Cpu, this: u32, text: u32, data: u32, ty: u32) -> 
         let mut r = Saved::of(c);
         r.0[0] = this;
         r.0[1] = ty;
-        r.enter(c, 0x8002_4b18, 0x8001_f5f0, |c| femenu::left_right_slider(c, this, text, data));
+        r.enter(c, 0x8002_4b18, 0x8001_f5f0, |c| femenu::left_right_slider(c, crate::types::MenuItemLeftRightSlider(this), text, crate::types::ListIterator(data)));
         let m = &mut c.m;
         m.w32(this + ITEM_VPTR, TWO_WAY_SLIDER_VT);
         m.w16(this + 40, ty as u16);
@@ -2248,7 +2248,7 @@ pub fn user_name(c: &mut Cpu, this: u32, text: u32) -> u32 {
     abi::frame(c, 24, |c, _| {
         let mut r = Saved::of(c);
         r.0[0] = this;
-        r.enter(c, 0x8002_4754, 0x8001_fdac, |c| femenu::menu_item(&mut c.m, this, text));
+        r.enter(c, 0x8002_4754, 0x8001_fdac, |c| femenu::menu_item(&mut c.m, crate::types::MenuItem(this), text));
         let m = &mut c.m;
         m.w32(this + ITEM_VPTR, USER_NAME_VT);
         m.w16(this + 36, 0);
@@ -2777,7 +2777,7 @@ pub fn controller_slider_process_input(c: &mut Cpu, this: u32, player: u32, key:
                 c.m.w32(state + 368, 1);
             }
         }
-        r.enter(c, 0x8002_4ba4, 0x8002_0cfc, |c| femenu::left_right_slider_process_input(c, this, player, key));
+        r.enter(c, 0x8002_4ba4, 0x8002_0cfc, |c| femenu::left_right_slider_process_input(c, crate::types::MenuItemLeftRightSlider(this), player, key));
     })
 }
 

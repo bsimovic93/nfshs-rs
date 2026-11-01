@@ -182,6 +182,28 @@ pub fn on_stack<R>(c: &mut Cpu, addr: u32, f: impl FnOnce(&mut Cpu) -> R) -> R {
     v
 }
 
+/// A value as the original's load leaves it in a register: signed types sign-extended (`lb`,
+/// `lh`), unsigned ones zero-extended (`lbu`, `lhu`). A port passes a field on as
+/// `view.field(m).reg()` where the original loads it and passes the register.
+pub trait Reg {
+    fn reg(self) -> u32;
+}
+
+macro_rules! reg_extend {
+    ($($t:ty),*) => {$(impl Reg for $t {
+        fn reg(self) -> u32 {
+            self as i32 as u32
+        }
+    })*};
+}
+reg_extend!(i8, i16, i32, u8, u16, u32);
+
+impl Reg for bool {
+    fn reg(self) -> u32 {
+        self as u32
+    }
+}
+
 /// Call the function at `addr` (a function pointer the original calls with `jalr`), wherever
 /// it is: decompiled, recompiled or the host's.
 pub fn call_addr(c: &mut Cpu, addr: u32, args: &[u32]) -> u32 {

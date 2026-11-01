@@ -2,12 +2,14 @@
 //! the development build's layouts). Do not edit by hand.
 //!
 //! A view is the address of one structure; its accessors read and write PS1 RAM, so the
-//! recompiled code still running sees every change.
+//! recompiled code still running sees every change. A C++ class's view dereferences to
+//! its base class's (`Deref`), so the members it inherits are reachable on it.
 #![allow(dead_code, clippy::all)]
 use ps1rt::Mem;
 
 /// `AICop_BasicPerpInfo` (0xc bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AICopBasicPerpInfo(pub u32);
 impl AICopBasicPerpInfo {
     pub const SIZE: u32 = 0xc;
@@ -25,6 +27,7 @@ impl AICopBasicPerpInfo {
 
 /// `AICop_PerpChaseInfo` (0x24 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AICopPerpChaseInfo(pub u32);
 impl AICopPerpChaseInfo {
     pub const SIZE: u32 = 0x24;
@@ -70,6 +73,7 @@ impl AICopPerpChaseInfo {
 
 /// `AICop_spikeBelt_t` (0x14 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AICopSpikeBelt(pub u32);
 impl AICopSpikeBelt {
     pub const SIZE: u32 = 0x14;
@@ -99,6 +103,7 @@ impl AICopSpikeBelt {
 
 /// `AIDataRecord_t` (0x58 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIDataRecord(pub u32);
 impl AIDataRecord {
     pub const SIZE: u32 = 0x58;
@@ -128,10 +133,15 @@ impl AIDataRecord {
     pub fn record_method_(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x50); m.r32(a) as i32 }
     pub fn set_record_method_(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x50); m.w32(a, v as u32) }
     pub fn update_record_method_(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.record_method_(m)); self.set_record_method_(m, v) }
+    /// `+0x054 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x54); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x54); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
 }
 
 /// `AIDelayCar` (0x3c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIDelayCar(pub u32);
 impl AIDelayCar {
     pub const SIZE: u32 = 0x3c;
@@ -179,6 +189,7 @@ impl AIDelayCar {
 
 /// `AIHigh_BTC_AIPerp` (0xac bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBTCAIPerp(pub u32);
 impl AIHighBTCAIPerp {
     pub const SIZE: u32 = 0xac;
@@ -225,6 +236,7 @@ impl AIHighBTCAIPerp {
 
 /// `AIHigh_BTC_Cop` (0x64 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBTCCop(pub u32);
 impl AIHighBTCCop {
     pub const SIZE: u32 = 0x64;
@@ -247,6 +259,7 @@ impl AIHighBTCCop {
 
 /// `AIHigh_BTC_HumanCop` (0x8c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBTCHumanCop(pub u32);
 impl AIHighBTCHumanCop {
     pub const SIZE: u32 = 0x8c;
@@ -298,6 +311,7 @@ impl AIHighBTCHumanCop {
 
 /// `AIHigh_BTC_HumanPerp` (0x88 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBTCHumanPerp(pub u32);
 impl AIHighBTCHumanPerp {
     pub const SIZE: u32 = 0x88;
@@ -309,6 +323,7 @@ impl AIHighBTCHumanPerp {
 
 /// `AIHigh_BTC_Perp` (0x88 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBTCPerp(pub u32);
 impl AIHighBTCPerp {
     pub const SIZE: u32 = 0x88;
@@ -331,6 +346,7 @@ impl AIHighBTCPerp {
 
 /// `AIHigh_BTC_Wingman` (0x7c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBTCWingman(pub u32);
 impl AIHighBTCWingman {
     pub const SIZE: u32 = 0x7c;
@@ -365,6 +381,7 @@ impl AIHighBTCWingman {
 
 /// `AIHigh_Base` (0x18 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBase(pub u32);
 impl AIHighBase {
     pub const SIZE: u32 = 0x18;
@@ -388,10 +405,15 @@ impl AIHighBase {
     pub fn last_traffic_trigger_check_slice_(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
     pub fn set_last_traffic_trigger_check_slice_(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
     pub fn update_last_traffic_trigger_check_slice_(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.last_traffic_trigger_check_slice_(m)); self.set_last_traffic_trigger_check_slice_(m, v) }
+    /// `+0x014 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
 }
 
 /// `AIHigh_BasicCop` (0x58 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBasicCop(pub u32);
 impl AIHighBasicCop {
     pub const SIZE: u32 = 0x58;
@@ -417,6 +439,7 @@ impl AIHighBasicCop {
 
 /// `AIHigh_BasicPerp` (0x7c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighBasicPerp(pub u32);
 impl AIHighBasicPerp {
     pub const SIZE: u32 = 0x7c;
@@ -451,6 +474,7 @@ impl AIHighBasicPerp {
 
 /// `AIHigh_Cop` (0x6c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighCop(pub u32);
 impl AIHighCop {
     pub const SIZE: u32 = 0x6c;
@@ -481,6 +505,7 @@ impl AIHighCop {
 
 /// `AIHigh_Human` (0xb0 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighHuman(pub u32);
 impl AIHighHuman {
     pub const SIZE: u32 = 0xb0;
@@ -492,6 +517,7 @@ impl AIHighHuman {
 
 /// `AIHigh_None` (0x18 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighNone(pub u32);
 impl AIHighNone {
     pub const SIZE: u32 = 0x18;
@@ -503,6 +529,7 @@ impl AIHighNone {
 
 /// `AIHigh_Opponent` (0xc0 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighOpponent(pub u32);
 impl AIHighOpponent {
     pub const SIZE: u32 = 0xc0;
@@ -529,6 +556,7 @@ impl AIHighOpponent {
 
 /// `AIHigh_Player` (0xb0 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighPlayer(pub u32);
 impl AIHighPlayer {
     pub const SIZE: u32 = 0xb0;
@@ -558,6 +586,7 @@ impl AIHighPlayer {
 
 /// `AIHigh_Traffic` (0x24 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIHighTraffic(pub u32);
 impl AIHighTraffic {
     pub const SIZE: u32 = 0x24;
@@ -581,6 +610,7 @@ impl AIHighTraffic {
 
 /// `AIPerson_t` (0x54 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIPerson(pub u32);
 impl AIPerson {
     pub const SIZE: u32 = 0x54;
@@ -662,6 +692,7 @@ impl AIPerson {
 
 /// `AIPhysic_BrakeInfo` (0x84 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIPhysicBrakeInfo(pub u32);
 impl AIPhysicBrakeInfo {
     pub const SIZE: u32 = 0x84;
@@ -679,6 +710,7 @@ impl AIPhysicBrakeInfo {
 
 /// `AIPhysic_Config_t` (0x6c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIPhysicConfig(pub u32);
 impl AIPhysicConfig {
     pub const SIZE: u32 = 0x6c;
@@ -712,6 +744,7 @@ impl AIPhysicConfig {
 
 /// `AIPhysic_ModelConfig_t` (0x2c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIPhysicModelConfig(pub u32);
 impl AIPhysicModelConfig {
     pub const SIZE: u32 = 0x2c;
@@ -765,6 +798,7 @@ impl AIPhysicModelConfig {
 
 /// `AIScript_t` (0x40 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIScript(pub u32);
 impl AIScript {
     pub const SIZE: u32 = 0x40;
@@ -812,6 +846,7 @@ impl AIScript {
 
 /// `AIScript_tReactionDetails` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIScriptReactionDetails(pub u32);
 impl AIScriptReactionDetails {
     pub const SIZE: u32 = 0x8;
@@ -829,6 +864,7 @@ impl AIScriptReactionDetails {
 
 /// `AISpeechInfo_t` (0x18 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AISpeechInfo(pub u32);
 impl AISpeechInfo {
     pub const SIZE: u32 = 0x18;
@@ -862,6 +898,7 @@ impl AISpeechInfo {
 
 /// `AISpeeds_tLeaderBoard` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AISpeedsLeaderBoard(pub u32);
 impl AISpeedsLeaderBoard {
     pub const SIZE: u32 = 0x10;
@@ -883,6 +920,7 @@ impl AISpeedsLeaderBoard {
 
 /// `AISpeeds_tSlotInfo` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AISpeedsSlotInfo(pub u32);
 impl AISpeedsSlotInfo {
     pub const SIZE: u32 = 0x10;
@@ -908,6 +946,7 @@ impl AISpeedsSlotInfo {
 
 /// `AIState_Base` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateBase(pub u32);
 impl AIStateBase {
     pub const SIZE: u32 = 0x8;
@@ -916,10 +955,15 @@ impl AIStateBase {
     /// `+0x000 struct Car_tObj* carObj_`
     pub fn car_obj_(self, m: &mut Mem) -> Car { let a = self.0.wrapping_add(0x0); Car(m.r32(a)) }
     pub fn set_car_obj_(self, m: &mut Mem, v: Car) { let a = self.0.wrapping_add(0x0); m.w32(a, v.0) }
+    /// `+0x004 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
 }
 
 /// `AIState_Chase` (0x94 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateChase(pub u32);
 impl AIStateChase {
     pub const SIZE: u32 = 0x94;
@@ -1002,6 +1046,7 @@ impl AIStateChase {
 
 /// `AIState_Cruise` (0x14 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateCruise(pub u32);
 impl AIStateCruise {
     pub const SIZE: u32 = 0x14;
@@ -1025,6 +1070,7 @@ impl AIStateCruise {
 
 /// `AIState_Donuts` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateDonuts(pub u32);
 impl AIStateDonuts {
     pub const SIZE: u32 = 0x10;
@@ -1044,6 +1090,7 @@ impl AIStateDonuts {
 
 /// `AIState_GotoSlice` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateGotoSlice(pub u32);
 impl AIStateGotoSlice {
     pub const SIZE: u32 = 0x10;
@@ -1063,6 +1110,7 @@ impl AIStateGotoSlice {
 
 /// `AIState_Idle` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateIdle(pub u32);
 impl AIStateIdle {
     pub const SIZE: u32 = 0x10;
@@ -1082,6 +1130,7 @@ impl AIStateIdle {
 
 /// `AIState_NonActive` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateNonActive(pub u32);
 impl AIStateNonActive {
     pub const SIZE: u32 = 0x8;
@@ -1093,6 +1142,7 @@ impl AIStateNonActive {
 
 /// `AIState_None` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateNone(pub u32);
 impl AIStateNone {
     pub const SIZE: u32 = 0x8;
@@ -1104,6 +1154,7 @@ impl AIStateNone {
 
 /// `AIState_Normal` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateNormal(pub u32);
 impl AIStateNormal {
     pub const SIZE: u32 = 0x8;
@@ -1115,6 +1166,7 @@ impl AIStateNormal {
 
 /// `AIState_Offroad` (0x68 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateOffroad(pub u32);
 impl AIStateOffroad {
     pub const SIZE: u32 = 0x68;
@@ -1158,6 +1210,7 @@ impl AIStateOffroad {
 
 /// `AIState_Purgatory` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStatePurgatory(pub u32);
 impl AIStatePurgatory {
     pub const SIZE: u32 = 0x8;
@@ -1169,6 +1222,7 @@ impl AIStatePurgatory {
 
 /// `AIState_RovingTraffic` (0x18 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AIStateRovingTraffic(pub u32);
 impl AIStateRovingTraffic {
     pub const SIZE: u32 = 0x18;
@@ -1196,6 +1250,7 @@ impl AIStateRovingTraffic {
 
 /// `AITrigger_TriggerManager` (0x34c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct AITriggerTriggerManager(pub u32);
 impl AITriggerTriggerManager {
     pub const SIZE: u32 = 0x34c;
@@ -1223,8 +1278,229 @@ impl AITriggerTriggerManager {
     pub fn update_last_trigger_checked_(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.last_trigger_checked_(m, i)); self.set_last_trigger_checked_(m, i, v) }
 }
 
+/// `tAcademyDefinition` (0x3120 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct AcademyDefinition(pub u32);
+impl AcademyDefinition {
+    pub const SIZE: u32 = 0x3120;
+    /// Element `i` of an array of `tAcademyDefinition` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMissionTierInfo[8] fTiers`
+    pub fn tiers(self, i: u32) -> MissionTierInfo { debug_assert!(i < 8); MissionTierInfo(self.0.wrapping_add(0x0 + i * 0x4)) }
+    /// `+0x020 struct tMissionInfo[64] fMissions`
+    pub fn missions(self, i: u32) -> MissionInfo { debug_assert!(i < 64); MissionInfo(self.0.wrapping_add(0x20 + i * 0x14)) }
+    /// `+0x520 struct tStageInfo[256] fStages`
+    pub fn stages(self, i: u32) -> StageInfo { debug_assert!(i < 256); StageInfo(self.0.wrapping_add(0x520 + i * 0x2c)) }
+}
+
+/// `tActiveLine` (0xc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ActiveLine(pub u32);
+impl ActiveLine {
+    pub const SIZE: u32 = 0xc;
+    /// Element `i` of an array of `tActiveLine` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short startTick`
+    pub fn start_tick(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_start_tick(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_start_tick(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.start_tick(m)); self.set_start_tick(m, v) }
+    /// `+0x002 short endTick`
+    pub fn end_tick(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_end_tick(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_end_tick(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.end_tick(m)); self.set_end_tick(m, v) }
+    /// `+0x004 short x1`
+    pub fn x1(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_x1(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_x1(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x1(m)); self.set_x1(m, v) }
+    /// `+0x006 short y1`
+    pub fn y1(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_y1(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_y1(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y1(m)); self.set_y1(m, v) }
+    /// `+0x008 char type`
+    pub fn type_(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x8); m.r8(a) as i8 }
+    pub fn set_type_(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x8); m.w8(a, v as u8) }
+    pub fn update_type_(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.type_(m)); self.set_type_(m, v) }
+    /// `+0x00a short data`
+    pub fn data(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xa); m.r16(a) as i16 }
+    pub fn set_data(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xa); m.w16(a, v as u16) }
+    pub fn update_data(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.data(m)); self.set_data(m, v) }
+}
+
+/// `tAllScreens` (0x3bd8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct AllScreens(pub u32);
+impl AllScreens {
+    pub const SIZE: u32 = 0x3bd8;
+    /// Element `i` of an array of `tAllScreens` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenMain screenMain`
+    pub fn screen_main(self) -> ScreenMain { ScreenMain(self.0.wrapping_add(0x0)) }
+    /// `+0x5b8 struct tScreenCarSelect screenCarSelect`
+    pub fn screen_car_select(self) -> ScreenCarSelect { ScreenCarSelect(self.0.wrapping_add(0x5b8)) }
+    /// `+0x958 struct tScreenCarSelectDuel screenCarSelectDuel`
+    pub fn screen_car_select_duel(self) -> ScreenCarSelectDuel { ScreenCarSelectDuel(self.0.wrapping_add(0x958)) }
+    /// `+0xd28 struct tScreenCarSelectTwoPlayer screenCarSelectTwoPlayer`
+    pub fn screen_car_select_two_player(self) -> ScreenCarSelectTwoPlayer { ScreenCarSelectTwoPlayer(self.0.wrapping_add(0xd28)) }
+    /// `+0x1160 struct tScreenCarSelectTwoPlayer screenCarSelectPlayerTwo`
+    pub fn screen_car_select_player_two(self) -> ScreenCarSelectTwoPlayer { ScreenCarSelectTwoPlayer(self.0.wrapping_add(0x1160)) }
+    /// `+0x1598 struct tScreenPinkSlipsCarSelect screenPinkSlipsCarSelectTwoPlayer`
+    pub fn screen_pink_slips_car_select_two_player(self) -> ScreenPinkSlipsCarSelect { ScreenPinkSlipsCarSelect(self.0.wrapping_add(0x1598)) }
+    /// `+0x19e4 struct tScreenPinkSlipsCarSelect screenPinkSlipsCarSelectPlayerTwo`
+    pub fn screen_pink_slips_car_select_player_two(self) -> ScreenPinkSlipsCarSelect { ScreenPinkSlipsCarSelect(self.0.wrapping_add(0x19e4)) }
+    /// `+0x1e30 struct tScreenTrackRecords screenTrackRecords`
+    pub fn screen_track_records(self) -> ScreenTrackRecords { ScreenTrackRecords(self.0.wrapping_add(0x1e30)) }
+    /// `+0x1ea4 struct tScreenTrackInfo screenTrackInfo`
+    pub fn screen_track_info(self) -> ScreenTrackInfo { ScreenTrackInfo(self.0.wrapping_add(0x1ea4)) }
+    /// `+0x2148 struct tScreenTrackSelect screenTrackSelect`
+    pub fn screen_track_select(self) -> ScreenTrackSelect { ScreenTrackSelect(self.0.wrapping_add(0x2148)) }
+    /// `+0x23e8 struct tScreenTournSelect screenTournSelect`
+    pub fn screen_tourn_select(self) -> ScreenTournSelect { ScreenTournSelect(self.0.wrapping_add(0x23e8)) }
+    /// `+0x26b0 struct tScreenTournamentStandings screenTournamentStandings`
+    pub fn screen_tournament_standings(self) -> ScreenTournamentStandings { ScreenTournamentStandings(self.0.wrapping_add(0x26b0)) }
+    /// `+0x2744 struct tScreenTournamentTrophy screenTournamentTrophy`
+    pub fn screen_tournament_trophy(self) -> ScreenTournamentTrophy { ScreenTournamentTrophy(self.0.wrapping_add(0x2744)) }
+    /// `+0x28cc struct tScreenTrophyRoom screenTrophyRoom`
+    pub fn screen_trophy_room(self) -> ScreenTrophyRoom { ScreenTrophyRoom(self.0.wrapping_add(0x28cc)) }
+    /// `+0x2a24 struct tScreenTrophyInfo screenTrophyInfo`
+    pub fn screen_trophy_info(self) -> ScreenTrophyInfo { ScreenTrophyInfo(self.0.wrapping_add(0x2a24)) }
+    /// `+0x2a8c struct tScreenControllerConfig screenControllerConfig`
+    pub fn screen_controller_config(self) -> ScreenControllerConfig { ScreenControllerConfig(self.0.wrapping_add(0x2a8c)) }
+    /// `+0x2c08 struct tScreenDisplay screenDisplay`
+    pub fn screen_display(self) -> ScreenDisplay { ScreenDisplay(self.0.wrapping_add(0x2c08)) }
+    /// `+0x2c6c struct tScreenAudio screenAudio`
+    pub fn screen_audio(self) -> ScreenAudio { ScreenAudio(self.0.wrapping_add(0x2c6c)) }
+    /// `+0x2ce8 struct tScreenMemcard screenMemcard`
+    pub fn screen_memcard(self) -> ScreenMemcard { ScreenMemcard(self.0.wrapping_add(0x2ce8)) }
+    /// `+0x328c struct tScreenUserName screenUserName`
+    pub fn screen_user_name(self) -> ScreenUserName { ScreenUserName(self.0.wrapping_add(0x328c)) }
+    /// `+0x3358 struct tScreenPinkSlipCongrats screenPinkSlipCongrats`
+    pub fn screen_pink_slip_congrats(self) -> ScreenPinkSlipCongrats { ScreenPinkSlipCongrats(self.0.wrapping_add(0x3358)) }
+    /// `+0x34e0 struct tScreenPinkSlipStandings screenPinkSlipStandings`
+    pub fn screen_pink_slip_standings(self) -> ScreenPinkSlipStandings { ScreenPinkSlipStandings(self.0.wrapping_add(0x34e0)) }
+    /// `+0x3574 struct tScreenTournamentStandings3item screenTournamentStandings3item`
+    pub fn screen_tournament_standings3item(self) -> ScreenTournamentStandings3item { ScreenTournamentStandings3item(self.0.wrapping_add(0x3574)) }
+    /// `+0x3608 struct tScreenPinkSlips screenPinkSlips`
+    pub fn screen_pink_slips(self) -> ScreenPinkSlips { ScreenPinkSlips(self.0.wrapping_add(0x3608)) }
+    /// `+0x38d0 struct tScreenBeTheCopCongrats screenBeTheCopCongrats`
+    pub fn screen_be_the_cop_congrats(self) -> ScreenBeTheCopCongrats { ScreenBeTheCopCongrats(self.0.wrapping_add(0x38d0)) }
+    /// `+0x3a54 struct tScreenTournamentCongrats screenTournamentCongrats`
+    pub fn screen_tournament_congrats(self) -> ScreenTournamentCongrats { ScreenTournamentCongrats(self.0.wrapping_add(0x3a54)) }
+}
+
+/// `tAwardInformation` (0x44 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct AwardInformation(pub u32);
+impl AwardInformation {
+    pub const SIZE: u32 = 0x44;
+    /// Element `i` of an array of `tAwardInformation` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 long fMoney`
+    pub fn money(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_money(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_money(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.money(m)); self.set_money(m, v) }
+    /// `+0x004 long fTournMoney`
+    pub fn tourn_money(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_tourn_money(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_tourn_money(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.tourn_money(m)); self.set_tourn_money(m, v) }
+    /// `+0x008 ushort fActivateFlags`
+    pub fn activate_flags(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x8); m.r16(a) }
+    pub fn set_activate_flags(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x8); m.w16(a, v) }
+    pub fn update_activate_flags(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.activate_flags(m)); self.set_activate_flags(m, v) }
+    /// `+0x00a char fActivateTrack`
+    pub fn activate_track(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0xa); m.r8(a) as i8 }
+    pub fn set_activate_track(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0xa); m.w8(a, v as u8) }
+    pub fn update_activate_track(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.activate_track(m)); self.set_activate_track(m, v) }
+    /// `+0x00c enum tCarClassType fActivateCarClass`
+    pub fn activate_car_class(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_activate_car_class(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_activate_car_class(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.activate_car_class(m)); self.set_activate_car_class(m, v) }
+    /// `+0x010 enum tCarModels fActivateCar`
+    pub fn activate_car(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
+    pub fn set_activate_car(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
+    pub fn update_activate_car(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.activate_car(m)); self.set_activate_car(m, v) }
+    /// `+0x014 enum tTrackClassType fActivateTrackClass`
+    pub fn activate_track_class(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x14); m.r32(a) as i32 }
+    pub fn set_activate_track_class(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x14); m.w32(a, v as u32) }
+    pub fn update_activate_track_class(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.activate_track_class(m)); self.set_activate_track_class(m, v) }
+    /// `+0x018 long fActivateCheat`
+    pub fn activate_cheat(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x18); m.r32(a) as i32 }
+    pub fn set_activate_cheat(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x18); m.w32(a, v as u32) }
+    pub fn update_activate_cheat(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.activate_cheat(m)); self.set_activate_cheat(m, v) }
+    /// `+0x01c void fAwardCar`
+    pub fn award_car(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x1c); m.r32(a) }
+    pub fn set_award_car(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x1c); m.w32(a, v) }
+    pub fn update_award_car(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.award_car(m)); self.set_award_car(m, v) }
+    /// `+0x020 void fAwardCarGarageFull`
+    pub fn award_car_garage_full(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x20); m.r32(a) }
+    pub fn set_award_car_garage_full(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x20); m.w32(a, v) }
+    pub fn update_award_car_garage_full(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.award_car_garage_full(m)); self.set_award_car_garage_full(m, v) }
+    /// `+0x024 long fAwardCarBonusMoney`
+    pub fn award_car_bonus_money(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x24); m.r32(a) as i32 }
+    pub fn set_award_car_bonus_money(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x24); m.w32(a, v as u32) }
+    pub fn update_award_car_bonus_money(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.award_car_bonus_money(m)); self.set_award_car_bonus_money(m, v) }
+    /// `+0x028 enum tCarModels fAwardCarModel`
+    pub fn award_car_model(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x28); m.r32(a) as i32 }
+    pub fn set_award_car_model(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x28); m.w32(a, v as u32) }
+    pub fn update_award_car_model(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.award_car_model(m)); self.set_award_car_model(m, v) }
+    /// `+0x02c char fAwardCarColor`
+    pub fn award_car_color(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x2c); m.r8(a) as i8 }
+    pub fn set_award_car_color(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x2c); m.w8(a, v as u8) }
+    pub fn update_award_car_color(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.award_car_color(m)); self.set_award_car_color(m, v) }
+    /// `+0x02d char fAwardCarUpgrades`
+    pub fn award_car_upgrades(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x2d); m.r8(a) as i8 }
+    pub fn set_award_car_upgrades(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x2d); m.w8(a, v as u8) }
+    pub fn update_award_car_upgrades(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.award_car_upgrades(m)); self.set_award_car_upgrades(m, v) }
+    /// `+0x030 void fCompletedTier`
+    pub fn completed_tier(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x30); m.r32(a) }
+    pub fn set_completed_tier(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x30); m.w32(a, v) }
+    pub fn update_completed_tier(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.completed_tier(m)); self.set_completed_tier(m, v) }
+    /// `+0x034 short fCompletedText`
+    pub fn completed_text(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x34); m.r16(a) as i16 }
+    pub fn set_completed_text(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x34); m.w16(a, v as u16) }
+    pub fn update_completed_text(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.completed_text(m)); self.set_completed_text(m, v) }
+    /// `+0x038 enum tCarModels fCompletedCar`
+    pub fn completed_car(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x38); m.r32(a) as i32 }
+    pub fn set_completed_car(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x38); m.w32(a, v as u32) }
+    pub fn update_completed_car(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.completed_car(m)); self.set_completed_car(m, v) }
+    /// `+0x03c void fCompletedGarageFull`
+    pub fn completed_garage_full(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x3c); m.r32(a) }
+    pub fn set_completed_garage_full(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x3c); m.w32(a, v) }
+    pub fn update_completed_garage_full(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.completed_garage_full(m)); self.set_completed_garage_full(m, v) }
+    /// `+0x040 long fCompletedBonusMoney`
+    pub fn completed_bonus_money(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x40); m.r32(a) as i32 }
+    pub fn set_completed_bonus_money(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x40); m.w32(a, v as u32) }
+    pub fn update_completed_bonus_money(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.completed_bonus_money(m)); self.set_completed_bonus_money(m, v) }
+}
+
+/// `tBTCPerpInfo` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct BTCPerpInfo(pub u32);
+impl BTCPerpInfo {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tBTCPerpInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char[8] name`
+    pub fn name(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 8); m.r8(a) as i8 }
+    pub fn set_name(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 8); m.w8(a, v as u8) }
+    pub fn update_name(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.name(m, i)); self.set_name(m, i, v) }
+    /// `+0x008 int time`
+    pub fn time(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_time(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_time(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.time(m)); self.set_time(m, v) }
+    /// `+0x00c void caught`
+    pub fn caught(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_caught(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_caught(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.caught(m)); self.set_caught(m, v) }
+}
+
 /// `BWorldSm_Pos` (0x84 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct BWorldSmPos(pub u32);
 impl BWorldSmPos {
     pub const SIZE: u32 = 0x84;
@@ -1293,8 +1569,51 @@ impl BWorldSmPos {
     pub fn set_sim_slice(self, m: &mut Mem, v: TrkNewSimSlice) { let a = self.0.wrapping_add(0x80); m.w32(a, v.0) }
 }
 
+/// `tBlankMenuItemGoToMenuNFS4Button` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct BlankMenuItemGoToMenuNFS4Button(pub u32);
+/// `tBlankMenuItemGoToMenuNFS4Button` derives from `tMenuItemGoToMenuNFS4Button`: its members are reachable through it.
+impl core::ops::Deref for BlankMenuItemGoToMenuNFS4Button {
+    type Target = MenuItemGoToMenuNFS4Button;
+    fn deref(&self) -> &MenuItemGoToMenuNFS4Button { unsafe { &*(self as *const Self as *const MenuItemGoToMenuNFS4Button) } }
+}
+impl BlankMenuItemGoToMenuNFS4Button {
+    /// The `tMenuItemGoToMenuNFS4Button` it derives from (the same address).
+    pub fn base(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0) }
+}
+impl BlankMenuItemGoToMenuNFS4Button {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tBlankMenuItemGoToMenuNFS4Button` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemGoToMenuNFS4Button tMenuItemGoToMenuNFS4Button`
+    pub fn t_menu_item_go_to_menu_nfs4_button(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x0)) }
+}
+
+/// `tBlankMenuItemNFS4LeftRightChoice` (0x28 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct BlankMenuItemNFS4LeftRightChoice(pub u32);
+/// `tBlankMenuItemNFS4LeftRightChoice` derives from `tMenuItemNFS4LeftRightChoice`: its members are reachable through it.
+impl core::ops::Deref for BlankMenuItemNFS4LeftRightChoice {
+    type Target = MenuItemNFS4LeftRightChoice;
+    fn deref(&self) -> &MenuItemNFS4LeftRightChoice { unsafe { &*(self as *const Self as *const MenuItemNFS4LeftRightChoice) } }
+}
+impl BlankMenuItemNFS4LeftRightChoice {
+    /// The `tMenuItemNFS4LeftRightChoice` it derives from (the same address).
+    pub fn base(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0) }
+}
+impl BlankMenuItemNFS4LeftRightChoice {
+    pub const SIZE: u32 = 0x28;
+    /// Element `i` of an array of `tBlankMenuItemNFS4LeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemNFS4LeftRightChoice tMenuItemNFS4LeftRightChoice`
+    pub fn t_menu_item_nfs4_left_right_choice(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x0)) }
+}
+
 /// `blockade_t` (0x34 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct Blockade(pub u32);
 impl Blockade {
     pub const SIZE: u32 = 0x34;
@@ -1353,8 +1672,95 @@ impl Blockade {
     pub fn update_blockade_speech_flags(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.blockade_speech_flags(m)); self.set_blockade_speech_flags(m, v) }
 }
 
+/// `tBoundingSphere` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct BoundingSphere(pub u32);
+impl BoundingSphere {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tBoundingSphere` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct COORD16 cp`
+    pub fn cp(self) -> COORD16 { COORD16(self.0.wrapping_add(0x0)) }
+    /// `+0x006 short radius`
+    pub fn radius(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_radius(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_radius(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.radius(m)); self.set_radius(m, v) }
+}
+
+/// `tBuildEntry` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct BuildEntry(pub u32);
+impl BuildEntry {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `tBuildEntry` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short chunkInd`
+    pub fn chunk_ind(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_chunk_ind(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_chunk_ind(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.chunk_ind(m)); self.set_chunk_ind(m, v) }
+    /// `+0x002 char geomRez`
+    pub fn geom_rez(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x2); m.r8(a) as i8 }
+    pub fn set_geom_rez(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x2); m.w8(a, v as u8) }
+    pub fn update_geom_rez(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.geom_rez(m)); self.set_geom_rez(m, v) }
+    /// `+0x003 char enableBits`
+    pub fn enable_bits(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x3); m.r8(a) as i8 }
+    pub fn set_enable_bits(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x3); m.w8(a, v as u8) }
+    pub fn update_enable_bits(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.enable_bits(m)); self.set_enable_bits(m, v) }
+}
+
+/// `COORD16` (0x6 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct COORD16(pub u32);
+impl COORD16 {
+    pub const SIZE: u32 = 0x6;
+    /// Element `i` of an array of `COORD16` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short x`
+    pub fn x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x002 short y`
+    pub fn y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y(m)); self.set_y(m, v) }
+    /// `+0x004 short z`
+    pub fn z(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_z(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_z(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.z(m)); self.set_z(m, v) }
+}
+
+/// `CVECTOR` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct CVECTOR(pub u32);
+impl CVECTOR {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `CVECTOR` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar r`
+    pub fn r(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x0); m.r8(a) }
+    pub fn set_r(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x0); m.w8(a, v) }
+    pub fn update_r(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.r(m)); self.set_r(m, v) }
+    /// `+0x001 uchar g`
+    pub fn g(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_g(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_g(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.g(m)); self.set_g(m, v) }
+    /// `+0x002 uchar b`
+    pub fn b(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_b(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_b(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.b(m)); self.set_b(m, v) }
+    /// `+0x003 uchar cd`
+    pub fn cd(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_cd(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_cd(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.cd(m)); self.set_cd(m, v) }
+}
+
 /// `Car_tObj` (0x8dc bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct Car(pub u32);
 impl Car {
     pub const SIZE: u32 = 0x8dc;
@@ -1858,6 +2264,7 @@ impl Car {
 
 /// `Car_tControl` (0x1c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarControl(pub u32);
 impl CarControl {
     pub const SIZE: u32 = 0x1c;
@@ -1941,8 +2348,35 @@ impl CarControl {
     pub fn update_hanno(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.hanno(m)); self.set_hanno(m, v) }
 }
 
+/// `tCarInLineup` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct CarInLineup(pub u32);
+impl CarInLineup {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `tCarInLineup` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char isPlayerCar`
+    pub fn is_player_car(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_is_player_car(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_is_player_car(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.is_player_car(m)); self.set_is_player_car(m, v) }
+    /// `+0x001 char isAlive`
+    pub fn is_alive(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x1); m.r8(a) as i8 }
+    pub fn set_is_alive(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x1); m.w8(a, v as u8) }
+    pub fn update_is_alive(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.is_alive(m)); self.set_is_alive(m, v) }
+    /// `+0x002 char AIPersonality`
+    pub fn ai_personality(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x2); m.r8(a) as i8 }
+    pub fn set_ai_personality(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x2); m.w8(a, v as u8) }
+    pub fn update_ai_personality(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.ai_personality(m)); self.set_ai_personality(m, v) }
+    /// `+0x003 char LineupPosition`
+    pub fn lineup_position(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x3); m.r8(a) as i8 }
+    pub fn set_lineup_position(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x3); m.w8(a, v as u8) }
+    pub fn update_lineup_position(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.lineup_position(m)); self.set_lineup_position(m, v) }
+}
+
 /// `tCarInfo` (0xcc bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarInfo(pub u32);
 impl CarInfo {
     pub const SIZE: u32 = 0xcc;
@@ -2082,8 +2516,43 @@ impl CarInfo {
     pub fn update_reserved(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.reserved(m, i)); self.set_reserved(m, i, v) }
 }
 
+/// `tCarLineup` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct CarLineup(pub u32);
+impl CarLineup {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tCarLineup` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 void isPlayerCar`
+    pub fn is_player_car(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_is_player_car(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_is_player_car(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.is_player_car(m)); self.set_is_player_car(m, v) }
+    /// `+0x004 enum tPersonalities personality`
+    pub fn personality(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_personality(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_personality(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.personality(m)); self.set_personality(m, v) }
+    /// `+0x008 char position`
+    pub fn position(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x8); m.r8(a) as i8 }
+    pub fn set_position(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x8); m.w8(a, v as u8) }
+    pub fn update_position(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.position(m)); self.set_position(m, v) }
+    /// `+0x00c enum tCarModels carModel`
+    pub fn car_model(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_car_model(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_car_model(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.car_model(m)); self.set_car_model(m, v) }
+    /// `+0x010 char carColor`
+    pub fn car_color(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x10); m.r8(a) as i8 }
+    pub fn set_car_color(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x10); m.w8(a, v as u8) }
+    pub fn update_car_color(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.car_color(m)); self.set_car_color(m, v) }
+    /// `+0x011 char carUpgrades`
+    pub fn car_upgrades(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x11); m.r8(a) as i8 }
+    pub fn set_car_upgrades(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x11); m.w8(a, v as u8) }
+    pub fn update_car_upgrades(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.car_upgrades(m)); self.set_car_upgrades(m, v) }
+}
+
 /// `tCarManager` (0x38c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarManager(pub u32);
 impl CarManager {
     pub const SIZE: u32 = 0x38c;
@@ -2124,6 +2593,7 @@ impl CarManager {
 
 /// `Car_tSpecs` (0x1d0 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarSpecs(pub u32);
 impl CarSpecs {
     pub const SIZE: u32 = 0x1d0;
@@ -2297,6 +2767,7 @@ impl CarSpecs {
 
 /// `Car_tStats` (0xa0 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarStats(pub u32);
 impl CarStats {
     pub const SIZE: u32 = 0xa0;
@@ -2430,6 +2901,7 @@ impl CarStats {
 
 /// `Car_tWheel` (0x30 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarWheel(pub u32);
 impl CarWheel {
     pub const SIZE: u32 = 0x30;
@@ -2467,6 +2939,7 @@ impl CarWheel {
 
 /// `Cars_tAudio` (0x18 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarsAudio(pub u32);
 impl CarsAudio {
     pub const SIZE: u32 = 0x18;
@@ -2500,6 +2973,7 @@ impl CarsAudio {
 
 /// `Cars_tCollisionInfo` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarsCollisionInfo(pub u32);
 impl CarsCollisionInfo {
     pub const SIZE: u32 = 0x8;
@@ -2517,6 +2991,7 @@ impl CarsCollisionInfo {
 
 /// `Cars_tRenderInfo` (0x98 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CarsRenderInfo(pub u32);
 impl CarsRenderInfo {
     pub const SIZE: u32 = 0x98;
@@ -2684,8 +3159,27 @@ impl CarsRenderInfo {
     pub fn update_upgrade_height(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.upgrade_height(m)); self.set_upgrade_height(m, v) }
 }
 
+/// `tCheat` (0xc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Cheat(pub u32);
+impl Cheat {
+    pub const SIZE: u32 = 0xc;
+    /// Element `i` of an array of `tCheat` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar[8] name`
+    pub fn name(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 8); m.r8(a) }
+    pub fn set_name(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 8); m.w8(a, v) }
+    pub fn update_name(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.name(m, i)); self.set_name(m, i, v) }
+    /// `+0x008 enum tCheatCode cheat`
+    pub fn cheat(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_cheat(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_cheat(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.cheat(m)); self.set_cheat(m, v) }
+}
+
 /// `Chunk` (0x70 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct Chunk(pub u32);
 impl Chunk {
     pub const SIZE: u32 = 0x70;
@@ -2769,8 +3263,91 @@ impl Chunk {
     pub fn update_vertex_buf(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vertex_buf(m)); self.set_vertex_buf(m, v) }
 }
 
+/// `tCompRGB` (0x3 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct CompRGB(pub u32);
+impl CompRGB {
+    pub const SIZE: u32 = 0x3;
+    /// Element `i` of an array of `tCompRGB` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char r`
+    pub fn r(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_r(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_r(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.r(m)); self.set_r(m, v) }
+    /// `+0x001 char g`
+    pub fn g(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x1); m.r8(a) as i8 }
+    pub fn set_g(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x1); m.w8(a, v as u8) }
+    pub fn update_g(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.g(m)); self.set_g(m, v) }
+    /// `+0x002 char b`
+    pub fn b(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x2); m.r8(a) as i8 }
+    pub fn set_b(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x2); m.w8(a, v as u8) }
+    pub fn update_b(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.b(m)); self.set_b(m, v) }
+}
+
+/// `tCompetitor` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Competitor(pub u32);
+impl Competitor {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tCompetitor` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 enum tPersonalities fPersonality`
+    pub fn personality(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_personality(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_personality(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.personality(m)); self.set_personality(m, v) }
+    /// `+0x004 uchar fVariation`
+    pub fn variation(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_variation(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_variation(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.variation(m)); self.set_variation(m, v) }
+    /// `+0x005 char fIsPlayerCar`
+    pub fn is_player_car(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x5); m.r8(a) as i8 }
+    pub fn set_is_player_car(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x5); m.w8(a, v as u8) }
+    pub fn update_is_player_car(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.is_player_car(m)); self.set_is_player_car(m, v) }
+    /// `+0x008 void fEliminated`
+    pub fn eliminated(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x8); m.r32(a) }
+    pub fn set_eliminated(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x8); m.w32(a, v) }
+    pub fn update_eliminated(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.eliminated(m)); self.set_eliminated(m, v) }
+    /// `+0x00c ushort fPoints`
+    pub fn points(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0xc); m.r16(a) }
+    pub fn set_points(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0xc); m.w16(a, v) }
+    pub fn update_points(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.points(m)); self.set_points(m, v) }
+    /// `+0x00e uchar fPosition`
+    pub fn position(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0xe); m.r8(a) }
+    pub fn set_position(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0xe); m.w8(a, v) }
+    pub fn update_position(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.position(m)); self.set_position(m, v) }
+}
+
+/// `tControllerData` (0x80 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ControllerData(pub u32);
+impl ControllerData {
+    pub const SIZE: u32 = 0x80;
+    /// Element `i` of an array of `tControllerData` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char[32] steering`
+    pub fn steering(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 32); m.r8(a) as i8 }
+    pub fn set_steering(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 32); m.w8(a, v as u8) }
+    pub fn update_steering(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.steering(m, i)); self.set_steering(m, i, v) }
+    /// `+0x020 uchar[32] gas`
+    pub fn gas(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x20 + i * 1); debug_assert!(i < 32); m.r8(a) }
+    pub fn set_gas(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x20 + i * 1); debug_assert!(i < 32); m.w8(a, v) }
+    pub fn update_gas(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.gas(m, i)); self.set_gas(m, i, v) }
+    /// `+0x040 uchar[32] brake`
+    pub fn brake(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x40 + i * 1); debug_assert!(i < 32); m.r8(a) }
+    pub fn set_brake(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x40 + i * 1); debug_assert!(i < 32); m.w8(a, v) }
+    pub fn update_brake(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.brake(m, i)); self.set_brake(m, i, v) }
+    /// `+0x060 uchar[32] states`
+    pub fn states(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x60 + i * 1); debug_assert!(i < 32); m.r8(a) }
+    pub fn set_states(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x60 + i * 1); debug_assert!(i < 32); m.w8(a, v) }
+    pub fn update_states(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.states(m, i)); self.set_states(m, i, v) }
+}
+
 /// `coorddef` (0xc bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct Coord(pub u32);
 impl Coord {
     pub const SIZE: u32 = 0xc;
@@ -2792,6 +3369,7 @@ impl Coord {
 
 /// `CCOORD16` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct Coord16(pub u32);
 impl Coord16 {
     pub const SIZE: u32 = 0x8;
@@ -2817,6 +3395,7 @@ impl Coord16 {
 
 /// `._96` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct CopPosition(pub u32);
 impl CopPosition {
     pub const SIZE: u32 = 0x8;
@@ -2832,8 +3411,705 @@ impl CopPosition {
     pub fn update_car_index(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.car_index(m)); self.set_car_index(m, v) }
 }
 
+/// `tCredit` (0x144 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Credit(pub u32);
+impl Credit {
+    pub const SIZE: u32 = 0x144;
+    /// Element `i` of an array of `tCredit` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short titleTextID`
+    pub fn title_text_id(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_title_text_id(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_title_text_id(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.title_text_id(m)); self.set_title_text_id(m, v) }
+    /// `+0x002 short subTitleTextID`
+    pub fn sub_title_text_id(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_sub_title_text_id(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_sub_title_text_id(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sub_title_text_id(m)); self.set_sub_title_text_id(m, v) }
+    /// `+0x004 short titleX`
+    pub fn title_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_title_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_title_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.title_x(m)); self.set_title_x(m, v) }
+    /// `+0x006 short titleY`
+    pub fn title_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_title_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_title_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.title_y(m)); self.set_title_y(m, v) }
+    /// `+0x008 short titleJustify`
+    pub fn title_justify(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8); m.r16(a) as i16 }
+    pub fn set_title_justify(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8); m.w16(a, v as u16) }
+    pub fn update_title_justify(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.title_justify(m)); self.set_title_justify(m, v) }
+    /// `+0x00a short titleWidth`
+    pub fn title_width(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xa); m.r16(a) as i16 }
+    pub fn set_title_width(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xa); m.w16(a, v as u16) }
+    pub fn update_title_width(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.title_width(m)); self.set_title_width(m, v) }
+    /// `+0x00c short subTitleX`
+    pub fn sub_title_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xc); m.r16(a) as i16 }
+    pub fn set_sub_title_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xc); m.w16(a, v as u16) }
+    pub fn update_sub_title_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sub_title_x(m)); self.set_sub_title_x(m, v) }
+    /// `+0x00e short subTitleY`
+    pub fn sub_title_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xe); m.r16(a) as i16 }
+    pub fn set_sub_title_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xe); m.w16(a, v as u16) }
+    pub fn update_sub_title_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sub_title_y(m)); self.set_sub_title_y(m, v) }
+    /// `+0x010 short subTitleJustify`
+    pub fn sub_title_justify(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x10); m.r16(a) as i16 }
+    pub fn set_sub_title_justify(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x10); m.w16(a, v as u16) }
+    pub fn update_sub_title_justify(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sub_title_justify(m)); self.set_sub_title_justify(m, v) }
+    /// `+0x012 short subTitleWidth`
+    pub fn sub_title_width(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x12); m.r16(a) as i16 }
+    pub fn set_sub_title_width(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x12); m.w16(a, v as u16) }
+    pub fn update_sub_title_width(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sub_title_width(m)); self.set_sub_title_width(m, v) }
+    /// `+0x014 short textX`
+    pub fn text_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x14); m.r16(a) as i16 }
+    pub fn set_text_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x14); m.w16(a, v as u16) }
+    pub fn update_text_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.text_x(m)); self.set_text_x(m, v) }
+    /// `+0x016 short textY`
+    pub fn text_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x16); m.r16(a) as i16 }
+    pub fn set_text_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x16); m.w16(a, v as u16) }
+    pub fn update_text_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.text_y(m)); self.set_text_y(m, v) }
+    /// `+0x018 short textJustify`
+    pub fn text_justify(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x18); m.r16(a) as i16 }
+    pub fn set_text_justify(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x18); m.w16(a, v as u16) }
+    pub fn update_text_justify(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.text_justify(m)); self.set_text_justify(m, v) }
+    /// `+0x01a short creditType`
+    pub fn credit_type(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1a); m.r16(a) as i16 }
+    pub fn set_credit_type(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1a); m.w16(a, v as u16) }
+    pub fn update_credit_type(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.credit_type(m)); self.set_credit_type(m, v) }
+    /// `+0x01c short bgNumber`
+    pub fn bg_number(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1c); m.r16(a) as i16 }
+    pub fn set_bg_number(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1c); m.w16(a, v as u16) }
+    pub fn update_bg_number(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.bg_number(m)); self.set_bg_number(m, v) }
+    /// `+0x01e short pad`
+    pub fn pad(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1e); m.r16(a) as i16 }
+    pub fn set_pad(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1e); m.w16(a, v as u16) }
+    pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.pad(m)); self.set_pad(m, v) }
+    /// `+0x020 char[292] text`
+    pub fn text(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x20 + i * 1); debug_assert!(i < 292); m.r8(a) as i8 }
+    pub fn set_text(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x20 + i * 1); debug_assert!(i < 292); m.w8(a, v as u8) }
+    pub fn update_text(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.text(m, i)); self.set_text(m, i, v) }
+}
+
+/// `tCreditManager` (0x38 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct CreditManager(pub u32);
+impl CreditManager {
+    pub const SIZE: u32 = 0x38;
+    /// Element `i` of an array of `tCreditManager` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tCredit* CreditBuffer`
+    pub fn credit_buffer(self, m: &mut Mem) -> Credit { let a = self.0.wrapping_add(0x0); Credit(m.r32(a)) }
+    pub fn set_credit_buffer(self, m: &mut Mem, v: Credit) { let a = self.0.wrapping_add(0x0); m.w32(a, v.0) }
+    /// `+0x004 int fTVFade`
+    pub fn tv_fade(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_tv_fade(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_tv_fade(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.tv_fade(m)); self.set_tv_fade(m, v) }
+    /// `+0x008 int fTextFade`
+    pub fn text_fade(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_text_fade(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_text_fade(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.text_fade(m)); self.set_text_fade(m, v) }
+    /// `+0x00c int fTextFadeDir`
+    pub fn text_fade_dir(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_text_fade_dir(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_text_fade_dir(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.text_fade_dir(m)); self.set_text_fade_dir(m, v) }
+    /// `+0x010 void fCreditsInitialized`
+    pub fn credits_initialized(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_credits_initialized(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_credits_initialized(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.credits_initialized(m)); self.set_credits_initialized(m, v) }
+    /// `+0x014 void fRequestDeInit`
+    pub fn request_de_init(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14); m.r32(a) }
+    pub fn set_request_de_init(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14); m.w32(a, v) }
+    pub fn update_request_de_init(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.request_de_init(m)); self.set_request_de_init(m, v) }
+    /// `+0x018 int fNumCredits`
+    pub fn num_credits(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x18); m.r32(a) as i32 }
+    pub fn set_num_credits(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x18); m.w32(a, v as u32) }
+    pub fn update_num_credits(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_credits(m)); self.set_num_credits(m, v) }
+    /// `+0x01c int fShowCreditNum`
+    pub fn show_credit_num(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x1c); m.r32(a) as i32 }
+    pub fn set_show_credit_num(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x1c); m.w32(a, v as u32) }
+    pub fn update_show_credit_num(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.show_credit_num(m)); self.set_show_credit_num(m, v) }
+    /// `+0x020 int fCurrCredit`
+    pub fn curr_credit(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x20); m.r32(a) as i32 }
+    pub fn set_curr_credit(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x20); m.w32(a, v as u32) }
+    pub fn update_curr_credit(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.curr_credit(m)); self.set_curr_credit(m, v) }
+    /// `+0x024 void StartedTransition`
+    pub fn started_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x24); m.r32(a) }
+    pub fn set_started_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x24); m.w32(a, v) }
+    pub fn update_started_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.started_transition(m)); self.set_started_transition(m, v) }
+    /// `+0x028 void StartedLines`
+    pub fn started_lines(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x28); m.r32(a) }
+    pub fn set_started_lines(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x28); m.w32(a, v) }
+    pub fn update_started_lines(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.started_lines(m)); self.set_started_lines(m, v) }
+    /// `+0x02c void StartedTextFade`
+    pub fn started_text_fade(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x2c); m.r32(a) }
+    pub fn set_started_text_fade(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x2c); m.w32(a, v) }
+    pub fn update_started_text_fade(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.started_text_fade(m)); self.set_started_text_fade(m, v) }
+    /// `+0x030 int fLineTicks`
+    pub fn line_ticks(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x30); m.r32(a) as i32 }
+    pub fn set_line_ticks(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x30); m.w32(a, v as u32) }
+    pub fn update_line_ticks(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.line_ticks(m)); self.set_line_ticks(m, v) }
+    /// `+0x034 int fStartTicks`
+    pub fn start_ticks(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x34); m.r32(a) as i32 }
+    pub fn set_start_ticks(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x34); m.w32(a, v as u32) }
+    pub fn update_start_ticks(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.start_ticks(m)); self.set_start_ticks(m, v) }
+}
+
+/// `DVECTOR` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DVECTOR(pub u32);
+impl DVECTOR {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `DVECTOR` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short vx`
+    pub fn vx(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_vx(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_vx(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.vx(m)); self.set_vx(m, v) }
+    /// `+0x002 short vy`
+    pub fn vy(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_vy(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_vy(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.vy(m)); self.set_vy(m, v) }
+}
+
+/// `tDialogBackUpOnly` (0x98 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogBackUpOnly(pub u32);
+/// `tDialogBackUpOnly` derives from `tDialogMessageString`: its members are reachable through it.
+impl core::ops::Deref for DialogBackUpOnly {
+    type Target = DialogMessageString;
+    fn deref(&self) -> &DialogMessageString { unsafe { &*(self as *const Self as *const DialogMessageString) } }
+}
+impl DialogBackUpOnly {
+    /// The `tDialogMessageString` it derives from (the same address).
+    pub fn base(self) -> DialogMessageString { DialogMessageString(self.0) }
+}
+impl DialogBackUpOnly {
+    pub const SIZE: u32 = 0x98;
+    /// Element `i` of an array of `tDialogBackUpOnly` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogMessageString tDialogMessageString`
+    pub fn t_dialog_message_string(self) -> DialogMessageString { DialogMessageString(self.0.wrapping_add(0x0)) }
+}
+
+/// `tDialogBase` (0x90 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogBase(pub u32);
+/// `tDialogBase` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for DialogBase {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl DialogBase {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl DialogBase {
+    pub const SIZE: u32 = 0x90;
+    /// Element `i` of an array of `tDialogBase` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 short specificPlayer`
+    pub fn specific_player(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x64); m.r16(a) as i16 }
+    pub fn set_specific_player(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x64); m.w16(a, v as u16) }
+    pub fn update_specific_player(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.specific_player(m)); self.set_specific_player(m, v) }
+    /// `+0x066 short left`
+    pub fn left(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x66); m.r16(a) as i16 }
+    pub fn set_left(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x66); m.w16(a, v as u16) }
+    pub fn update_left(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.left(m)); self.set_left(m, v) }
+    /// `+0x068 short top`
+    pub fn top(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x68); m.r16(a) as i16 }
+    pub fn set_top(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x68); m.w16(a, v as u16) }
+    pub fn update_top(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.top(m)); self.set_top(m, v) }
+    /// `+0x06a short width`
+    pub fn width(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6a); m.r16(a) as i16 }
+    pub fn set_width(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6a); m.w16(a, v as u16) }
+    pub fn update_width(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.width(m)); self.set_width(m, v) }
+    /// `+0x06c short height`
+    pub fn height(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6c); m.r16(a) as i16 }
+    pub fn set_height(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6c); m.w16(a, v as u16) }
+    pub fn update_height(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.height(m)); self.set_height(m, v) }
+    /// `+0x06e short reservedheight`
+    pub fn reservedheight(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6e); m.r16(a) as i16 }
+    pub fn set_reservedheight(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6e); m.w16(a, v as u16) }
+    pub fn update_reservedheight(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.reservedheight(m)); self.set_reservedheight(m, v) }
+    /// `+0x070 void currentlyOn`
+    pub fn currently_on(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x70); m.r32(a) }
+    pub fn set_currently_on(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x70); m.w32(a, v) }
+    pub fn update_currently_on(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.currently_on(m)); self.set_currently_on(m, v) }
+    /// `+0x074 long startTicks`
+    pub fn start_ticks(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x74); m.r32(a) as i32 }
+    pub fn set_start_ticks(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x74); m.w32(a, v as u32) }
+    pub fn update_start_ticks(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.start_ticks(m)); self.set_start_ticks(m, v) }
+    /// `+0x078 long timeOutTicks`
+    pub fn time_out_ticks(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x78); m.r32(a) as i32 }
+    pub fn set_time_out_ticks(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x78); m.w32(a, v as u32) }
+    pub fn update_time_out_ticks(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.time_out_ticks(m)); self.set_time_out_ticks(m, v) }
+    /// `+0x07c short OffsetX`
+    pub fn offset_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x7c); m.r16(a) as i16 }
+    pub fn set_offset_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x7c); m.w16(a, v as u16) }
+    pub fn update_offset_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.offset_x(m)); self.set_offset_x(m, v) }
+    /// `+0x07e short OffsetY`
+    pub fn offset_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x7e); m.r16(a) as i16 }
+    pub fn set_offset_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x7e); m.w16(a, v as u16) }
+    pub fn update_offset_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.offset_y(m)); self.set_offset_y(m, v) }
+    /// `+0x080 short MaxW`
+    pub fn max_w(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x80); m.r16(a) as i16 }
+    pub fn set_max_w(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x80); m.w16(a, v as u16) }
+    pub fn update_max_w(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.max_w(m)); self.set_max_w(m, v) }
+    /// `+0x082 short MaxH`
+    pub fn max_h(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x82); m.r16(a) as i16 }
+    pub fn set_max_h(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x82); m.w16(a, v as u16) }
+    pub fn update_max_h(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.max_h(m)); self.set_max_h(m, v) }
+    /// `+0x084 void fFullyOpen`
+    pub fn fully_open(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x84); m.r32(a) }
+    pub fn set_fully_open(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x84); m.w32(a, v) }
+    pub fn update_fully_open(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.fully_open(m)); self.set_fully_open(m, v) }
+    /// `+0x088 short fDefault`
+    pub fn default(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x88); m.r16(a) as i16 }
+    pub fn set_default(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x88); m.w16(a, v as u16) }
+    pub fn update_default(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.default(m)); self.set_default(m, v) }
+    /// `+0x08a short ReturnValue`
+    pub fn return_value(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8a); m.r16(a) as i16 }
+    pub fn set_return_value(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8a); m.w16(a, v as u16) }
+    pub fn update_return_value(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.return_value(m)); self.set_return_value(m, v) }
+    /// `+0x08c int fFadeText`
+    pub fn fade_text(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8c); m.r32(a) as i32 }
+    pub fn set_fade_text(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8c); m.w32(a, v as u32) }
+    pub fn update_fade_text(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.fade_text(m)); self.set_fade_text(m, v) }
+}
+
+/// `tDialogHelp` (0xd4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogHelp(pub u32);
+/// `tDialogHelp` derives from `tDialogBase`: its members are reachable through it.
+impl core::ops::Deref for DialogHelp {
+    type Target = DialogBase;
+    fn deref(&self) -> &DialogBase { unsafe { &*(self as *const Self as *const DialogBase) } }
+}
+impl DialogHelp {
+    /// The `tDialogBase` it derives from (the same address).
+    pub fn base(self) -> DialogBase { DialogBase(self.0) }
+}
+impl DialogHelp {
+    pub const SIZE: u32 = 0xd4;
+    /// Element `i` of an array of `tDialogHelp` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogBase tDialogBase`
+    pub fn t_dialog_base(self) -> DialogBase { DialogBase(self.0.wrapping_add(0x0)) }
+    /// `+0x090 short variant`
+    pub fn variant(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x90); m.r16(a) as i16 }
+    pub fn set_variant(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x90); m.w16(a, v as u16) }
+    pub fn update_variant(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.variant(m)); self.set_variant(m, v) }
+    /// `+0x094 char[7]* text`
+    pub fn text(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x94); m.r32(a) }
+    pub fn set_text(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x94); m.w32(a, v) }
+    pub fn update_text(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.text(m)); self.set_text(m, v) }
+    /// `+0x0b0 int[7] cont`
+    pub fn cont(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0xb0 + i * 4); debug_assert!(i < 7); m.r32(a) as i32 }
+    pub fn set_cont(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0xb0 + i * 4); debug_assert!(i < 7); m.w32(a, v as u32) }
+    pub fn update_cont(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.cont(m, i)); self.set_cont(m, i, v) }
+    /// `+0x0cc short numItems`
+    pub fn num_items(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xcc); m.r16(a) as i16 }
+    pub fn set_num_items(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xcc); m.w16(a, v as u16) }
+    pub fn update_num_items(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_items(m)); self.set_num_items(m, v) }
+    /// `+0x0ce short helpcontrollers`
+    pub fn helpcontrollers(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xce); m.r16(a) as i16 }
+    pub fn set_helpcontrollers(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xce); m.w16(a, v as u16) }
+    pub fn update_helpcontrollers(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.helpcontrollers(m)); self.set_helpcontrollers(m, v) }
+    /// `+0x0d0 short lefttext`
+    pub fn lefttext(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xd0); m.r16(a) as i16 }
+    pub fn set_lefttext(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xd0); m.w16(a, v as u16) }
+    pub fn update_lefttext(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.lefttext(m)); self.set_lefttext(m, v) }
+}
+
+/// `tDialogInteractive` (0xa0 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogInteractive(pub u32);
+/// `tDialogInteractive` derives from `tDialogMessageString`: its members are reachable through it.
+impl core::ops::Deref for DialogInteractive {
+    type Target = DialogMessageString;
+    fn deref(&self) -> &DialogMessageString { unsafe { &*(self as *const Self as *const DialogMessageString) } }
+}
+impl DialogInteractive {
+    /// The `tDialogMessageString` it derives from (the same address).
+    pub fn base(self) -> DialogMessageString { DialogMessageString(self.0) }
+}
+impl DialogInteractive {
+    pub const SIZE: u32 = 0xa0;
+    /// Element `i` of an array of `tDialogInteractive` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogMessageString tDialogMessageString`
+    pub fn t_dialog_message_string(self) -> DialogMessageString { DialogMessageString(self.0.wrapping_add(0x0)) }
+    /// `+0x098 void ReadyToReturnValue`
+    pub fn ready_to_return_value(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x98); m.r32(a) }
+    pub fn set_ready_to_return_value(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x98); m.w32(a, v) }
+    pub fn update_ready_to_return_value(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.ready_to_return_value(m)); self.set_ready_to_return_value(m, v) }
+    /// `+0x09c void fCurrentlyRunning`
+    pub fn currently_running(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x9c); m.r32(a) }
+    pub fn set_currently_running(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x9c); m.w32(a, v) }
+    pub fn update_currently_running(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.currently_running(m)); self.set_currently_running(m, v) }
+}
+
+/// `tDialogMessageString` (0x98 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogMessageString(pub u32);
+/// `tDialogMessageString` derives from `tDialogBase`: its members are reachable through it.
+impl core::ops::Deref for DialogMessageString {
+    type Target = DialogBase;
+    fn deref(&self) -> &DialogBase { unsafe { &*(self as *const Self as *const DialogBase) } }
+}
+impl DialogMessageString {
+    /// The `tDialogBase` it derives from (the same address).
+    pub fn base(self) -> DialogBase { DialogBase(self.0) }
+}
+impl DialogMessageString {
+    pub const SIZE: u32 = 0x98;
+    /// Element `i` of an array of `tDialogMessageString` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogBase tDialogBase`
+    pub fn t_dialog_base(self) -> DialogBase { DialogBase(self.0.wrapping_add(0x0)) }
+    /// `+0x090 char* string`
+    pub fn string(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x90); m.r32(a) }
+    pub fn set_string(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x90); m.w32(a, v) }
+    pub fn update_string(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.string(m)); self.set_string(m, v) }
+    /// `+0x094 void Centerit`
+    pub fn centerit(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x94); m.r32(a) }
+    pub fn set_centerit(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x94); m.w32(a, v) }
+    pub fn update_centerit(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.centerit(m)); self.set_centerit(m, v) }
+}
+
+/// `tDialogMessageStringWithTimeout` (0x98 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogMessageStringWithTimeout(pub u32);
+/// `tDialogMessageStringWithTimeout` derives from `tDialogMessageString`: its members are reachable through it.
+impl core::ops::Deref for DialogMessageStringWithTimeout {
+    type Target = DialogMessageString;
+    fn deref(&self) -> &DialogMessageString { unsafe { &*(self as *const Self as *const DialogMessageString) } }
+}
+impl DialogMessageStringWithTimeout {
+    /// The `tDialogMessageString` it derives from (the same address).
+    pub fn base(self) -> DialogMessageString { DialogMessageString(self.0) }
+}
+impl DialogMessageStringWithTimeout {
+    pub const SIZE: u32 = 0x98;
+    /// Element `i` of an array of `tDialogMessageStringWithTimeout` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogMessageString tDialogMessageString`
+    pub fn t_dialog_message_string(self) -> DialogMessageString { DialogMessageString(self.0.wrapping_add(0x0)) }
+}
+
+/// `tDialogNoInputMessage` (0x98 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogNoInputMessage(pub u32);
+/// `tDialogNoInputMessage` derives from `tDialogMessageString`: its members are reachable through it.
+impl core::ops::Deref for DialogNoInputMessage {
+    type Target = DialogMessageString;
+    fn deref(&self) -> &DialogMessageString { unsafe { &*(self as *const Self as *const DialogMessageString) } }
+}
+impl DialogNoInputMessage {
+    /// The `tDialogMessageString` it derives from (the same address).
+    pub fn base(self) -> DialogMessageString { DialogMessageString(self.0) }
+}
+impl DialogNoInputMessage {
+    pub const SIZE: u32 = 0x98;
+    /// Element `i` of an array of `tDialogNoInputMessage` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogMessageString tDialogMessageString`
+    pub fn t_dialog_message_string(self) -> DialogMessageString { DialogMessageString(self.0.wrapping_add(0x0)) }
+}
+
+/// `tDialogYesNo` (0xa8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogYesNo(pub u32);
+/// `tDialogYesNo` derives from `tDialogInteractive`: its members are reachable through it.
+impl core::ops::Deref for DialogYesNo {
+    type Target = DialogInteractive;
+    fn deref(&self) -> &DialogInteractive { unsafe { &*(self as *const Self as *const DialogInteractive) } }
+}
+impl DialogYesNo {
+    /// The `tDialogInteractive` it derives from (the same address).
+    pub fn base(self) -> DialogInteractive { DialogInteractive(self.0) }
+}
+impl DialogYesNo {
+    pub const SIZE: u32 = 0xa8;
+    /// Element `i` of an array of `tDialogYesNo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogInteractive tDialogInteractive`
+    pub fn t_dialog_interactive(self) -> DialogInteractive { DialogInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x0a0 int[2] yesnowords`
+    pub fn yesnowords(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0xa0 + i * 4); debug_assert!(i < 2); m.r32(a) as i32 }
+    pub fn set_yesnowords(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0xa0 + i * 4); debug_assert!(i < 2); m.w32(a, v as u32) }
+    pub fn update_yesnowords(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.yesnowords(m, i)); self.set_yesnowords(m, i, v) }
+}
+
+/// `tDialogYesNoMem` (0xa8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogYesNoMem(pub u32);
+/// `tDialogYesNoMem` derives from `tDialogYesNo`: its members are reachable through it.
+impl core::ops::Deref for DialogYesNoMem {
+    type Target = DialogYesNo;
+    fn deref(&self) -> &DialogYesNo { unsafe { &*(self as *const Self as *const DialogYesNo) } }
+}
+impl DialogYesNoMem {
+    /// The `tDialogYesNo` it derives from (the same address).
+    pub fn base(self) -> DialogYesNo { DialogYesNo(self.0) }
+}
+impl DialogYesNoMem {
+    pub const SIZE: u32 = 0xa8;
+    /// Element `i` of an array of `tDialogYesNoMem` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogYesNo tDialogYesNo`
+    pub fn t_dialog_yes_no(self) -> DialogYesNo { DialogYesNo(self.0.wrapping_add(0x0)) }
+}
+
+/// `tDialogYesNoTri` (0xa8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DialogYesNoTri(pub u32);
+/// `tDialogYesNoTri` derives from `tDialogYesNo`: its members are reachable through it.
+impl core::ops::Deref for DialogYesNoTri {
+    type Target = DialogYesNo;
+    fn deref(&self) -> &DialogYesNo { unsafe { &*(self as *const Self as *const DialogYesNo) } }
+}
+impl DialogYesNoTri {
+    /// The `tDialogYesNo` it derives from (the same address).
+    pub fn base(self) -> DialogYesNo { DialogYesNo(self.0) }
+}
+impl DialogYesNoTri {
+    pub const SIZE: u32 = 0xa8;
+    /// Element `i` of an array of `tDialogYesNoTri` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tDialogYesNo tDialogYesNo`
+    pub fn t_dialog_yes_no(self) -> DialogYesNo { DialogYesNo(self.0.wrapping_add(0x0)) }
+}
+
+/// `tDrawShapeExtended` (0x18 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct DrawShapeExtended(pub u32);
+impl DrawShapeExtended {
+    pub const SIZE: u32 = 0x18;
+    /// Element `i` of an array of `tDrawShapeExtended` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short flip_axis`
+    pub fn flip_axis(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_flip_axis(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_flip_axis(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.flip_axis(m)); self.set_flip_axis(m, v) }
+    /// `+0x004 int[4] tint`
+    pub fn tint(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x4 + i * 4); debug_assert!(i < 4); m.r32(a) as i32 }
+    pub fn set_tint(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x4 + i * 4); debug_assert!(i < 4); m.w32(a, v as u32) }
+    pub fn update_tint(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.tint(m, i)); self.set_tint(m, i, v) }
+    /// `+0x014 struct tTexture_ShapeInfo* custom_shapes`
+    pub fn custom_shapes(self, m: &mut Mem) -> TextureShapeInfo { let a = self.0.wrapping_add(0x14); TextureShapeInfo(m.r32(a)) }
+    pub fn set_custom_shapes(self, m: &mut Mem, v: TextureShapeInfo) { let a = self.0.wrapping_add(0x14); m.w32(a, v.0) }
+}
+
+/// `tFEApplication` (0x380 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct FEApplication(pub u32);
+impl FEApplication {
+    pub const SIZE: u32 = 0x380;
+    /// Element `i` of an array of `tFEApplication` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uint fCurrentMusic`
+    pub fn current_music(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_current_music(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_current_music(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.current_music(m)); self.set_current_music(m, v) }
+    /// `+0x004 struct tMenu[2]* fCurrentMenu`
+    pub fn current_menu(self, m: &mut Mem, i: u32) -> Menu { let a = self.0.wrapping_add(0x4 + i * 4); debug_assert!(i < 2); Menu(m.r32(a)) }
+    pub fn set_current_menu(self, m: &mut Mem, i: u32, v: Menu) { let a = self.0.wrapping_add(0x4 + i * 4); debug_assert!(i < 2); m.w32(a, v.0) }
+    /// `+0x00c struct tScreen[2]* fCurrentScreen`
+    pub fn current_screen(self, m: &mut Mem, i: u32) -> Screen { let a = self.0.wrapping_add(0xc + i * 4); debug_assert!(i < 2); Screen(m.r32(a)) }
+    pub fn set_current_screen(self, m: &mut Mem, i: u32, v: Screen) { let a = self.0.wrapping_add(0xc + i * 4); debug_assert!(i < 2); m.w32(a, v.0) }
+    /// `+0x014 struct tMenu[2]* fTransitionToMenu`
+    pub fn transition_to_menu(self, m: &mut Mem, i: u32) -> Menu { let a = self.0.wrapping_add(0x14 + i * 4); debug_assert!(i < 2); Menu(m.r32(a)) }
+    pub fn set_transition_to_menu(self, m: &mut Mem, i: u32, v: Menu) { let a = self.0.wrapping_add(0x14 + i * 4); debug_assert!(i < 2); m.w32(a, v.0) }
+    /// `+0x01c struct tScreen[2]* fTransitionToScreen`
+    pub fn transition_to_screen(self, m: &mut Mem, i: u32) -> Screen { let a = self.0.wrapping_add(0x1c + i * 4); debug_assert!(i < 2); Screen(m.r32(a)) }
+    pub fn set_transition_to_screen(self, m: &mut Mem, i: u32, v: Screen) { let a = self.0.wrapping_add(0x1c + i * 4); debug_assert!(i < 2); m.w32(a, v.0) }
+    /// `+0x024 struct tMenu[2]* fParentMenu`
+    pub fn parent_menu(self, m: &mut Mem, i: u32) -> Menu { let a = self.0.wrapping_add(0x24 + i * 4); debug_assert!(i < 2); Menu(m.r32(a)) }
+    pub fn set_parent_menu(self, m: &mut Mem, i: u32, v: Menu) { let a = self.0.wrapping_add(0x24 + i * 4); debug_assert!(i < 2); m.w32(a, v.0) }
+    /// `+0x02c struct tDialogMessageString messagePopup`
+    pub fn message_popup(self) -> DialogMessageString { DialogMessageString(self.0.wrapping_add(0x2c)) }
+    /// `+0x0c4 struct tMenu[2][16]* backList`
+    pub fn back_list(self, m: &mut Mem, i: u32) -> Menu { let a = self.0.wrapping_add(0xc4 + i * 4); debug_assert!(i < 32); Menu(m.r32(a)) }
+    pub fn set_back_list(self, m: &mut Mem, i: u32, v: Menu) { let a = self.0.wrapping_add(0xc4 + i * 4); debug_assert!(i < 32); m.w32(a, v.0) }
+    /// `+0x144 int[2] backDepth`
+    pub fn back_depth(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x144 + i * 4); debug_assert!(i < 2); m.r32(a) as i32 }
+    pub fn set_back_depth(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x144 + i * 4); debug_assert!(i < 2); m.w32(a, v as u32) }
+    pub fn update_back_depth(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.back_depth(m, i)); self.set_back_depth(m, i, v) }
+    /// `+0x14c enum tInputKeyType[2] fLastKeyPressed`
+    pub fn last_key_pressed(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x14c + i * 4); debug_assert!(i < 2); m.r32(a) as i32 }
+    pub fn set_last_key_pressed(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x14c + i * 4); debug_assert!(i < 2); m.w32(a, v as u32) }
+    pub fn update_last_key_pressed(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.last_key_pressed(m, i)); self.set_last_key_pressed(m, i, v) }
+    /// `+0x154 short fYOffset`
+    pub fn y_offset(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x154); m.r16(a) as i16 }
+    pub fn set_y_offset(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x154); m.w16(a, v as u16) }
+    pub fn update_y_offset(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y_offset(m)); self.set_y_offset(m, v) }
+    /// `+0x158 struct tDialogHelp helpPopup`
+    pub fn help_popup(self) -> DialogHelp { DialogHelp(self.0.wrapping_add(0x158)) }
+    /// `+0x22c char fPlayer`
+    pub fn player(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x22c); m.r8(a) as i8 }
+    pub fn set_player(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x22c); m.w8(a, v as u8) }
+    pub fn update_player(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.player(m)); self.set_player(m, v) }
+    /// `+0x22d char fInputPlayer`
+    pub fn input_player(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x22d); m.r8(a) as i8 }
+    pub fn set_input_player(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x22d); m.w8(a, v as u8) }
+    pub fn update_input_player(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.input_player(m)); self.set_input_player(m, v) }
+    /// `+0x230 void[2] waitingForOtherPlayer`
+    pub fn waiting_for_other_player(self, m: &mut Mem, i: u32) -> u32 { let a = self.0.wrapping_add(0x230 + i * 4); debug_assert!(i < 2); m.r32(a) }
+    pub fn set_waiting_for_other_player(self, m: &mut Mem, i: u32, v: u32) { let a = self.0.wrapping_add(0x230 + i * 4); debug_assert!(i < 2); m.w32(a, v) }
+    pub fn update_waiting_for_other_player(self, m: &mut Mem, i: u32, f: impl FnOnce(u32) -> u32) { let v = f(self.waiting_for_other_player(m, i)); self.set_waiting_for_other_player(m, i, v) }
+    /// `+0x238 struct tDialogMessageStringWithTimeout MemCardDialog`
+    pub fn mem_card_dialog(self) -> DialogMessageStringWithTimeout { DialogMessageStringWithTimeout(self.0.wrapping_add(0x238)) }
+    /// `+0x2d0 struct tDialogNoInputMessage NoInputMemCardDialog`
+    pub fn no_input_mem_card_dialog(self) -> DialogNoInputMessage { DialogNoInputMessage(self.0.wrapping_add(0x2d0)) }
+    /// `+0x368 void[2] gotName`
+    pub fn got_name(self, m: &mut Mem, i: u32) -> u32 { let a = self.0.wrapping_add(0x368 + i * 4); debug_assert!(i < 2); m.r32(a) }
+    pub fn set_got_name(self, m: &mut Mem, i: u32, v: u32) { let a = self.0.wrapping_add(0x368 + i * 4); debug_assert!(i < 2); m.w32(a, v) }
+    pub fn update_got_name(self, m: &mut Mem, i: u32, f: impl FnOnce(u32) -> u32) { let v = f(self.got_name(m, i)); self.set_got_name(m, i, v) }
+    /// `+0x370 void[2] needName`
+    pub fn need_name(self, m: &mut Mem, i: u32) -> u32 { let a = self.0.wrapping_add(0x370 + i * 4); debug_assert!(i < 2); m.r32(a) }
+    pub fn set_need_name(self, m: &mut Mem, i: u32, v: u32) { let a = self.0.wrapping_add(0x370 + i * 4); debug_assert!(i < 2); m.w32(a, v) }
+    pub fn update_need_name(self, m: &mut Mem, i: u32, f: impl FnOnce(u32) -> u32) { let v = f(self.need_name(m, i)); self.set_need_name(m, i, v) }
+    /// `+0x378 int[2] speechToPlay`
+    pub fn speech_to_play(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x378 + i * 4); debug_assert!(i < 2); m.r32(a) as i32 }
+    pub fn set_speech_to_play(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x378 + i * 4); debug_assert!(i < 2); m.w32(a, v as u32) }
+    pub fn update_speech_to_play(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.speech_to_play(m, i)); self.set_speech_to_play(m, i, v) }
+}
+
+/// `tFEStream` (0x2e8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct FEStream(pub u32);
+impl FEStream {
+    pub const SIZE: u32 = 0x2e8;
+    /// Element `i` of an array of `tFEStream` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short totalCars`
+    pub fn total_cars(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_total_cars(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_total_cars(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.total_cars(m)); self.set_total_cars(m, v) }
+    /// `+0x002 short totalModels`
+    pub fn total_models(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_total_models(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_total_models(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.total_models(m)); self.set_total_models(m, v) }
+    /// `+0x004 short currentCar`
+    pub fn current_car(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_current_car(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_current_car(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.current_car(m)); self.set_current_car(m, v) }
+    /// `+0x006 short numPlayers`
+    pub fn num_players(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_num_players(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_num_players(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_players(m)); self.set_num_players(m, v) }
+    /// `+0x008 struct tCarInfo[2] playerCars`
+    pub fn player_cars(self, i: u32) -> CarInfo { debug_assert!(i < 2); CarInfo(self.0.wrapping_add(0x8 + i * 0xcc)) }
+    /// `+0x1a0 short numOpponents`
+    pub fn num_opponents(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1a0); m.r16(a) as i16 }
+    pub fn set_num_opponents(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1a0); m.w16(a, v as u16) }
+    pub fn update_num_opponents(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_opponents(m)); self.set_num_opponents(m, v) }
+    /// `+0x1a4 struct tCarLineup[6] carLineup`
+    pub fn car_lineup(self, i: u32) -> CarLineup { debug_assert!(i < 6); CarLineup(self.0.wrapping_add(0x1a4 + i * 0x14)) }
+    /// `+0x21c short numCops`
+    pub fn num_cops(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x21c); m.r16(a) as i16 }
+    pub fn set_num_cops(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x21c); m.w16(a, v as u16) }
+    pub fn update_num_cops(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_cops(m)); self.set_num_cops(m, v) }
+    /// `+0x21e short numSuperCops`
+    pub fn num_super_cops(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x21e); m.r16(a) as i16 }
+    pub fn set_num_super_cops(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x21e); m.w16(a, v as u16) }
+    pub fn update_num_super_cops(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_super_cops(m)); self.set_num_super_cops(m, v) }
+    /// `+0x220 enum tCarModels[6] copCars`
+    pub fn cop_cars(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x220 + i * 4); debug_assert!(i < 6); m.r32(a) as i32 }
+    pub fn set_cop_cars(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x220 + i * 4); debug_assert!(i < 6); m.w32(a, v as u32) }
+    pub fn update_cop_cars(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.cop_cars(m, i)); self.set_cop_cars(m, i, v) }
+    /// `+0x238 short[6] copCountry`
+    pub fn cop_country(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x238 + i * 2); debug_assert!(i < 6); m.r16(a) as i16 }
+    pub fn set_cop_country(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x238 + i * 2); debug_assert!(i < 6); m.w16(a, v as u16) }
+    pub fn update_cop_country(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.cop_country(m, i)); self.set_cop_country(m, i, v) }
+    /// `+0x244 short numTraffic`
+    pub fn num_traffic(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x244); m.r16(a) as i16 }
+    pub fn set_num_traffic(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x244); m.w16(a, v as u16) }
+    pub fn update_num_traffic(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_traffic(m)); self.set_num_traffic(m, v) }
+    /// `+0x246 short[6] trafficCars`
+    pub fn traffic_cars(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x246 + i * 2); debug_assert!(i < 6); m.r16(a) as i16 }
+    pub fn set_traffic_cars(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x246 + i * 2); debug_assert!(i < 6); m.w16(a, v as u16) }
+    pub fn update_traffic_cars(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.traffic_cars(m, i)); self.set_traffic_cars(m, i, v) }
+    /// `+0x252 short numPerpObjects`
+    pub fn num_perp_objects(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x252); m.r16(a) as i16 }
+    pub fn set_num_perp_objects(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x252); m.w16(a, v as u16) }
+    pub fn update_num_perp_objects(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_perp_objects(m)); self.set_num_perp_objects(m, v) }
+    /// `+0x254 short numPerps`
+    pub fn num_perps(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x254); m.r16(a) as i16 }
+    pub fn set_num_perps(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x254); m.w16(a, v as u16) }
+    pub fn update_num_perps(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_perps(m)); self.set_num_perps(m, v) }
+    /// `+0x258 struct tMissionInfo* pMission`
+    pub fn p_mission(self, m: &mut Mem) -> MissionInfo { let a = self.0.wrapping_add(0x258); MissionInfo(m.r32(a)) }
+    pub fn set_p_mission(self, m: &mut Mem, v: MissionInfo) { let a = self.0.wrapping_add(0x258); m.w32(a, v.0) }
+    /// `+0x25c struct tStageInfo* pStages`
+    pub fn p_stages(self, m: &mut Mem) -> StageInfo { let a = self.0.wrapping_add(0x25c); StageInfo(m.r32(a)) }
+    pub fn set_p_stages(self, m: &mut Mem, v: StageInfo) { let a = self.0.wrapping_add(0x25c); m.w32(a, v.0) }
+    /// `+0x260 struct tPerpModelList[6] perps`
+    pub fn perps(self, i: u32) -> PerpModelList { debug_assert!(i < 6); PerpModelList(self.0.wrapping_add(0x260 + i * 0x8)) }
+    /// `+0x290 struct tTrackInformation trackInfo`
+    pub fn track_info(self) -> TrackInformation { TrackInformation(self.0.wrapping_add(0x290)) }
+    /// `+0x2c0 struct tTrackInfo track`
+    pub fn track(self) -> TrackInfo { TrackInfo(self.0.wrapping_add(0x2c0)) }
+}
+
+/// `Force_tGlobal` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ForceGlobal(pub u32);
+impl ForceGlobal {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `Force_tGlobal` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar active`
+    pub fn active(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x0); m.r8(a) }
+    pub fn set_active(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x0); m.w8(a, v) }
+    pub fn update_active(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.active(m)); self.set_active(m, v) }
+    /// `+0x001 uchar high`
+    pub fn high(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_high(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_high(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.high(m)); self.set_high(m, v) }
+    /// `+0x002 uchar low`
+    pub fn low(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_low(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_low(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.low(m)); self.set_low(m, v) }
+    /// `+0x003 uchar jolt`
+    pub fn jolt(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_jolt(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_jolt(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.jolt(m)); self.set_jolt(m, v) }
+    /// `+0x004 uchar time`
+    pub fn time(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_time(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_time(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.time(m)); self.set_time(m, v) }
+    /// `+0x005 uchar fade`
+    pub fn fade(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x5); m.r8(a) }
+    pub fn set_fade(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x5); m.w8(a, v) }
+    pub fn update_fade(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.fade(m)); self.set_fade(m, v) }
+    /// `+0x006 uchar[2] actuator`
+    pub fn actuator(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x6 + i * 1); debug_assert!(i < 2); m.r8(a) }
+    pub fn set_actuator(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x6 + i * 1); debug_assert!(i < 2); m.w8(a, v) }
+    pub fn update_actuator(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.actuator(m, i)); self.set_actuator(m, i, v) }
+}
+
 /// `tfrontEnd` (0x450 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct FrontEnd(pub u32);
 impl FrontEnd {
     pub const SIZE: u32 = 0x450;
@@ -3267,6 +4543,7 @@ impl FrontEnd {
 
 /// `GameSetup_tCarData` (0xb4 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct GameSetupCarData(pub u32);
 impl GameSetupCarData {
     pub const SIZE: u32 = 0xb4;
@@ -3436,6 +4713,7 @@ impl GameSetupCarData {
 
 /// `GameSetup_tControllerData` (0x58 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct GameSetupControllerData(pub u32);
 impl GameSetupControllerData {
     pub const SIZE: u32 = 0x58;
@@ -3489,6 +4767,7 @@ impl GameSetupControllerData {
 
 /// `GameSetup_tData` (0xa28 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct GameSetupData(pub u32);
 impl GameSetupData {
     pub const SIZE: u32 = 0xa28;
@@ -3670,6 +4949,7 @@ impl GameSetupData {
 
 /// `GameSetup_tPerpData` (0x34 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct GameSetupPerpData(pub u32);
 impl GameSetupPerpData {
     pub const SIZE: u32 = 0x34;
@@ -3731,6 +5011,7 @@ impl GameSetupPerpData {
 
 /// `GameSetup_tUserSetting` (0xcc bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct GameSetupUserSetting(pub u32);
 impl GameSetupUserSetting {
     pub const SIZE: u32 = 0xcc;
@@ -3786,8 +5067,587 @@ impl GameSetupUserSetting {
     pub fn update_playlist(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.playlist(m, i)); self.set_playlist(m, i, v) }
 }
 
+/// `tGlobalMenuDefs` (0x3b18 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct GlobalMenuDefs(pub u32);
+impl GlobalMenuDefs {
+    pub const SIZE: u32 = 0x3b18;
+    /// Element `i` of an array of `tGlobalMenuDefs` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemGoToMenuNFS4Button itemMainOnePlayerRace`
+    pub fn item_main_one_player_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x0)) }
+    /// `+0x02c struct tMenuItemGoToMenuNFS4Button itemMainTwoPlayerRace`
+    pub fn item_main_two_player_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x2c)) }
+    /// `+0x058 struct tMenuItemGoToMenuNFS4Button itemMainTrophyRoom`
+    pub fn item_main_trophy_room(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x58)) }
+    /// `+0x084 struct tMenuItemGoToMenuNFS4Button itemMainOptions`
+    pub fn item_main_options(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x84)) }
+    /// `+0x0b0 struct tMenuNFS4 menuMain`
+    pub fn menu_main(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0xb0)) }
+    /// `+0x12c struct tMenuItemGoToMenuNFS4Button itemTournTrophyRoom`
+    pub fn item_tourn_trophy_room(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x12c)) }
+    /// `+0x158 struct tMenuItemGoToMenuNFS4Button itemSETrophyRoom`
+    pub fn item_se_trophy_room(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x158)) }
+    /// `+0x184 struct tMenuNFS4 menuTrophyRoomSelect`
+    pub fn menu_trophy_room_select(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x184)) }
+    /// `+0x200 struct tMenuBlank menuTrophyInfo`
+    pub fn menu_trophy_info(self) -> MenuBlank { MenuBlank(self.0.wrapping_add(0x200)) }
+    /// `+0x27c struct tMenuItemGoToMenuNFS4Button itemSkillBeginner`
+    pub fn item_skill_beginner(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x27c)) }
+    /// `+0x2a8 struct tMenuItemGoToMenuNFS4Button itemSkillIntermediate`
+    pub fn item_skill_intermediate(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x2a8)) }
+    /// `+0x2d4 struct tMenuItemGoToMenuNFS4Button itemSkillExpert`
+    pub fn item_skill_expert(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x2d4)) }
+    /// `+0x300 struct tMenuNFS4 menuSkillLevel`
+    pub fn menu_skill_level(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x300)) }
+    /// `+0x37c struct tMenuItemGoToMenuNFS4Button itemOnePlayerTestDrive`
+    pub fn item_one_player_test_drive(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x37c)) }
+    /// `+0x3a8 struct tMenuItemGoToMenuNFS4Button itemOnePlayerSingleRace`
+    pub fn item_one_player_single_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x3a8)) }
+    /// `+0x3d4 struct tMenuItemGoToMenuNFS4Button itemOnePlayerPursuit`
+    pub fn item_one_player_pursuit(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x3d4)) }
+    /// `+0x400 struct tMenuItemGoToMenuNFS4Button itemOnePlayerTournament`
+    pub fn item_one_player_tournament(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x400)) }
+    /// `+0x42c struct tMenuItemGoToMenuNFS4Button itemOnePlayerSpecialEvents`
+    pub fn item_one_player_special_events(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x42c)) }
+    /// `+0x458 struct tMenuNFS4 menuOnePlayer`
+    pub fn menu_one_player(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x458)) }
+    /// `+0x4d4 struct tMenuItemGoToMenuNFS4Button itemSingleRaceSolo`
+    pub fn item_single_race_solo(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x4d4)) }
+    /// `+0x500 struct tMenuItemGoToMenuNFS4Button itemSingleRaceDuel`
+    pub fn item_single_race_duel(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x500)) }
+    /// `+0x52c struct tMenuItemGoToMenuNFS4Button itemSingleRaceFullGrid`
+    pub fn item_single_race_full_grid(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x52c)) }
+    /// `+0x558 struct tMenuNFS4 menuSingleRace`
+    pub fn menu_single_race(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x558)) }
+    /// `+0x5d4 struct tMenuItemGoToMenuNFS4Button itemHotPursuitSolo`
+    pub fn item_hot_pursuit_solo(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x5d4)) }
+    /// `+0x600 struct tMenuItemGoToMenuNFS4Button itemHotPursuitDuel`
+    pub fn item_hot_pursuit_duel(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x600)) }
+    /// `+0x62c struct tMenuNFS4 menuHotPursuit`
+    pub fn menu_hot_pursuit(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x62c)) }
+    /// `+0x6a8 struct tListIteratorTournament iteratorTournament`
+    pub fn iterator_tournament(self) -> ListIteratorTournament { ListIteratorTournament(self.0.wrapping_add(0x6a8)) }
+    /// `+0x6bc struct tMenuItemGoToMenuNFS4Button itemTournamentContinue`
+    pub fn item_tournament_continue(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x6bc)) }
+    /// `+0x6e8 struct tMenuItemNFS4LeftRightChoice itemTournamentSelect`
+    pub fn item_tournament_select(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x6e8)) }
+    /// `+0x710 struct tMenuNFS4 menuTournament`
+    pub fn menu_tournament(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x710)) }
+    /// `+0x78c struct tListIteratorTournament iteratorSpecialEvent`
+    pub fn iterator_special_event(self) -> ListIteratorTournament { ListIteratorTournament(self.0.wrapping_add(0x78c)) }
+    /// `+0x7a0 struct tMenuItemGoToMenuNFS4Button itemSpecialEventContinue`
+    pub fn item_special_event_continue(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x7a0)) }
+    /// `+0x7cc struct tMenuItemNFS4LeftRightChoice itemSpecialEventSelect`
+    pub fn item_special_event_select(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x7cc)) }
+    /// `+0x7f4 struct tMenuNFS4 menuSpecialEvent`
+    pub fn menu_special_event(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x7f4)) }
+    /// `+0x870 struct tMenuItemGoToMenuNFS4Button itemTwoPlayerTestDrive`
+    pub fn item_two_player_test_drive(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x870)) }
+    /// `+0x89c struct tMenuItemGoToMenuNFS4Button itemTwoPlayerDuel`
+    pub fn item_two_player_duel(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x89c)) }
+    /// `+0x8c8 struct tMenuItemGoToMenuNFS4Button itemTwoPlayerHotPursuit`
+    pub fn item_two_player_hot_pursuit(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x8c8)) }
+    /// `+0x8f4 struct tMenuItemGoToMenuNFS4Button itemTwoPlayerPinkSlips`
+    pub fn item_two_player_pink_slips(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x8f4)) }
+    /// `+0x920 struct tMenuNFS4 menuTwoPlayer`
+    pub fn menu_two_player(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x920)) }
+    /// `+0x99c struct tMenuItemGoToMenuNFS4Button itemBestOfOne`
+    pub fn item_best_of_one(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x99c)) }
+    /// `+0x9c8 struct tMenuItemGoToMenuNFS4Button itemBestOfThree`
+    pub fn item_best_of_three(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x9c8)) }
+    /// `+0x9f4 struct tMenuItemGoToMenuNFS4Button itemBestOfFive`
+    pub fn item_best_of_five(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x9f4)) }
+    /// `+0xa20 struct tMenuNFS4 menuPinkSlipSelect`
+    pub fn menu_pink_slip_select(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0xa20)) }
+    /// `+0xa9c struct tMenuItemGoToMenuNFS4Button itemPinkSlipsContinue`
+    pub fn item_pink_slips_continue(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0xa9c)) }
+    /// `+0xac8 struct tMenuItemNFS4LeftRightChoice itemTrack1`
+    pub fn item_track1(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0xac8)) }
+    /// `+0xaf0 struct tMenuItemNFS4LeftRightChoice itemTrack2`
+    pub fn item_track2(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0xaf0)) }
+    /// `+0xb18 struct tMenuItemNFS4LeftRightChoice itemTrack3`
+    pub fn item_track3(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0xb18)) }
+    /// `+0xb40 struct tMenuItemNFS4LeftRightChoice itemTrack4`
+    pub fn item_track4(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0xb40)) }
+    /// `+0xb68 struct tMenuItemNFS4LeftRightChoice itemTrack5`
+    pub fn item_track5(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0xb68)) }
+    /// `+0xb90 struct tMenuNFS4 menuPinkSlipsBestOfThree`
+    pub fn menu_pink_slips_best_of_three(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0xb90)) }
+    /// `+0xc0c struct tMenuNFS4 menuPinkSlipsBestOfFive`
+    pub fn menu_pink_slips_best_of_five(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0xc0c)) }
+    /// `+0xc88 struct tListIteratorTrack iteratorTrack`
+    pub fn iterator_track(self) -> ListIteratorTrack { ListIteratorTrack(self.0.wrapping_add(0xc88)) }
+    /// `+0xca0 struct tMenuItemGoToMenuNFS4Button itemTrackContinue`
+    pub fn item_track_continue(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0xca0)) }
+    /// `+0xccc struct tMenuItemNFS4LeftRightChoice itemTrack`
+    pub fn item_track(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0xccc)) }
+    /// `+0xcf4 struct tMenuItemGoToMenuNFS4Button itemTrackRecords`
+    pub fn item_track_records(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0xcf4)) }
+    /// `+0xd20 struct tMenuNFS4 menuSingleTrackSelect`
+    pub fn menu_single_track_select(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0xd20)) }
+    /// `+0xd9c struct tMenuNFS4 menuTestDriveTrackSelect`
+    pub fn menu_test_drive_track_select(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0xd9c)) }
+    /// `+0xe18 struct tListIteratorIndexed iteratorLaps`
+    pub fn iterator_laps(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0xe18)) }
+    /// `+0xe2c struct tListIteratorIndexed iteratorTrackDirection`
+    pub fn iterator_track_direction(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0xe2c)) }
+    /// `+0xe40 struct tListIteratorIndexed iteratorTrackMirrored`
+    pub fn iterator_track_mirrored(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0xe40)) }
+    /// `+0xe54 struct tListIteratorIndexed iteratorTimeOfDay`
+    pub fn iterator_time_of_day(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0xe54)) }
+    /// `+0xe68 struct tListIteratorIndexed iteratorWeather`
+    pub fn iterator_weather(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0xe68)) }
+    /// `+0xe7c struct tListIteratorIndexed iteratorTraffic`
+    pub fn iterator_traffic(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0xe7c)) }
+    /// `+0xe90 struct tListIterator iteratorLocalSpeech`
+    pub fn iterator_local_speech(self) -> ListIterator { ListIterator(self.0.wrapping_add(0xe90)) }
+    /// `+0xea0 struct tMenuItemOptionsLeftRightChoice itemLaps`
+    pub fn item_laps(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0xea0)) }
+    /// `+0xec0 struct tMenuItemOptionsLeftRightChoice itemTrackDirection`
+    pub fn item_track_direction(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0xec0)) }
+    /// `+0xee0 struct tMenuItemOptionsTwoItemChoice itemTrackMirrored`
+    pub fn item_track_mirrored(self) -> MenuItemOptionsTwoItemChoice { MenuItemOptionsTwoItemChoice(self.0.wrapping_add(0xee0)) }
+    /// `+0xf04 struct tMenuItemOptionsTwoItemChoice itemTimeOfDay`
+    pub fn item_time_of_day(self) -> MenuItemOptionsTwoItemChoice { MenuItemOptionsTwoItemChoice(self.0.wrapping_add(0xf04)) }
+    /// `+0xf28 struct tMenuItemOptionsTwoItemChoice itemWeather`
+    pub fn item_weather(self) -> MenuItemOptionsTwoItemChoice { MenuItemOptionsTwoItemChoice(self.0.wrapping_add(0xf28)) }
+    /// `+0xf4c struct tMenuItemOptionsTwoItemChoice itemTraffic`
+    pub fn item_traffic(self) -> MenuItemOptionsTwoItemChoice { MenuItemOptionsTwoItemChoice(self.0.wrapping_add(0xf4c)) }
+    /// `+0xf70 struct tMenuItemOptionsTwoItemChoice itemLocalSpeech`
+    pub fn item_local_speech(self) -> MenuItemOptionsTwoItemChoice { MenuItemOptionsTwoItemChoice(self.0.wrapping_add(0xf70)) }
+    /// `+0xf94 struct tMenuOptions menuTrackOptions`
+    pub fn menu_track_options(self) -> MenuOptions { MenuOptions(self.0.wrapping_add(0xf94)) }
+    /// `+0x1018 struct tBlankMenuItemGoToMenuNFS4Button menuTrackRecordsItem`
+    pub fn menu_track_records_item(self) -> BlankMenuItemGoToMenuNFS4Button { BlankMenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1018)) }
+    /// `+0x1044 struct tOptionsMenu menuTrackRecords`
+    pub fn menu_track_records(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x1044)) }
+    /// `+0x10c4 struct tMenuItemGoToMenuNFS4Button itemTrackInfoContinue`
+    pub fn item_track_info_continue(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x10c4)) }
+    /// `+0x10f0 struct tMenuNFS4 menuTrackInfo`
+    pub fn menu_track_info(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x10f0)) }
+    /// `+0x116c struct tListIteratorCar iteratorCar1`
+    pub fn iterator_car1(self) -> ListIteratorCar { ListIteratorCar(self.0.wrapping_add(0x116c)) }
+    /// `+0x1188 struct tListIteratorCarColor iteratorColor`
+    pub fn iterator_color(self) -> ListIteratorCarColor { ListIteratorCarColor(self.0.wrapping_add(0x1188)) }
+    /// `+0x11a8 struct tMenuItemGoToMenuNFS4Button itemCarSelectRace`
+    pub fn item_car_select_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x11a8)) }
+    /// `+0x11d4 struct tMenuItemNFS4LeftRightChoice itemCar`
+    pub fn item_car(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x11d4)) }
+    /// `+0x11fc struct tMenuItemNFS4LeftRightChoice itemColor`
+    pub fn item_color(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x11fc)) }
+    /// `+0x1224 struct tMenuItemGoToMenuNFS4Button itemShowcase`
+    pub fn item_showcase(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1224)) }
+    /// `+0x1250 struct tMenuNFS4 menuSingleCarSelect`
+    pub fn menu_single_car_select(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x1250)) }
+    /// `+0x12cc struct tListIteratorCar iteratorGarageCar`
+    pub fn iterator_garage_car(self) -> ListIteratorCar { ListIteratorCar(self.0.wrapping_add(0x12cc)) }
+    /// `+0x12e8 struct tMenuItemNFS4LeftRightChoice itemGarageCar`
+    pub fn item_garage_car(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x12e8)) }
+    /// `+0x1310 struct tMenuItemGoToMenuNFS4Button itemCarDealer`
+    pub fn item_car_dealer(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1310)) }
+    /// `+0x133c struct tMenuItemGoToMenuNFS4Button itemUpgradeCar`
+    pub fn item_upgrade_car(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x133c)) }
+    /// `+0x1368 struct tMenuNFS4 menuCarGarage`
+    pub fn menu_car_garage(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x1368)) }
+    /// `+0x13e4 struct tMenuNFS4 menuPostCarGarage`
+    pub fn menu_post_car_garage(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x13e4)) }
+    /// `+0x1460 struct tListIteratorCar iteratorOpponentCar`
+    pub fn iterator_opponent_car(self) -> ListIteratorCar { ListIteratorCar(self.0.wrapping_add(0x1460)) }
+    /// `+0x147c struct tMenuItemGoToMenuNFS4Button itemDuelRace`
+    pub fn item_duel_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x147c)) }
+    /// `+0x14a8 struct tMenuItemNFS4LeftRightChoice itemCar2`
+    pub fn item_car2(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x14a8)) }
+    /// `+0x14d0 struct tMenuItemNFS4LeftRightChoice itemColor2`
+    pub fn item_color2(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x14d0)) }
+    /// `+0x14f8 struct tMenuItemGoToMenuNFS4Button itemGoToDuelBuyCar`
+    pub fn item_go_to_duel_buy_car(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x14f8)) }
+    /// `+0x1524 struct tMenuItemNFS4LeftRightChoice itemOpponentCar`
+    pub fn item_opponent_car(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1524)) }
+    /// `+0x154c struct tMenuNFS4 menuDuelCarSelect`
+    pub fn menu_duel_car_select(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x154c)) }
+    /// `+0x15c8 struct tMenuNFS4 menuHPDuelCarSelect`
+    pub fn menu_hp_duel_car_select(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x15c8)) }
+    /// `+0x1644 struct tMenuItemGoToMenuNFS4Button itemPlayerOneRace`
+    pub fn item_player_one_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1644)) }
+    /// `+0x1670 struct tMenuItemNFS4LeftRightChoice itemCarP1`
+    pub fn item_car_p1(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1670)) }
+    /// `+0x1698 struct tMenuItemNFS4LeftRightChoice itemColorP1`
+    pub fn item_color_p1(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1698)) }
+    /// `+0x16c0 struct tMenuNFS4TwoPlayer menuPlayerOneCarSelect`
+    pub fn menu_player_one_car_select(self) -> MenuNFS4TwoPlayer { MenuNFS4TwoPlayer(self.0.wrapping_add(0x16c0)) }
+    /// `+0x173c struct tMenuItemGoToMenuNFS4Button itemPlayerTwoRace`
+    pub fn item_player_two_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x173c)) }
+    /// `+0x1768 struct tMenuItemNFS4LeftRightChoice itemCarP2`
+    pub fn item_car_p2(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1768)) }
+    /// `+0x1790 struct tMenuItemNFS4LeftRightChoice itemColorP2`
+    pub fn item_color_p2(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1790)) }
+    /// `+0x17b8 struct tMenuNFS4TwoPlayer menuPlayerTwoCarSelect`
+    pub fn menu_player_two_car_select(self) -> MenuNFS4TwoPlayer { MenuNFS4TwoPlayer(self.0.wrapping_add(0x17b8)) }
+    /// `+0x1834 struct tMenuItemGoToMenuNFS4Button itemPlayerOneGarageRace`
+    pub fn item_player_one_garage_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1834)) }
+    /// `+0x1860 struct tMenuItemNFS4LeftRightChoice itemGarageCarP1`
+    pub fn item_garage_car_p1(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1860)) }
+    /// `+0x1888 struct tMenuNFS4TwoPlayer menuPlayerOneGarage`
+    pub fn menu_player_one_garage(self) -> MenuNFS4TwoPlayer { MenuNFS4TwoPlayer(self.0.wrapping_add(0x1888)) }
+    /// `+0x1904 struct tMenuItemGoToMenuNFS4Button itemPlayerTwoGarageRace`
+    pub fn item_player_two_garage_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1904)) }
+    /// `+0x1930 struct tMenuItemNFS4LeftRightChoice itemGarageCarP2`
+    pub fn item_garage_car_p2(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1930)) }
+    /// `+0x1958 struct tMenuNFS4TwoPlayer menuPlayerTwoGarage`
+    pub fn menu_player_two_garage(self) -> MenuNFS4TwoPlayer { MenuNFS4TwoPlayer(self.0.wrapping_add(0x1958)) }
+    /// `+0x19d4 struct tListIteratorCar iteratorPinkSlipsCar`
+    pub fn iterator_pink_slips_car(self) -> ListIteratorCar { ListIteratorCar(self.0.wrapping_add(0x19d4)) }
+    /// `+0x19f0 struct tMenuItemGoToMenuNFS4Button itemPlayerOnePinkSlipRace`
+    pub fn item_player_one_pink_slip_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x19f0)) }
+    /// `+0x1a1c struct tMenuItemNFS4LeftRightChoice itemPinkSlipCarP1`
+    pub fn item_pink_slip_car_p1(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1a1c)) }
+    /// `+0x1a44 struct tMenuNFS4TwoPlayer menuPlayerOnePinkSlipCarSelect`
+    pub fn menu_player_one_pink_slip_car_select(self) -> MenuNFS4TwoPlayer { MenuNFS4TwoPlayer(self.0.wrapping_add(0x1a44)) }
+    /// `+0x1ac0 struct tMenuItemGoToMenuNFS4Button itemPlayerTwoPinkSlipRace`
+    pub fn item_player_two_pink_slip_race(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1ac0)) }
+    /// `+0x1aec struct tMenuItemNFS4LeftRightChoice itemPinkSlipCarP2`
+    pub fn item_pink_slip_car_p2(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1aec)) }
+    /// `+0x1b14 struct tMenuNFS4TwoPlayer menuPlayerTwoPinkSlipCarSelect`
+    pub fn menu_player_two_pink_slip_car_select(self) -> MenuNFS4TwoPlayer { MenuNFS4TwoPlayer(self.0.wrapping_add(0x1b14)) }
+    /// `+0x1b90 struct tMenuItemGoToMenuNFS4Button itemGoToBuyCar`
+    pub fn item_go_to_buy_car(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1b90)) }
+    /// `+0x1bbc struct tMenuItemGoToMenuNFS4Button itemGoToSellCar`
+    pub fn item_go_to_sell_car(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1bbc)) }
+    /// `+0x1be8 struct tMenuNFS4 menuGoToCarDealer`
+    pub fn menu_go_to_car_dealer(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x1be8)) }
+    /// `+0x1c64 struct tListIteratorCar iteratorDealerCar`
+    pub fn iterator_dealer_car(self) -> ListIteratorCar { ListIteratorCar(self.0.wrapping_add(0x1c64)) }
+    /// `+0x1c80 struct tListIteratorCarColor iteratorDealerColor`
+    pub fn iterator_dealer_color(self) -> ListIteratorCarColor { ListIteratorCarColor(self.0.wrapping_add(0x1c80)) }
+    /// `+0x1ca0 struct tMenuItemNFS4LeftRightChoice itemDealerCar`
+    pub fn item_dealer_car(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1ca0)) }
+    /// `+0x1cc8 struct tMenuItemNFS4LeftRightChoice itemDealerColor`
+    pub fn item_dealer_color(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1cc8)) }
+    /// `+0x1cf0 struct tMenuItemGoToMenuNFS4Button itemBuyCar`
+    pub fn item_buy_car(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1cf0)) }
+    /// `+0x1d1c struct tMenuItemGoToMenuNFS4Button itemDealerShowroom`
+    pub fn item_dealer_showroom(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1d1c)) }
+    /// `+0x1d48 struct tMenuNFS4 menuCarDealer`
+    pub fn menu_car_dealer(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x1d48)) }
+    /// `+0x1dc4 struct tListIteratorCar iteratorSellerCar`
+    pub fn iterator_seller_car(self) -> ListIteratorCar { ListIteratorCar(self.0.wrapping_add(0x1dc4)) }
+    /// `+0x1de0 struct tMenuItemNFS4LeftRightChoice itemSellerCar`
+    pub fn item_seller_car(self) -> MenuItemNFS4LeftRightChoice { MenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x1de0)) }
+    /// `+0x1e08 struct tMenuItemGoToMenuNFS4Button itemSellCar`
+    pub fn item_sell_car(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1e08)) }
+    /// `+0x1e34 struct tMenuNFS4 menuCarSeller`
+    pub fn menu_car_seller(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x1e34)) }
+    /// `+0x1eb0 struct tMenuItemGoToMenuNFS4Button itemPurchaseUpgrade1`
+    pub fn item_purchase_upgrade1(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1eb0)) }
+    /// `+0x1edc struct tMenuItemGoToMenuNFS4Button itemPurchaseUpgrade2`
+    pub fn item_purchase_upgrade2(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1edc)) }
+    /// `+0x1f08 struct tMenuItemGoToMenuNFS4Button itemPurchaseUpgrade3`
+    pub fn item_purchase_upgrade3(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x1f08)) }
+    /// `+0x1f34 struct tMenuNFS4 menuCarUpgrades`
+    pub fn menu_car_upgrades(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x1f34)) }
+    /// `+0x1fb0 struct tListIteratorIndexed iteratorTransmission`
+    pub fn iterator_transmission(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x1fb0)) }
+    /// `+0x1fc4 struct tListIteratorIndexed iteratorABS`
+    pub fn iterator_abs(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x1fc4)) }
+    /// `+0x1fd8 struct tListIterator iteratorDamage`
+    pub fn iterator_damage(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x1fd8)) }
+    /// `+0x1fe8 struct tListIterator iteratorOpponentUpgrades`
+    pub fn iterator_opponent_upgrades(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x1fe8)) }
+    /// `+0x1ff8 struct tMenuItemOptionsLeftRightChoice itemTransmission`
+    pub fn item_transmission(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0x1ff8)) }
+    /// `+0x2018 struct tMenuItemOptionsLeftRightChoice itemABS`
+    pub fn item_abs(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0x2018)) }
+    /// `+0x2038 struct tMenuItemOptionsLeftRightChoice itemDamage`
+    pub fn item_damage(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0x2038)) }
+    /// `+0x2058 struct tMenuItemOptionsLeftRightChoice itemTransmission2`
+    pub fn item_transmission2(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0x2058)) }
+    /// `+0x2078 struct tMenuItemOptionsLeftRightChoice itemABS2`
+    pub fn item_abs2(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0x2078)) }
+    /// `+0x2098 struct tMenuItemOptionsLeftRightChoice itemDamage2`
+    pub fn item_damage2(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0x2098)) }
+    /// `+0x20b8 struct tMenuItemOptionsLeftRightChoice itemOpponentUpgrades`
+    pub fn item_opponent_upgrades(self) -> MenuItemOptionsLeftRightChoice { MenuItemOptionsLeftRightChoice(self.0.wrapping_add(0x20b8)) }
+    /// `+0x20d8 struct tMenuOptions menuCarOptions`
+    pub fn menu_car_options(self) -> MenuOptions { MenuOptions(self.0.wrapping_add(0x20d8)) }
+    /// `+0x215c struct tMenuOptions menuCarOptionsPlayerOne`
+    pub fn menu_car_options_player_one(self) -> MenuOptions { MenuOptions(self.0.wrapping_add(0x215c)) }
+    /// `+0x21e0 struct tMenuOptions menuCarOptionsPlayerTwo`
+    pub fn menu_car_options_player_two(self) -> MenuOptions { MenuOptions(self.0.wrapping_add(0x21e0)) }
+    /// `+0x2264 struct tMenuOptions menuPinkSlipCarOptionsPlayerOne`
+    pub fn menu_pink_slip_car_options_player_one(self) -> MenuOptions { MenuOptions(self.0.wrapping_add(0x2264)) }
+    /// `+0x22e8 struct tMenuOptions menuPinkSlipCarOptionsPlayerTwo`
+    pub fn menu_pink_slip_car_options_player_two(self) -> MenuOptions { MenuOptions(self.0.wrapping_add(0x22e8)) }
+    /// `+0x236c struct tMenuBlank menuShowroom`
+    pub fn menu_showroom(self) -> MenuBlank { MenuBlank(self.0.wrapping_add(0x236c)) }
+    /// `+0x23e8 struct tMenuItemGoToMenuNFS4Button itemOptionsAudio`
+    pub fn item_options_audio(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x23e8)) }
+    /// `+0x2414 struct tMenuItemGoToMenuNFS4Button itemOptionsDisplay`
+    pub fn item_options_display(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x2414)) }
+    /// `+0x2440 struct tMenuItemGoToMenuNFS4Button itemOptionsControllers`
+    pub fn item_options_controllers(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x2440)) }
+    /// `+0x246c struct tMenuItemGoToMenuNFS4Button itemOptionsMemoryCard`
+    pub fn item_options_memory_card(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x246c)) }
+    /// `+0x2498 struct tMenuItemGoToMenuNFS4Button itemOptionsUsername`
+    pub fn item_options_username(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x2498)) }
+    /// `+0x24c4 struct tMenuItemGoToMenuNFS4Button itemOptionsCredits`
+    pub fn item_options_credits(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x24c4)) }
+    /// `+0x24f0 struct tMenuNFS4 menuOptions`
+    pub fn menu_options(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x24f0)) }
+    /// `+0x256c struct tListIteratorRange iteratorMusicVolume`
+    pub fn iterator_music_volume(self) -> ListIteratorRange { ListIteratorRange(self.0.wrapping_add(0x256c)) }
+    /// `+0x257c struct tListIteratorRange iteratorSoundEffectsVolume`
+    pub fn iterator_sound_effects_volume(self) -> ListIteratorRange { ListIteratorRange(self.0.wrapping_add(0x257c)) }
+    /// `+0x258c struct tListIteratorRange iteratorEngineVolume`
+    pub fn iterator_engine_volume(self) -> ListIteratorRange { ListIteratorRange(self.0.wrapping_add(0x258c)) }
+    /// `+0x259c struct tListIteratorRange iteratorSpeechVolume`
+    pub fn iterator_speech_volume(self) -> ListIteratorRange { ListIteratorRange(self.0.wrapping_add(0x259c)) }
+    /// `+0x25ac struct tListIteratorRange iteratorAmbientVolume`
+    pub fn iterator_ambient_volume(self) -> ListIteratorRange { ListIteratorRange(self.0.wrapping_add(0x25ac)) }
+    /// `+0x25bc struct tListIterator iteratorAudioMode`
+    pub fn iterator_audio_mode(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x25bc)) }
+    /// `+0x25cc struct tMenuItemLeftRightAudioSlider itemMusicVolume`
+    pub fn item_music_volume(self) -> MenuItemLeftRightAudioSlider { MenuItemLeftRightAudioSlider(self.0.wrapping_add(0x25cc)) }
+    /// `+0x2604 struct tMenuItemLeftRightAudioSlider itemSoundEffectsVolume`
+    pub fn item_sound_effects_volume(self) -> MenuItemLeftRightAudioSlider { MenuItemLeftRightAudioSlider(self.0.wrapping_add(0x2604)) }
+    /// `+0x263c struct tMenuItemLeftRightAudioSlider itemEngineVolume`
+    pub fn item_engine_volume(self) -> MenuItemLeftRightAudioSlider { MenuItemLeftRightAudioSlider(self.0.wrapping_add(0x263c)) }
+    /// `+0x2674 struct tMenuItemLeftRightAudioSlider itemSpeechVolume`
+    pub fn item_speech_volume(self) -> MenuItemLeftRightAudioSlider { MenuItemLeftRightAudioSlider(self.0.wrapping_add(0x2674)) }
+    /// `+0x26ac struct tMenuItemLeftRightAudioSlider itemAmbientVolume`
+    pub fn item_ambient_volume(self) -> MenuItemLeftRightAudioSlider { MenuItemLeftRightAudioSlider(self.0.wrapping_add(0x26ac)) }
+    /// `+0x26e4 struct tMenuItemDisplayLeftRightChoice itemAudioMode`
+    pub fn item_audio_mode(self) -> MenuItemDisplayLeftRightChoice { MenuItemDisplayLeftRightChoice(self.0.wrapping_add(0x26e4)) }
+    /// `+0x2710 struct tMenuItemSlidingActivated itemSlidingPlayList`
+    pub fn item_sliding_play_list(self) -> MenuItemSlidingActivated { MenuItemSlidingActivated(self.0.wrapping_add(0x2710)) }
+    /// `+0x2758 struct tInsideBoxSongMenu menuPlayListMenu`
+    pub fn menu_play_list_menu(self) -> InsideBoxSongMenu { InsideBoxSongMenu(self.0.wrapping_add(0x2758)) }
+    /// `+0x27e0 struct tOptionsMenu menuAudio`
+    pub fn menu_audio(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x27e0)) }
+    /// `+0x2860 struct tListIteratorIndexed iteratorDisplaySpeedometer`
+    pub fn iterator_display_speedometer(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x2860)) }
+    /// `+0x2874 struct tListIteratorIndexed iteratorDisplayMap`
+    pub fn iterator_display_map(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x2874)) }
+    /// `+0x2888 struct tListIteratorIndexed iteratorDisplayOpponentID`
+    pub fn iterator_display_opponent_id(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x2888)) }
+    /// `+0x289c struct tListIteratorIndexed iteratorDisplayTime`
+    pub fn iterator_display_time(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x289c)) }
+    /// `+0x28b0 struct tListIteratorIndexed iteratorDisplayPosition`
+    pub fn iterator_display_position(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x28b0)) }
+    /// `+0x28c4 struct tListIteratorIndexed iteratorDisplayLapNumber`
+    pub fn iterator_display_lap_number(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x28c4)) }
+    /// `+0x28d8 struct tListIterator iteratorDisplaySplitTime`
+    pub fn iterator_display_split_time(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x28d8)) }
+    /// `+0x28e8 struct tListIteratorIndexed iteratorDisplaySplitDisplay`
+    pub fn iterator_display_split_display(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x28e8)) }
+    /// `+0x28fc struct tMenuItemDisplayLeftRightChoice itemDisplaySpeedometer`
+    pub fn item_display_speedometer(self) -> MenuItemDisplayLeftRightChoice { MenuItemDisplayLeftRightChoice(self.0.wrapping_add(0x28fc)) }
+    /// `+0x2928 struct tMenuItemDisplayLeftRightChoice itemDisplayMap`
+    pub fn item_display_map(self) -> MenuItemDisplayLeftRightChoice { MenuItemDisplayLeftRightChoice(self.0.wrapping_add(0x2928)) }
+    /// `+0x2954 struct tMenuItemDisplayLeftRightChoice itemDisplayOpponentID`
+    pub fn item_display_opponent_id(self) -> MenuItemDisplayLeftRightChoice { MenuItemDisplayLeftRightChoice(self.0.wrapping_add(0x2954)) }
+    /// `+0x2980 struct tMenuItemOnOffLeftRightChoice itemDisplayTime`
+    pub fn item_display_time(self) -> MenuItemOnOffLeftRightChoice { MenuItemOnOffLeftRightChoice(self.0.wrapping_add(0x2980)) }
+    /// `+0x29b0 struct tMenuItemOnOffLeftRightChoice itemDisplayPosition`
+    pub fn item_display_position(self) -> MenuItemOnOffLeftRightChoice { MenuItemOnOffLeftRightChoice(self.0.wrapping_add(0x29b0)) }
+    /// `+0x29e0 struct tMenuItemOnOffLeftRightChoice itemDisplayLapNumber`
+    pub fn item_display_lap_number(self) -> MenuItemOnOffLeftRightChoice { MenuItemOnOffLeftRightChoice(self.0.wrapping_add(0x29e0)) }
+    /// `+0x2a10 struct tMenuItemDisplayLeftRightChoice itemDisplaySplitTime`
+    pub fn item_display_split_time(self) -> MenuItemDisplayLeftRightChoice { MenuItemDisplayLeftRightChoice(self.0.wrapping_add(0x2a10)) }
+    /// `+0x2a3c struct tMenuItemDisplayLeftRightChoice itemDisplaySplitDisplay`
+    pub fn item_display_split_display(self) -> MenuItemDisplayLeftRightChoice { MenuItemDisplayLeftRightChoice(self.0.wrapping_add(0x2a3c)) }
+    /// `+0x2a68 struct tOptionsMenu menuDisplayOptions`
+    pub fn menu_display_options(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x2a68)) }
+    /// `+0x2ae8 struct tListIteratorIndexed iteratorControllerConfigSelected`
+    pub fn iterator_controller_config_selected(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x2ae8)) }
+    /// `+0x2afc struct tMenuItemControllerLeftRightChoice itemControllerConfigSelected`
+    pub fn item_controller_config_selected(self) -> MenuItemControllerLeftRightChoice { MenuItemControllerLeftRightChoice(self.0.wrapping_add(0x2afc)) }
+    /// `+0x2b28 struct tMenuItemSlidingMenu itemControllerSettings`
+    pub fn item_controller_settings(self) -> MenuItemSlidingMenu { MenuItemSlidingMenu(self.0.wrapping_add(0x2b28)) }
+    /// `+0x2b6c struct tOptionsMenu menuControllerConfig`
+    pub fn menu_controller_config(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x2b6c)) }
+    /// `+0x2bec struct tListIteratorRangeIndexed iteratorControllerShockMode`
+    pub fn iterator_controller_shock_mode(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2bec)) }
+    /// `+0x2c00 struct tInsideBoxControllerLeftRightSlider itemControllerShockMode`
+    pub fn item_controller_shock_mode(self) -> InsideBoxControllerLeftRightSlider { InsideBoxControllerLeftRightSlider(self.0.wrapping_add(0x2c00)) }
+    /// `+0x2c28 struct tListIteratorRangeIndexed iteratorControllerShockImpact`
+    pub fn iterator_controller_shock_impact(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2c28)) }
+    /// `+0x2c3c struct tInsideBoxControllerLeftRightSlider itemControllerShockImpact`
+    pub fn item_controller_shock_impact(self) -> InsideBoxControllerLeftRightSlider { InsideBoxControllerLeftRightSlider(self.0.wrapping_add(0x2c3c)) }
+    /// `+0x2c64 struct tListIteratorRangeIndexed iteratorControllerSteeringRange1`
+    pub fn iterator_controller_steering_range1(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2c64)) }
+    /// `+0x2c78 struct tInsideBoxTwoWaySlider itemControllerSteeringRange1`
+    pub fn item_controller_steering_range1(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2c78)) }
+    /// `+0x2ca8 struct tListIteratorRangeIndexed iteratorControllerDeadSpot1`
+    pub fn iterator_controller_dead_spot1(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2ca8)) }
+    /// `+0x2cbc struct tInsideBoxTwoWaySlider itemControllerDeadSpot1`
+    pub fn item_controller_dead_spot1(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2cbc)) }
+    /// `+0x2cec struct tListIteratorRangeIndexed iteratorControllerSteeringRange2`
+    pub fn iterator_controller_steering_range2(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2cec)) }
+    /// `+0x2d00 struct tInsideBoxTwoWaySlider itemControllerSteeringRange2`
+    pub fn item_controller_steering_range2(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2d00)) }
+    /// `+0x2d30 struct tListIteratorRangeIndexed iteratorControllerDeadSpot2`
+    pub fn iterator_controller_dead_spot2(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2d30)) }
+    /// `+0x2d44 struct tInsideBoxTwoWaySlider itemControllerDeadSpot2`
+    pub fn item_controller_dead_spot2(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2d44)) }
+    /// `+0x2d74 struct tListIteratorRangeIndexed iteratorControllerJoyRange`
+    pub fn iterator_controller_joy_range(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2d74)) }
+    /// `+0x2d88 struct tInsideBoxTwoWaySlider itemControllerJoyRange`
+    pub fn item_controller_joy_range(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2d88)) }
+    /// `+0x2db8 struct tListIteratorRangeIndexed iteratorControllerCenterPoint`
+    pub fn iterator_controller_center_point(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2db8)) }
+    /// `+0x2dcc struct tInsideBoxTwoWaySlider itemControllerCenterPoint`
+    pub fn item_controller_center_point(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2dcc)) }
+    /// `+0x2dfc struct tListIteratorRangeIndexed iteratorControllerIMax`
+    pub fn iterator_controller_i_max(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2dfc)) }
+    /// `+0x2e10 struct tInsideBoxTwoWaySlider itemControllerIMax`
+    pub fn item_controller_i_max(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2e10)) }
+    /// `+0x2e40 struct tListIteratorRangeIndexed iteratorControllerIIMax`
+    pub fn iterator_controller_ii_max(self) -> ListIteratorRangeIndexed { ListIteratorRangeIndexed(self.0.wrapping_add(0x2e40)) }
+    /// `+0x2e54 struct tInsideBoxTwoWaySlider itemControllerIIMax`
+    pub fn item_controller_ii_max(self) -> InsideBoxTwoWaySlider { InsideBoxTwoWaySlider(self.0.wrapping_add(0x2e54)) }
+    /// `+0x2e84 struct tInsideBoxMenu menuControllerDualShock`
+    pub fn menu_controller_dual_shock(self) -> InsideBoxMenu { InsideBoxMenu(self.0.wrapping_add(0x2e84)) }
+    /// `+0x2ef8 struct tInsideBoxMenu menuControllerAnalog`
+    pub fn menu_controller_analog(self) -> InsideBoxMenu { InsideBoxMenu(self.0.wrapping_add(0x2ef8)) }
+    /// `+0x2f6c struct tInsideBoxMenu menuControllerDualShockAnalog`
+    pub fn menu_controller_dual_shock_analog(self) -> InsideBoxMenu { InsideBoxMenu(self.0.wrapping_add(0x2f6c)) }
+    /// `+0x2fe0 struct tInsideBoxMenu menuControllerNegcon`
+    pub fn menu_controller_negcon(self) -> InsideBoxMenu { InsideBoxMenu(self.0.wrapping_add(0x2fe0)) }
+    /// `+0x3054 struct tMemoryCardMenuItem itemSaveGame`
+    pub fn item_save_game(self) -> MemoryCardMenuItem { MemoryCardMenuItem(self.0.wrapping_add(0x3054)) }
+    /// `+0x3080 struct tMemoryCardMenuItem itemLoadGame`
+    pub fn item_load_game(self) -> MemoryCardMenuItem { MemoryCardMenuItem(self.0.wrapping_add(0x3080)) }
+    /// `+0x30ac struct tOptionsMenu menuMemory`
+    pub fn menu_memory(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x30ac)) }
+    /// `+0x312c struct tUserNameMenuItem menuItemUserName`
+    pub fn menu_item_user_name(self) -> UserNameMenuItem { UserNameMenuItem(self.0.wrapping_add(0x312c)) }
+    /// `+0x31b8 struct tUserNameMenuItem menuItemUserName1`
+    pub fn menu_item_user_name1(self) -> UserNameMenuItem { UserNameMenuItem(self.0.wrapping_add(0x31b8)) }
+    /// `+0x3244 struct tUserNameMenuItem menuItemUserName2`
+    pub fn menu_item_user_name2(self) -> UserNameMenuItem { UserNameMenuItem(self.0.wrapping_add(0x3244)) }
+    /// `+0x32d0 struct tOptionsMenu menuUserName`
+    pub fn menu_user_name(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x32d0)) }
+    /// `+0x3350 struct tListIterator iteratorChangeTrophy`
+    pub fn iterator_change_trophy(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x3350)) }
+    /// `+0x3360 struct tBlankMenuItemNFS4LeftRightChoice itemChangeTrophy`
+    pub fn item_change_trophy(self) -> BlankMenuItemNFS4LeftRightChoice { BlankMenuItemNFS4LeftRightChoice(self.0.wrapping_add(0x3360)) }
+    /// `+0x3388 struct tMenuNFS4Bottom menuTrophyRoom`
+    pub fn menu_trophy_room(self) -> MenuNFS4Bottom { MenuNFS4Bottom(self.0.wrapping_add(0x3388)) }
+    /// `+0x3404 struct tMenuItemGoToMenuNFS4Button itemPinkSlipStandingsForward`
+    pub fn item_pink_slip_standings_forward(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x3404)) }
+    /// `+0x3430 struct tMenuItemGoToMenuNFS4Button itemPinkSlipStandingsExit`
+    pub fn item_pink_slip_standings_exit(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x3430)) }
+    /// `+0x345c struct tMenuNFS4 menuPinkSlipStandings`
+    pub fn menu_pink_slip_standings(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x345c)) }
+    /// `+0x34d8 struct tMenuItemGoToMenuNFS4Button itemTournStandingsForward`
+    pub fn item_tourn_standings_forward(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x34d8)) }
+    /// `+0x3504 struct tMenuItemGoToMenuNFS4Button itemTournStandingsExit`
+    pub fn item_tourn_standings_exit(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x3504)) }
+    /// `+0x3530 struct tMenuNFS4 menuTournamentStandings`
+    pub fn menu_tournament_standings(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x3530)) }
+    /// `+0x35ac struct tMenuItemGoToMenuNFS4Button itemTournamentFinishedHome`
+    pub fn item_tournament_finished_home(self) -> MenuItemGoToMenuNFS4Button { MenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x35ac)) }
+    /// `+0x35d8 struct tMenuNFS4 menuTournamentFinished`
+    pub fn menu_tournament_finished(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x35d8)) }
+    /// `+0x3654 struct tMenuBlank menuTournamentTrophy`
+    pub fn menu_tournament_trophy(self) -> MenuBlank { MenuBlank(self.0.wrapping_add(0x3654)) }
+    /// `+0x36d0 struct tOptionsMenu menuPostGamePlayer1Name`
+    pub fn menu_post_game_player1_name(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x36d0)) }
+    /// `+0x3750 struct tOptionsMenu menuPostGamePlayer2Name`
+    pub fn menu_post_game_player2_name(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x3750)) }
+    /// `+0x37d0 struct tBlankMenuItemGoToMenuNFS4Button itemPostGameTrackRecordsContinue`
+    pub fn item_post_game_track_records_continue(self) -> BlankMenuItemGoToMenuNFS4Button { BlankMenuItemGoToMenuNFS4Button(self.0.wrapping_add(0x37d0)) }
+    /// `+0x37fc struct tOptionsMenu menuPostGameTrackRecords`
+    pub fn menu_post_game_track_records(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x37fc)) }
+    /// `+0x387c struct tMenuBlank menuPinkSlipCongrats`
+    pub fn menu_pink_slip_congrats(self) -> MenuBlank { MenuBlank(self.0.wrapping_add(0x387c)) }
+    /// `+0x38f8 struct tMenuBlank menuBeTheCopCongrats`
+    pub fn menu_be_the_cop_congrats(self) -> MenuBlank { MenuBlank(self.0.wrapping_add(0x38f8)) }
+    /// `+0x3974 struct tMenuBlank menuTierCompleteCongrats`
+    pub fn menu_tier_complete_congrats(self) -> MenuBlank { MenuBlank(self.0.wrapping_add(0x3974)) }
+    /// `+0x39f0 struct tMenuBlank menuCredits`
+    pub fn menu_credits(self) -> MenuBlank { MenuBlank(self.0.wrapping_add(0x39f0)) }
+    /// `+0x3a6c struct tMemoryCardMenuItem itemMemContinue`
+    pub fn item_mem_continue(self) -> MemoryCardMenuItem { MemoryCardMenuItem(self.0.wrapping_add(0x3a6c)) }
+    /// `+0x3a98 struct tOptionsMenu menuPostGameSave`
+    pub fn menu_post_game_save(self) -> OptionsMenu { OptionsMenu(self.0.wrapping_add(0x3a98)) }
+}
+
+/// `tHelpData` (0x12 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct HelpData(pub u32);
+impl HelpData {
+    pub const SIZE: u32 = 0x12;
+    /// Element `i` of an array of `tHelpData` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char autoGenerate`
+    pub fn auto_generate(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_auto_generate(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_auto_generate(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.auto_generate(m)); self.set_auto_generate(m, v) }
+    /// `+0x002 struct helpKeyData[4] items`
+    pub fn items(self, i: u32) -> HelpKeyData { debug_assert!(i < 4); HelpKeyData(self.0.wrapping_add(0x2 + i * 0x4)) }
+}
+
+/// `helpKeyData` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct HelpKeyData(pub u32);
+impl HelpKeyData {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `helpKeyData` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short text`
+    pub fn text(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_text(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_text(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.text(m)); self.set_text(m, v) }
+    /// `+0x002 short button`
+    pub fn button(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_button(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_button(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.button(m)); self.set_button(m, v) }
+}
+
+/// `tHrz_Lightning` (0x68 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct HrzLightning(pub u32);
+impl HrzLightning {
+    pub const SIZE: u32 = 0x68;
+    /// Element `i` of an array of `tHrz_Lightning` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tHrz_LightningFork[16] forks`
+    pub fn forks(self, i: u32) -> HrzLightningFork { debug_assert!(i < 16); HrzLightningFork(self.0.wrapping_add(0x0 + i * 0x6)) }
+    /// `+0x060 int brightness`
+    pub fn brightness(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x60); m.r32(a) as i32 }
+    pub fn set_brightness(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x60); m.w32(a, v as u32) }
+    pub fn update_brightness(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.brightness(m)); self.set_brightness(m, v) }
+    /// `+0x064 char numForks`
+    pub fn num_forks(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x64); m.r8(a) as i8 }
+    pub fn set_num_forks(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x64); m.w8(a, v as u8) }
+    pub fn update_num_forks(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.num_forks(m)); self.set_num_forks(m, v) }
+}
+
+/// `tHrz_LightningFork` (0x6 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct HrzLightningFork(pub u32);
+impl HrzLightningFork {
+    pub const SIZE: u32 = 0x6;
+    /// Element `i` of an array of `tHrz_LightningFork` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct DVECTOR pos`
+    pub fn pos(self) -> DVECTOR { DVECTOR(self.0.wrapping_add(0x0)) }
+    /// `+0x004 char pmxIndex`
+    pub fn pmx_index(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x4); m.r8(a) as i8 }
+    pub fn set_pmx_index(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x4); m.w8(a, v as u8) }
+    pub fn update_pmx_index(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.pmx_index(m)); self.set_pmx_index(m, v) }
+}
+
 /// `Input_tResults` (0x4 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct InputResults(pub u32);
 impl InputResults {
     pub const SIZE: u32 = 0x4;
@@ -3811,8 +5671,183 @@ impl InputResults {
     pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.flags(m)); self.set_flags(m, v) }
 }
 
+/// `tInsideBoxControllerLeftRightSlider` (0x28 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct InsideBoxControllerLeftRightSlider(pub u32);
+/// `tInsideBoxControllerLeftRightSlider` derives from `tInsideBoxLeftRightSlider`: its members are reachable through it.
+impl core::ops::Deref for InsideBoxControllerLeftRightSlider {
+    type Target = InsideBoxLeftRightSlider;
+    fn deref(&self) -> &InsideBoxLeftRightSlider { unsafe { &*(self as *const Self as *const InsideBoxLeftRightSlider) } }
+}
+impl InsideBoxControllerLeftRightSlider {
+    /// The `tInsideBoxLeftRightSlider` it derives from (the same address).
+    pub fn base(self) -> InsideBoxLeftRightSlider { InsideBoxLeftRightSlider(self.0) }
+}
+impl InsideBoxControllerLeftRightSlider {
+    pub const SIZE: u32 = 0x28;
+    /// Element `i` of an array of `tInsideBoxControllerLeftRightSlider` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tInsideBoxLeftRightSlider tInsideBoxLeftRightSlider`
+    pub fn t_inside_box_left_right_slider(self) -> InsideBoxLeftRightSlider { InsideBoxLeftRightSlider(self.0.wrapping_add(0x0)) }
+}
+
+/// `tInsideBoxLeftRightSlider` (0x28 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct InsideBoxLeftRightSlider(pub u32);
+/// `tInsideBoxLeftRightSlider` derives from `tMenuItemLeftRightSlider`: its members are reachable through it.
+impl core::ops::Deref for InsideBoxLeftRightSlider {
+    type Target = MenuItemLeftRightSlider;
+    fn deref(&self) -> &MenuItemLeftRightSlider { unsafe { &*(self as *const Self as *const MenuItemLeftRightSlider) } }
+}
+impl InsideBoxLeftRightSlider {
+    /// The `tMenuItemLeftRightSlider` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightSlider { MenuItemLeftRightSlider(self.0) }
+}
+impl InsideBoxLeftRightSlider {
+    pub const SIZE: u32 = 0x28;
+    /// Element `i` of an array of `tInsideBoxLeftRightSlider` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightSlider tMenuItemLeftRightSlider`
+    pub fn t_menu_item_left_right_slider(self) -> MenuItemLeftRightSlider { MenuItemLeftRightSlider(self.0.wrapping_add(0x0)) }
+}
+
+/// `tInsideBoxMenu` (0x74 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct InsideBoxMenu(pub u32);
+/// `tInsideBoxMenu` derives from `tMenu`: its members are reachable through it.
+impl core::ops::Deref for InsideBoxMenu {
+    type Target = Menu;
+    fn deref(&self) -> &Menu { unsafe { &*(self as *const Self as *const Menu) } }
+}
+impl InsideBoxMenu {
+    /// The `tMenu` it derives from (the same address).
+    pub fn base(self) -> Menu { Menu(self.0) }
+}
+impl InsideBoxMenu {
+    pub const SIZE: u32 = 0x74;
+    /// Element `i` of an array of `tInsideBoxMenu` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenu tMenu`
+    pub fn t_menu(self) -> Menu { Menu(self.0.wrapping_add(0x0)) }
+    /// `+0x06c short fPrevItem`
+    pub fn prev_item(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6c); m.r16(a) as i16 }
+    pub fn set_prev_item(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6c); m.w16(a, v as u16) }
+    pub fn update_prev_item(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.prev_item(m)); self.set_prev_item(m, v) }
+    /// `+0x06e short fMoving`
+    pub fn moving(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6e); m.r16(a) as i16 }
+    pub fn set_moving(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6e); m.w16(a, v as u16) }
+    pub fn update_moving(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.moving(m)); self.set_moving(m, v) }
+    /// `+0x070 short fMovingDir`
+    pub fn moving_dir(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x70); m.r16(a) as i16 }
+    pub fn set_moving_dir(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x70); m.w16(a, v as u16) }
+    pub fn update_moving_dir(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.moving_dir(m)); self.set_moving_dir(m, v) }
+}
+
+/// `tInsideBoxSongMenu` (0x88 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct InsideBoxSongMenu(pub u32);
+/// `tInsideBoxSongMenu` derives from `tInsideBoxMenu`: its members are reachable through it.
+impl core::ops::Deref for InsideBoxSongMenu {
+    type Target = InsideBoxMenu;
+    fn deref(&self) -> &InsideBoxMenu { unsafe { &*(self as *const Self as *const InsideBoxMenu) } }
+}
+impl InsideBoxSongMenu {
+    /// The `tInsideBoxMenu` it derives from (the same address).
+    pub fn base(self) -> InsideBoxMenu { InsideBoxMenu(self.0) }
+}
+impl InsideBoxSongMenu {
+    pub const SIZE: u32 = 0x88;
+    /// Element `i` of an array of `tInsideBoxSongMenu` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tInsideBoxMenu tInsideBoxMenu`
+    pub fn t_inside_box_menu(self) -> InsideBoxMenu { InsideBoxMenu(self.0.wrapping_add(0x0)) }
+    /// `+0x074 short[5] fOnOffFade`
+    pub fn on_off_fade(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x74 + i * 2); debug_assert!(i < 5); m.r16(a) as i16 }
+    pub fn set_on_off_fade(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x74 + i * 2); debug_assert!(i < 5); m.w16(a, v as u16) }
+    pub fn update_on_off_fade(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.on_off_fade(m, i)); self.set_on_off_fade(m, i, v) }
+    /// `+0x07e short[5] fSelFade`
+    pub fn sel_fade(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x7e + i * 2); debug_assert!(i < 5); m.r16(a) as i16 }
+    pub fn set_sel_fade(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x7e + i * 2); debug_assert!(i < 5); m.w16(a, v as u16) }
+    pub fn update_sel_fade(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.sel_fade(m, i)); self.set_sel_fade(m, i, v) }
+}
+
+/// `tInsideBoxTwoWaySlider` (0x30 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct InsideBoxTwoWaySlider(pub u32);
+/// `tInsideBoxTwoWaySlider` derives from `tMenuItemLeftRightSlider`: its members are reachable through it.
+impl core::ops::Deref for InsideBoxTwoWaySlider {
+    type Target = MenuItemLeftRightSlider;
+    fn deref(&self) -> &MenuItemLeftRightSlider { unsafe { &*(self as *const Self as *const MenuItemLeftRightSlider) } }
+}
+impl InsideBoxTwoWaySlider {
+    /// The `tMenuItemLeftRightSlider` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightSlider { MenuItemLeftRightSlider(self.0) }
+}
+impl InsideBoxTwoWaySlider {
+    pub const SIZE: u32 = 0x30;
+    /// Element `i` of an array of `tInsideBoxTwoWaySlider` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightSlider tMenuItemLeftRightSlider`
+    pub fn t_menu_item_left_right_slider(self) -> MenuItemLeftRightSlider { MenuItemLeftRightSlider(self.0.wrapping_add(0x0)) }
+    /// `+0x028 short fType`
+    pub fn type_(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x28); m.r16(a) as i16 }
+    pub fn set_type_(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x28); m.w16(a, v as u16) }
+    pub fn update_type_(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.type_(m)); self.set_type_(m, v) }
+    /// `+0x02c void fActive`
+    pub fn active(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x2c); m.r32(a) }
+    pub fn set_active(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x2c); m.w32(a, v) }
+    pub fn update_active(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.active(m)); self.set_active(m, v) }
+}
+
+/// `tItemButton` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ItemButton(pub u32);
+impl ItemButton {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tItemButton` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short type`
+    pub fn type_(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_type_(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_type_(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.type_(m)); self.set_type_(m, v) }
+    /// `+0x002 short text`
+    pub fn text(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_text(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_text(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.text(m)); self.set_text(m, v) }
+    /// `+0x004 struct tOldMenu* nextMenu`
+    pub fn next_menu(self, m: &mut Mem) -> OldMenu { let a = self.0.wrapping_add(0x4); OldMenu(m.r32(a)) }
+    pub fn set_next_menu(self, m: &mut Mem, v: OldMenu) { let a = self.0.wrapping_add(0x4); m.w32(a, v.0) }
+    /// `+0x008 char* value`
+    pub fn value(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x8); m.r32(a) }
+    pub fn set_value(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x8); m.w32(a, v) }
+    pub fn update_value(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.value(m)); self.set_value(m, v) }
+    /// `+0x00c short* selection`
+    pub fn selection(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_selection(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_selection(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.selection(m)); self.set_selection(m, v) }
+    /// `+0x010 char defaultvalue`
+    pub fn defaultvalue(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x10); m.r8(a) as i8 }
+    pub fn set_defaultvalue(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x10); m.w8(a, v as u8) }
+    pub fn update_defaultvalue(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.defaultvalue(m)); self.set_defaultvalue(m, v) }
+    /// `+0x011 uchar flags`
+    pub fn flags(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x11); m.r8(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x11); m.w8(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x012 uchar cases`
+    pub fn cases(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x12); m.r8(a) }
+    pub fn set_cases(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x12); m.w8(a, v) }
+    pub fn update_cases(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.cases(m)); self.set_cases(m, v) }
+}
+
 /// `tListIterator` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct ListIterator(pub u32);
 impl ListIterator {
     pub const SIZE: u32 = 0x10;
@@ -3826,19 +5861,33 @@ impl ListIterator {
     pub fn value(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
     pub fn set_value(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
     pub fn update_value(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.value(m)); self.set_value(m, v) }
-    /// `+0x008 char fMinValue`
-    pub fn min_value(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x8); m.r8(a) as i8 }
-    pub fn set_min_value(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x8); m.w8(a, v as u8) }
-    pub fn update_min_value(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.min_value(m)); self.set_min_value(m, v) }
-    /// `+0x009 char fMaxValue`
-    pub fn max_value(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x9); m.r8(a) as i8 }
-    pub fn set_max_value(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x9); m.w8(a, v as u8) }
-    pub fn update_max_value(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.max_value(m)); self.set_max_value(m, v) }
+    /// `+0x008 uchar fMinValue`
+    pub fn min_value(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x8); m.r8(a) }
+    pub fn set_min_value(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x8); m.w8(a, v) }
+    pub fn update_min_value(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.min_value(m)); self.set_min_value(m, v) }
+    /// `+0x009 uchar fMaxValue`
+    pub fn max_value(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x9); m.r8(a) }
+    pub fn set_max_value(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x9); m.w8(a, v) }
+    pub fn update_max_value(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.max_value(m)); self.set_max_value(m, v) }
+    /// `+0x00c ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
 }
 
 /// `tListIteratorCar` (0x1c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct ListIteratorCar(pub u32);
+/// `tListIteratorCar` derives from `tListIterator`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorCar {
+    type Target = ListIterator;
+    fn deref(&self) -> &ListIterator { unsafe { &*(self as *const Self as *const ListIterator) } }
+}
+impl ListIteratorCar {
+    /// The `tListIterator` it derives from (the same address).
+    pub fn base(self) -> ListIterator { ListIterator(self.0) }
+}
 impl ListIteratorCar {
     pub const SIZE: u32 = 0x1c;
     /// Element `i` of an array of `tListIteratorCar` starting here.
@@ -3860,7 +5909,17 @@ impl ListIteratorCar {
 
 /// `tListIteratorCarColor` (0x20 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct ListIteratorCarColor(pub u32);
+/// `tListIteratorCarColor` derives from `tListIterator`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorCarColor {
+    type Target = ListIterator;
+    fn deref(&self) -> &ListIterator { unsafe { &*(self as *const Self as *const ListIterator) } }
+}
+impl ListIteratorCarColor {
+    /// The `tListIterator` it derives from (the same address).
+    pub fn base(self) -> ListIterator { ListIterator(self.0) }
+}
 impl ListIteratorCarColor {
     pub const SIZE: u32 = 0x20;
     /// Element `i` of an array of `tListIteratorCarColor` starting here.
@@ -3884,8 +5943,228 @@ impl ListIteratorCarColor {
     pub fn set_car_manager(self, m: &mut Mem, v: CarManager) { let a = self.0.wrapping_add(0x1c); m.w32(a, v.0) }
 }
 
+/// `tListIteratorDoubleIndexed` (0x1c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ListIteratorDoubleIndexed(pub u32);
+/// `tListIteratorDoubleIndexed` derives from `tListIterator`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorDoubleIndexed {
+    type Target = ListIterator;
+    fn deref(&self) -> &ListIterator { unsafe { &*(self as *const Self as *const ListIterator) } }
+}
+impl ListIteratorDoubleIndexed {
+    /// The `tListIterator` it derives from (the same address).
+    pub fn base(self) -> ListIterator { ListIterator(self.0) }
+}
+impl ListIteratorDoubleIndexed {
+    pub const SIZE: u32 = 0x1c;
+    /// Element `i` of an array of `tListIteratorDoubleIndexed` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tListIterator tListIterator`
+    pub fn t_list_iterator(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x0)) }
+    /// `+0x010 char* fIndex1`
+    pub fn index1(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_index1(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_index1(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.index1(m)); self.set_index1(m, v) }
+    /// `+0x014 int index1multiplier`
+    pub fn index1multiplier(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x14); m.r32(a) as i32 }
+    pub fn set_index1multiplier(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x14); m.w32(a, v as u32) }
+    pub fn update_index1multiplier(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.index1multiplier(m)); self.set_index1multiplier(m, v) }
+    /// `+0x018 char* fIndex2`
+    pub fn index2(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x18); m.r32(a) }
+    pub fn set_index2(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x18); m.w32(a, v) }
+    pub fn update_index2(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.index2(m)); self.set_index2(m, v) }
+}
+
+/// `tListIteratorIndexed` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ListIteratorIndexed(pub u32);
+/// `tListIteratorIndexed` derives from `tListIterator`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorIndexed {
+    type Target = ListIterator;
+    fn deref(&self) -> &ListIterator { unsafe { &*(self as *const Self as *const ListIterator) } }
+}
+impl ListIteratorIndexed {
+    /// The `tListIterator` it derives from (the same address).
+    pub fn base(self) -> ListIterator { ListIterator(self.0) }
+}
+impl ListIteratorIndexed {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tListIteratorIndexed` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tListIterator tListIterator`
+    pub fn t_list_iterator(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x0)) }
+    /// `+0x010 char* fIndex`
+    pub fn index(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_index(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_index(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.index(m)); self.set_index(m, v) }
+}
+
+/// `tListIteratorMultiPlayer` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ListIteratorMultiPlayer(pub u32);
+/// `tListIteratorMultiPlayer` derives from `tListIterator`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorMultiPlayer {
+    type Target = ListIterator;
+    fn deref(&self) -> &ListIterator { unsafe { &*(self as *const Self as *const ListIterator) } }
+}
+impl ListIteratorMultiPlayer {
+    /// The `tListIterator` it derives from (the same address).
+    pub fn base(self) -> ListIterator { ListIterator(self.0) }
+}
+impl ListIteratorMultiPlayer {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tListIteratorMultiPlayer` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tListIterator tListIterator`
+    pub fn t_list_iterator(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x0)) }
+}
+
+/// `tListIteratorRange` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ListIteratorRange(pub u32);
+/// `tListIteratorRange` derives from `tListIterator`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorRange {
+    type Target = ListIterator;
+    fn deref(&self) -> &ListIterator { unsafe { &*(self as *const Self as *const ListIterator) } }
+}
+impl ListIteratorRange {
+    /// The `tListIterator` it derives from (the same address).
+    pub fn base(self) -> ListIterator { ListIterator(self.0) }
+}
+impl ListIteratorRange {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tListIteratorRange` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tListIterator tListIterator`
+    pub fn t_list_iterator(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x0)) }
+}
+
+/// `tListIteratorRangeIndexed` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ListIteratorRangeIndexed(pub u32);
+/// `tListIteratorRangeIndexed` derives from `tListIteratorRange`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorRangeIndexed {
+    type Target = ListIteratorRange;
+    fn deref(&self) -> &ListIteratorRange { unsafe { &*(self as *const Self as *const ListIteratorRange) } }
+}
+impl ListIteratorRangeIndexed {
+    /// The `tListIteratorRange` it derives from (the same address).
+    pub fn base(self) -> ListIteratorRange { ListIteratorRange(self.0) }
+}
+impl ListIteratorRangeIndexed {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tListIteratorRangeIndexed` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tListIteratorRange tListIteratorRange`
+    pub fn t_list_iterator_range(self) -> ListIteratorRange { ListIteratorRange(self.0.wrapping_add(0x0)) }
+    /// `+0x010 char* fIndex`
+    pub fn index(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_index(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_index(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.index(m)); self.set_index(m, v) }
+}
+
+/// `tListIteratorTournament` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ListIteratorTournament(pub u32);
+/// `tListIteratorTournament` derives from `tListIterator`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorTournament {
+    type Target = ListIterator;
+    fn deref(&self) -> &ListIterator { unsafe { &*(self as *const Self as *const ListIterator) } }
+}
+impl ListIteratorTournament {
+    /// The `tListIterator` it derives from (the same address).
+    pub fn base(self) -> ListIterator { ListIterator(self.0) }
+}
+impl ListIteratorTournament {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tListIteratorTournament` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tListIterator tListIterator`
+    pub fn t_list_iterator(self) -> ListIterator { ListIterator(self.0.wrapping_add(0x0)) }
+    /// `+0x010 struct tTournamentManager* fTournamentManager`
+    pub fn tournament_manager(self, m: &mut Mem) -> TournamentManager { let a = self.0.wrapping_add(0x10); TournamentManager(m.r32(a)) }
+    pub fn set_tournament_manager(self, m: &mut Mem, v: TournamentManager) { let a = self.0.wrapping_add(0x10); m.w32(a, v.0) }
+}
+
+/// `tListIteratorTrack` (0x18 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ListIteratorTrack(pub u32);
+/// `tListIteratorTrack` derives from `tListIteratorIndexed`: its members are reachable through it.
+impl core::ops::Deref for ListIteratorTrack {
+    type Target = ListIteratorIndexed;
+    fn deref(&self) -> &ListIteratorIndexed { unsafe { &*(self as *const Self as *const ListIteratorIndexed) } }
+}
+impl ListIteratorTrack {
+    /// The `tListIteratorIndexed` it derives from (the same address).
+    pub fn base(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0) }
+}
+impl ListIteratorTrack {
+    pub const SIZE: u32 = 0x18;
+    /// Element `i` of an array of `tListIteratorTrack` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tListIteratorIndexed tListIteratorIndexed`
+    pub fn t_list_iterator_indexed(self) -> ListIteratorIndexed { ListIteratorIndexed(self.0.wrapping_add(0x0)) }
+    /// `+0x014 struct tTrackManager* fTrackManager`
+    pub fn track_manager(self, m: &mut Mem) -> TrackManager { let a = self.0.wrapping_add(0x14); TrackManager(m.r32(a)) }
+    pub fn set_track_manager(self, m: &mut Mem, v: TrackManager) { let a = self.0.wrapping_add(0x14); m.w32(a, v.0) }
+}
+
+/// `MCRDFILE_def` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MCRDFILEDef(pub u32);
+impl MCRDFILEDef {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `MCRDFILE_def` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char* name`
+    pub fn name(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_name(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_name(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.name(m)); self.set_name(m, v) }
+    /// `+0x004 char* title`
+    pub fn title(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_title(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_title(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.title(m)); self.set_title(m, v) }
+    /// `+0x008 int size`
+    pub fn size(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_size(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_size(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.size(m)); self.set_size(m, v) }
+    /// `+0x00c int offset`
+    pub fn offset(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_offset(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_offset(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.offset(m)); self.set_offset(m, v) }
+    /// `+0x010 uint flags`
+    pub fn flags(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x014 void* pData`
+    pub fn p_data(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14); m.r32(a) }
+    pub fn set_p_data(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14); m.w32(a, v) }
+    pub fn update_p_data(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.p_data(m)); self.set_p_data(m, v) }
+    /// `+0x018 struct shapetbl[3]* icon`
+    pub fn icon(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x18); m.r32(a) }
+    pub fn set_icon(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x18); m.w32(a, v) }
+    pub fn update_icon(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.icon(m)); self.set_icon(m, v) }
+    /// `+0x024 uchar* numicons`
+    pub fn numicons(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x24); m.r32(a) }
+    pub fn set_numicons(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x24); m.w32(a, v) }
+    pub fn update_numicons(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.numicons(m)); self.set_numicons(m, v) }
+    /// `+0x028 uchar* numblocks`
+    pub fn numblocks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x28); m.r32(a) }
+    pub fn set_numblocks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x28); m.w32(a, v) }
+    pub fn update_numblocks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.numblocks(m)); self.set_numblocks(m, v) }
+}
+
 /// `matrixtdef` (0x24 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct Matrix(pub u32);
 impl Matrix {
     pub const SIZE: u32 = 0x24;
@@ -3897,8 +6176,939 @@ impl Matrix {
     pub fn update_m(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.m(m, i)); self.set_m(m, i, v) }
 }
 
+/// `tMemCardData` (0x14ac bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MemCardData(pub u32);
+impl MemCardData {
+    pub const SIZE: u32 = 0x14ac;
+    /// Element `i` of an array of `tMemCardData` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 ulong fSize`
+    pub fn size(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_size(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_size(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.size(m)); self.set_size(m, v) }
+    /// `+0x004 ulong bonus`
+    pub fn bonus(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_bonus(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_bonus(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.bonus(m)); self.set_bonus(m, v) }
+    /// `+0x008 struct tfrontEnd frontEnd`
+    pub fn front_end(self) -> FrontEnd { FrontEnd(self.0.wrapping_add(0x8)) }
+    /// `+0x458 struct tSaveCarInfo carInfo`
+    pub fn car_info(self) -> SaveCarInfo { SaveCarInfo(self.0.wrapping_add(0x458)) }
+    /// `+0x538 struct tSaveTrackInfo trackInfo`
+    pub fn track_info(self) -> SaveTrackInfo { SaveTrackInfo(self.0.wrapping_add(0x538)) }
+    /// `+0x548 struct tSaveTournament tournament`
+    pub fn tournament(self) -> SaveTournament { SaveTournament(self.0.wrapping_add(0x548)) }
+    /// `+0x5f8 struct tRecordBuffer[187] records`
+    pub fn records(self, i: u32) -> RecordBuffer { debug_assert!(i < 187); RecordBuffer(self.0.wrapping_add(0x5f8 + i * 0x14)) }
+    /// `+0x1494 ulong pinkSlipsNoCheat`
+    pub fn pink_slips_no_cheat(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x1494); m.r32(a) }
+    pub fn set_pink_slips_no_cheat(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x1494); m.w32(a, v) }
+    pub fn update_pink_slips_no_cheat(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.pink_slips_no_cheat(m)); self.set_pink_slips_no_cheat(m, v) }
+    /// `+0x1498 ulong frontEndCRC`
+    pub fn front_end_crc(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x1498); m.r32(a) }
+    pub fn set_front_end_crc(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x1498); m.w32(a, v) }
+    pub fn update_front_end_crc(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.front_end_crc(m)); self.set_front_end_crc(m, v) }
+    /// `+0x149c ulong carInfoCRC`
+    pub fn car_info_crc(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x149c); m.r32(a) }
+    pub fn set_car_info_crc(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x149c); m.w32(a, v) }
+    pub fn update_car_info_crc(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.car_info_crc(m)); self.set_car_info_crc(m, v) }
+    /// `+0x14a0 ulong trackInfoCRC`
+    pub fn track_info_crc(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14a0); m.r32(a) }
+    pub fn set_track_info_crc(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14a0); m.w32(a, v) }
+    pub fn update_track_info_crc(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.track_info_crc(m)); self.set_track_info_crc(m, v) }
+    /// `+0x14a4 ulong tournamentCRC`
+    pub fn tournament_crc(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14a4); m.r32(a) }
+    pub fn set_tournament_crc(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14a4); m.w32(a, v) }
+    pub fn update_tournament_crc(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.tournament_crc(m)); self.set_tournament_crc(m, v) }
+    /// `+0x14a8 ulong recordsCRC`
+    pub fn records_crc(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14a8); m.r32(a) }
+    pub fn set_records_crc(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14a8); m.w32(a, v) }
+    pub fn update_records_crc(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.records_crc(m)); self.set_records_crc(m, v) }
+}
+
+/// `tMemoryCardMenuItem` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MemoryCardMenuItem(pub u32);
+/// `tMemoryCardMenuItem` derives from `tMenuItemGoToMenuButtonFade`: its members are reachable through it.
+impl core::ops::Deref for MemoryCardMenuItem {
+    type Target = MenuItemGoToMenuButtonFade;
+    fn deref(&self) -> &MenuItemGoToMenuButtonFade { unsafe { &*(self as *const Self as *const MenuItemGoToMenuButtonFade) } }
+}
+impl MemoryCardMenuItem {
+    /// The `tMenuItemGoToMenuButtonFade` it derives from (the same address).
+    pub fn base(self) -> MenuItemGoToMenuButtonFade { MenuItemGoToMenuButtonFade(self.0) }
+}
+impl MemoryCardMenuItem {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tMemoryCardMenuItem` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemGoToMenuButtonFade tMenuItemGoToMenuButtonFade`
+    pub fn t_menu_item_go_to_menu_button_fade(self) -> MenuItemGoToMenuButtonFade { MenuItemGoToMenuButtonFade(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenu` (0x6c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Menu(pub u32);
+impl Menu {
+    pub const SIZE: u32 = 0x6c;
+    /// Element `i` of an array of `tMenu` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uint fFlags`
+    pub fn flags(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x004 short fTitle`
+    pub fn title(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_title(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_title(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.title(m)); self.set_title(m, v) }
+    /// `+0x008 int fCurrentItem`
+    pub fn current_item(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_current_item(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_current_item(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.current_item(m)); self.set_current_item(m, v) }
+    /// `+0x00c void fNeverAnyEnabled`
+    pub fn never_any_enabled(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_never_any_enabled(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_never_any_enabled(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.never_any_enabled(m)); self.set_never_any_enabled(m, v) }
+    /// `+0x010 struct tMenuItem[16]* fItemList`
+    pub fn item_list(self, m: &mut Mem, i: u32) -> MenuItem { let a = self.0.wrapping_add(0x10 + i * 4); debug_assert!(i < 16); MenuItem(m.r32(a)) }
+    pub fn set_item_list(self, m: &mut Mem, i: u32, v: MenuItem) { let a = self.0.wrapping_add(0x10 + i * 4); debug_assert!(i < 16); m.w32(a, v.0) }
+    /// `+0x050 struct tScreen* fScreen`
+    pub fn screen(self, m: &mut Mem) -> Screen { let a = self.0.wrapping_add(0x50); Screen(m.r32(a)) }
+    pub fn set_screen(self, m: &mut Mem, v: Screen) { let a = self.0.wrapping_add(0x50); m.w32(a, v.0) }
+    /// `+0x054 struct tMenu* fNextMenu`
+    pub fn next_menu(self, m: &mut Mem) -> Menu { let a = self.0.wrapping_add(0x54); Menu(m.r32(a)) }
+    pub fn set_next_menu(self, m: &mut Mem, v: Menu) { let a = self.0.wrapping_add(0x54); m.w32(a, v.0) }
+    /// `+0x058 struct tMenu* fChildMenu`
+    pub fn child_menu(self, m: &mut Mem) -> Menu { let a = self.0.wrapping_add(0x58); Menu(m.r32(a)) }
+    pub fn set_child_menu(self, m: &mut Mem, v: Menu) { let a = self.0.wrapping_add(0x58); m.w32(a, v.0) }
+    /// `+0x05c struct tMenu* fOptionsMenu`
+    pub fn options_menu(self, m: &mut Mem) -> Menu { let a = self.0.wrapping_add(0x5c); Menu(m.r32(a)) }
+    pub fn set_options_menu(self, m: &mut Mem, v: Menu) { let a = self.0.wrapping_add(0x5c); m.w32(a, v.0) }
+    /// `+0x060 void*() fOnButtonPress`
+    pub fn on_button_press(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x60); m.r32(a) }
+    pub fn set_on_button_press(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x60); m.w32(a, v) }
+    pub fn update_on_button_press(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.on_button_press(m)); self.set_on_button_press(m, v) }
+    /// `+0x064 short VertHelp`
+    pub fn vert_help(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x64); m.r16(a) as i16 }
+    pub fn set_vert_help(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x64); m.w16(a, v as u16) }
+    pub fn update_vert_help(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.vert_help(m)); self.set_vert_help(m, v) }
+    /// `+0x068 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x68); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x68); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
+}
+
+/// `tMenuBlank` (0x7c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuBlank(pub u32);
+/// `tMenuBlank` derives from `tMenuNFS4`: its members are reachable through it.
+impl core::ops::Deref for MenuBlank {
+    type Target = MenuNFS4;
+    fn deref(&self) -> &MenuNFS4 { unsafe { &*(self as *const Self as *const MenuNFS4) } }
+}
+impl MenuBlank {
+    /// The `tMenuNFS4` it derives from (the same address).
+    pub fn base(self) -> MenuNFS4 { MenuNFS4(self.0) }
+}
+impl MenuBlank {
+    pub const SIZE: u32 = 0x7c;
+    /// Element `i` of an array of `tMenuBlank` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuNFS4 tMenuNFS4`
+    pub fn t_menu_nfs4(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenuCommand` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuCommand(pub u32);
+impl MenuCommand {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tMenuCommand` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 enum tMenuCommandType type`
+    pub fn type_(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_type_(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_type_(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.type_(m)); self.set_type_(m, v) }
+    /// `+0x004 struct tMenu* nextMenu`
+    pub fn next_menu(self, m: &mut Mem) -> Menu { let a = self.0.wrapping_add(0x4); Menu(m.r32(a)) }
+    pub fn set_next_menu(self, m: &mut Mem, v: Menu) { let a = self.0.wrapping_add(0x4); m.w32(a, v.0) }
+}
+
+/// `tMenuItem` (0x1c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItem(pub u32);
+impl MenuItem {
+    pub const SIZE: u32 = 0x1c;
+    /// Element `i` of an array of `tMenuItem` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uint fFlags`
+    pub fn flags(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x004 uint fTextDescription`
+    pub fn text_description(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_text_description(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_text_description(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.text_description(m)); self.set_text_description(m, v) }
+    /// `+0x008 short fSelFade`
+    pub fn sel_fade(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8); m.r16(a) as i16 }
+    pub fn set_sel_fade(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8); m.w16(a, v as u16) }
+    pub fn update_sel_fade(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sel_fade(m)); self.set_sel_fade(m, v) }
+    /// `+0x00c int fButtonImage`
+    pub fn button_image(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_button_image(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_button_image(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.button_image(m)); self.set_button_image(m, v) }
+    /// `+0x010 int fNumFrames`
+    pub fn num_frames(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
+    pub fn set_num_frames(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
+    pub fn update_num_frames(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_frames(m)); self.set_num_frames(m, v) }
+    /// `+0x014 struct tMenu* fNewMenu`
+    pub fn new_menu(self, m: &mut Mem) -> Menu { let a = self.0.wrapping_add(0x14); Menu(m.r32(a)) }
+    pub fn set_new_menu(self, m: &mut Mem, v: Menu) { let a = self.0.wrapping_add(0x14); m.w32(a, v.0) }
+    /// `+0x018 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x18); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x18); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
+}
+
+/// `tMenuItemControllerLeftRightChoice` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemControllerLeftRightChoice(pub u32);
+/// `tMenuItemControllerLeftRightChoice` derives from `tMenuItemLeftRightFade`: its members are reachable through it.
+impl core::ops::Deref for MenuItemControllerLeftRightChoice {
+    type Target = MenuItemLeftRightFade;
+    fn deref(&self) -> &MenuItemLeftRightFade { unsafe { &*(self as *const Self as *const MenuItemLeftRightFade) } }
+}
+impl MenuItemControllerLeftRightChoice {
+    /// The `tMenuItemLeftRightFade` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightFade { MenuItemLeftRightFade(self.0) }
+}
+impl MenuItemControllerLeftRightChoice {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tMenuItemControllerLeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightFade tMenuItemLeftRightFade`
+    pub fn t_menu_item_left_right_fade(self) -> MenuItemLeftRightFade { MenuItemLeftRightFade(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenuItemDisplayLeftRightChoice` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemDisplayLeftRightChoice(pub u32);
+/// `tMenuItemDisplayLeftRightChoice` derives from `tMenuItemLeftRightFade`: its members are reachable through it.
+impl core::ops::Deref for MenuItemDisplayLeftRightChoice {
+    type Target = MenuItemLeftRightFade;
+    fn deref(&self) -> &MenuItemLeftRightFade { unsafe { &*(self as *const Self as *const MenuItemLeftRightFade) } }
+}
+impl MenuItemDisplayLeftRightChoice {
+    /// The `tMenuItemLeftRightFade` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightFade { MenuItemLeftRightFade(self.0) }
+}
+impl MenuItemDisplayLeftRightChoice {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tMenuItemDisplayLeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightFade tMenuItemLeftRightFade`
+    pub fn t_menu_item_left_right_fade(self) -> MenuItemLeftRightFade { MenuItemLeftRightFade(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenuItemGoToMenuButton` (0x20 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemGoToMenuButton(pub u32);
+/// `tMenuItemGoToMenuButton` derives from `tMenuItemInteractive`: its members are reachable through it.
+impl core::ops::Deref for MenuItemGoToMenuButton {
+    type Target = MenuItemInteractive;
+    fn deref(&self) -> &MenuItemInteractive { unsafe { &*(self as *const Self as *const MenuItemInteractive) } }
+}
+impl MenuItemGoToMenuButton {
+    /// The `tMenuItemInteractive` it derives from (the same address).
+    pub fn base(self) -> MenuItemInteractive { MenuItemInteractive(self.0) }
+}
+impl MenuItemGoToMenuButton {
+    pub const SIZE: u32 = 0x20;
+    /// Element `i` of an array of `tMenuItemGoToMenuButton` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemInteractive tMenuItemInteractive`
+    pub fn t_menu_item_interactive(self) -> MenuItemInteractive { MenuItemInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x01c void*() fOnButtonPress`
+    pub fn on_button_press(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x1c); m.r32(a) }
+    pub fn set_on_button_press(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x1c); m.w32(a, v) }
+    pub fn update_on_button_press(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.on_button_press(m)); self.set_on_button_press(m, v) }
+}
+
+/// `tMenuItemGoToMenuButtonFade` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemGoToMenuButtonFade(pub u32);
+/// `tMenuItemGoToMenuButtonFade` derives from `tMenuItemGoToMenuButton`: its members are reachable through it.
+impl core::ops::Deref for MenuItemGoToMenuButtonFade {
+    type Target = MenuItemGoToMenuButton;
+    fn deref(&self) -> &MenuItemGoToMenuButton { unsafe { &*(self as *const Self as *const MenuItemGoToMenuButton) } }
+}
+impl MenuItemGoToMenuButtonFade {
+    /// The `tMenuItemGoToMenuButton` it derives from (the same address).
+    pub fn base(self) -> MenuItemGoToMenuButton { MenuItemGoToMenuButton(self.0) }
+}
+impl MenuItemGoToMenuButtonFade {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tMenuItemGoToMenuButtonFade` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemGoToMenuButton tMenuItemGoToMenuButton`
+    pub fn t_menu_item_go_to_menu_button(self) -> MenuItemGoToMenuButton { MenuItemGoToMenuButton(self.0.wrapping_add(0x0)) }
+    /// `+0x020 short fFadeVal`
+    pub fn fade_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x20); m.r16(a) as i16 }
+    pub fn set_fade_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x20); m.w16(a, v as u16) }
+    pub fn update_fade_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_val(m)); self.set_fade_val(m, v) }
+    /// `+0x022 short fFadeDir`
+    pub fn fade_dir(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x22); m.r16(a) as i16 }
+    pub fn set_fade_dir(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x22); m.w16(a, v as u16) }
+    pub fn update_fade_dir(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_dir(m)); self.set_fade_dir(m, v) }
+    /// `+0x024 void fInTransition`
+    pub fn in_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x24); m.r32(a) }
+    pub fn set_in_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x24); m.w32(a, v) }
+    pub fn update_in_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_transition(m)); self.set_in_transition(m, v) }
+    /// `+0x028 short fEnableVal`
+    pub fn enable_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x28); m.r16(a) as i16 }
+    pub fn set_enable_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x28); m.w16(a, v as u16) }
+    pub fn update_enable_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.enable_val(m)); self.set_enable_val(m, v) }
+}
+
+/// `tMenuItemGoToMenuNFS4Button` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemGoToMenuNFS4Button(pub u32);
+/// `tMenuItemGoToMenuNFS4Button` derives from `tMenuItemGoToMenuButton`: its members are reachable through it.
+impl core::ops::Deref for MenuItemGoToMenuNFS4Button {
+    type Target = MenuItemGoToMenuButton;
+    fn deref(&self) -> &MenuItemGoToMenuButton { unsafe { &*(self as *const Self as *const MenuItemGoToMenuButton) } }
+}
+impl MenuItemGoToMenuNFS4Button {
+    /// The `tMenuItemGoToMenuButton` it derives from (the same address).
+    pub fn base(self) -> MenuItemGoToMenuButton { MenuItemGoToMenuButton(self.0) }
+}
+impl MenuItemGoToMenuNFS4Button {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tMenuItemGoToMenuNFS4Button` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemGoToMenuButton tMenuItemGoToMenuButton`
+    pub fn t_menu_item_go_to_menu_button(self) -> MenuItemGoToMenuButton { MenuItemGoToMenuButton(self.0.wrapping_add(0x0)) }
+    /// `+0x020 int fOrdinalPos`
+    pub fn ordinal_pos(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x20); m.r32(a) as i32 }
+    pub fn set_ordinal_pos(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x20); m.w32(a, v as u32) }
+    pub fn update_ordinal_pos(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.ordinal_pos(m)); self.set_ordinal_pos(m, v) }
+    /// `+0x024 short fOffset`
+    pub fn offset(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x24); m.r16(a) as i16 }
+    pub fn set_offset(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x24); m.w16(a, v as u16) }
+    pub fn update_offset(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.offset(m)); self.set_offset(m, v) }
+    /// `+0x026 short fTransitionVal`
+    pub fn transition_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x26); m.r16(a) as i16 }
+    pub fn set_transition_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x26); m.w16(a, v as u16) }
+    pub fn update_transition_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition_val(m)); self.set_transition_val(m, v) }
+    /// `+0x028 short fTransitionSpeed`
+    pub fn transition_speed(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x28); m.r16(a) as i16 }
+    pub fn set_transition_speed(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x28); m.w16(a, v as u16) }
+    pub fn update_transition_speed(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition_speed(m)); self.set_transition_speed(m, v) }
+    /// `+0x02a short fEnabledTransitionVal`
+    pub fn enabled_transition_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2a); m.r16(a) as i16 }
+    pub fn set_enabled_transition_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2a); m.w16(a, v as u16) }
+    pub fn update_enabled_transition_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.enabled_transition_val(m)); self.set_enabled_transition_val(m, v) }
+}
+
+/// `tMenuItemInteractive` (0x1c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemInteractive(pub u32);
+/// `tMenuItemInteractive` derives from `tMenuItem`: its members are reachable through it.
+impl core::ops::Deref for MenuItemInteractive {
+    type Target = MenuItem;
+    fn deref(&self) -> &MenuItem { unsafe { &*(self as *const Self as *const MenuItem) } }
+}
+impl MenuItemInteractive {
+    /// The `tMenuItem` it derives from (the same address).
+    pub fn base(self) -> MenuItem { MenuItem(self.0) }
+}
+impl MenuItemInteractive {
+    pub const SIZE: u32 = 0x1c;
+    /// Element `i` of an array of `tMenuItemInteractive` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItem tMenuItem`
+    pub fn t_menu_item(self) -> MenuItem { MenuItem(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenuItemLeftRightAudioSlider` (0x38 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemLeftRightAudioSlider(pub u32);
+/// `tMenuItemLeftRightAudioSlider` derives from `tMenuItemLeftRightSlider`: its members are reachable through it.
+impl core::ops::Deref for MenuItemLeftRightAudioSlider {
+    type Target = MenuItemLeftRightSlider;
+    fn deref(&self) -> &MenuItemLeftRightSlider { unsafe { &*(self as *const Self as *const MenuItemLeftRightSlider) } }
+}
+impl MenuItemLeftRightAudioSlider {
+    /// The `tMenuItemLeftRightSlider` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightSlider { MenuItemLeftRightSlider(self.0) }
+}
+impl MenuItemLeftRightAudioSlider {
+    pub const SIZE: u32 = 0x38;
+    /// Element `i` of an array of `tMenuItemLeftRightAudioSlider` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightSlider tMenuItemLeftRightSlider`
+    pub fn t_menu_item_left_right_slider(self) -> MenuItemLeftRightSlider { MenuItemLeftRightSlider(self.0.wrapping_add(0x0)) }
+    /// `+0x028 short fFadeVal`
+    pub fn fade_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x28); m.r16(a) as i16 }
+    pub fn set_fade_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x28); m.w16(a, v as u16) }
+    pub fn update_fade_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_val(m)); self.set_fade_val(m, v) }
+    /// `+0x02a short fFadeDir`
+    pub fn fade_dir(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2a); m.r16(a) as i16 }
+    pub fn set_fade_dir(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2a); m.w16(a, v as u16) }
+    pub fn update_fade_dir(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_dir(m)); self.set_fade_dir(m, v) }
+    /// `+0x02c void fInTransition`
+    pub fn in_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x2c); m.r32(a) }
+    pub fn set_in_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x2c); m.w32(a, v) }
+    pub fn update_in_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_transition(m)); self.set_in_transition(m, v) }
+    /// `+0x030 short fAudioArt`
+    pub fn audio_art(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x30); m.r16(a) as i16 }
+    pub fn set_audio_art(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x30); m.w16(a, v as u16) }
+    pub fn update_audio_art(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.audio_art(m)); self.set_audio_art(m, v) }
+    /// `+0x034 int flareextra`
+    pub fn flareextra(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x34); m.r32(a) as i32 }
+    pub fn set_flareextra(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x34); m.w32(a, v as u32) }
+    pub fn update_flareextra(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.flareextra(m)); self.set_flareextra(m, v) }
+}
+
+/// `tMenuItemLeftRightChoice` (0x20 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemLeftRightChoice(pub u32);
+/// `tMenuItemLeftRightChoice` derives from `tMenuItemInteractive`: its members are reachable through it.
+impl core::ops::Deref for MenuItemLeftRightChoice {
+    type Target = MenuItemInteractive;
+    fn deref(&self) -> &MenuItemInteractive { unsafe { &*(self as *const Self as *const MenuItemInteractive) } }
+}
+impl MenuItemLeftRightChoice {
+    /// The `tMenuItemInteractive` it derives from (the same address).
+    pub fn base(self) -> MenuItemInteractive { MenuItemInteractive(self.0) }
+}
+impl MenuItemLeftRightChoice {
+    pub const SIZE: u32 = 0x20;
+    /// Element `i` of an array of `tMenuItemLeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemInteractive tMenuItemInteractive`
+    pub fn t_menu_item_interactive(self) -> MenuItemInteractive { MenuItemInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x01c struct tListIterator* fData`
+    pub fn data(self, m: &mut Mem) -> ListIterator { let a = self.0.wrapping_add(0x1c); ListIterator(m.r32(a)) }
+    pub fn set_data(self, m: &mut Mem, v: ListIterator) { let a = self.0.wrapping_add(0x1c); m.w32(a, v.0) }
+}
+
+/// `tMenuItemLeftRightFade` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemLeftRightFade(pub u32);
+/// `tMenuItemLeftRightFade` derives from `tMenuItemLeftRightChoice`: its members are reachable through it.
+impl core::ops::Deref for MenuItemLeftRightFade {
+    type Target = MenuItemLeftRightChoice;
+    fn deref(&self) -> &MenuItemLeftRightChoice { unsafe { &*(self as *const Self as *const MenuItemLeftRightChoice) } }
+}
+impl MenuItemLeftRightFade {
+    /// The `tMenuItemLeftRightChoice` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0) }
+}
+impl MenuItemLeftRightFade {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tMenuItemLeftRightFade` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightChoice tMenuItemLeftRightChoice`
+    pub fn t_menu_item_left_right_choice(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0.wrapping_add(0x0)) }
+    /// `+0x020 short fFadeVal`
+    pub fn fade_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x20); m.r16(a) as i16 }
+    pub fn set_fade_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x20); m.w16(a, v as u16) }
+    pub fn update_fade_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_val(m)); self.set_fade_val(m, v) }
+    /// `+0x022 short fFadeDir`
+    pub fn fade_dir(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x22); m.r16(a) as i16 }
+    pub fn set_fade_dir(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x22); m.w16(a, v as u16) }
+    pub fn update_fade_dir(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_dir(m)); self.set_fade_dir(m, v) }
+    /// `+0x024 void fInTransition`
+    pub fn in_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x24); m.r32(a) }
+    pub fn set_in_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x24); m.w32(a, v) }
+    pub fn update_in_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_transition(m)); self.set_in_transition(m, v) }
+    /// `+0x028 int flareextra`
+    pub fn flareextra(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x28); m.r32(a) as i32 }
+    pub fn set_flareextra(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x28); m.w32(a, v as u32) }
+    pub fn update_flareextra(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.flareextra(m)); self.set_flareextra(m, v) }
+}
+
+/// `tMenuItemLeftRightSlider` (0x28 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemLeftRightSlider(pub u32);
+/// `tMenuItemLeftRightSlider` derives from `tMenuItemInteractive`: its members are reachable through it.
+impl core::ops::Deref for MenuItemLeftRightSlider {
+    type Target = MenuItemInteractive;
+    fn deref(&self) -> &MenuItemInteractive { unsafe { &*(self as *const Self as *const MenuItemInteractive) } }
+}
+impl MenuItemLeftRightSlider {
+    /// The `tMenuItemInteractive` it derives from (the same address).
+    pub fn base(self) -> MenuItemInteractive { MenuItemInteractive(self.0) }
+}
+impl MenuItemLeftRightSlider {
+    pub const SIZE: u32 = 0x28;
+    /// Element `i` of an array of `tMenuItemLeftRightSlider` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemInteractive tMenuItemInteractive`
+    pub fn t_menu_item_interactive(self) -> MenuItemInteractive { MenuItemInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x01c struct tListIterator* fData`
+    pub fn data(self, m: &mut Mem) -> ListIterator { let a = self.0.wrapping_add(0x1c); ListIterator(m.r32(a)) }
+    pub fn set_data(self, m: &mut Mem, v: ListIterator) { let a = self.0.wrapping_add(0x1c); m.w32(a, v.0) }
+    /// `+0x020 short fX`
+    pub fn x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x20); m.r16(a) as i16 }
+    pub fn set_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x20); m.w16(a, v as u16) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x022 short fY`
+    pub fn y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x22); m.r16(a) as i16 }
+    pub fn set_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x22); m.w16(a, v as u16) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y(m)); self.set_y(m, v) }
+    /// `+0x024 short fWidth`
+    pub fn width(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x24); m.r16(a) as i16 }
+    pub fn set_width(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x24); m.w16(a, v as u16) }
+    pub fn update_width(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.width(m)); self.set_width(m, v) }
+    /// `+0x026 short fHeight`
+    pub fn height(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x26); m.r16(a) as i16 }
+    pub fn set_height(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x26); m.w16(a, v as u16) }
+    pub fn update_height(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.height(m)); self.set_height(m, v) }
+}
+
+/// `tMenuItemNFS4LeftRightChoice` (0x28 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemNFS4LeftRightChoice(pub u32);
+/// `tMenuItemNFS4LeftRightChoice` derives from `tMenuItemLeftRightChoice`: its members are reachable through it.
+impl core::ops::Deref for MenuItemNFS4LeftRightChoice {
+    type Target = MenuItemLeftRightChoice;
+    fn deref(&self) -> &MenuItemLeftRightChoice { unsafe { &*(self as *const Self as *const MenuItemLeftRightChoice) } }
+}
+impl MenuItemNFS4LeftRightChoice {
+    /// The `tMenuItemLeftRightChoice` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0) }
+}
+impl MenuItemNFS4LeftRightChoice {
+    pub const SIZE: u32 = 0x28;
+    /// Element `i` of an array of `tMenuItemNFS4LeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightChoice tMenuItemLeftRightChoice`
+    pub fn t_menu_item_left_right_choice(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0.wrapping_add(0x0)) }
+    /// `+0x020 short fOffset`
+    pub fn offset(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x20); m.r16(a) as i16 }
+    pub fn set_offset(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x20); m.w16(a, v as u16) }
+    pub fn update_offset(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.offset(m)); self.set_offset(m, v) }
+    /// `+0x022 short fTransitionVal`
+    pub fn transition_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x22); m.r16(a) as i16 }
+    pub fn set_transition_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x22); m.w16(a, v as u16) }
+    pub fn update_transition_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition_val(m)); self.set_transition_val(m, v) }
+    /// `+0x024 short fTransitionSpeed`
+    pub fn transition_speed(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x24); m.r16(a) as i16 }
+    pub fn set_transition_speed(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x24); m.w16(a, v as u16) }
+    pub fn update_transition_speed(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition_speed(m)); self.set_transition_speed(m, v) }
+    /// `+0x026 short fEnabledTransitionVal`
+    pub fn enabled_transition_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x26); m.r16(a) as i16 }
+    pub fn set_enabled_transition_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x26); m.w16(a, v as u16) }
+    pub fn update_enabled_transition_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.enabled_transition_val(m)); self.set_enabled_transition_val(m, v) }
+}
+
+/// `tMenuItemOnOffLeftRightChoice` (0x30 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemOnOffLeftRightChoice(pub u32);
+/// `tMenuItemOnOffLeftRightChoice` derives from `tMenuItemLeftRightFade`: its members are reachable through it.
+impl core::ops::Deref for MenuItemOnOffLeftRightChoice {
+    type Target = MenuItemLeftRightFade;
+    fn deref(&self) -> &MenuItemLeftRightFade { unsafe { &*(self as *const Self as *const MenuItemLeftRightFade) } }
+}
+impl MenuItemOnOffLeftRightChoice {
+    /// The `tMenuItemLeftRightFade` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightFade { MenuItemLeftRightFade(self.0) }
+}
+impl MenuItemOnOffLeftRightChoice {
+    pub const SIZE: u32 = 0x30;
+    /// Element `i` of an array of `tMenuItemOnOffLeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightFade tMenuItemLeftRightFade`
+    pub fn t_menu_item_left_right_fade(self) -> MenuItemLeftRightFade { MenuItemLeftRightFade(self.0.wrapping_add(0x0)) }
+    /// `+0x02c short fOnFade`
+    pub fn on_fade(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2c); m.r16(a) as i16 }
+    pub fn set_on_fade(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2c); m.w16(a, v as u16) }
+    pub fn update_on_fade(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.on_fade(m)); self.set_on_fade(m, v) }
+}
+
+/// `tMenuItemOptionsLeftRightChoice` (0x20 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemOptionsLeftRightChoice(pub u32);
+/// `tMenuItemOptionsLeftRightChoice` derives from `tMenuItemLeftRightChoice`: its members are reachable through it.
+impl core::ops::Deref for MenuItemOptionsLeftRightChoice {
+    type Target = MenuItemLeftRightChoice;
+    fn deref(&self) -> &MenuItemLeftRightChoice { unsafe { &*(self as *const Self as *const MenuItemLeftRightChoice) } }
+}
+impl MenuItemOptionsLeftRightChoice {
+    /// The `tMenuItemLeftRightChoice` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0) }
+}
+impl MenuItemOptionsLeftRightChoice {
+    pub const SIZE: u32 = 0x20;
+    /// Element `i` of an array of `tMenuItemOptionsLeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightChoice tMenuItemLeftRightChoice`
+    pub fn t_menu_item_left_right_choice(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenuItemOptionsTwoItemChoice` (0x24 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemOptionsTwoItemChoice(pub u32);
+/// `tMenuItemOptionsTwoItemChoice` derives from `tMenuItemLeftRightChoice`: its members are reachable through it.
+impl core::ops::Deref for MenuItemOptionsTwoItemChoice {
+    type Target = MenuItemLeftRightChoice;
+    fn deref(&self) -> &MenuItemLeftRightChoice { unsafe { &*(self as *const Self as *const MenuItemLeftRightChoice) } }
+}
+impl MenuItemOptionsTwoItemChoice {
+    /// The `tMenuItemLeftRightChoice` it derives from (the same address).
+    pub fn base(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0) }
+}
+impl MenuItemOptionsTwoItemChoice {
+    pub const SIZE: u32 = 0x24;
+    /// Element `i` of an array of `tMenuItemOptionsTwoItemChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemLeftRightChoice tMenuItemLeftRightChoice`
+    pub fn t_menu_item_left_right_choice(self) -> MenuItemLeftRightChoice { MenuItemLeftRightChoice(self.0.wrapping_add(0x0)) }
+    /// `+0x020 short fOnOffFade`
+    pub fn on_off_fade(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x20); m.r16(a) as i16 }
+    pub fn set_on_off_fade(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x20); m.w16(a, v as u16) }
+    pub fn update_on_off_fade(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.on_off_fade(m)); self.set_on_off_fade(m, v) }
+}
+
+/// `tMenuItemSlidingActivated` (0x48 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemSlidingActivated(pub u32);
+/// `tMenuItemSlidingActivated` derives from `tMenuItemSlidingMenu`: its members are reachable through it.
+impl core::ops::Deref for MenuItemSlidingActivated {
+    type Target = MenuItemSlidingMenu;
+    fn deref(&self) -> &MenuItemSlidingMenu { unsafe { &*(self as *const Self as *const MenuItemSlidingMenu) } }
+}
+impl MenuItemSlidingActivated {
+    /// The `tMenuItemSlidingMenu` it derives from (the same address).
+    pub fn base(self) -> MenuItemSlidingMenu { MenuItemSlidingMenu(self.0) }
+}
+impl MenuItemSlidingActivated {
+    pub const SIZE: u32 = 0x48;
+    /// Element `i` of an array of `tMenuItemSlidingActivated` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItemSlidingMenu tMenuItemSlidingMenu`
+    pub fn t_menu_item_sliding_menu(self) -> MenuItemSlidingMenu { MenuItemSlidingMenu(self.0.wrapping_add(0x0)) }
+    /// `+0x044 void fActive`
+    pub fn active(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x44); m.r32(a) }
+    pub fn set_active(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x44); m.w32(a, v) }
+    pub fn update_active(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.active(m)); self.set_active(m, v) }
+}
+
+/// `tMenuItemSlidingMenu` (0x44 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuItemSlidingMenu(pub u32);
+/// `tMenuItemSlidingMenu` derives from `tMenuItem`: its members are reachable through it.
+impl core::ops::Deref for MenuItemSlidingMenu {
+    type Target = MenuItem;
+    fn deref(&self) -> &MenuItem { unsafe { &*(self as *const Self as *const MenuItem) } }
+}
+impl MenuItemSlidingMenu {
+    /// The `tMenuItem` it derives from (the same address).
+    pub fn base(self) -> MenuItem { MenuItem(self.0) }
+}
+impl MenuItemSlidingMenu {
+    pub const SIZE: u32 = 0x44;
+    /// Element `i` of an array of `tMenuItemSlidingMenu` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItem tMenuItem`
+    pub fn t_menu_item(self) -> MenuItem { MenuItem(self.0.wrapping_add(0x0)) }
+    /// `+0x01c struct tInsideBoxMenu* currMenu`
+    pub fn curr_menu(self, m: &mut Mem) -> InsideBoxMenu { let a = self.0.wrapping_add(0x1c); InsideBoxMenu(m.r32(a)) }
+    pub fn set_curr_menu(self, m: &mut Mem, v: InsideBoxMenu) { let a = self.0.wrapping_add(0x1c); m.w32(a, v.0) }
+    /// `+0x020 struct tInsideBoxMenu* nextMenu`
+    pub fn next_menu(self, m: &mut Mem) -> InsideBoxMenu { let a = self.0.wrapping_add(0x20); InsideBoxMenu(m.r32(a)) }
+    pub fn set_next_menu(self, m: &mut Mem, v: InsideBoxMenu) { let a = self.0.wrapping_add(0x20); m.w32(a, v.0) }
+    /// `+0x024 short fWidth`
+    pub fn width(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x24); m.r16(a) as i16 }
+    pub fn set_width(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x24); m.w16(a, v as u16) }
+    pub fn update_width(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.width(m)); self.set_width(m, v) }
+    /// `+0x026 short fHeight`
+    pub fn height(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x26); m.r16(a) as i16 }
+    pub fn set_height(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x26); m.w16(a, v as u16) }
+    pub fn update_height(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.height(m)); self.set_height(m, v) }
+    /// `+0x028 short fOpenHeight`
+    pub fn open_height(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x28); m.r16(a) as i16 }
+    pub fn set_open_height(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x28); m.w16(a, v as u16) }
+    pub fn update_open_height(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.open_height(m)); self.set_open_height(m, v) }
+    /// `+0x02a short fSlideOffset`
+    pub fn slide_offset(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2a); m.r16(a) as i16 }
+    pub fn set_slide_offset(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2a); m.w16(a, v as u16) }
+    pub fn update_slide_offset(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.slide_offset(m)); self.set_slide_offset(m, v) }
+    /// `+0x02c short fFadeVal`
+    pub fn fade_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2c); m.r16(a) as i16 }
+    pub fn set_fade_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2c); m.w16(a, v as u16) }
+    pub fn update_fade_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_val(m)); self.set_fade_val(m, v) }
+    /// `+0x02e short fFadeDir`
+    pub fn fade_dir(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2e); m.r16(a) as i16 }
+    pub fn set_fade_dir(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2e); m.w16(a, v as u16) }
+    pub fn update_fade_dir(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_dir(m)); self.set_fade_dir(m, v) }
+    /// `+0x030 void fInTransition`
+    pub fn in_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x30); m.r32(a) }
+    pub fn set_in_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x30); m.w32(a, v) }
+    pub fn update_in_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_transition(m)); self.set_in_transition(m, v) }
+    /// `+0x034 void fTransitioningOut`
+    pub fn transitioning_out(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x34); m.r32(a) }
+    pub fn set_transitioning_out(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x34); m.w32(a, v) }
+    pub fn update_transitioning_out(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.transitioning_out(m)); self.set_transitioning_out(m, v) }
+    /// `+0x038 void fClosing`
+    pub fn closing(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x38); m.r32(a) }
+    pub fn set_closing(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x38); m.w32(a, v) }
+    pub fn update_closing(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.closing(m)); self.set_closing(m, v) }
+    /// `+0x03c short fDiffX`
+    pub fn diff_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x3c); m.r16(a) as i16 }
+    pub fn set_diff_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x3c); m.w16(a, v as u16) }
+    pub fn update_diff_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.diff_x(m)); self.set_diff_x(m, v) }
+    /// `+0x03e short fDiffY`
+    pub fn diff_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x3e); m.r16(a) as i16 }
+    pub fn set_diff_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x3e); m.w16(a, v as u16) }
+    pub fn update_diff_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.diff_y(m)); self.set_diff_y(m, v) }
+    /// `+0x040 void fFillback`
+    pub fn fillback(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x40); m.r32(a) }
+    pub fn set_fillback(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x40); m.w32(a, v) }
+    pub fn update_fillback(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.fillback(m)); self.set_fillback(m, v) }
+}
+
+/// `tMenuNFS4` (0x7c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuNFS4(pub u32);
+/// `tMenuNFS4` derives from `tMenu`: its members are reachable through it.
+impl core::ops::Deref for MenuNFS4 {
+    type Target = Menu;
+    fn deref(&self) -> &Menu { unsafe { &*(self as *const Self as *const Menu) } }
+}
+impl MenuNFS4 {
+    /// The `tMenu` it derives from (the same address).
+    pub fn base(self) -> Menu { Menu(self.0) }
+}
+impl MenuNFS4 {
+    pub const SIZE: u32 = 0x7c;
+    /// Element `i` of an array of `tMenuNFS4` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenu tMenu`
+    pub fn t_menu(self) -> Menu { Menu(self.0.wrapping_add(0x0)) }
+    /// `+0x06c void fInItemTransition`
+    pub fn in_item_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x6c); m.r32(a) }
+    pub fn set_in_item_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v) }
+    pub fn update_in_item_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_item_transition(m)); self.set_in_item_transition(m, v) }
+    /// `+0x070 void fInMenuTransition`
+    pub fn in_menu_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x70); m.r32(a) }
+    pub fn set_in_menu_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x70); m.w32(a, v) }
+    pub fn update_in_menu_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_menu_transition(m)); self.set_in_menu_transition(m, v) }
+    /// `+0x074 short fTransitionVal`
+    pub fn transition_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x74); m.r16(a) as i16 }
+    pub fn set_transition_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x74); m.w16(a, v as u16) }
+    pub fn update_transition_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition_val(m)); self.set_transition_val(m, v) }
+    /// `+0x076 char fTransitionDirection`
+    pub fn transition_direction(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x76); m.r8(a) as i8 }
+    pub fn set_transition_direction(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x76); m.w8(a, v as u8) }
+    pub fn update_transition_direction(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.transition_direction(m)); self.set_transition_direction(m, v) }
+    /// `+0x077 char fLastItem`
+    pub fn last_item(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x77); m.r8(a) as i8 }
+    pub fn set_last_item(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x77); m.w8(a, v as u8) }
+    pub fn update_last_item(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.last_item(m)); self.set_last_item(m, v) }
+    /// `+0x078 char fNumItems`
+    pub fn num_items(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x78); m.r8(a) as i8 }
+    pub fn set_num_items(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x78); m.w8(a, v as u8) }
+    pub fn update_num_items(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.num_items(m)); self.set_num_items(m, v) }
+}
+
+/// `tMenuNFS4Bottom` (0x7c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuNFS4Bottom(pub u32);
+/// `tMenuNFS4Bottom` derives from `tMenuNFS4`: its members are reachable through it.
+impl core::ops::Deref for MenuNFS4Bottom {
+    type Target = MenuNFS4;
+    fn deref(&self) -> &MenuNFS4 { unsafe { &*(self as *const Self as *const MenuNFS4) } }
+}
+impl MenuNFS4Bottom {
+    /// The `tMenuNFS4` it derives from (the same address).
+    pub fn base(self) -> MenuNFS4 { MenuNFS4(self.0) }
+}
+impl MenuNFS4Bottom {
+    pub const SIZE: u32 = 0x7c;
+    /// Element `i` of an array of `tMenuNFS4Bottom` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuNFS4 tMenuNFS4`
+    pub fn t_menu_nfs4(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenuNFS4TwoPlayer` (0x7c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuNFS4TwoPlayer(pub u32);
+/// `tMenuNFS4TwoPlayer` derives from `tMenuNFS4`: its members are reachable through it.
+impl core::ops::Deref for MenuNFS4TwoPlayer {
+    type Target = MenuNFS4;
+    fn deref(&self) -> &MenuNFS4 { unsafe { &*(self as *const Self as *const MenuNFS4) } }
+}
+impl MenuNFS4TwoPlayer {
+    /// The `tMenuNFS4` it derives from (the same address).
+    pub fn base(self) -> MenuNFS4 { MenuNFS4(self.0) }
+}
+impl MenuNFS4TwoPlayer {
+    pub const SIZE: u32 = 0x7c;
+    /// Element `i` of an array of `tMenuNFS4TwoPlayer` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuNFS4 tMenuNFS4`
+    pub fn t_menu_nfs4(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x0)) }
+}
+
+/// `tMenuOptions` (0x84 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MenuOptions(pub u32);
+/// `tMenuOptions` derives from `tMenuNFS4`: its members are reachable through it.
+impl core::ops::Deref for MenuOptions {
+    type Target = MenuNFS4;
+    fn deref(&self) -> &MenuNFS4 { unsafe { &*(self as *const Self as *const MenuNFS4) } }
+}
+impl MenuOptions {
+    /// The `tMenuNFS4` it derives from (the same address).
+    pub fn base(self) -> MenuNFS4 { MenuNFS4(self.0) }
+}
+impl MenuOptions {
+    pub const SIZE: u32 = 0x84;
+    /// Element `i` of an array of `tMenuOptions` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuNFS4 tMenuNFS4`
+    pub fn t_menu_nfs4(self) -> MenuNFS4 { MenuNFS4(self.0.wrapping_add(0x0)) }
+    /// `+0x07c ulong fMenuEnterTicks`
+    pub fn menu_enter_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x7c); m.r32(a) }
+    pub fn set_menu_enter_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x7c); m.w32(a, v) }
+    pub fn update_menu_enter_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.menu_enter_ticks(m)); self.set_menu_enter_ticks(m, v) }
+    /// `+0x080 short fPlayer`
+    pub fn player(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x80); m.r16(a) as i16 }
+    pub fn set_player(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x80); m.w16(a, v as u16) }
+    pub fn update_player(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.player(m)); self.set_player(m, v) }
+}
+
+/// `tMissionInfo` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MissionInfo(pub u32);
+impl MissionInfo {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tMissionInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar fDescriptionID`
+    pub fn description_id(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x0); m.r8(a) }
+    pub fn set_description_id(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x0); m.w8(a, v) }
+    pub fn update_description_id(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.description_id(m)); self.set_description_id(m, v) }
+    /// `+0x001 uchar fTrackNumber`
+    pub fn track_number(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_track_number(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_track_number(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.track_number(m)); self.set_track_number(m, v) }
+    /// `+0x002 uchar fDirection`
+    pub fn direction(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_direction(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_direction(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.direction(m)); self.set_direction(m, v) }
+    /// `+0x003 uchar fMirrored`
+    pub fn mirrored(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_mirrored(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_mirrored(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.mirrored(m)); self.set_mirrored(m, v) }
+    /// `+0x004 uchar fTimeOfDay`
+    pub fn time_of_day(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_time_of_day(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_time_of_day(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.time_of_day(m)); self.set_time_of_day(m, v) }
+    /// `+0x005 uchar fWeather`
+    pub fn weather(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x5); m.r8(a) }
+    pub fn set_weather(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x5); m.w8(a, v) }
+    pub fn update_weather(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.weather(m)); self.set_weather(m, v) }
+    /// `+0x006 uchar fTraffic`
+    pub fn traffic(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x6); m.r8(a) }
+    pub fn set_traffic(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x6); m.w8(a, v) }
+    pub fn update_traffic(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.traffic(m)); self.set_traffic(m, v) }
+    /// `+0x007 uchar fPad`
+    pub fn pad(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x7); m.r8(a) }
+    pub fn set_pad(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x7); m.w8(a, v) }
+    pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.pad(m)); self.set_pad(m, v) }
+    /// `+0x008 ushort fStageOffset`
+    pub fn stage_offset(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x8); m.r16(a) }
+    pub fn set_stage_offset(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x8); m.w16(a, v) }
+    pub fn update_stage_offset(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.stage_offset(m)); self.set_stage_offset(m, v) }
+    /// `+0x00a uchar fNumStages`
+    pub fn num_stages(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0xa); m.r8(a) }
+    pub fn set_num_stages(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0xa); m.w8(a, v) }
+    pub fn update_num_stages(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.num_stages(m)); self.set_num_stages(m, v) }
+    /// `+0x00b uchar[9] fReserved`
+    pub fn reserved(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0xb + i * 1); debug_assert!(i < 9); m.r8(a) }
+    pub fn set_reserved(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0xb + i * 1); debug_assert!(i < 9); m.w8(a, v) }
+    pub fn update_reserved(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.reserved(m, i)); self.set_reserved(m, i, v) }
+}
+
+/// `tMissionManager` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MissionManager(pub u32);
+impl MissionManager {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tMissionManager` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char fNumTiers`
+    pub fn num_tiers(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_num_tiers(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_num_tiers(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.num_tiers(m)); self.set_num_tiers(m, v) }
+    /// `+0x004 struct tAcademyDefinition* fDefinition`
+    pub fn definition(self, m: &mut Mem) -> AcademyDefinition { let a = self.0.wrapping_add(0x4); AcademyDefinition(m.r32(a)) }
+    pub fn set_definition(self, m: &mut Mem, v: AcademyDefinition) { let a = self.0.wrapping_add(0x4); m.w32(a, v.0) }
+}
+
+/// `tMissionTierInfo` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct MissionTierInfo(pub u32);
+impl MissionTierInfo {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `tMissionTierInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar fNumMissions`
+    pub fn num_missions(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x0); m.r8(a) }
+    pub fn set_num_missions(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x0); m.w8(a, v) }
+    pub fn update_num_missions(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.num_missions(m)); self.set_num_missions(m, v) }
+    /// `+0x001 uchar fDescriptionID`
+    pub fn description_id(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_description_id(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_description_id(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.description_id(m)); self.set_description_id(m, v) }
+    /// `+0x002 uchar fMissionOffset`
+    pub fn mission_offset(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_mission_offset(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_mission_offset(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.mission_offset(m)); self.set_mission_offset(m, v) }
+    /// `+0x003 uchar fPad`
+    pub fn pad(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_pad(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.pad(m)); self.set_pad(m, v) }
+}
+
 /// `BO_tNewtonCollisionInfo` (0x30 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct NewtonCollisionInfo(pub u32);
 impl NewtonCollisionInfo {
     pub const SIZE: u32 = 0x30;
@@ -3944,6 +7154,7 @@ impl NewtonCollisionInfo {
 
 /// `BO_tNewtonObj` (0x240 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct NewtonObj(pub u32);
 impl NewtonObj {
     pub const SIZE: u32 = 0x240;
@@ -4123,8 +7334,145 @@ impl NewtonObj {
     pub fn update_damage(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.damage(m, i)); self.set_damage(m, i, v) }
 }
 
+/// `tNfsSystemInfo` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct NfsSystemInfo(pub u32);
+impl NfsSystemInfo {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `tNfsSystemInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 int userRam`
+    pub fn user_ram(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_user_ram(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_user_ram(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.user_ram(m)); self.set_user_ram(m, v) }
+}
+
+/// `tNightInitCache` (0x303 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct NightInitCache(pub u32);
+impl NightInitCache {
+    pub const SIZE: u32 = 0x303;
+    /// Element `i` of an array of `tNightInitCache` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tCompRGB[257] table`
+    pub fn table(self, i: u32) -> CompRGB { debug_assert!(i < 257); CompRGB(self.0.wrapping_add(0x0 + i * 0x3)) }
+}
+
+/// `tOldMenu` (0x50 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct OldMenu(pub u32);
+impl OldMenu {
+    pub const SIZE: u32 = 0x50;
+    /// Element `i` of an array of `tOldMenu` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char* artFileName`
+    pub fn art_file_name(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_art_file_name(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_art_file_name(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.art_file_name(m)); self.set_art_file_name(m, v) }
+    /// `+0x004 char* backgrName`
+    pub fn backgr_name(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_backgr_name(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_backgr_name(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.backgr_name(m)); self.set_backgr_name(m, v) }
+    /// `+0x008 short driver`
+    pub fn driver(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8); m.r16(a) as i16 }
+    pub fn set_driver(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8); m.w16(a, v as u16) }
+    pub fn update_driver(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.driver(m)); self.set_driver(m, v) }
+    /// `+0x00a short current`
+    pub fn current(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xa); m.r16(a) as i16 }
+    pub fn set_current(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xa); m.w16(a, v as u16) }
+    pub fn update_current(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.current(m)); self.set_current(m, v) }
+    /// `+0x00c short flags`
+    pub fn flags(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xc); m.r16(a) as i16 }
+    pub fn set_flags(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xc); m.w16(a, v as u16) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x00e short helpvariant`
+    pub fn helpvariant(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xe); m.r16(a) as i16 }
+    pub fn set_helpvariant(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xe); m.w16(a, v as u16) }
+    pub fn update_helpvariant(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.helpvariant(m)); self.set_helpvariant(m, v) }
+    /// `+0x010 struct tItemButton[16]* item`
+    pub fn item(self, m: &mut Mem, i: u32) -> ItemButton { let a = self.0.wrapping_add(0x10 + i * 4); debug_assert!(i < 16); ItemButton(m.r32(a)) }
+    pub fn set_item(self, m: &mut Mem, i: u32, v: ItemButton) { let a = self.0.wrapping_add(0x10 + i * 4); debug_assert!(i < 16); m.w32(a, v.0) }
+}
+
+/// `tOptionsMenu` (0x80 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct OptionsMenu(pub u32);
+/// `tOptionsMenu` derives from `tMenu`: its members are reachable through it.
+impl core::ops::Deref for OptionsMenu {
+    type Target = Menu;
+    fn deref(&self) -> &Menu { unsafe { &*(self as *const Self as *const Menu) } }
+}
+impl OptionsMenu {
+    /// The `tMenu` it derives from (the same address).
+    pub fn base(self) -> Menu { Menu(self.0) }
+}
+impl OptionsMenu {
+    pub const SIZE: u32 = 0x80;
+    /// Element `i` of an array of `tOptionsMenu` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenu tMenu`
+    pub fn t_menu(self) -> Menu { Menu(self.0.wrapping_add(0x0)) }
+    /// `+0x06c void fInMenuTransition`
+    pub fn in_menu_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x6c); m.r32(a) }
+    pub fn set_in_menu_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v) }
+    pub fn update_in_menu_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_menu_transition(m)); self.set_in_menu_transition(m, v) }
+    /// `+0x070 char fTransitionDirection`
+    pub fn transition_direction(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x70); m.r8(a) as i8 }
+    pub fn set_transition_direction(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x70); m.w8(a, v as u8) }
+    pub fn update_transition_direction(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.transition_direction(m)); self.set_transition_direction(m, v) }
+    /// `+0x072 short fPrevItem`
+    pub fn prev_item(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x72); m.r16(a) as i16 }
+    pub fn set_prev_item(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x72); m.w16(a, v as u16) }
+    pub fn update_prev_item(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.prev_item(m)); self.set_prev_item(m, v) }
+    /// `+0x074 int fScreenFade`
+    pub fn screen_fade(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x74); m.r32(a) as i32 }
+    pub fn set_screen_fade(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x74); m.w32(a, v as u32) }
+    pub fn update_screen_fade(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.screen_fade(m)); self.set_screen_fade(m, v) }
+    /// `+0x078 int fFirstFrame`
+    pub fn first_frame(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x78); m.r32(a) as i32 }
+    pub fn set_first_frame(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x78); m.w32(a, v as u32) }
+    pub fn update_first_frame(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.first_frame(m)); self.set_first_frame(m, v) }
+    /// `+0x07c int fNumFrames`
+    pub fn num_frames(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x7c); m.r32(a) as i32 }
+    pub fn set_num_frames(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x7c); m.w32(a, v as u32) }
+    pub fn update_num_frames(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_frames(m)); self.set_num_frames(m, v) }
+}
+
+/// `tOverlay` (0x18 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Overlay(pub u32);
+impl Overlay {
+    pub const SIZE: u32 = 0x18;
+    /// Element `i` of an array of `tOverlay` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct RECT[2] location`
+    pub fn location(self, i: u32) -> RECT { debug_assert!(i < 2); RECT(self.0.wrapping_add(0x0 + i * 0x8)) }
+    /// `+0x010 short transition`
+    pub fn transition(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x10); m.r16(a) as i16 }
+    pub fn set_transition(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x10); m.w16(a, v as u16) }
+    pub fn update_transition(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition(m)); self.set_transition(m, v) }
+    /// `+0x012 short delta`
+    pub fn delta(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x12); m.r16(a) as i16 }
+    pub fn set_delta(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x12); m.w16(a, v as u16) }
+    pub fn update_delta(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.delta(m)); self.set_delta(m, v) }
+    /// `+0x014 short direction`
+    pub fn direction(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x14); m.r16(a) as i16 }
+    pub fn set_direction(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x14); m.w16(a, v as u16) }
+    pub fn update_direction(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.direction(m)); self.set_direction(m, v) }
+    /// `+0x016 short ID`
+    pub fn id(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x16); m.r16(a) as i16 }
+    pub fn set_id(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x16); m.w16(a, v as u16) }
+    pub fn update_id(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.id(m)); self.set_id(m, v) }
+}
+
 /// `tOwnedCarInfo` (0x4 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct OwnedCarInfo(pub u32);
 impl OwnedCarInfo {
     pub const SIZE: u32 = 0x4;
@@ -4148,8 +7496,486 @@ impl OwnedCarInfo {
     pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.pad(m)); self.set_pad(m, v) }
 }
 
+/// `tPListIterator` (0xc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PListIterator(pub u32);
+impl PListIterator {
+    pub const SIZE: u32 = 0xc;
+    /// Element `i` of an array of `tPListIterator` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short* fSelectionList`
+    pub fn selection_list(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_selection_list(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_selection_list(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.selection_list(m)); self.set_selection_list(m, v) }
+    /// `+0x004 int* fValue`
+    pub fn value(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_value(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_value(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.value(m)); self.set_value(m, v) }
+    /// `+0x008 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x8); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x8); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
+}
+
+/// `tPListIteratorIndexed` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PListIteratorIndexed(pub u32);
+/// `tPListIteratorIndexed` derives from `tPListIterator`: its members are reachable through it.
+impl core::ops::Deref for PListIteratorIndexed {
+    type Target = PListIterator;
+    fn deref(&self) -> &PListIterator { unsafe { &*(self as *const Self as *const PListIterator) } }
+}
+impl PListIteratorIndexed {
+    /// The `tPListIterator` it derives from (the same address).
+    pub fn base(self) -> PListIterator { PListIterator(self.0) }
+}
+impl PListIteratorIndexed {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tPListIteratorIndexed` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPListIterator tPListIterator`
+    pub fn t_p_list_iterator(self) -> PListIterator { PListIterator(self.0.wrapping_add(0x0)) }
+    /// `+0x00c char* fIndex`
+    pub fn index(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_index(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_index(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.index(m)); self.set_index(m, v) }
+}
+
+/// `tPMenu` (0x54 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenu(pub u32);
+impl PMenu {
+    pub const SIZE: u32 = 0x54;
+    /// Element `i` of an array of `tPMenu` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 int fCurrentItem`
+    pub fn current_item(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_current_item(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_current_item(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.current_item(m)); self.set_current_item(m, v) }
+    /// `+0x004 void fHighlight`
+    pub fn highlight(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_highlight(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_highlight(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.highlight(m)); self.set_highlight(m, v) }
+    /// `+0x008 struct tPMenuItem[16]* fItemList`
+    pub fn item_list(self, m: &mut Mem, i: u32) -> PMenuItem { let a = self.0.wrapping_add(0x8 + i * 4); debug_assert!(i < 16); PMenuItem(m.r32(a)) }
+    pub fn set_item_list(self, m: &mut Mem, i: u32, v: PMenuItem) { let a = self.0.wrapping_add(0x8 + i * 4); debug_assert!(i < 16); m.w32(a, v.0) }
+    /// `+0x048 struct tPMenu* fNextMenu`
+    pub fn next_menu(self, m: &mut Mem) -> PMenu { let a = self.0.wrapping_add(0x48); PMenu(m.r32(a)) }
+    pub fn set_next_menu(self, m: &mut Mem, v: PMenu) { let a = self.0.wrapping_add(0x48); m.w32(a, v.0) }
+    /// `+0x04c int fNumItems`
+    pub fn num_items(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4c); m.r32(a) as i32 }
+    pub fn set_num_items(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4c); m.w32(a, v as u32) }
+    pub fn update_num_items(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_items(m)); self.set_num_items(m, v) }
+    /// `+0x050 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x50); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x50); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
+}
+
+/// `tPMenuCommand` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuCommand(pub u32);
+impl PMenuCommand {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tPMenuCommand` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 enum tPMenuCommandType type`
+    pub fn type_(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_type_(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_type_(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.type_(m)); self.set_type_(m, v) }
+    /// `+0x004 struct tPMenu* nextMenu`
+    pub fn next_menu(self, m: &mut Mem) -> PMenu { let a = self.0.wrapping_add(0x4); PMenu(m.r32(a)) }
+    pub fn set_next_menu(self, m: &mut Mem, v: PMenu) { let a = self.0.wrapping_add(0x4); m.w32(a, v.0) }
+}
+
+/// `tPMenuItem` (0xc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItem(pub u32);
+impl PMenuItem {
+    pub const SIZE: u32 = 0xc;
+    /// Element `i` of an array of `tPMenuItem` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uint fFlags`
+    pub fn flags(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x004 uint fTextDescription`
+    pub fn text_description(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_text_description(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_text_description(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.text_description(m)); self.set_text_description(m, v) }
+    /// `+0x008 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x8); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x8); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
+}
+
+/// `tPMenuItemCommandButton` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItemCommandButton(pub u32);
+/// `tPMenuItemCommandButton` derives from `tPMenuItemInteractive`: its members are reachable through it.
+impl core::ops::Deref for PMenuItemCommandButton {
+    type Target = PMenuItemInteractive;
+    fn deref(&self) -> &PMenuItemInteractive { unsafe { &*(self as *const Self as *const PMenuItemInteractive) } }
+}
+impl PMenuItemCommandButton {
+    /// The `tPMenuItemInteractive` it derives from (the same address).
+    pub fn base(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0) }
+}
+impl PMenuItemCommandButton {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tPMenuItemCommandButton` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItemInteractive tPMenuItemInteractive`
+    pub fn t_p_menu_item_interactive(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x00c enum tPMenuCommandType fCommand`
+    pub fn command(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_command(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_command(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.command(m)); self.set_command(m, v) }
+}
+
+/// `tPMenuItemGoToMenuButton` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItemGoToMenuButton(pub u32);
+/// `tPMenuItemGoToMenuButton` derives from `tPMenuItemInteractive`: its members are reachable through it.
+impl core::ops::Deref for PMenuItemGoToMenuButton {
+    type Target = PMenuItemInteractive;
+    fn deref(&self) -> &PMenuItemInteractive { unsafe { &*(self as *const Self as *const PMenuItemInteractive) } }
+}
+impl PMenuItemGoToMenuButton {
+    /// The `tPMenuItemInteractive` it derives from (the same address).
+    pub fn base(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0) }
+}
+impl PMenuItemGoToMenuButton {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tPMenuItemGoToMenuButton` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItemInteractive tPMenuItemInteractive`
+    pub fn t_p_menu_item_interactive(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x00c struct tPMenu* fNewMenu`
+    pub fn new_menu(self, m: &mut Mem) -> PMenu { let a = self.0.wrapping_add(0xc); PMenu(m.r32(a)) }
+    pub fn set_new_menu(self, m: &mut Mem, v: PMenu) { let a = self.0.wrapping_add(0xc); m.w32(a, v.0) }
+    /// `+0x010 void*() fOnButtonPress`
+    pub fn on_button_press(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_on_button_press(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_on_button_press(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.on_button_press(m)); self.set_on_button_press(m, v) }
+}
+
+/// `tPMenuItemInteractive` (0xc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItemInteractive(pub u32);
+/// `tPMenuItemInteractive` derives from `tPMenuItem`: its members are reachable through it.
+impl core::ops::Deref for PMenuItemInteractive {
+    type Target = PMenuItem;
+    fn deref(&self) -> &PMenuItem { unsafe { &*(self as *const Self as *const PMenuItem) } }
+}
+impl PMenuItemInteractive {
+    /// The `tPMenuItem` it derives from (the same address).
+    pub fn base(self) -> PMenuItem { PMenuItem(self.0) }
+}
+impl PMenuItemInteractive {
+    pub const SIZE: u32 = 0xc;
+    /// Element `i` of an array of `tPMenuItemInteractive` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItem tPMenuItem`
+    pub fn t_p_menu_item(self) -> PMenuItem { PMenuItem(self.0.wrapping_add(0x0)) }
+}
+
+/// `tPMenuItemLeftRightChoice` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItemLeftRightChoice(pub u32);
+/// `tPMenuItemLeftRightChoice` derives from `tPMenuItemInteractive`: its members are reachable through it.
+impl core::ops::Deref for PMenuItemLeftRightChoice {
+    type Target = PMenuItemInteractive;
+    fn deref(&self) -> &PMenuItemInteractive { unsafe { &*(self as *const Self as *const PMenuItemInteractive) } }
+}
+impl PMenuItemLeftRightChoice {
+    /// The `tPMenuItemInteractive` it derives from (the same address).
+    pub fn base(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0) }
+}
+impl PMenuItemLeftRightChoice {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tPMenuItemLeftRightChoice` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItemInteractive tPMenuItemInteractive`
+    pub fn t_p_menu_item_interactive(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x00c struct tPListIterator* fData`
+    pub fn data(self, m: &mut Mem) -> PListIterator { let a = self.0.wrapping_add(0xc); PListIterator(m.r32(a)) }
+    pub fn set_data(self, m: &mut Mem, v: PListIterator) { let a = self.0.wrapping_add(0xc); m.w32(a, v.0) }
+}
+
+/// `tPMenuItemLeftRightSlider` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItemLeftRightSlider(pub u32);
+/// `tPMenuItemLeftRightSlider` derives from `tPMenuItemInteractive`: its members are reachable through it.
+impl core::ops::Deref for PMenuItemLeftRightSlider {
+    type Target = PMenuItemInteractive;
+    fn deref(&self) -> &PMenuItemInteractive { unsafe { &*(self as *const Self as *const PMenuItemInteractive) } }
+}
+impl PMenuItemLeftRightSlider {
+    /// The `tPMenuItemInteractive` it derives from (the same address).
+    pub fn base(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0) }
+}
+impl PMenuItemLeftRightSlider {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tPMenuItemLeftRightSlider` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItemInteractive tPMenuItemInteractive`
+    pub fn t_p_menu_item_interactive(self) -> PMenuItemInteractive { PMenuItemInteractive(self.0.wrapping_add(0x0)) }
+    /// `+0x00c int* fData`
+    pub fn data(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_data(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_data(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.data(m)); self.set_data(m, v) }
+    /// `+0x010 char fMaxVal`
+    pub fn max_val(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x10); m.r8(a) as i8 }
+    pub fn set_max_val(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x10); m.w8(a, v as u8) }
+    pub fn update_max_val(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.max_val(m)); self.set_max_val(m, v) }
+}
+
+/// `tPMenuItemLeftRightSliderIndexed` (0x18 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItemLeftRightSliderIndexed(pub u32);
+/// `tPMenuItemLeftRightSliderIndexed` derives from `tPMenuItemLeftRightSlider`: its members are reachable through it.
+impl core::ops::Deref for PMenuItemLeftRightSliderIndexed {
+    type Target = PMenuItemLeftRightSlider;
+    fn deref(&self) -> &PMenuItemLeftRightSlider { unsafe { &*(self as *const Self as *const PMenuItemLeftRightSlider) } }
+}
+impl PMenuItemLeftRightSliderIndexed {
+    /// The `tPMenuItemLeftRightSlider` it derives from (the same address).
+    pub fn base(self) -> PMenuItemLeftRightSlider { PMenuItemLeftRightSlider(self.0) }
+}
+impl PMenuItemLeftRightSliderIndexed {
+    pub const SIZE: u32 = 0x18;
+    /// Element `i` of an array of `tPMenuItemLeftRightSliderIndexed` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItemLeftRightSlider tPMenuItemLeftRightSlider`
+    pub fn t_p_menu_item_left_right_slider(self) -> PMenuItemLeftRightSlider { PMenuItemLeftRightSlider(self.0.wrapping_add(0x0)) }
+    /// `+0x014 char* fIndex`
+    pub fn index(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14); m.r32(a) }
+    pub fn set_index(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14); m.w32(a, v) }
+    pub fn update_index(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.index(m)); self.set_index(m, v) }
+}
+
+/// `tPMenuItemNonInteractiveText` (0xc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PMenuItemNonInteractiveText(pub u32);
+/// `tPMenuItemNonInteractiveText` derives from `tPMenuItem`: its members are reachable through it.
+impl core::ops::Deref for PMenuItemNonInteractiveText {
+    type Target = PMenuItem;
+    fn deref(&self) -> &PMenuItem { unsafe { &*(self as *const Self as *const PMenuItem) } }
+}
+impl PMenuItemNonInteractiveText {
+    /// The `tPMenuItem` it derives from (the same address).
+    pub fn base(self) -> PMenuItem { PMenuItem(self.0) }
+}
+impl PMenuItemNonInteractiveText {
+    pub const SIZE: u32 = 0xc;
+    /// Element `i` of an array of `tPMenuItemNonInteractiveText` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItem tPMenuItem`
+    pub fn t_p_menu_item(self) -> PMenuItem { PMenuItem(self.0.wrapping_add(0x0)) }
+}
+
+/// `tPSXToFEMapping` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PSXToFEMapping(pub u32);
+impl PSXToFEMapping {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tPSXToFEMapping` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 int PSXKey`
+    pub fn psx_key(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_psx_key(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_psx_key(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.psx_key(m)); self.set_psx_key(m, v) }
+    /// `+0x004 enum tInputKeyType FEKey`
+    pub fn fe_key(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_fe_key(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_fe_key(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.fe_key(m)); self.set_fe_key(m, v) }
+}
+
+/// `tPauseMenuDefs` (0x358 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PauseMenuDefs(pub u32);
+impl PauseMenuDefs {
+    pub const SIZE: u32 = 0x358;
+    /// Element `i` of an array of `tPauseMenuDefs` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tPMenuItemNonInteractiveText itemGamePaused`
+    pub fn item_game_paused(self) -> PMenuItemNonInteractiveText { PMenuItemNonInteractiveText(self.0.wrapping_add(0x0)) }
+    /// `+0x00c struct tPMenuItemCommandButton itemContinue`
+    pub fn item_continue(self) -> PMenuItemCommandButton { PMenuItemCommandButton(self.0.wrapping_add(0xc)) }
+    /// `+0x01c struct tPMenuItemCommandButton itemRestart`
+    pub fn item_restart(self) -> PMenuItemCommandButton { PMenuItemCommandButton(self.0.wrapping_add(0x1c)) }
+    /// `+0x02c struct tPMenuItemGoToMenuButton itemOptions`
+    pub fn item_options(self) -> PMenuItemGoToMenuButton { PMenuItemGoToMenuButton(self.0.wrapping_add(0x2c)) }
+    /// `+0x040 struct tPMenuItemCommandButton itemQuitRace`
+    pub fn item_quit_race(self) -> PMenuItemCommandButton { PMenuItemCommandButton(self.0.wrapping_add(0x40)) }
+    /// `+0x050 struct tPMenuItemCommandButton itemForfeitRace`
+    pub fn item_forfeit_race(self) -> PMenuItemCommandButton { PMenuItemCommandButton(self.0.wrapping_add(0x50)) }
+    /// `+0x060 struct tPMenu menuPause`
+    pub fn menu_pause(self) -> PMenu { PMenu(self.0.wrapping_add(0x60)) }
+    /// `+0x0b4 struct tPMenuItemNonInteractiveText itemOptionsTitle`
+    pub fn item_options_title(self) -> PMenuItemNonInteractiveText { PMenuItemNonInteractiveText(self.0.wrapping_add(0xb4)) }
+    /// `+0x0c0 struct tPMenuItemGoToMenuButton itemAudioSettings`
+    pub fn item_audio_settings(self) -> PMenuItemGoToMenuButton { PMenuItemGoToMenuButton(self.0.wrapping_add(0xc0)) }
+    /// `+0x0d4 struct tPMenuItemGoToMenuButton itemControllerSettings`
+    pub fn item_controller_settings(self) -> PMenuItemGoToMenuButton { PMenuItemGoToMenuButton(self.0.wrapping_add(0xd4)) }
+    /// `+0x0e8 struct tPMenu menuOptions`
+    pub fn menu_options(self) -> PMenu { PMenu(self.0.wrapping_add(0xe8)) }
+    /// `+0x13c struct tPMenuItemNonInteractiveText itemAudioSettingsTitle`
+    pub fn item_audio_settings_title(self) -> PMenuItemNonInteractiveText { PMenuItemNonInteractiveText(self.0.wrapping_add(0x13c)) }
+    /// `+0x148 struct tPListIterator iteratorAudioMode`
+    pub fn iterator_audio_mode(self) -> PListIterator { PListIterator(self.0.wrapping_add(0x148)) }
+    /// `+0x154 struct tPMenuItemLeftRightChoice itemAudioSettingsAudioMode`
+    pub fn item_audio_settings_audio_mode(self) -> PMenuItemLeftRightChoice { PMenuItemLeftRightChoice(self.0.wrapping_add(0x154)) }
+    /// `+0x164 struct tPMenuItemLeftRightSlider itemAudioSettingsMusicVolume`
+    pub fn item_audio_settings_music_volume(self) -> PMenuItemLeftRightSlider { PMenuItemLeftRightSlider(self.0.wrapping_add(0x164)) }
+    /// `+0x178 struct tPMenuItemLeftRightSlider itemAudioSettingsFXVolume`
+    pub fn item_audio_settings_fx_volume(self) -> PMenuItemLeftRightSlider { PMenuItemLeftRightSlider(self.0.wrapping_add(0x178)) }
+    /// `+0x18c struct tPMenuItemLeftRightSlider itemAudioSettingsSpeechVolume`
+    pub fn item_audio_settings_speech_volume(self) -> PMenuItemLeftRightSlider { PMenuItemLeftRightSlider(self.0.wrapping_add(0x18c)) }
+    /// `+0x1a0 struct tPMenuItemLeftRightSlider itemAudioSettingsEngineVolume`
+    pub fn item_audio_settings_engine_volume(self) -> PMenuItemLeftRightSlider { PMenuItemLeftRightSlider(self.0.wrapping_add(0x1a0)) }
+    /// `+0x1b4 struct tPMenuItemLeftRightSlider itemAudioSettingsAmbientVolume`
+    pub fn item_audio_settings_ambient_volume(self) -> PMenuItemLeftRightSlider { PMenuItemLeftRightSlider(self.0.wrapping_add(0x1b4)) }
+    /// `+0x1c8 struct tPMenu menuAudioSettings`
+    pub fn menu_audio_settings(self) -> PMenu { PMenu(self.0.wrapping_add(0x1c8)) }
+    /// `+0x21c struct tPListIteratorIndexed iteratorConfig`
+    pub fn iterator_config(self) -> PListIteratorIndexed { PListIteratorIndexed(self.0.wrapping_add(0x21c)) }
+    /// `+0x22c struct tPMenuItemNonInteractiveText itemControllerSettingsTitle`
+    pub fn item_controller_settings_title(self) -> PMenuItemNonInteractiveText { PMenuItemNonInteractiveText(self.0.wrapping_add(0x22c)) }
+    /// `+0x238 struct tPMenuItemLeftRightChoice itemControllerConfig`
+    pub fn item_controller_config(self) -> PMenuItemLeftRightChoice { PMenuItemLeftRightChoice(self.0.wrapping_add(0x238)) }
+    /// `+0x248 struct tPMenuItemLeftRightSliderIndexed itemControllerShockMode`
+    pub fn item_controller_shock_mode(self) -> PMenuItemLeftRightSliderIndexed { PMenuItemLeftRightSliderIndexed(self.0.wrapping_add(0x248)) }
+    /// `+0x260 struct tPMenuItemLeftRightSliderIndexed itemControllerShockImpact`
+    pub fn item_controller_shock_impact(self) -> PMenuItemLeftRightSliderIndexed { PMenuItemLeftRightSliderIndexed(self.0.wrapping_add(0x260)) }
+    /// `+0x278 struct tPMenu menuControllerConfig`
+    pub fn menu_controller_config(self) -> PMenu { PMenu(self.0.wrapping_add(0x278)) }
+    /// `+0x2cc struct tPMenuItemNonInteractiveText itemConfirmTitle`
+    pub fn item_confirm_title(self) -> PMenuItemNonInteractiveText { PMenuItemNonInteractiveText(self.0.wrapping_add(0x2cc)) }
+    /// `+0x2d8 struct tPMenuItemNonInteractiveText itemConfirmAreYouSure`
+    pub fn item_confirm_are_you_sure(self) -> PMenuItemNonInteractiveText { PMenuItemNonInteractiveText(self.0.wrapping_add(0x2d8)) }
+    /// `+0x2e4 struct tPMenuItemCommandButton itemConfirmNo`
+    pub fn item_confirm_no(self) -> PMenuItemCommandButton { PMenuItemCommandButton(self.0.wrapping_add(0x2e4)) }
+    /// `+0x2f4 struct tPMenuItemCommandButton itemConfirmYes`
+    pub fn item_confirm_yes(self) -> PMenuItemCommandButton { PMenuItemCommandButton(self.0.wrapping_add(0x2f4)) }
+    /// `+0x304 struct tPMenu menuConfirmYesNo`
+    pub fn menu_confirm_yes_no(self) -> PMenu { PMenu(self.0.wrapping_add(0x304)) }
+}
+
+/// `tPerpModelList` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct PerpModelList(pub u32);
+impl PerpModelList {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tPerpModelList` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 enum tCarModels carModel`
+    pub fn car_model(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_car_model(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_car_model(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.car_model(m)); self.set_car_model(m, v) }
+    /// `+0x004 char carColor`
+    pub fn car_color(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x4); m.r8(a) as i8 }
+    pub fn set_car_color(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x4); m.w8(a, v as u8) }
+    pub fn update_car_color(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.car_color(m)); self.set_car_color(m, v) }
+}
+
+/// `tQuat` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Quat(pub u32);
+impl Quat {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tQuat` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short x`
+    pub fn x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x002 short y`
+    pub fn y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y(m)); self.set_y(m, v) }
+    /// `+0x004 short z`
+    pub fn z(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_z(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_z(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.z(m)); self.set_z(m, v) }
+    /// `+0x006 short w`
+    pub fn w(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_w(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_w(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.w(m)); self.set_w(m, v) }
+}
+
+/// `RECT` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct RECT(pub u32);
+impl RECT {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `RECT` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short x`
+    pub fn x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x002 short y`
+    pub fn y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y(m)); self.set_y(m, v) }
+    /// `+0x004 short w`
+    pub fn w(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_w(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_w(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.w(m)); self.set_w(m, v) }
+    /// `+0x006 short h`
+    pub fn h(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_h(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_h(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.h(m)); self.set_h(m, v) }
+}
+
+/// `tRecordBuffer` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct RecordBuffer(pub u32);
+impl RecordBuffer {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tRecordBuffer` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char[8] sName`
+    pub fn s_name(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 8); m.r8(a) as i8 }
+    pub fn set_s_name(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 8); m.w8(a, v as u8) }
+    pub fn update_s_name(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.s_name(m, i)); self.set_s_name(m, i, v) }
+    /// `+0x008 int nCar`
+    pub fn n_car(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_n_car(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_n_car(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.n_car(m)); self.set_n_car(m, v) }
+    /// `+0x00c int nTime`
+    pub fn n_time(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_n_time(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_n_time(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.n_time(m)); self.set_n_time(m, v) }
+    /// `+0x010 int nBestLap`
+    pub fn n_best_lap(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
+    pub fn set_n_best_lap(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
+    pub fn update_n_best_lap(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.n_best_lap(m)); self.set_n_best_lap(m, v) }
+}
+
 /// `RelCoord16` (0x4 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct RelCoord16(pub u32);
 impl RelCoord16 {
     pub const SIZE: u32 = 0x4;
@@ -4165,8 +7991,55 @@ impl RelCoord16 {
     pub fn update_z(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.z(m)); self.set_z(m, v) }
 }
 
+/// `tReplayBuffer` (0x6a2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ReplayBuffer(pub u32);
+impl ReplayBuffer {
+    pub const SIZE: u32 = 0x6a2c;
+    /// Element `i` of an array of `tReplayBuffer` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct GameSetup_tData gameSetup`
+    pub fn game_setup(self) -> GameSetupData { GameSetupData(self.0.wrapping_add(0x0)) }
+    /// `+0xa28 int size`
+    pub fn size(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xa28); m.r32(a) as i32 }
+    pub fn set_size(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xa28); m.w32(a, v as u32) }
+    pub fn update_size(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.size(m)); self.set_size(m, v) }
+    /// `+0xa2c char[24576] buffer`
+    pub fn buffer(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0xa2c + i * 1); debug_assert!(i < 24576); m.r8(a) as i8 }
+    pub fn set_buffer(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0xa2c + i * 1); debug_assert!(i < 24576); m.w8(a, v as u8) }
+    pub fn update_buffer(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.buffer(m, i)); self.set_buffer(m, i, v) }
+}
+
+/// `tReplayCameraModes` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ReplayCameraModes(pub u32);
+impl ReplayCameraModes {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tReplayCameraModes` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 int defaultCamera`
+    pub fn default_camera(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_default_camera(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_default_camera(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.default_camera(m)); self.set_default_camera(m, v) }
+    /// `+0x004 int timeCounter`
+    pub fn time_counter(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_time_counter(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_time_counter(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.time_counter(m)); self.set_time_counter(m, v) }
+    /// `+0x008 int cameraMode`
+    pub fn camera_mode(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_camera_mode(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_camera_mode(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.camera_mode(m)); self.set_camera_mode(m, v) }
+    /// `+0x00c int cutToNextCamera`
+    pub fn cut_to_next_camera(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_cut_to_next_camera(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_cut_to_next_camera(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.cut_to_next_camera(m)); self.set_cut_to_next_camera(m, v) }
+}
+
 /// `tReplayInterface` (0x20 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct ReplayInterface(pub u32);
 impl ReplayInterface {
     pub const SIZE: u32 = 0x20;
@@ -4208,6 +8081,7 @@ impl ReplayInterface {
 
 /// `tSaveCarInfo` (0xe0 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct SaveCarInfo(pub u32);
 impl SaveCarInfo {
     pub const SIZE: u32 = 0xe0;
@@ -4225,8 +8099,80 @@ impl SaveCarInfo {
     pub fn update_save_viewable(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.save_viewable(m, i)); self.set_save_viewable(m, i, v) }
 }
 
+/// `tSaveSurface` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct SaveSurface(pub u32);
+impl SaveSurface {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tSaveSurface` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct Trk_NewSimQuad* fSimQuad`
+    pub fn sim_quad(self, m: &mut Mem) -> TrkNewSimQuad { let a = self.0.wrapping_add(0x0); TrkNewSimQuad(m.r32(a)) }
+    pub fn set_sim_quad(self, m: &mut Mem, v: TrkNewSimQuad) { let a = self.0.wrapping_add(0x0); m.w32(a, v.0) }
+    /// `+0x004 uchar fSurface`
+    pub fn surface(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_surface(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_surface(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.surface(m)); self.set_surface(m, v) }
+}
+
+/// `tSaveTournament` (0xb0 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct SaveTournament(pub u32);
+impl SaveTournament {
+    pub const SIZE: u32 = 0xb0;
+    /// Element `i` of an array of `tSaveTournament` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 long fSaveMoney`
+    pub fn save_money(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_save_money(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_save_money(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.save_money(m)); self.set_save_money(m, v) }
+    /// `+0x004 uchar fSaveTier`
+    pub fn save_tier(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_save_tier(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_save_tier(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.save_tier(m)); self.set_save_tier(m, v) }
+    /// `+0x005 uchar fSaveTournament`
+    pub fn save_tournament(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x5); m.r8(a) }
+    pub fn set_save_tournament(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x5); m.w8(a, v) }
+    pub fn update_save_tournament(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.save_tournament(m)); self.set_save_tournament(m, v) }
+    /// `+0x006 uchar fSaveTrack`
+    pub fn save_track(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x6); m.r8(a) }
+    pub fn set_save_track(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x6); m.w8(a, v) }
+    pub fn update_save_track(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.save_track(m)); self.set_save_track(m, v) }
+    /// `+0x007 uchar fSaveNumRacers`
+    pub fn save_num_racers(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x7); m.r8(a) }
+    pub fn set_save_num_racers(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x7); m.w8(a, v) }
+    pub fn update_save_num_racers(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.save_num_racers(m)); self.set_save_num_racers(m, v) }
+    /// `+0x008 struct tCompetitor[6] fSaveCompetitors`
+    pub fn save_competitors(self, i: u32) -> Competitor { debug_assert!(i < 6); Competitor(self.0.wrapping_add(0x8 + i * 0x10)) }
+    /// `+0x068 uchar[64] fSaveBestPlacement`
+    pub fn save_best_placement(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x68 + i * 1); debug_assert!(i < 64); m.r8(a) }
+    pub fn set_save_best_placement(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x68 + i * 1); debug_assert!(i < 64); m.w8(a, v) }
+    pub fn update_save_best_placement(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.save_best_placement(m, i)); self.set_save_best_placement(m, i, v) }
+    /// `+0x0a8 short[4] fSaveTierFinishPrize`
+    pub fn save_tier_finish_prize(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0xa8 + i * 2); debug_assert!(i < 4); m.r16(a) as i16 }
+    pub fn set_save_tier_finish_prize(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0xa8 + i * 2); debug_assert!(i < 4); m.w16(a, v as u16) }
+    pub fn update_save_tier_finish_prize(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.save_tier_finish_prize(m, i)); self.set_save_tier_finish_prize(m, i, v) }
+}
+
+/// `tSaveTrackInfo` (0x10 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct SaveTrackInfo(pub u32);
+impl SaveTrackInfo {
+    pub const SIZE: u32 = 0x10;
+    /// Element `i` of an array of `tSaveTrackInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar[16] fTrackActivated`
+    pub fn track_activated(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 16); m.r8(a) }
+    pub fn set_track_activated(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x0 + i * 1); debug_assert!(i < 16); m.w8(a, v) }
+    pub fn update_track_activated(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.track_activated(m, i)); self.set_track_activated(m, i, v) }
+}
+
 /// `Sched_tFunctionSchedule` (0x10 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct SchedFunctionSchedule(pub u32);
 impl SchedFunctionSchedule {
     pub const SIZE: u32 = 0x10;
@@ -4252,6 +8198,7 @@ impl SchedFunctionSchedule {
 
 /// `Sched_tSchedule` (0x18 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct SchedSchedule(pub u32);
 impl SchedSchedule {
     pub const SIZE: u32 = 0x18;
@@ -4269,8 +8216,1453 @@ impl SchedSchedule {
     pub fn func(self, i: u32) -> SchedFunctionSchedule { debug_assert!(i < 1); SchedFunctionSchedule(self.0.wrapping_add(0x8 + i * 0x10)) }
 }
 
+/// `tScreen` (0x64 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Screen(pub u32);
+impl Screen {
+    pub const SIZE: u32 = 0x64;
+    /// Element `i` of an array of `tScreen` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tShapeInformation fPermShapes`
+    pub fn perm_shapes(self) -> ShapeInformation { ShapeInformation(self.0.wrapping_add(0x0)) }
+    /// `+0x028 struct tShapeInformation fSwapShapes`
+    pub fn swap_shapes(self) -> ShapeInformation { ShapeInformation(self.0.wrapping_add(0x28)) }
+    /// `+0x050 int fTransitionTicks`
+    pub fn transition_ticks(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x50); m.r32(a) as i32 }
+    pub fn set_transition_ticks(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x50); m.w32(a, v as u32) }
+    pub fn update_transition_ticks(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.transition_ticks(m)); self.set_transition_ticks(m, v) }
+    /// `+0x054 void fTransitionOff`
+    pub fn transition_off(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x54); m.r32(a) }
+    pub fn set_transition_off(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x54); m.w32(a, v) }
+    pub fn update_transition_off(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.transition_off(m)); self.set_transition_off(m, v) }
+    /// `+0x058 int fInternalScreenFadeVal`
+    pub fn internal_screen_fade_val(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x58); m.r32(a) as i32 }
+    pub fn set_internal_screen_fade_val(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x58); m.w32(a, v as u32) }
+    pub fn update_internal_screen_fade_val(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.internal_screen_fade_val(m)); self.set_internal_screen_fade_val(m, v) }
+    /// `+0x05c short fScreenFadeVal`
+    pub fn screen_fade_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x5c); m.r16(a) as i16 }
+    pub fn set_screen_fade_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x5c); m.w16(a, v as u16) }
+    pub fn update_screen_fade_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.screen_fade_val(m)); self.set_screen_fade_val(m, v) }
+    /// `+0x060 ulong vtable`
+    pub fn vtable(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x60); m.r32(a) }
+    pub fn set_vtable(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x60); m.w32(a, v) }
+    pub fn update_vtable(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.vtable(m)); self.set_vtable(m, v) }
+}
+
+/// `tScreenAudio` (0x7c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenAudio(pub u32);
+/// `tScreenAudio` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenAudio {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenAudio {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenAudio {
+    pub const SIZE: u32 = 0x7c;
+    /// Element `i` of an array of `tScreenAudio` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 short fShapeCount`
+    pub fn shape_count(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x64); m.r16(a) as i16 }
+    pub fn set_shape_count(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x64); m.w16(a, v as u16) }
+    pub fn update_shape_count(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.shape_count(m)); self.set_shape_count(m, v) }
+    /// `+0x066 char prevAudioMode`
+    pub fn prev_audio_mode(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x66); m.r8(a) as i8 }
+    pub fn set_prev_audio_mode(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x66); m.w8(a, v as u8) }
+    pub fn update_prev_audio_mode(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.prev_audio_mode(m)); self.set_prev_audio_mode(m, v) }
+    /// `+0x068 short audioTest`
+    pub fn audio_test(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x68); m.r16(a) as i16 }
+    pub fn set_audio_test(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x68); m.w16(a, v as u16) }
+    pub fn update_audio_test(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.audio_test(m)); self.set_audio_test(m, v) }
+    /// `+0x06c int audioTestHandle`
+    pub fn audio_test_handle(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x6c); m.r32(a) as i32 }
+    pub fn set_audio_test_handle(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v as u32) }
+    pub fn update_audio_test_handle(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.audio_test_handle(m)); self.set_audio_test_handle(m, v) }
+    /// `+0x070 short fPrevSelectedSong`
+    pub fn prev_selected_song(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x70); m.r16(a) as i16 }
+    pub fn set_prev_selected_song(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x70); m.w16(a, v as u16) }
+    pub fn update_prev_selected_song(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.prev_selected_song(m)); self.set_prev_selected_song(m, v) }
+    /// `+0x072 char fCurrentAudioMode`
+    pub fn current_audio_mode(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x72); m.r8(a) as i8 }
+    pub fn set_current_audio_mode(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x72); m.w8(a, v as u8) }
+    pub fn update_current_audio_mode(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.current_audio_mode(m)); self.set_current_audio_mode(m, v) }
+    /// `+0x074 short fSelectedSong`
+    pub fn selected_song(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x74); m.r16(a) as i16 }
+    pub fn set_selected_song(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x74); m.w16(a, v as u16) }
+    pub fn update_selected_song(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.selected_song(m)); self.set_selected_song(m, v) }
+    /// `+0x078 struct AudioMus_tSongList* songlist`
+    pub fn songlist(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x78); m.r32(a) }
+    pub fn set_songlist(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x78); m.w32(a, v) }
+    pub fn update_songlist(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.songlist(m)); self.set_songlist(m, v) }
+}
+
+/// `tScreenBeTheCopCongrats` (0x184 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenBeTheCopCongrats(pub u32);
+/// `tScreenBeTheCopCongrats` derives from `tScreenCongrats`: its members are reachable through it.
+impl core::ops::Deref for ScreenBeTheCopCongrats {
+    type Target = ScreenCongrats;
+    fn deref(&self) -> &ScreenCongrats { unsafe { &*(self as *const Self as *const ScreenCongrats) } }
+}
+impl ScreenBeTheCopCongrats {
+    /// The `tScreenCongrats` it derives from (the same address).
+    pub fn base(self) -> ScreenCongrats { ScreenCongrats(self.0) }
+}
+impl ScreenBeTheCopCongrats {
+    pub const SIZE: u32 = 0x184;
+    /// Element `i` of an array of `tScreenBeTheCopCongrats` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenCongrats tScreenCongrats`
+    pub fn t_screen_congrats(self) -> ScreenCongrats { ScreenCongrats(self.0.wrapping_add(0x0)) }
+}
+
+/// `tScreenCarSelect` (0x3a0 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenCarSelect(pub u32);
+/// `tScreenCarSelect` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenCarSelect {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenCarSelect {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenCarSelect {
+    pub const SIZE: u32 = 0x3a0;
+    /// Element `i` of an array of `tScreenCarSelect` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 struct tOverlay[7] fOverlays`
+    pub fn overlays(self, i: u32) -> Overlay { debug_assert!(i < 7); Overlay(self.0.wrapping_add(0x64 + i * 0x18)) }
+    /// `+0x10c struct tOverlay[4]* fCurrentOverlays`
+    pub fn current_overlays(self, m: &mut Mem, i: u32) -> Overlay { let a = self.0.wrapping_add(0x10c + i * 4); debug_assert!(i < 4); Overlay(m.r32(a)) }
+    pub fn set_current_overlays(self, m: &mut Mem, i: u32, v: Overlay) { let a = self.0.wrapping_add(0x10c + i * 4); debug_assert!(i < 4); m.w32(a, v.0) }
+    /// `+0x11c short fState`
+    pub fn state(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x11c); m.r16(a) as i16 }
+    pub fn set_state(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x11c); m.w16(a, v as u16) }
+    pub fn update_state(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.state(m)); self.set_state(m, v) }
+    /// `+0x11e short fPreviousCar`
+    pub fn previous_car(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x11e); m.r16(a) as i16 }
+    pub fn set_previous_car(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x11e); m.w16(a, v as u16) }
+    pub fn update_previous_car(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_car(m)); self.set_previous_car(m, v) }
+    /// `+0x120 short fPreviousCarID`
+    pub fn previous_car_id(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x120); m.r16(a) as i16 }
+    pub fn set_previous_car_id(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x120); m.w16(a, v as u16) }
+    pub fn update_previous_car_id(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_car_id(m)); self.set_previous_car_id(m, v) }
+    /// `+0x122 short fPreviousCountry`
+    pub fn previous_country(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x122); m.r16(a) as i16 }
+    pub fn set_previous_country(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x122); m.w16(a, v as u16) }
+    pub fn update_previous_country(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_country(m)); self.set_previous_country(m, v) }
+    /// `+0x124 struct tTVConfig[10] tvConfigs`
+    pub fn tv_configs(self, i: u32) -> TVConfig { debug_assert!(i < 10); TVConfig(self.0.wrapping_add(0x124 + i * 0x30)) }
+    /// `+0x304 struct tVideoWall[2] fVideoWall`
+    pub fn video_wall(self, i: u32) -> VideoWall { debug_assert!(i < 2); VideoWall(self.0.wrapping_add(0x304 + i * 0x38)) }
+    /// `+0x374 short[2] fBrightness`
+    pub fn brightness(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x374 + i * 2); debug_assert!(i < 2); m.r16(a) as i16 }
+    pub fn set_brightness(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x374 + i * 2); debug_assert!(i < 2); m.w16(a, v as u16) }
+    pub fn update_brightness(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.brightness(m, i)); self.set_brightness(m, i, v) }
+    /// `+0x378 short[2] fDestBrightness`
+    pub fn dest_brightness(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x378 + i * 2); debug_assert!(i < 2); m.r16(a) as i16 }
+    pub fn set_dest_brightness(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x378 + i * 2); debug_assert!(i < 2); m.w16(a, v as u16) }
+    pub fn update_dest_brightness(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.dest_brightness(m, i)); self.set_dest_brightness(m, i, v) }
+    /// `+0x37c long[2] fFadeTicks`
+    pub fn fade_ticks(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x37c + i * 4); debug_assert!(i < 2); m.r32(a) as i32 }
+    pub fn set_fade_ticks(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x37c + i * 4); debug_assert!(i < 2); m.w32(a, v as u32) }
+    pub fn update_fade_ticks(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.fade_ticks(m, i)); self.set_fade_ticks(m, i, v) }
+    /// `+0x384 void fTVsInitialized`
+    pub fn t_vs_initialized(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x384); m.r32(a) }
+    pub fn set_t_vs_initialized(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x384); m.w32(a, v) }
+    pub fn update_t_vs_initialized(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.t_vs_initialized(m)); self.set_t_vs_initialized(m, v) }
+    /// `+0x388 void fInShowroom`
+    pub fn in_showroom(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x388); m.r32(a) }
+    pub fn set_in_showroom(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x388); m.w32(a, v) }
+    pub fn update_in_showroom(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_showroom(m)); self.set_in_showroom(m, v) }
+    /// `+0x38c ulong fShowroomTicks`
+    pub fn showroom_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x38c); m.r32(a) }
+    pub fn set_showroom_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x38c); m.w32(a, v) }
+    pub fn update_showroom_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.showroom_ticks(m)); self.set_showroom_ticks(m, v) }
+    /// `+0x390 ulong fSpeechTicks`
+    pub fn speech_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x390); m.r32(a) }
+    pub fn set_speech_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x390); m.w32(a, v) }
+    pub fn update_speech_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.speech_ticks(m)); self.set_speech_ticks(m, v) }
+    /// `+0x394 void fSpeechPlayed`
+    pub fn speech_played(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x394); m.r32(a) }
+    pub fn set_speech_played(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x394); m.w32(a, v) }
+    pub fn update_speech_played(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.speech_played(m)); self.set_speech_played(m, v) }
+    /// `+0x398 int fSplineInterval`
+    pub fn spline_interval(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x398); m.r32(a) as i32 }
+    pub fn set_spline_interval(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x398); m.w32(a, v as u32) }
+    pub fn update_spline_interval(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.spline_interval(m)); self.set_spline_interval(m, v) }
+    /// `+0x39c ulong fCameraRotation`
+    pub fn camera_rotation(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x39c); m.r32(a) }
+    pub fn set_camera_rotation(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x39c); m.w32(a, v) }
+    pub fn update_camera_rotation(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.camera_rotation(m)); self.set_camera_rotation(m, v) }
+}
+
+/// `tScreenCarSelectDuel` (0x3d0 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenCarSelectDuel(pub u32);
+/// `tScreenCarSelectDuel` derives from `tScreenCarSelect`: its members are reachable through it.
+impl core::ops::Deref for ScreenCarSelectDuel {
+    type Target = ScreenCarSelect;
+    fn deref(&self) -> &ScreenCarSelect { unsafe { &*(self as *const Self as *const ScreenCarSelect) } }
+}
+impl ScreenCarSelectDuel {
+    /// The `tScreenCarSelect` it derives from (the same address).
+    pub fn base(self) -> ScreenCarSelect { ScreenCarSelect(self.0) }
+}
+impl ScreenCarSelectDuel {
+    pub const SIZE: u32 = 0x3d0;
+    /// Element `i` of an array of `tScreenCarSelectDuel` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenCarSelect tScreenCarSelect`
+    pub fn t_screen_car_select(self) -> ScreenCarSelect { ScreenCarSelect(self.0.wrapping_add(0x0)) }
+    /// `+0x3a0 short fPreviousOpponent`
+    pub fn previous_opponent(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x3a0); m.r16(a) as i16 }
+    pub fn set_previous_opponent(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x3a0); m.w16(a, v as u16) }
+    pub fn update_previous_opponent(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_opponent(m)); self.set_previous_opponent(m, v) }
+    /// `+0x3a4 void fOpponentTVsInitialized`
+    pub fn opponent_t_vs_initialized(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x3a4); m.r32(a) }
+    pub fn set_opponent_t_vs_initialized(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x3a4); m.w32(a, v) }
+    pub fn update_opponent_t_vs_initialized(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.opponent_t_vs_initialized(m)); self.set_opponent_t_vs_initialized(m, v) }
+    /// `+0x3a8 struct tShapeInformation fOpponentShapes`
+    pub fn opponent_shapes(self) -> ShapeInformation { ShapeInformation(self.0.wrapping_add(0x3a8)) }
+}
+
+/// `tScreenCarSelectTwoPlayer` (0x438 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenCarSelectTwoPlayer(pub u32);
+/// `tScreenCarSelectTwoPlayer` derives from `tScreenCarSelect`: its members are reachable through it.
+impl core::ops::Deref for ScreenCarSelectTwoPlayer {
+    type Target = ScreenCarSelect;
+    fn deref(&self) -> &ScreenCarSelect { unsafe { &*(self as *const Self as *const ScreenCarSelect) } }
+}
+impl ScreenCarSelectTwoPlayer {
+    /// The `tScreenCarSelect` it derives from (the same address).
+    pub fn base(self) -> ScreenCarSelect { ScreenCarSelect(self.0) }
+}
+impl ScreenCarSelectTwoPlayer {
+    pub const SIZE: u32 = 0x438;
+    /// Element `i` of an array of `tScreenCarSelectTwoPlayer` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenCarSelect tScreenCarSelect`
+    pub fn t_screen_car_select(self) -> ScreenCarSelect { ScreenCarSelect(self.0.wrapping_add(0x0)) }
+    /// `+0x3a0 struct tDialogBackUpOnly CarDialog`
+    pub fn car_dialog(self) -> DialogBackUpOnly { DialogBackUpOnly(self.0.wrapping_add(0x3a0)) }
+}
+
+/// `tScreenCongrats` (0x184 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenCongrats(pub u32);
+/// `tScreenCongrats` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenCongrats {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenCongrats {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenCongrats {
+    pub const SIZE: u32 = 0x184;
+    /// Element `i` of an array of `tScreenCongrats` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 enum tScreenCongratsMessage congratsMessage`
+    pub fn congrats_message(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x64); m.r32(a) as i32 }
+    pub fn set_congrats_message(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x64); m.w32(a, v as u32) }
+    pub fn update_congrats_message(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.congrats_message(m)); self.set_congrats_message(m, v) }
+    /// `+0x068 enum tTrophyClass trophy`
+    pub fn trophy(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_trophy(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_trophy(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.trophy(m)); self.set_trophy(m, v) }
+    /// `+0x06c enum tSmallSpinningThing smallSpinningThing`
+    pub fn small_spinning_thing(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x6c); m.r32(a) as i32 }
+    pub fn set_small_spinning_thing(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v as u32) }
+    pub fn update_small_spinning_thing(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.small_spinning_thing(m)); self.set_small_spinning_thing(m, v) }
+    /// `+0x070 int fNumSpinShapes`
+    pub fn num_spin_shapes(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x70); m.r32(a) as i32 }
+    pub fn set_num_spin_shapes(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x70); m.w32(a, v as u32) }
+    pub fn update_num_spin_shapes(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_spin_shapes(m)); self.set_num_spin_shapes(m, v) }
+    /// `+0x074 int fNumSmallSpinShapes`
+    pub fn num_small_spin_shapes(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x74); m.r32(a) as i32 }
+    pub fn set_num_small_spin_shapes(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x74); m.w32(a, v as u32) }
+    pub fn update_num_small_spin_shapes(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_small_spin_shapes(m)); self.set_num_small_spin_shapes(m, v) }
+    /// `+0x078 int fCarPlayer`
+    pub fn car_player(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x78); m.r32(a) as i32 }
+    pub fn set_car_player(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x78); m.w32(a, v as u32) }
+    pub fn update_car_player(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.car_player(m)); self.set_car_player(m, v) }
+    /// `+0x07c long TotalCash`
+    pub fn total_cash(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x7c); m.r32(a) as i32 }
+    pub fn set_total_cash(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x7c); m.w32(a, v as u32) }
+    pub fn update_total_cash(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.total_cash(m)); self.set_total_cash(m, v) }
+    /// `+0x080 long CashAwarded`
+    pub fn cash_awarded(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x80); m.r32(a) as i32 }
+    pub fn set_cash_awarded(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x80); m.w32(a, v as u32) }
+    pub fn update_cash_awarded(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.cash_awarded(m)); self.set_cash_awarded(m, v) }
+    /// `+0x084 int framenum`
+    pub fn framenum(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x84); m.r32(a) as i32 }
+    pub fn set_framenum(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x84); m.w32(a, v as u32) }
+    pub fn update_framenum(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.framenum(m)); self.set_framenum(m, v) }
+    /// `+0x088 int starttick`
+    pub fn starttick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x88); m.r32(a) as i32 }
+    pub fn set_starttick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x88); m.w32(a, v as u32) }
+    pub fn update_starttick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.starttick(m)); self.set_starttick(m, v) }
+    /// `+0x08c void InExtraSpin`
+    pub fn in_extra_spin(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x8c); m.r32(a) }
+    pub fn set_in_extra_spin(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x8c); m.w32(a, v) }
+    pub fn update_in_extra_spin(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_extra_spin(m)); self.set_in_extra_spin(m, v) }
+    /// `+0x090 int InExtraSpinTick`
+    pub fn in_extra_spin_tick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x90); m.r32(a) as i32 }
+    pub fn set_in_extra_spin_tick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x90); m.w32(a, v as u32) }
+    pub fn update_in_extra_spin_tick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.in_extra_spin_tick(m)); self.set_in_extra_spin_tick(m, v) }
+    /// `+0x094 struct tCarInfo fCarInfo`
+    pub fn car_info(self) -> CarInfo { CarInfo(self.0.wrapping_add(0x94)) }
+    /// `+0x160 void fGotCar`
+    pub fn got_car(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x160); m.r32(a) }
+    pub fn set_got_car(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x160); m.w32(a, v) }
+    pub fn update_got_car(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.got_car(m)); self.set_got_car(m, v) }
+    /// `+0x164 int fEnterTick`
+    pub fn enter_tick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x164); m.r32(a) as i32 }
+    pub fn set_enter_tick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x164); m.w32(a, v as u32) }
+    pub fn update_enter_tick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.enter_tick(m)); self.set_enter_tick(m, v) }
+    /// `+0x168 void fCountedDown`
+    pub fn counted_down(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x168); m.r32(a) }
+    pub fn set_counted_down(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x168); m.w32(a, v) }
+    pub fn update_counted_down(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.counted_down(m)); self.set_counted_down(m, v) }
+    /// `+0x16c void fStartCountdownNOW`
+    pub fn start_countdown_now(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x16c); m.r32(a) }
+    pub fn set_start_countdown_now(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x16c); m.w32(a, v) }
+    pub fn update_start_countdown_now(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.start_countdown_now(m)); self.set_start_countdown_now(m, v) }
+    /// `+0x170 int fCountSpeed`
+    pub fn count_speed(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x170); m.r32(a) as i32 }
+    pub fn set_count_speed(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x170); m.w32(a, v as u32) }
+    pub fn update_count_speed(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.count_speed(m)); self.set_count_speed(m, v) }
+    /// `+0x174 int fSpeechToPlay`
+    pub fn speech_to_play(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x174); m.r32(a) as i32 }
+    pub fn set_speech_to_play(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x174); m.w32(a, v as u32) }
+    pub fn update_speech_to_play(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.speech_to_play(m)); self.set_speech_to_play(m, v) }
+    /// `+0x178 short fCarX`
+    pub fn car_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x178); m.r16(a) as i16 }
+    pub fn set_car_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x178); m.w16(a, v as u16) }
+    pub fn update_car_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.car_x(m)); self.set_car_x(m, v) }
+    /// `+0x17a short fCarY`
+    pub fn car_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x17a); m.r16(a) as i16 }
+    pub fn set_car_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x17a); m.w16(a, v as u16) }
+    pub fn update_car_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.car_y(m)); self.set_car_y(m, v) }
+    /// `+0x17c float fCarCX`
+    pub fn car_cx(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x17c); m.r32(a) }
+    pub fn set_car_cx(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x17c); m.w32(a, v) }
+    pub fn update_car_cx(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.car_cx(m)); self.set_car_cx(m, v) }
+    /// `+0x180 float fCarCY`
+    pub fn car_cy(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x180); m.r32(a) }
+    pub fn set_car_cy(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x180); m.w32(a, v) }
+    pub fn update_car_cy(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.car_cy(m)); self.set_car_cy(m, v) }
+}
+
+/// `tScreenControllerConfig` (0x17c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenControllerConfig(pub u32);
+/// `tScreenControllerConfig` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenControllerConfig {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenControllerConfig {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenControllerConfig {
+    pub const SIZE: u32 = 0x17c;
+    /// Element `i` of an array of `tScreenControllerConfig` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 struct Force_tGlobal fShaker`
+    pub fn shaker(self) -> ForceGlobal { ForceGlobal(self.0.wrapping_add(0x64)) }
+    /// `+0x06c char fPrevConfig`
+    pub fn prev_config(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x6c); m.r8(a) as i8 }
+    pub fn set_prev_config(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x6c); m.w8(a, v as u8) }
+    pub fn update_prev_config(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.prev_config(m)); self.set_prev_config(m, v) }
+    /// `+0x06d char fTextConfig`
+    pub fn text_config(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x6d); m.r8(a) as i8 }
+    pub fn set_text_config(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x6d); m.w8(a, v as u8) }
+    pub fn update_text_config(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.text_config(m)); self.set_text_config(m, v) }
+    /// `+0x06e char fTextController`
+    pub fn text_controller(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x6e); m.r8(a) as i8 }
+    pub fn set_text_controller(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x6e); m.w8(a, v as u8) }
+    pub fn update_text_controller(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.text_controller(m)); self.set_text_controller(m, v) }
+    /// `+0x06f char fPrevController`
+    pub fn prev_controller(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x6f); m.r8(a) as i8 }
+    pub fn set_prev_controller(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x6f); m.w8(a, v as u8) }
+    pub fn update_prev_controller(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.prev_controller(m)); self.set_prev_controller(m, v) }
+    /// `+0x070 short[2] fFade`
+    pub fn fade(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x70 + i * 2); debug_assert!(i < 2); m.r16(a) as i16 }
+    pub fn set_fade(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x70 + i * 2); debug_assert!(i < 2); m.w16(a, v as u16) }
+    pub fn update_fade(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.fade(m, i)); self.set_fade(m, i, v) }
+    /// `+0x074 short[2] fFadeController`
+    pub fn fade_controller(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x74 + i * 2); debug_assert!(i < 2); m.r16(a) as i16 }
+    pub fn set_fade_controller(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x74 + i * 2); debug_assert!(i < 2); m.w16(a, v as u16) }
+    pub fn update_fade_controller(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_controller(m, i)); self.set_fade_controller(m, i, v) }
+    /// `+0x078 int fStartTick`
+    pub fn start_tick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x78); m.r32(a) as i32 }
+    pub fn set_start_tick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x78); m.w32(a, v as u32) }
+    pub fn update_start_tick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.start_tick(m)); self.set_start_tick(m, v) }
+    /// `+0x07c short fGotTick`
+    pub fn got_tick(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x7c); m.r16(a) as i16 }
+    pub fn set_got_tick(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x7c); m.w16(a, v as u16) }
+    pub fn update_got_tick(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.got_tick(m)); self.set_got_tick(m, v) }
+    /// `+0x07e short fAnim`
+    pub fn anim(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x7e); m.r16(a) as i16 }
+    pub fn set_anim(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x7e); m.w16(a, v as u16) }
+    pub fn update_anim(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim(m)); self.set_anim(m, v) }
+    /// `+0x080 short fAnimFrame`
+    pub fn anim_frame(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x80); m.r16(a) as i16 }
+    pub fn set_anim_frame(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x80); m.w16(a, v as u16) }
+    pub fn update_anim_frame(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_frame(m)); self.set_anim_frame(m, v) }
+    /// `+0x082 short fAnimStart`
+    pub fn anim_start(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x82); m.r16(a) as i16 }
+    pub fn set_anim_start(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x82); m.w16(a, v as u16) }
+    pub fn update_anim_start(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_start(m)); self.set_anim_start(m, v) }
+    /// `+0x084 short fAnimStop`
+    pub fn anim_stop(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x84); m.r16(a) as i16 }
+    pub fn set_anim_stop(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x84); m.w16(a, v as u16) }
+    pub fn update_anim_stop(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_stop(m)); self.set_anim_stop(m, v) }
+    /// `+0x086 short fAnimStep`
+    pub fn anim_step(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x86); m.r16(a) as i16 }
+    pub fn set_anim_step(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x86); m.w16(a, v as u16) }
+    pub fn update_anim_step(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_step(m)); self.set_anim_step(m, v) }
+    /// `+0x088 short fAnimController`
+    pub fn anim_controller(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x88); m.r16(a) as i16 }
+    pub fn set_anim_controller(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x88); m.w16(a, v as u16) }
+    pub fn update_anim_controller(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_controller(m)); self.set_anim_controller(m, v) }
+    /// `+0x08a short fSwap`
+    pub fn swap(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8a); m.r16(a) as i16 }
+    pub fn set_swap(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8a); m.w16(a, v as u16) }
+    pub fn update_swap(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.swap(m)); self.set_swap(m, v) }
+    /// `+0x08c short fAnimFade`
+    pub fn anim_fade(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8c); m.r16(a) as i16 }
+    pub fn set_anim_fade(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8c); m.w16(a, v as u16) }
+    pub fn update_anim_fade(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_fade(m)); self.set_anim_fade(m, v) }
+    /// `+0x08e short fAnimFadeStart`
+    pub fn anim_fade_start(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8e); m.r16(a) as i16 }
+    pub fn set_anim_fade_start(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8e); m.w16(a, v as u16) }
+    pub fn update_anim_fade_start(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_fade_start(m)); self.set_anim_fade_start(m, v) }
+    /// `+0x090 short fAnimFadeStop`
+    pub fn anim_fade_stop(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x90); m.r16(a) as i16 }
+    pub fn set_anim_fade_stop(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x90); m.w16(a, v as u16) }
+    pub fn update_anim_fade_stop(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_fade_stop(m)); self.set_anim_fade_stop(m, v) }
+    /// `+0x092 short fAnimFadeFrame`
+    pub fn anim_fade_frame(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x92); m.r16(a) as i16 }
+    pub fn set_anim_fade_frame(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x92); m.w16(a, v as u16) }
+    pub fn update_anim_fade_frame(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_fade_frame(m)); self.set_anim_fade_frame(m, v) }
+    /// `+0x094 short fAnimFadeController`
+    pub fn anim_fade_controller(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x94); m.r16(a) as i16 }
+    pub fn set_anim_fade_controller(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x94); m.w16(a, v as u16) }
+    pub fn update_anim_fade_controller(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_fade_controller(m)); self.set_anim_fade_controller(m, v) }
+    /// `+0x096 short CurrentlyLoadedArt`
+    pub fn currently_loaded_art(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x96); m.r16(a) as i16 }
+    pub fn set_currently_loaded_art(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x96); m.w16(a, v as u16) }
+    pub fn update_currently_loaded_art(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.currently_loaded_art(m)); self.set_currently_loaded_art(m, v) }
+    /// `+0x098 short negconChoice`
+    pub fn negcon_choice(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x98); m.r16(a) as i16 }
+    pub fn set_negcon_choice(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x98); m.w16(a, v as u16) }
+    pub fn update_negcon_choice(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.negcon_choice(m)); self.set_negcon_choice(m, v) }
+    /// `+0x09c void fTransitionedIn`
+    pub fn transitioned_in(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x9c); m.r32(a) }
+    pub fn set_transitioned_in(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x9c); m.w32(a, v) }
+    pub fn update_transitioned_in(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.transitioned_in(m)); self.set_transitioned_in(m, v) }
+    /// `+0x0a0 void fTransitioningIn`
+    pub fn transitioning_in(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xa0); m.r32(a) }
+    pub fn set_transitioning_in(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xa0); m.w32(a, v) }
+    pub fn update_transitioning_in(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.transitioning_in(m)); self.set_transitioning_in(m, v) }
+    /// `+0x0a4 void fTransitioningOut`
+    pub fn transitioning_out(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xa4); m.r32(a) }
+    pub fn set_transitioning_out(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xa4); m.w32(a, v) }
+    pub fn update_transitioning_out(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.transitioning_out(m)); self.set_transitioning_out(m, v) }
+    /// `+0x0a8 short fArrowFade`
+    pub fn arrow_fade(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xa8); m.r16(a) as i16 }
+    pub fn set_arrow_fade(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xa8); m.w16(a, v as u16) }
+    pub fn update_arrow_fade(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.arrow_fade(m)); self.set_arrow_fade(m, v) }
+    /// `+0x0aa short fArrowFadeDir`
+    pub fn arrow_fade_dir(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xaa); m.r16(a) as i16 }
+    pub fn set_arrow_fade_dir(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xaa); m.w16(a, v as u16) }
+    pub fn update_arrow_fade_dir(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.arrow_fade_dir(m)); self.set_arrow_fade_dir(m, v) }
+    /// `+0x0ac short fTextTypeOn`
+    pub fn text_type_on(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xac); m.r16(a) as i16 }
+    pub fn set_text_type_on(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xac); m.w16(a, v as u16) }
+    pub fn update_text_type_on(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.text_type_on(m)); self.set_text_type_on(m, v) }
+    /// `+0x0b0 void fFadeTextOut`
+    pub fn fade_text_out(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xb0); m.r32(a) }
+    pub fn set_fade_text_out(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xb0); m.w32(a, v) }
+    pub fn update_fade_text_out(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.fade_text_out(m)); self.set_fade_text_out(m, v) }
+    /// `+0x0b4 short mult`
+    pub fn mult(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xb4); m.r16(a) as i16 }
+    pub fn set_mult(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xb4); m.w16(a, v as u16) }
+    pub fn update_mult(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.mult(m)); self.set_mult(m, v) }
+    /// `+0x0b8 struct tDialogYesNo negconPopUp`
+    pub fn negcon_pop_up(self) -> DialogYesNo { DialogYesNo(self.0.wrapping_add(0xb8)) }
+    /// `+0x160 int fTimeOutStartTick`
+    pub fn time_out_start_tick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x160); m.r32(a) as i32 }
+    pub fn set_time_out_start_tick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x160); m.w32(a, v as u32) }
+    pub fn update_time_out_start_tick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.time_out_start_tick(m)); self.set_time_out_start_tick(m, v) }
+    /// `+0x164 void SuperFastFadeOut`
+    pub fn super_fast_fade_out(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x164); m.r32(a) }
+    pub fn set_super_fast_fade_out(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x164); m.w32(a, v) }
+    pub fn update_super_fast_fade_out(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.super_fast_fade_out(m)); self.set_super_fast_fade_out(m, v) }
+    /// `+0x168 void fPlayedInSound`
+    pub fn played_in_sound(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x168); m.r32(a) }
+    pub fn set_played_in_sound(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x168); m.w32(a, v) }
+    pub fn update_played_in_sound(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.played_in_sound(m)); self.set_played_in_sound(m, v) }
+    /// `+0x16c short fShakingItem`
+    pub fn shaking_item(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x16c); m.r16(a) as i16 }
+    pub fn set_shaking_item(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x16c); m.w16(a, v as u16) }
+    pub fn update_shaking_item(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.shaking_item(m)); self.set_shaking_item(m, v) }
+    /// `+0x170 void fResetShakeTimeOut`
+    pub fn reset_shake_time_out(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x170); m.r32(a) }
+    pub fn set_reset_shake_time_out(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x170); m.w32(a, v) }
+    pub fn update_reset_shake_time_out(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.reset_shake_time_out(m)); self.set_reset_shake_time_out(m, v) }
+    /// `+0x174 char fCurrentController`
+    pub fn current_controller(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x174); m.r8(a) as i8 }
+    pub fn set_current_controller(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x174); m.w8(a, v as u8) }
+    pub fn update_current_controller(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.current_controller(m)); self.set_current_controller(m, v) }
+    /// `+0x178 int player`
+    pub fn player(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x178); m.r32(a) as i32 }
+    pub fn set_player(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x178); m.w32(a, v as u32) }
+    pub fn update_player(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.player(m)); self.set_player(m, v) }
+}
+
+/// `tScreenDisplay` (0x64 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenDisplay(pub u32);
+/// `tScreenDisplay` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenDisplay {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenDisplay {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenDisplay {
+    pub const SIZE: u32 = 0x64;
+    /// Element `i` of an array of `tScreenDisplay` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+}
+
+/// `tScreenMain` (0x5b8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenMain(pub u32);
+/// `tScreenMain` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenMain {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenMain {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenMain {
+    pub const SIZE: u32 = 0x5b8;
+    /// Element `i` of an array of `tScreenMain` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 int hVideo`
+    pub fn h_video(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x64); m.r32(a) as i32 }
+    pub fn set_h_video(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x64); m.w32(a, v as u32) }
+    pub fn update_h_video(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.h_video(m)); self.set_h_video(m, v) }
+    /// `+0x068 int fFrame`
+    pub fn frame(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_frame(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_frame(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.frame(m)); self.set_frame(m, v) }
+    /// `+0x06c ulong fStartTicks`
+    pub fn start_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x6c); m.r32(a) }
+    pub fn set_start_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v) }
+    pub fn update_start_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.start_ticks(m)); self.set_start_ticks(m, v) }
+    /// `+0x070 ulong fAnimTicks`
+    pub fn anim_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x70); m.r32(a) }
+    pub fn set_anim_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x70); m.w32(a, v) }
+    pub fn update_anim_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.anim_ticks(m)); self.set_anim_ticks(m, v) }
+    /// `+0x074 short fAnimLocation`
+    pub fn anim_location(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x74); m.r16(a) as i16 }
+    pub fn set_anim_location(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x74); m.w16(a, v as u16) }
+    pub fn update_anim_location(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.anim_location(m)); self.set_anim_location(m, v) }
+    /// `+0x078 enum tScreenMainState fState`
+    pub fn state(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x78); m.r32(a) as i32 }
+    pub fn set_state(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x78); m.w32(a, v as u32) }
+    pub fn update_state(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.state(m)); self.set_state(m, v) }
+    /// `+0x07c struct tTVConfig[16] tvConfigs`
+    pub fn tv_configs(self, i: u32) -> TVConfig { debug_assert!(i < 16); TVConfig(self.0.wrapping_add(0x7c + i * 0x30)) }
+    /// `+0x37c enum tScreenMainState[16] tvStates`
+    pub fn tv_states(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x37c + i * 4); debug_assert!(i < 16); m.r32(a) as i32 }
+    pub fn set_tv_states(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x37c + i * 4); debug_assert!(i < 16); m.w32(a, v as u32) }
+    pub fn update_tv_states(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.tv_states(m, i)); self.set_tv_states(m, i, v) }
+    /// `+0x3bc struct tVideoTransition[16] tvTransitions`
+    pub fn tv_transitions(self, i: u32) -> VideoTransition { debug_assert!(i < 16); VideoTransition(self.0.wrapping_add(0x3bc + i * 0x18)) }
+    /// `+0x53c void fTVsInitialized`
+    pub fn t_vs_initialized(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x53c); m.r32(a) }
+    pub fn set_t_vs_initialized(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x53c); m.w32(a, v) }
+    pub fn update_t_vs_initialized(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.t_vs_initialized(m)); self.set_t_vs_initialized(m, v) }
+    /// `+0x540 char fTransitionDirection`
+    pub fn transition_direction(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x540); m.r8(a) as i8 }
+    pub fn set_transition_direction(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x540); m.w8(a, v as u8) }
+    pub fn update_transition_direction(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.transition_direction(m)); self.set_transition_direction(m, v) }
+    /// `+0x544 void fAnimationUploaded`
+    pub fn animation_uploaded(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x544); m.r32(a) }
+    pub fn set_animation_uploaded(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x544); m.w32(a, v) }
+    pub fn update_animation_uploaded(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.animation_uploaded(m)); self.set_animation_uploaded(m, v) }
+    /// `+0x548 short fPreviousAnim`
+    pub fn previous_anim(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x548); m.r16(a) as i16 }
+    pub fn set_previous_anim(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x548); m.w16(a, v as u16) }
+    pub fn update_previous_anim(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_anim(m)); self.set_previous_anim(m, v) }
+    /// `+0x54a short fWarningFade`
+    pub fn warning_fade(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x54a); m.r16(a) as i16 }
+    pub fn set_warning_fade(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x54a); m.w16(a, v as u16) }
+    pub fn update_warning_fade(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.warning_fade(m)); self.set_warning_fade(m, v) }
+    /// `+0x54c short fPreviousMovie`
+    pub fn previous_movie(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x54c); m.r16(a) as i16 }
+    pub fn set_previous_movie(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x54c); m.w16(a, v as u16) }
+    pub fn update_previous_movie(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_movie(m)); self.set_previous_movie(m, v) }
+    /// `+0x54e short fCurrentMovie`
+    pub fn current_movie(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x54e); m.r16(a) as i16 }
+    pub fn set_current_movie(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x54e); m.w16(a, v as u16) }
+    pub fn update_current_movie(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.current_movie(m)); self.set_current_movie(m, v) }
+    /// `+0x550 void bVideoAborted`
+    pub fn b_video_aborted(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x550); m.r32(a) }
+    pub fn set_b_video_aborted(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x550); m.w32(a, v) }
+    pub fn update_b_video_aborted(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.b_video_aborted(m)); self.set_b_video_aborted(m, v) }
+    /// `+0x554 ulong fMovieTicks`
+    pub fn movie_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x554); m.r32(a) }
+    pub fn set_movie_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x554); m.w32(a, v) }
+    pub fn update_movie_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.movie_ticks(m)); self.set_movie_ticks(m, v) }
+    /// `+0x558 struct tShapeInformation[2] fVideoShapes`
+    pub fn video_shapes(self, i: u32) -> ShapeInformation { debug_assert!(i < 2); ShapeInformation(self.0.wrapping_add(0x558 + i * 0x28)) }
+    /// `+0x5a8 int fCurrentSlot`
+    pub fn current_slot(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x5a8); m.r32(a) as i32 }
+    pub fn set_current_slot(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x5a8); m.w32(a, v as u32) }
+    pub fn update_current_slot(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.current_slot(m)); self.set_current_slot(m, v) }
+    /// `+0x5ac int[2] fCurrentBG`
+    pub fn current_bg(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x5ac + i * 4); debug_assert!(i < 2); m.r32(a) as i32 }
+    pub fn set_current_bg(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x5ac + i * 4); debug_assert!(i < 2); m.w32(a, v as u32) }
+    pub fn update_current_bg(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.current_bg(m, i)); self.set_current_bg(m, i, v) }
+    /// `+0x5b4 int fNumTVsInTransition`
+    pub fn num_t_vs_in_transition(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x5b4); m.r32(a) as i32 }
+    pub fn set_num_t_vs_in_transition(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x5b4); m.w32(a, v as u32) }
+    pub fn update_num_t_vs_in_transition(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_t_vs_in_transition(m)); self.set_num_t_vs_in_transition(m, v) }
+}
+
+/// `tScreenMemcard` (0x5a4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenMemcard(pub u32);
+/// `tScreenMemcard` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenMemcard {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenMemcard {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenMemcard {
+    pub const SIZE: u32 = 0x5a4;
+    /// Element `i` of an array of `tScreenMemcard` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 int theNFS4icon`
+    pub fn the_nfs4icon(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x64); m.r32(a) as i32 }
+    pub fn set_the_nfs4icon(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x64); m.w32(a, v as u32) }
+    pub fn update_the_nfs4icon(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.the_nfs4icon(m)); self.set_the_nfs4icon(m, v) }
+    /// `+0x068 int card`
+    pub fn card(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_card(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_card(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.card(m)); self.set_card(m, v) }
+    /// `+0x06c struct CARDINFO_def* pCI`
+    pub fn p_ci(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x6c); m.r32(a) }
+    pub fn set_p_ci(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v) }
+    pub fn update_p_ci(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.p_ci(m)); self.set_p_ci(m, v) }
+    /// `+0x070 char[15][32] fMemTitle`
+    pub fn mem_title(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x70 + i * 1); debug_assert!(i < 480); m.r8(a) as i8 }
+    pub fn set_mem_title(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x70 + i * 1); debug_assert!(i < 480); m.w8(a, v as u8) }
+    pub fn update_mem_title(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.mem_title(m, i)); self.set_mem_title(m, i, v) }
+    /// `+0x250 char[15] goticon`
+    pub fn goticon(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x250 + i * 1); debug_assert!(i < 15); m.r8(a) as i8 }
+    pub fn set_goticon(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x250 + i * 1); debug_assert!(i < 15); m.w8(a, v as u8) }
+    pub fn update_goticon(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.goticon(m, i)); self.set_goticon(m, i, v) }
+    /// `+0x25f uchar[15] numicon`
+    pub fn numicon(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x25f + i * 1); debug_assert!(i < 15); m.r8(a) }
+    pub fn set_numicon(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x25f + i * 1); debug_assert!(i < 15); m.w8(a, v) }
+    pub fn update_numicon(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.numicon(m, i)); self.set_numicon(m, i, v) }
+    /// `+0x26e uchar[15] numblock`
+    pub fn numblock(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x26e + i * 1); debug_assert!(i < 15); m.r8(a) }
+    pub fn set_numblock(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x26e + i * 1); debug_assert!(i < 15); m.w8(a, v) }
+    pub fn update_numblock(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.numblock(m, i)); self.set_numblock(m, i, v) }
+    /// `+0x280 struct MCRDFILE_def[15] fMemFile`
+    pub fn mem_file(self, i: u32) -> MCRDFILEDef { debug_assert!(i < 15); MCRDFILEDef(self.0.wrapping_add(0x280 + i * 0x2c)) }
+    /// `+0x514 ushort[15] fMemIconClutId`
+    pub fn mem_icon_clut_id(self, m: &mut Mem, i: u32) -> u16 { let a = self.0.wrapping_add(0x514 + i * 2); debug_assert!(i < 15); m.r16(a) }
+    pub fn set_mem_icon_clut_id(self, m: &mut Mem, i: u32, v: u16) { let a = self.0.wrapping_add(0x514 + i * 2); debug_assert!(i < 15); m.w16(a, v) }
+    pub fn update_mem_icon_clut_id(self, m: &mut Mem, i: u32, f: impl FnOnce(u16) -> u16) { let v = f(self.mem_icon_clut_id(m, i)); self.set_mem_icon_clut_id(m, i, v) }
+    /// `+0x532 short[15] fFadeIcon`
+    pub fn fade_icon(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x532 + i * 2); debug_assert!(i < 15); m.r16(a) as i16 }
+    pub fn set_fade_icon(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x532 + i * 2); debug_assert!(i < 15); m.w16(a, v as u16) }
+    pub fn update_fade_icon(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_icon(m, i)); self.set_fade_icon(m, i, v) }
+    /// `+0x550 void fReadyToGetNewIcons`
+    pub fn ready_to_get_new_icons(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x550); m.r32(a) }
+    pub fn set_ready_to_get_new_icons(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x550); m.w32(a, v) }
+    pub fn update_ready_to_get_new_icons(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.ready_to_get_new_icons(m)); self.set_ready_to_get_new_icons(m, v) }
+    /// `+0x554 void fInitedMemCard`
+    pub fn inited_mem_card(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x554); m.r32(a) }
+    pub fn set_inited_mem_card(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x554); m.w32(a, v) }
+    pub fn update_inited_mem_card(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.inited_mem_card(m)); self.set_inited_mem_card(m, v) }
+    /// `+0x558 char[40] fMemCardMessage`
+    pub fn mem_card_message(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x558 + i * 1); debug_assert!(i < 40); m.r8(a) as i8 }
+    pub fn set_mem_card_message(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x558 + i * 1); debug_assert!(i < 40); m.w8(a, v as u8) }
+    pub fn update_mem_card_message(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.mem_card_message(m, i)); self.set_mem_card_message(m, i, v) }
+    /// `+0x580 int fMemCardMessageTextSys`
+    pub fn mem_card_message_text_sys(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x580); m.r32(a) as i32 }
+    pub fn set_mem_card_message_text_sys(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x580); m.w32(a, v as u32) }
+    pub fn update_mem_card_message_text_sys(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.mem_card_message_text_sys(m)); self.set_mem_card_message_text_sys(m, v) }
+    /// `+0x584 int message`
+    pub fn message(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x584); m.r32(a) as i32 }
+    pub fn set_message(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x584); m.w32(a, v as u32) }
+    pub fn update_message(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.message(m)); self.set_message(m, v) }
+    /// `+0x588 short memcardanimframe`
+    pub fn memcardanimframe(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x588); m.r16(a) as i16 }
+    pub fn set_memcardanimframe(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x588); m.w16(a, v as u16) }
+    pub fn update_memcardanimframe(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.memcardanimframe(m)); self.set_memcardanimframe(m, v) }
+    /// `+0x58a short count`
+    pub fn count(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x58a); m.r16(a) as i16 }
+    pub fn set_count(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x58a); m.w16(a, v as u16) }
+    pub fn update_count(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.count(m)); self.set_count(m, v) }
+    /// `+0x58c short cursorPosition`
+    pub fn cursor_position(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x58c); m.r16(a) as i16 }
+    pub fn set_cursor_position(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x58c); m.w16(a, v as u16) }
+    pub fn update_cursor_position(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.cursor_position(m)); self.set_cursor_position(m, v) }
+    /// `+0x590 int checkingstart`
+    pub fn checkingstart(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x590); m.r32(a) as i32 }
+    pub fn set_checkingstart(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x590); m.w32(a, v as u32) }
+    pub fn update_checkingstart(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.checkingstart(m)); self.set_checkingstart(m, v) }
+    /// `+0x594 void fSomePunkInQAPulledOutTheMemoryCardWhileLoadingIcons`
+    pub fn some_punk_in_qa_pulled_out_the_memory_card_while_loading_icons(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x594); m.r32(a) }
+    pub fn set_some_punk_in_qa_pulled_out_the_memory_card_while_loading_icons(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x594); m.w32(a, v) }
+    pub fn update_some_punk_in_qa_pulled_out_the_memory_card_while_loading_icons(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.some_punk_in_qa_pulled_out_the_memory_card_while_loading_icons(m)); self.set_some_punk_in_qa_pulled_out_the_memory_card_while_loading_icons(m, v) }
+    /// `+0x598 int fScreenFadeReadyTick`
+    pub fn screen_fade_ready_tick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x598); m.r32(a) as i32 }
+    pub fn set_screen_fade_ready_tick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x598); m.w32(a, v as u32) }
+    pub fn update_screen_fade_ready_tick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.screen_fade_ready_tick(m)); self.set_screen_fade_ready_tick(m, v) }
+    /// `+0x59c short player`
+    pub fn player(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x59c); m.r16(a) as i16 }
+    pub fn set_player(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x59c); m.w16(a, v as u16) }
+    pub fn update_player(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.player(m)); self.set_player(m, v) }
+    /// `+0x5a0 void fGetNewIcons`
+    pub fn get_new_icons(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x5a0); m.r32(a) }
+    pub fn set_get_new_icons(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x5a0); m.w32(a, v) }
+    pub fn update_get_new_icons(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.get_new_icons(m)); self.set_get_new_icons(m, v) }
+}
+
+/// `tScreenPinkSlipCongrats` (0x188 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenPinkSlipCongrats(pub u32);
+/// `tScreenPinkSlipCongrats` derives from `tScreenCongrats`: its members are reachable through it.
+impl core::ops::Deref for ScreenPinkSlipCongrats {
+    type Target = ScreenCongrats;
+    fn deref(&self) -> &ScreenCongrats { unsafe { &*(self as *const Self as *const ScreenCongrats) } }
+}
+impl ScreenPinkSlipCongrats {
+    /// The `tScreenCongrats` it derives from (the same address).
+    pub fn base(self) -> ScreenCongrats { ScreenCongrats(self.0) }
+}
+impl ScreenPinkSlipCongrats {
+    pub const SIZE: u32 = 0x188;
+    /// Element `i` of an array of `tScreenPinkSlipCongrats` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenCongrats tScreenCongrats`
+    pub fn t_screen_congrats(self) -> ScreenCongrats { ScreenCongrats(self.0.wrapping_add(0x0)) }
+    /// `+0x184 short fWinner`
+    pub fn winner(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x184); m.r16(a) as i16 }
+    pub fn set_winner(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x184); m.w16(a, v as u16) }
+    pub fn update_winner(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.winner(m)); self.set_winner(m, v) }
+}
+
+/// `tScreenPinkSlipStandings` (0x94 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenPinkSlipStandings(pub u32);
+/// `tScreenPinkSlipStandings` derives from `tScreenTournamentStandings3item`: its members are reachable through it.
+impl core::ops::Deref for ScreenPinkSlipStandings {
+    type Target = ScreenTournamentStandings3item;
+    fn deref(&self) -> &ScreenTournamentStandings3item { unsafe { &*(self as *const Self as *const ScreenTournamentStandings3item) } }
+}
+impl ScreenPinkSlipStandings {
+    /// The `tScreenTournamentStandings3item` it derives from (the same address).
+    pub fn base(self) -> ScreenTournamentStandings3item { ScreenTournamentStandings3item(self.0) }
+}
+impl ScreenPinkSlipStandings {
+    pub const SIZE: u32 = 0x94;
+    /// Element `i` of an array of `tScreenPinkSlipStandings` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenTournamentStandings3item tScreenTournamentStandings3item`
+    pub fn t_screen_tournament_standings3item(self) -> ScreenTournamentStandings3item { ScreenTournamentStandings3item(self.0.wrapping_add(0x0)) }
+}
+
+/// `tScreenPinkSlips` (0x2c8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenPinkSlips(pub u32);
+/// `tScreenPinkSlips` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenPinkSlips {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenPinkSlips {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenPinkSlips {
+    pub const SIZE: u32 = 0x2c8;
+    /// Element `i` of an array of `tScreenPinkSlips` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 struct tMenu* fMenu`
+    pub fn menu(self, m: &mut Mem) -> Menu { let a = self.0.wrapping_add(0x64); Menu(m.r32(a)) }
+    pub fn set_menu(self, m: &mut Mem, v: Menu) { let a = self.0.wrapping_add(0x64); m.w32(a, v.0) }
+    /// `+0x068 int hVideo`
+    pub fn h_video(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_h_video(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_h_video(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.h_video(m)); self.set_h_video(m, v) }
+    /// `+0x06c int fFrame`
+    pub fn frame(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x6c); m.r32(a) as i32 }
+    pub fn set_frame(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v as u32) }
+    pub fn update_frame(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.frame(m)); self.set_frame(m, v) }
+    /// `+0x070 short fPreviousTrack`
+    pub fn previous_track(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x70); m.r16(a) as i16 }
+    pub fn set_previous_track(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x70); m.w16(a, v as u16) }
+    pub fn update_previous_track(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_track(m)); self.set_previous_track(m, v) }
+    /// `+0x072 short fBrightness`
+    pub fn brightness(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x72); m.r16(a) as i16 }
+    pub fn set_brightness(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x72); m.w16(a, v as u16) }
+    pub fn update_brightness(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.brightness(m)); self.set_brightness(m, v) }
+    /// `+0x074 short fDestBrightness`
+    pub fn dest_brightness(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x74); m.r16(a) as i16 }
+    pub fn set_dest_brightness(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x74); m.w16(a, v as u16) }
+    pub fn update_dest_brightness(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.dest_brightness(m)); self.set_dest_brightness(m, v) }
+    /// `+0x076 short fStartBrightness`
+    pub fn start_brightness(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x76); m.r16(a) as i16 }
+    pub fn set_start_brightness(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x76); m.w16(a, v as u16) }
+    pub fn update_start_brightness(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.start_brightness(m)); self.set_start_brightness(m, v) }
+    /// `+0x078 ulong fStartTicks`
+    pub fn start_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x78); m.r32(a) }
+    pub fn set_start_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x78); m.w32(a, v) }
+    pub fn update_start_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.start_ticks(m)); self.set_start_ticks(m, v) }
+    /// `+0x07c ulong fTVTicks`
+    pub fn tv_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x7c); m.r32(a) }
+    pub fn set_tv_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x7c); m.w32(a, v) }
+    pub fn update_tv_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.tv_ticks(m)); self.set_tv_ticks(m, v) }
+    /// `+0x080 char fTransitionDirection`
+    pub fn transition_direction(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x80); m.r8(a) as i8 }
+    pub fn set_transition_direction(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x80); m.w8(a, v as u8) }
+    pub fn update_transition_direction(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.transition_direction(m)); self.set_transition_direction(m, v) }
+    /// `+0x084 struct tTVConfig[8] fTrackTVs`
+    pub fn track_t_vs(self, i: u32) -> TVConfig { debug_assert!(i < 8); TVConfig(self.0.wrapping_add(0x84 + i * 0x30)) }
+    /// `+0x204 struct tTVConfig[4] fImageTVs`
+    pub fn image_t_vs(self, i: u32) -> TVConfig { debug_assert!(i < 4); TVConfig(self.0.wrapping_add(0x204 + i * 0x30)) }
+    /// `+0x2c4 void fTVsInitialized`
+    pub fn t_vs_initialized(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x2c4); m.r32(a) }
+    pub fn set_t_vs_initialized(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x2c4); m.w32(a, v) }
+    pub fn update_t_vs_initialized(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.t_vs_initialized(m)); self.set_t_vs_initialized(m, v) }
+}
+
+/// `tScreenPinkSlipsCarSelect` (0x44c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenPinkSlipsCarSelect(pub u32);
+/// `tScreenPinkSlipsCarSelect` derives from `tScreenCarSelectTwoPlayer`: its members are reachable through it.
+impl core::ops::Deref for ScreenPinkSlipsCarSelect {
+    type Target = ScreenCarSelectTwoPlayer;
+    fn deref(&self) -> &ScreenCarSelectTwoPlayer { unsafe { &*(self as *const Self as *const ScreenCarSelectTwoPlayer) } }
+}
+impl ScreenPinkSlipsCarSelect {
+    /// The `tScreenCarSelectTwoPlayer` it derives from (the same address).
+    pub fn base(self) -> ScreenCarSelectTwoPlayer { ScreenCarSelectTwoPlayer(self.0) }
+}
+impl ScreenPinkSlipsCarSelect {
+    pub const SIZE: u32 = 0x44c;
+    /// Element `i` of an array of `tScreenPinkSlipsCarSelect` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenCarSelectTwoPlayer tScreenCarSelectTwoPlayer`
+    pub fn t_screen_car_select_two_player(self) -> ScreenCarSelectTwoPlayer { ScreenCarSelectTwoPlayer(self.0.wrapping_add(0x0)) }
+    /// `+0x438 int waitfordialog`
+    pub fn waitfordialog(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x438); m.r32(a) as i32 }
+    pub fn set_waitfordialog(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x438); m.w32(a, v as u32) }
+    pub fn update_waitfordialog(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.waitfordialog(m)); self.set_waitfordialog(m, v) }
+    /// `+0x43c struct CARDINFO_def* pCI`
+    pub fn p_ci(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x43c); m.r32(a) }
+    pub fn set_p_ci(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x43c); m.w32(a, v) }
+    pub fn update_p_ci(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.p_ci(m)); self.set_p_ci(m, v) }
+    /// `+0x440 int fStartCheckTick`
+    pub fn start_check_tick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x440); m.r32(a) as i32 }
+    pub fn set_start_check_tick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x440); m.w32(a, v as u32) }
+    pub fn update_start_check_tick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.start_check_tick(m)); self.set_start_check_tick(m, v) }
+    /// `+0x444 void fCardFailed`
+    pub fn card_failed(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x444); m.r32(a) }
+    pub fn set_card_failed(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x444); m.w32(a, v) }
+    pub fn update_card_failed(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.card_failed(m)); self.set_card_failed(m, v) }
+    /// `+0x448 void fExitingScreen`
+    pub fn exiting_screen(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x448); m.r32(a) }
+    pub fn set_exiting_screen(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x448); m.w32(a, v) }
+    pub fn update_exiting_screen(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.exiting_screen(m)); self.set_exiting_screen(m, v) }
+}
+
+/// `tScreenTournSelect` (0x2c8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTournSelect(pub u32);
+/// `tScreenTournSelect` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenTournSelect {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenTournSelect {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenTournSelect {
+    pub const SIZE: u32 = 0x2c8;
+    /// Element `i` of an array of `tScreenTournSelect` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 int hVideo`
+    pub fn h_video(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x64); m.r32(a) as i32 }
+    pub fn set_h_video(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x64); m.w32(a, v as u32) }
+    pub fn update_h_video(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.h_video(m)); self.set_h_video(m, v) }
+    /// `+0x068 int fFrame`
+    pub fn frame(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_frame(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_frame(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.frame(m)); self.set_frame(m, v) }
+    /// `+0x06c struct tTVConfig[8] tvConfigs`
+    pub fn tv_configs(self, i: u32) -> TVConfig { debug_assert!(i < 8); TVConfig(self.0.wrapping_add(0x6c + i * 0x30)) }
+    /// `+0x1ec struct tTVConfig[4] trophyTV`
+    pub fn trophy_tv(self, i: u32) -> TVConfig { debug_assert!(i < 4); TVConfig(self.0.wrapping_add(0x1ec + i * 0x30)) }
+    /// `+0x2ac short fPreviousMovie`
+    pub fn previous_movie(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2ac); m.r16(a) as i16 }
+    pub fn set_previous_movie(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2ac); m.w16(a, v as u16) }
+    pub fn update_previous_movie(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_movie(m)); self.set_previous_movie(m, v) }
+    /// `+0x2ae short fCurrentMovie`
+    pub fn current_movie(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2ae); m.r16(a) as i16 }
+    pub fn set_current_movie(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2ae); m.w16(a, v as u16) }
+    pub fn update_current_movie(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.current_movie(m)); self.set_current_movie(m, v) }
+    /// `+0x2b0 ulong fStartTicks`
+    pub fn start_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x2b0); m.r32(a) }
+    pub fn set_start_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x2b0); m.w32(a, v) }
+    pub fn update_start_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.start_ticks(m)); self.set_start_ticks(m, v) }
+    /// `+0x2b4 ulong fTVTicks`
+    pub fn tv_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x2b4); m.r32(a) }
+    pub fn set_tv_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x2b4); m.w32(a, v) }
+    pub fn update_tv_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.tv_ticks(m)); self.set_tv_ticks(m, v) }
+    /// `+0x2b8 short fTransitionDirection`
+    pub fn transition_direction(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2b8); m.r16(a) as i16 }
+    pub fn set_transition_direction(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2b8); m.w16(a, v as u16) }
+    pub fn update_transition_direction(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition_direction(m)); self.set_transition_direction(m, v) }
+    /// `+0x2ba char fPreviousTrophy`
+    pub fn previous_trophy(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x2ba); m.r8(a) as i8 }
+    pub fn set_previous_trophy(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x2ba); m.w8(a, v as u8) }
+    pub fn update_previous_trophy(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.previous_trophy(m)); self.set_previous_trophy(m, v) }
+    /// `+0x2bc void fTVsInitialized`
+    pub fn t_vs_initialized(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x2bc); m.r32(a) }
+    pub fn set_t_vs_initialized(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x2bc); m.w32(a, v) }
+    pub fn update_t_vs_initialized(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.t_vs_initialized(m)); self.set_t_vs_initialized(m, v) }
+    /// `+0x2c0 int PreCalculatedTournamentY`
+    pub fn pre_calculated_tournament_y(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x2c0); m.r32(a) as i32 }
+    pub fn set_pre_calculated_tournament_y(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x2c0); m.w32(a, v as u32) }
+    pub fn update_pre_calculated_tournament_y(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.pre_calculated_tournament_y(m)); self.set_pre_calculated_tournament_y(m, v) }
+    /// `+0x2c4 int fPrevi`
+    pub fn previ(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x2c4); m.r32(a) as i32 }
+    pub fn set_previ(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x2c4); m.w32(a, v as u32) }
+    pub fn update_previ(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.previ(m)); self.set_previ(m, v) }
+}
+
+/// `tScreenTournamentCongrats` (0x184 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTournamentCongrats(pub u32);
+/// `tScreenTournamentCongrats` derives from `tScreenCongrats`: its members are reachable through it.
+impl core::ops::Deref for ScreenTournamentCongrats {
+    type Target = ScreenCongrats;
+    fn deref(&self) -> &ScreenCongrats { unsafe { &*(self as *const Self as *const ScreenCongrats) } }
+}
+impl ScreenTournamentCongrats {
+    /// The `tScreenCongrats` it derives from (the same address).
+    pub fn base(self) -> ScreenCongrats { ScreenCongrats(self.0) }
+}
+impl ScreenTournamentCongrats {
+    pub const SIZE: u32 = 0x184;
+    /// Element `i` of an array of `tScreenTournamentCongrats` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenCongrats tScreenCongrats`
+    pub fn t_screen_congrats(self) -> ScreenCongrats { ScreenCongrats(self.0.wrapping_add(0x0)) }
+}
+
+/// `tScreenTournamentStandings` (0x94 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTournamentStandings(pub u32);
+/// `tScreenTournamentStandings` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenTournamentStandings {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenTournamentStandings {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenTournamentStandings {
+    pub const SIZE: u32 = 0x94;
+    /// Element `i` of an array of `tScreenTournamentStandings` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 long moneyFinal`
+    pub fn money_final(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x64); m.r32(a) as i32 }
+    pub fn set_money_final(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x64); m.w32(a, v as u32) }
+    pub fn update_money_final(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.money_final(m)); self.set_money_final(m, v) }
+    /// `+0x068 long moneyAwarded`
+    pub fn money_awarded(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_money_awarded(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_money_awarded(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.money_awarded(m)); self.set_money_awarded(m, v) }
+    /// `+0x06c long moneyDamage`
+    pub fn money_damage(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x6c); m.r32(a) as i32 }
+    pub fn set_money_damage(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v as u32) }
+    pub fn update_money_damage(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.money_damage(m)); self.set_money_damage(m, v) }
+    /// `+0x070 long moneyBonus`
+    pub fn money_bonus(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x70); m.r32(a) as i32 }
+    pub fn set_money_bonus(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x70); m.w32(a, v as u32) }
+    pub fn update_money_bonus(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.money_bonus(m)); self.set_money_bonus(m, v) }
+    /// `+0x074 int starttick`
+    pub fn starttick(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x74); m.r32(a) as i32 }
+    pub fn set_starttick(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x74); m.w32(a, v as u32) }
+    pub fn update_starttick(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.starttick(m)); self.set_starttick(m, v) }
+    /// `+0x078 void gotmoney`
+    pub fn gotmoney(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x78); m.r32(a) }
+    pub fn set_gotmoney(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x78); m.w32(a, v) }
+    pub fn update_gotmoney(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.gotmoney(m)); self.set_gotmoney(m, v) }
+    /// `+0x07c void gotbonus`
+    pub fn gotbonus(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x7c); m.r32(a) }
+    pub fn set_gotbonus(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x7c); m.w32(a, v) }
+    pub fn update_gotbonus(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.gotbonus(m)); self.set_gotbonus(m, v) }
+    /// `+0x080 void gotbilled`
+    pub fn gotbilled(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x80); m.r32(a) }
+    pub fn set_gotbilled(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x80); m.w32(a, v) }
+    pub fn update_gotbilled(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.gotbilled(m)); self.set_gotbilled(m, v) }
+    /// `+0x084 void fDrawMoney`
+    pub fn draw_money(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x84); m.r32(a) }
+    pub fn set_draw_money(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x84); m.w32(a, v) }
+    pub fn update_draw_money(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.draw_money(m)); self.set_draw_money(m, v) }
+    /// `+0x088 void fCountedDown`
+    pub fn counted_down(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x88); m.r32(a) }
+    pub fn set_counted_down(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x88); m.w32(a, v) }
+    pub fn update_counted_down(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.counted_down(m)); self.set_counted_down(m, v) }
+    /// `+0x08c void fStartCountdownNOW`
+    pub fn start_countdown_now(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x8c); m.r32(a) }
+    pub fn set_start_countdown_now(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x8c); m.w32(a, v) }
+    pub fn update_start_countdown_now(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.start_countdown_now(m)); self.set_start_countdown_now(m, v) }
+    /// `+0x090 int fCountSpeed`
+    pub fn count_speed(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x90); m.r32(a) as i32 }
+    pub fn set_count_speed(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x90); m.w32(a, v as u32) }
+    pub fn update_count_speed(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.count_speed(m)); self.set_count_speed(m, v) }
+}
+
+/// `tScreenTournamentStandings3item` (0x94 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTournamentStandings3item(pub u32);
+/// `tScreenTournamentStandings3item` derives from `tScreenTournamentStandings`: its members are reachable through it.
+impl core::ops::Deref for ScreenTournamentStandings3item {
+    type Target = ScreenTournamentStandings;
+    fn deref(&self) -> &ScreenTournamentStandings { unsafe { &*(self as *const Self as *const ScreenTournamentStandings) } }
+}
+impl ScreenTournamentStandings3item {
+    /// The `tScreenTournamentStandings` it derives from (the same address).
+    pub fn base(self) -> ScreenTournamentStandings { ScreenTournamentStandings(self.0) }
+}
+impl ScreenTournamentStandings3item {
+    pub const SIZE: u32 = 0x94;
+    /// Element `i` of an array of `tScreenTournamentStandings3item` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenTournamentStandings tScreenTournamentStandings`
+    pub fn t_screen_tournament_standings(self) -> ScreenTournamentStandings { ScreenTournamentStandings(self.0.wrapping_add(0x0)) }
+}
+
+/// `tScreenTournamentTrophy` (0x188 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTournamentTrophy(pub u32);
+/// `tScreenTournamentTrophy` derives from `tScreenCongrats`: its members are reachable through it.
+impl core::ops::Deref for ScreenTournamentTrophy {
+    type Target = ScreenCongrats;
+    fn deref(&self) -> &ScreenCongrats { unsafe { &*(self as *const Self as *const ScreenCongrats) } }
+}
+impl ScreenTournamentTrophy {
+    /// The `tScreenCongrats` it derives from (the same address).
+    pub fn base(self) -> ScreenCongrats { ScreenCongrats(self.0) }
+}
+impl ScreenTournamentTrophy {
+    pub const SIZE: u32 = 0x188;
+    /// Element `i` of an array of `tScreenTournamentTrophy` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreenCongrats tScreenCongrats`
+    pub fn t_screen_congrats(self) -> ScreenCongrats { ScreenCongrats(self.0.wrapping_add(0x0)) }
+    /// `+0x184 short fShapeCount`
+    pub fn shape_count(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x184); m.r16(a) as i16 }
+    pub fn set_shape_count(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x184); m.w16(a, v as u16) }
+    pub fn update_shape_count(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.shape_count(m)); self.set_shape_count(m, v) }
+    /// `+0x186 char fDoUpdate`
+    pub fn do_update(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x186); m.r8(a) as i8 }
+    pub fn set_do_update(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x186); m.w8(a, v as u8) }
+    pub fn update_do_update(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.do_update(m)); self.set_do_update(m, v) }
+}
+
+/// `tScreenTrackInfo` (0x2a4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTrackInfo(pub u32);
+/// `tScreenTrackInfo` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenTrackInfo {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenTrackInfo {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenTrackInfo {
+    pub const SIZE: u32 = 0x2a4;
+    /// Element `i` of an array of `tScreenTrackInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 struct tTrackInfo fTrack`
+    pub fn track(self) -> TrackInfo { TrackInfo(self.0.wrapping_add(0x64)) }
+    /// `+0x08c struct tTVConfig[10] tvConfigs`
+    pub fn tv_configs(self, i: u32) -> TVConfig { debug_assert!(i < 10); TVConfig(self.0.wrapping_add(0x8c + i * 0x30)) }
+    /// `+0x26c struct tVideoWall fVideoWall`
+    pub fn video_wall(self) -> VideoWall { VideoWall(self.0.wrapping_add(0x26c)) }
+}
+
+/// `tScreenTrackRecords` (0x74 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTrackRecords(pub u32);
+/// `tScreenTrackRecords` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenTrackRecords {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenTrackRecords {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenTrackRecords {
+    pub const SIZE: u32 = 0x74;
+    /// Element `i` of an array of `tScreenTrackRecords` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 struct tRecordBuffer* TrackRecords`
+    pub fn track_records(self, m: &mut Mem) -> RecordBuffer { let a = self.0.wrapping_add(0x64); RecordBuffer(m.r32(a)) }
+    pub fn set_track_records(self, m: &mut Mem, v: RecordBuffer) { let a = self.0.wrapping_add(0x64); m.w32(a, v.0) }
+    /// `+0x068 int flare_intensity`
+    pub fn flare_intensity(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_flare_intensity(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_flare_intensity(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.flare_intensity(m)); self.set_flare_intensity(m, v) }
+    /// `+0x06c int flareextra`
+    pub fn flareextra(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x6c); m.r32(a) as i32 }
+    pub fn set_flareextra(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v as u32) }
+    pub fn update_flareextra(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.flareextra(m)); self.set_flareextra(m, v) }
+    /// `+0x070 void fReadNewData`
+    pub fn read_new_data(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x70); m.r32(a) }
+    pub fn set_read_new_data(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x70); m.w32(a, v) }
+    pub fn update_read_new_data(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.read_new_data(m)); self.set_read_new_data(m, v) }
+}
+
+/// `tScreenTrackSelect` (0x2a0 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTrackSelect(pub u32);
+/// `tScreenTrackSelect` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenTrackSelect {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenTrackSelect {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenTrackSelect {
+    pub const SIZE: u32 = 0x2a0;
+    /// Element `i` of an array of `tScreenTrackSelect` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 int hVideo`
+    pub fn h_video(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x64); m.r32(a) as i32 }
+    pub fn set_h_video(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x64); m.w32(a, v as u32) }
+    pub fn update_h_video(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.h_video(m)); self.set_h_video(m, v) }
+    /// `+0x068 int fFrame`
+    pub fn frame(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x68); m.r32(a) as i32 }
+    pub fn set_frame(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x68); m.w32(a, v as u32) }
+    pub fn update_frame(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.frame(m)); self.set_frame(m, v) }
+    /// `+0x06c short fPreviousTrack`
+    pub fn previous_track(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6c); m.r16(a) as i16 }
+    pub fn set_previous_track(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6c); m.w16(a, v as u16) }
+    pub fn update_previous_track(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.previous_track(m)); self.set_previous_track(m, v) }
+    /// `+0x06e short fMovieTrack`
+    pub fn movie_track(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6e); m.r16(a) as i16 }
+    pub fn set_movie_track(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6e); m.w16(a, v as u16) }
+    pub fn update_movie_track(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.movie_track(m)); self.set_movie_track(m, v) }
+    /// `+0x070 short fBrightness`
+    pub fn brightness(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x70); m.r16(a) as i16 }
+    pub fn set_brightness(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x70); m.w16(a, v as u16) }
+    pub fn update_brightness(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.brightness(m)); self.set_brightness(m, v) }
+    /// `+0x072 short fDestBrightness`
+    pub fn dest_brightness(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x72); m.r16(a) as i16 }
+    pub fn set_dest_brightness(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x72); m.w16(a, v as u16) }
+    pub fn update_dest_brightness(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.dest_brightness(m)); self.set_dest_brightness(m, v) }
+    /// `+0x074 short fStartBrightness`
+    pub fn start_brightness(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x74); m.r16(a) as i16 }
+    pub fn set_start_brightness(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x74); m.w16(a, v as u16) }
+    pub fn update_start_brightness(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.start_brightness(m)); self.set_start_brightness(m, v) }
+    /// `+0x078 ulong fStartTicks`
+    pub fn start_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x78); m.r32(a) }
+    pub fn set_start_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x78); m.w32(a, v) }
+    pub fn update_start_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.start_ticks(m)); self.set_start_ticks(m, v) }
+    /// `+0x07c void fTicksSet`
+    pub fn ticks_set(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x7c); m.r32(a) }
+    pub fn set_ticks_set(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x7c); m.w32(a, v) }
+    pub fn update_ticks_set(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.ticks_set(m)); self.set_ticks_set(m, v) }
+    /// `+0x080 struct tTVConfig[10] tvConfigs`
+    pub fn tv_configs(self, i: u32) -> TVConfig { debug_assert!(i < 10); TVConfig(self.0.wrapping_add(0x80 + i * 0x30)) }
+    /// `+0x260 struct tVideoWall fVideoWall`
+    pub fn video_wall(self) -> VideoWall { VideoWall(self.0.wrapping_add(0x260)) }
+    /// `+0x298 void fTVsInitialized`
+    pub fn t_vs_initialized(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x298); m.r32(a) }
+    pub fn set_t_vs_initialized(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x298); m.w32(a, v) }
+    pub fn update_t_vs_initialized(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.t_vs_initialized(m)); self.set_t_vs_initialized(m, v) }
+    /// `+0x29c ulong fVideoTicks`
+    pub fn video_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x29c); m.r32(a) }
+    pub fn set_video_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x29c); m.w32(a, v) }
+    pub fn update_video_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.video_ticks(m)); self.set_video_ticks(m, v) }
+}
+
+/// `tScreenTrophyInfo` (0x68 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTrophyInfo(pub u32);
+/// `tScreenTrophyInfo` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenTrophyInfo {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenTrophyInfo {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenTrophyInfo {
+    pub const SIZE: u32 = 0x68;
+    /// Element `i` of an array of `tScreenTrophyInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 int BannerCol`
+    pub fn banner_col(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x64); m.r32(a) as i32 }
+    pub fn set_banner_col(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x64); m.w32(a, v as u32) }
+    pub fn update_banner_col(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.banner_col(m)); self.set_banner_col(m, v) }
+}
+
+/// `tScreenTrophyRoom` (0x158 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenTrophyRoom(pub u32);
+/// `tScreenTrophyRoom` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenTrophyRoom {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenTrophyRoom {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenTrophyRoom {
+    pub const SIZE: u32 = 0x158;
+    /// Element `i` of an array of `tScreenTrophyRoom` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 struct tShapeInformation fTrophyShapes`
+    pub fn trophy_shapes(self) -> ShapeInformation { ShapeInformation(self.0.wrapping_add(0x64)) }
+    /// `+0x08c short fNumTrophies`
+    pub fn num_trophies(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8c); m.r16(a) as i16 }
+    pub fn set_num_trophies(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8c); m.w16(a, v as u16) }
+    pub fn update_num_trophies(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_trophies(m)); self.set_num_trophies(m, v) }
+    /// `+0x090 int startTicks`
+    pub fn start_ticks(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x90); m.r32(a) as i32 }
+    pub fn set_start_ticks(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x90); m.w32(a, v as u32) }
+    pub fn update_start_ticks(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.start_ticks(m)); self.set_start_ticks(m, v) }
+    /// `+0x094 short fShapeCount`
+    pub fn shape_count(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x94); m.r16(a) as i16 }
+    pub fn set_shape_count(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x94); m.w16(a, v as u16) }
+    pub fn update_shape_count(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.shape_count(m)); self.set_shape_count(m, v) }
+    /// `+0x098 void fLoadingTrophy`
+    pub fn loading_trophy(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x98); m.r32(a) }
+    pub fn set_loading_trophy(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x98); m.w32(a, v) }
+    pub fn update_loading_trophy(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.loading_trophy(m)); self.set_loading_trophy(m, v) }
+    /// `+0x09c char fPreviousTrophy`
+    pub fn previous_trophy(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x9c); m.r8(a) as i8 }
+    pub fn set_previous_trophy(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x9c); m.w8(a, v as u8) }
+    pub fn update_previous_trophy(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.previous_trophy(m)); self.set_previous_trophy(m, v) }
+    /// `+0x09d char fDoUpdate`
+    pub fn do_update(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x9d); m.r8(a) as i8 }
+    pub fn set_do_update(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x9d); m.w8(a, v as u8) }
+    pub fn update_do_update(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.do_update(m)); self.set_do_update(m, v) }
+    /// `+0x0a0 void fClearScreen`
+    pub fn clear_screen(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xa0); m.r32(a) }
+    pub fn set_clear_screen(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xa0); m.w32(a, v) }
+    pub fn update_clear_screen(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.clear_screen(m)); self.set_clear_screen(m, v) }
+    /// `+0x0a4 char fBrightness`
+    pub fn brightness(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0xa4); m.r8(a) as i8 }
+    pub fn set_brightness(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0xa4); m.w8(a, v as u8) }
+    pub fn update_brightness(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.brightness(m)); self.set_brightness(m, v) }
+    /// `+0x0a8 ulong fStartTicks`
+    pub fn start_ticks_(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xa8); m.r32(a) }
+    pub fn set_start_ticks_(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xa8); m.w32(a, v) }
+    pub fn update_start_ticks_(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.start_ticks_(m)); self.set_start_ticks_(m, v) }
+    /// `+0x0ac short[16] fTextInfo`
+    pub fn text_info(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0xac + i * 2); debug_assert!(i < 16); m.r16(a) as i16 }
+    pub fn set_text_info(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0xac + i * 2); debug_assert!(i < 16); m.w16(a, v as u16) }
+    pub fn update_text_info(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.text_info(m, i)); self.set_text_info(m, i, v) }
+    /// `+0x0cc char thisisuseless`
+    pub fn thisisuseless(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0xcc); m.r8(a) as i8 }
+    pub fn set_thisisuseless(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0xcc); m.w8(a, v as u8) }
+    pub fn update_thisisuseless(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.thisisuseless(m)); self.set_thisisuseless(m, v) }
+    /// `+0x0d0 int tier`
+    pub fn tier(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xd0); m.r32(a) as i32 }
+    pub fn set_tier(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xd0); m.w32(a, v as u32) }
+    pub fn update_tier(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.tier(m)); self.set_tier(m, v) }
+    /// `+0x0d4 short[2] fRealCurrentTourn`
+    pub fn real_current_tourn(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0xd4 + i * 2); debug_assert!(i < 2); m.r16(a) as i16 }
+    pub fn set_real_current_tourn(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0xd4 + i * 2); debug_assert!(i < 2); m.w16(a, v as u16) }
+    pub fn update_real_current_tourn(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.real_current_tourn(m, i)); self.set_real_current_tourn(m, i, v) }
+    /// `+0x0d8 short[64] fTrophyList`
+    pub fn trophy_list(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0xd8 + i * 2); debug_assert!(i < 64); m.r16(a) as i16 }
+    pub fn set_trophy_list(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0xd8 + i * 2); debug_assert!(i < 64); m.w16(a, v as u16) }
+    pub fn update_trophy_list(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.trophy_list(m, i)); self.set_trophy_list(m, i, v) }
+}
+
+/// `tScreenUserName` (0xcc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ScreenUserName(pub u32);
+/// `tScreenUserName` derives from `tScreen`: its members are reachable through it.
+impl core::ops::Deref for ScreenUserName {
+    type Target = Screen;
+    fn deref(&self) -> &Screen { unsafe { &*(self as *const Self as *const Screen) } }
+}
+impl ScreenUserName {
+    /// The `tScreen` it derives from (the same address).
+    pub fn base(self) -> Screen { Screen(self.0) }
+}
+impl ScreenUserName {
+    pub const SIZE: u32 = 0xcc;
+    /// Element `i` of an array of `tScreenUserName` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tScreen tScreen`
+    pub fn t_screen(self) -> Screen { Screen(self.0.wrapping_add(0x0)) }
+    /// `+0x064 struct tOptionsMenu* callingMenu`
+    pub fn calling_menu(self, m: &mut Mem) -> OptionsMenu { let a = self.0.wrapping_add(0x64); OptionsMenu(m.r32(a)) }
+    pub fn set_calling_menu(self, m: &mut Mem, v: OptionsMenu) { let a = self.0.wrapping_add(0x64); m.w32(a, v.0) }
+    /// `+0x068 short fTextFade`
+    pub fn text_fade(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x68); m.r16(a) as i16 }
+    pub fn set_text_fade(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x68); m.w16(a, v as u16) }
+    pub fn update_text_fade(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.text_fade(m)); self.set_text_fade(m, v) }
+    /// `+0x06c void fInTransition`
+    pub fn in_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x6c); m.r32(a) }
+    pub fn set_in_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x6c); m.w32(a, v) }
+    pub fn update_in_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_transition(m)); self.set_in_transition(m, v) }
+    /// `+0x070 char[10][9] fRowList`
+    pub fn row_list(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x70 + i * 1); debug_assert!(i < 90); m.r8(a) as i8 }
+    pub fn set_row_list(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x70 + i * 1); debug_assert!(i < 90); m.w8(a, v as u8) }
+    pub fn update_row_list(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.row_list(m, i)); self.set_row_list(m, i, v) }
+}
+
+/// `tShapeInformation` (0x28 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct ShapeInformation(pub u32);
+impl ShapeInformation {
+    pub const SIZE: u32 = 0x28;
+    /// Element `i` of an array of `tShapeInformation` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tTexture_ShapeInfo* fShapes`
+    pub fn shapes(self, m: &mut Mem) -> TextureShapeInfo { let a = self.0.wrapping_add(0x0); TextureShapeInfo(m.r32(a)) }
+    pub fn set_shapes(self, m: &mut Mem, v: TextureShapeInfo) { let a = self.0.wrapping_add(0x0); m.w32(a, v.0) }
+    /// `+0x004 char* fFile`
+    pub fn file(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x4); m.r32(a) }
+    pub fn set_file(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x4); m.w32(a, v) }
+    pub fn update_file(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.file(m)); self.set_file(m, v) }
+    /// `+0x008 char* fDestFile`
+    pub fn dest_file(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x8); m.r32(a) }
+    pub fn set_dest_file(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x8); m.w32(a, v) }
+    pub fn update_dest_file(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.dest_file(m)); self.set_dest_file(m, v) }
+    /// `+0x00c uint async_handle`
+    pub fn async_handle(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_async_handle(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_async_handle(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.async_handle(m)); self.set_async_handle(m, v) }
+    /// `+0x010 ushort fNumShapes`
+    pub fn num_shapes(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x10); m.r16(a) }
+    pub fn set_num_shapes(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x10); m.w16(a, v) }
+    pub fn update_num_shapes(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.num_shapes(m)); self.set_num_shapes(m, v) }
+    /// `+0x012 ushort fFlags`
+    pub fn flags(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x12); m.r16(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x12); m.w16(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x014 char[16] fFilename`
+    pub fn filename(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x14 + i * 1); debug_assert!(i < 16); m.r8(a) as i8 }
+    pub fn set_filename(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x14 + i * 1); debug_assert!(i < 16); m.w8(a, v as u8) }
+    pub fn update_filename(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.filename(m, i)); self.set_filename(m, i, v) }
+    /// `+0x024 void fLoadCancelled`
+    pub fn load_cancelled(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x24); m.r32(a) }
+    pub fn set_load_cancelled(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x24); m.w32(a, v) }
+    pub fn update_load_cancelled(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.load_cancelled(m)); self.set_load_cancelled(m, v) }
+}
+
 /// `Sim_tSimGlobalVar` (0x18 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct SimGlobal(pub u32);
 impl SimGlobal {
     pub const SIZE: u32 = 0x18;
@@ -4301,6 +9693,7 @@ impl SimGlobal {
 
 /// `sim_queue` (0x20c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct SimQueue(pub u32);
 impl SimQueue {
     pub const SIZE: u32 = 0x20c;
@@ -4324,6 +9717,7 @@ impl SimQueue {
 
 /// `Sim_tSimSystemVar` (0x1c bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct SimVar(pub u32);
 impl SimVar {
     pub const SIZE: u32 = 0x1c;
@@ -4359,8 +9753,127 @@ impl SimVar {
     pub fn update_current_clock_ticks(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.current_clock_ticks(m)); self.set_current_clock_ticks(m, v) }
 }
 
+/// `tSkid` (0x1c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Skid(pub u32);
+impl Skid {
+    pub const SIZE: u32 = 0x1c;
+    /// Element `i` of an array of `tSkid` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct coorddef pt`
+    pub fn pt(self) -> Coord { Coord(self.0.wrapping_add(0x0)) }
+    /// `+0x00c struct CVECTOR clr`
+    pub fn clr(self) -> CVECTOR { CVECTOR(self.0.wrapping_add(0xc)) }
+    /// `+0x010 int type`
+    pub fn type_(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
+    pub fn set_type_(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
+    pub fn update_type_(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.type_(m)); self.set_type_(m, v) }
+    /// `+0x014 struct Skidmark_Segment* nseg`
+    pub fn nseg(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14); m.r32(a) }
+    pub fn set_nseg(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14); m.w32(a, v) }
+    pub fn update_nseg(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.nseg(m)); self.set_nseg(m, v) }
+    /// `+0x018 int chunk`
+    pub fn chunk(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x18); m.r32(a) as i32 }
+    pub fn set_chunk(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x18); m.w32(a, v as u32) }
+    pub fn update_chunk(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.chunk(m)); self.set_chunk(m, v) }
+}
+
+/// `tSmallCoordXY` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct SmallCoordXY(pub u32);
+impl SmallCoordXY {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `tSmallCoordXY` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short x`
+    pub fn x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x002 short y`
+    pub fn y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y(m)); self.set_y(m, v) }
+}
+
+/// `tStageInfo` (0x2c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct StageInfo(pub u32);
+impl StageInfo {
+    pub const SIZE: u32 = 0x2c;
+    /// Element `i` of an array of `tStageInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar fCarModel`
+    pub fn car_model(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x0); m.r8(a) }
+    pub fn set_car_model(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x0); m.w8(a, v) }
+    pub fn update_car_model(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.car_model(m)); self.set_car_model(m, v) }
+    /// `+0x001 uchar fColor`
+    pub fn color(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_color(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_color(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.color(m)); self.set_color(m, v) }
+    /// `+0x002 uchar fAIPersonality`
+    pub fn ai_personality(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_ai_personality(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_ai_personality(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.ai_personality(m)); self.set_ai_personality(m, v) }
+    /// `+0x003 uchar fDirection`
+    pub fn direction(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_direction(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_direction(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.direction(m)); self.set_direction(m, v) }
+    /// `+0x004 short fTimeLimit`
+    pub fn time_limit(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_time_limit(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_time_limit(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.time_limit(m)); self.set_time_limit(m, v) }
+    /// `+0x006 short fWingman`
+    pub fn wingman(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_wingman(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_wingman(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.wingman(m)); self.set_wingman(m, v) }
+    /// `+0x008 short fSpikeBelt`
+    pub fn spike_belt(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x8); m.r16(a) as i16 }
+    pub fn set_spike_belt(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x8); m.w16(a, v as u16) }
+    pub fn update_spike_belt(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.spike_belt(m)); self.set_spike_belt(m, v) }
+    /// `+0x00a short fBlockadeCop`
+    pub fn blockade_cop(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xa); m.r16(a) as i16 }
+    pub fn set_blockade_cop(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xa); m.w16(a, v as u16) }
+    pub fn update_blockade_cop(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.blockade_cop(m)); self.set_blockade_cop(m, v) }
+    /// `+0x00c uchar fPlacement`
+    pub fn placement(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0xc); m.r8(a) }
+    pub fn set_placement(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0xc); m.w8(a, v) }
+    pub fn update_placement(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.placement(m)); self.set_placement(m, v) }
+    /// `+0x00d uchar fStyle`
+    pub fn style(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0xd); m.r8(a) }
+    pub fn set_style(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0xd); m.w8(a, v) }
+    pub fn update_style(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.style(m)); self.set_style(m, v) }
+    /// `+0x00e ushort fDistance`
+    pub fn distance(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0xe); m.r16(a) }
+    pub fn set_distance(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0xe); m.w16(a, v) }
+    pub fn update_distance(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.distance(m)); self.set_distance(m, v) }
+    /// `+0x010 ulong fSpeed`
+    pub fn speed(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_speed(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_speed(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.speed(m)); self.set_speed(m, v) }
+    /// `+0x014 ulong fWeight`
+    pub fn weight(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x14); m.r32(a) }
+    pub fn set_weight(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x14); m.w32(a, v) }
+    pub fn update_weight(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.weight(m)); self.set_weight(m, v) }
+    /// `+0x018 ulong fGlue`
+    pub fn glue(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x18); m.r32(a) }
+    pub fn set_glue(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x18); m.w32(a, v) }
+    pub fn update_glue(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.glue(m)); self.set_glue(m, v) }
+    /// `+0x01c uchar fSpeechColor`
+    pub fn speech_color(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1c); m.r8(a) }
+    pub fn set_speech_color(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1c); m.w8(a, v) }
+    pub fn update_speech_color(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.speech_color(m)); self.set_speech_color(m, v) }
+    /// `+0x01d uchar[15] fReserved`
+    pub fn reserved(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x1d + i * 1); debug_assert!(i < 15); m.r8(a) }
+    pub fn set_reserved(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x1d + i * 1); debug_assert!(i < 15); m.w8(a, v) }
+    pub fn update_reserved(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.reserved(m, i)); self.set_reserved(m, i, v) }
+}
+
 /// `tNormalCacheEntry` (0x20 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TNormalCacheEntry(pub u32);
 impl TNormalCacheEntry {
     pub const SIZE: u32 = 0x20;
@@ -4388,8 +9901,613 @@ impl TNormalCacheEntry {
     pub fn update_access_time(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.access_time(m)); self.set_access_time(m, v) }
 }
 
+/// `tTVConfig` (0x30 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TVConfig(pub u32);
+impl TVConfig {
+    pub const SIZE: u32 = 0x30;
+    /// Element `i` of an array of `tTVConfig` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 enum tTVState state`
+    pub fn state(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_state(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_state(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.state(m)); self.set_state(m, v) }
+    /// `+0x004 short transition`
+    pub fn transition(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_transition(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_transition(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition(m)); self.set_transition(m, v) }
+    /// `+0x006 ushort destBrightness`
+    pub fn dest_brightness(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x6); m.r16(a) }
+    pub fn set_dest_brightness(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x6); m.w16(a, v) }
+    pub fn update_dest_brightness(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.dest_brightness(m)); self.set_dest_brightness(m, v) }
+    /// `+0x008 ushort flags`
+    pub fn flags(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x8); m.r16(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x8); m.w16(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x00a short fxWide`
+    pub fn fx_wide(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xa); m.r16(a) as i16 }
+    pub fn set_fx_wide(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xa); m.w16(a, v as u16) }
+    pub fn update_fx_wide(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fx_wide(m)); self.set_fx_wide(m, v) }
+    /// `+0x00c short fxThin`
+    pub fn fx_thin(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0xc); m.r16(a) as i16 }
+    pub fn set_fx_thin(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0xc); m.w16(a, v as u16) }
+    pub fn update_fx_thin(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fx_thin(m)); self.set_fx_thin(m, v) }
+    /// `+0x010 int tint`
+    pub fn tint(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
+    pub fn set_tint(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
+    pub fn update_tint(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.tint(m)); self.set_tint(m, v) }
+    /// `+0x014 short x`
+    pub fn x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x14); m.r16(a) as i16 }
+    pub fn set_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x14); m.w16(a, v as u16) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x016 short y`
+    pub fn y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x16); m.r16(a) as i16 }
+    pub fn set_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x16); m.w16(a, v as u16) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y(m)); self.set_y(m, v) }
+    /// `+0x018 short w`
+    pub fn w(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x18); m.r16(a) as i16 }
+    pub fn set_w(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x18); m.w16(a, v as u16) }
+    pub fn update_w(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.w(m)); self.set_w(m, v) }
+    /// `+0x01a short h`
+    pub fn h(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1a); m.r16(a) as i16 }
+    pub fn set_h(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1a); m.w16(a, v as u16) }
+    pub fn update_h(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.h(m)); self.set_h(m, v) }
+    /// `+0x01c uchar u`
+    pub fn u(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1c); m.r8(a) }
+    pub fn set_u(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1c); m.w8(a, v) }
+    pub fn update_u(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.u(m)); self.set_u(m, v) }
+    /// `+0x01d uchar v`
+    pub fn v(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1d); m.r8(a) }
+    pub fn set_v(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1d); m.w8(a, v) }
+    pub fn update_v(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.v(m)); self.set_v(m, v) }
+    /// `+0x01e uchar uw`
+    pub fn uw(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1e); m.r8(a) }
+    pub fn set_uw(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1e); m.w8(a, v) }
+    pub fn update_uw(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.uw(m)); self.set_uw(m, v) }
+    /// `+0x01f uchar vh`
+    pub fn vh(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1f); m.r8(a) }
+    pub fn set_vh(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1f); m.w8(a, v) }
+    pub fn update_vh(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.vh(m)); self.set_vh(m, v) }
+    /// `+0x020 uchar shapeType`
+    pub fn shape_type(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x20); m.r8(a) }
+    pub fn set_shape_type(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x20); m.w8(a, v) }
+    pub fn update_shape_type(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.shape_type(m)); self.set_shape_type(m, v) }
+    /// `+0x022 ushort clut`
+    pub fn clut(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x22); m.r16(a) }
+    pub fn set_clut(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x22); m.w16(a, v) }
+    pub fn update_clut(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.clut(m)); self.set_clut(m, v) }
+    /// `+0x024 ushort tpage`
+    pub fn tpage(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x24); m.r16(a) }
+    pub fn set_tpage(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x24); m.w16(a, v) }
+    pub fn update_tpage(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.tpage(m)); self.set_tpage(m, v) }
+    /// `+0x026 ushort shapex`
+    pub fn shapex(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x26); m.r16(a) }
+    pub fn set_shapex(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x26); m.w16(a, v) }
+    pub fn update_shapex(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.shapex(m)); self.set_shapex(m, v) }
+    /// `+0x028 ushort shapey`
+    pub fn shapey(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x28); m.r16(a) }
+    pub fn set_shapey(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x28); m.w16(a, v) }
+    pub fn update_shapey(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.shapey(m)); self.set_shapey(m, v) }
+    /// `+0x02a ushort clutID`
+    pub fn clut_id(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x2a); m.r16(a) }
+    pub fn set_clut_id(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x2a); m.w16(a, v) }
+    pub fn update_clut_id(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.clut_id(m)); self.set_clut_id(m, v) }
+    /// `+0x02c ushort flip_axis`
+    pub fn flip_axis(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x2c); m.r16(a) }
+    pub fn set_flip_axis(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x2c); m.w16(a, v) }
+    pub fn update_flip_axis(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.flip_axis(m)); self.set_flip_axis(m, v) }
+}
+
+/// `tTexture_ShapeInfo` (0x20 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TextureShapeInfo(pub u32);
+impl TextureShapeInfo {
+    pub const SIZE: u32 = 0x20;
+    /// Element `i` of an array of `tTexture_ShapeInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct shapetbl* shpptr`
+    pub fn shpptr(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_shpptr(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_shpptr(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.shpptr(m)); self.set_shpptr(m, v) }
+    /// `+0x004 long clutID`
+    pub fn clut_id(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_clut_id(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_clut_id(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.clut_id(m)); self.set_clut_id(m, v) }
+    /// `+0x008 char depth`
+    pub fn depth(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x8); m.r8(a) as i8 }
+    pub fn set_depth(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x8); m.w8(a, v as u8) }
+    pub fn update_depth(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.depth(m)); self.set_depth(m, v) }
+    /// `+0x010 short width`
+    pub fn width(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x10); m.r16(a) as i16 }
+    pub fn set_width(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x10); m.w16(a, v as u16) }
+    pub fn update_width(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.width(m)); self.set_width(m, v) }
+    /// `+0x012 short height`
+    pub fn height(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x12); m.r16(a) as i16 }
+    pub fn set_height(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x12); m.w16(a, v as u16) }
+    pub fn update_height(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.height(m)); self.set_height(m, v) }
+    /// `+0x014 short centerx`
+    pub fn centerx(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x14); m.r16(a) as i16 }
+    pub fn set_centerx(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x14); m.w16(a, v as u16) }
+    pub fn update_centerx(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.centerx(m)); self.set_centerx(m, v) }
+    /// `+0x016 short centery`
+    pub fn centery(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x16); m.r16(a) as i16 }
+    pub fn set_centery(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x16); m.w16(a, v as u16) }
+    pub fn update_centery(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.centery(m)); self.set_centery(m, v) }
+    /// `+0x018 short shapex`
+    pub fn shapex(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x18); m.r16(a) as i16 }
+    pub fn set_shapex(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x18); m.w16(a, v as u16) }
+    pub fn update_shapex(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.shapex(m)); self.set_shapex(m, v) }
+    /// `+0x01a short shapey`
+    pub fn shapey(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1a); m.r16(a) as i16 }
+    pub fn set_shapey(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1a); m.w16(a, v as u16) }
+    pub fn update_shapey(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.shapey(m)); self.set_shapey(m, v) }
+    /// `+0x01c ushort tpage`
+    pub fn tpage(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x1c); m.r16(a) }
+    pub fn set_tpage(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x1c); m.w16(a, v) }
+    pub fn update_tpage(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.tpage(m)); self.set_tpage(m, v) }
+    /// `+0x01e ushort clut`
+    pub fn clut(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x1e); m.r16(a) }
+    pub fn set_clut(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x1e); m.w16(a, v) }
+    pub fn update_clut(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.clut(m)); self.set_clut(m, v) }
+}
+
+/// `tTierInfo` (0xc bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TierInfo(pub u32);
+impl TierInfo {
+    pub const SIZE: u32 = 0xc;
+    /// Element `i` of an array of `tTierInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 uchar fNumTournaments`
+    pub fn num_tournaments(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x0); m.r8(a) }
+    pub fn set_num_tournaments(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x0); m.w8(a, v) }
+    pub fn update_num_tournaments(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.num_tournaments(m)); self.set_num_tournaments(m, v) }
+    /// `+0x001 uchar fDescriptionID`
+    pub fn description_id(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_description_id(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_description_id(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.description_id(m)); self.set_description_id(m, v) }
+    /// `+0x002 uchar fTournOffset`
+    pub fn tourn_offset(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_tourn_offset(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_tourn_offset(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.tourn_offset(m)); self.set_tourn_offset(m, v) }
+    /// `+0x003 uchar fPad`
+    pub fn pad(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_pad(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.pad(m)); self.set_pad(m, v) }
+    /// `+0x004 uchar[8] fReserved`
+    pub fn reserved(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x4 + i * 1); debug_assert!(i < 8); m.r8(a) }
+    pub fn set_reserved(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x4 + i * 1); debug_assert!(i < 8); m.w8(a, v) }
+    pub fn update_reserved(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.reserved(m, i)); self.set_reserved(m, i, v) }
+}
+
+/// `tTournamentDefinition` (0x2924 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TournamentDefinition(pub u32);
+impl TournamentDefinition {
+    pub const SIZE: u32 = 0x2924;
+    /// Element `i` of an array of `tTournamentDefinition` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tTierInfo[3] fTiers`
+    pub fn tiers(self, i: u32) -> TierInfo { debug_assert!(i < 3); TierInfo(self.0.wrapping_add(0x0 + i * 0xc)) }
+    /// `+0x024 struct tTourneyInfo[64] fTournaments`
+    pub fn tournaments(self, i: u32) -> TourneyInfo { debug_assert!(i < 64); TourneyInfo(self.0.wrapping_add(0x24 + i * 0x54)) }
+    /// `+0x1524 struct tTrackInfo[128] fTracks`
+    pub fn tracks(self, i: u32) -> TrackInfo { debug_assert!(i < 128); TrackInfo(self.0.wrapping_add(0x1524 + i * 0x28)) }
+}
+
+/// `tTournamentManager` (0x284 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TournamentManager(pub u32);
+impl TournamentManager {
+    pub const SIZE: u32 = 0x284;
+    /// Element `i` of an array of `tTournamentManager` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char fNumTiers`
+    pub fn num_tiers(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_num_tiers(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_num_tiers(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.num_tiers(m)); self.set_num_tiers(m, v) }
+    /// `+0x004 int fTier`
+    pub fn tier(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x4); m.r32(a) as i32 }
+    pub fn set_tier(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x4); m.w32(a, v as u32) }
+    pub fn update_tier(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.tier(m)); self.set_tier(m, v) }
+    /// `+0x008 int fTournament`
+    pub fn tournament(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x8); m.r32(a) as i32 }
+    pub fn set_tournament(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x8); m.w32(a, v as u32) }
+    pub fn update_tournament(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.tournament(m)); self.set_tournament(m, v) }
+    /// `+0x00c int fCurrentTrack`
+    pub fn current_track(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0xc); m.r32(a) as i32 }
+    pub fn set_current_track(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0xc); m.w32(a, v as u32) }
+    pub fn update_current_track(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.current_track(m)); self.set_current_track(m, v) }
+    /// `+0x010 int fNumRacers`
+    pub fn num_racers(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x10); m.r32(a) as i32 }
+    pub fn set_num_racers(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x10); m.w32(a, v as u32) }
+    pub fn update_num_racers(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.num_racers(m)); self.set_num_racers(m, v) }
+    /// `+0x014 long fMoney`
+    pub fn money(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x14); m.r32(a) as i32 }
+    pub fn set_money(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x14); m.w32(a, v as u32) }
+    pub fn update_money(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.money(m)); self.set_money(m, v) }
+    /// `+0x018 struct tTournamentDefinition* fDefinition`
+    pub fn definition(self, m: &mut Mem) -> TournamentDefinition { let a = self.0.wrapping_add(0x18); TournamentDefinition(m.r32(a)) }
+    pub fn set_definition(self, m: &mut Mem, v: TournamentDefinition) { let a = self.0.wrapping_add(0x18); m.w32(a, v.0) }
+    /// `+0x01c short[4] fTierList`
+    pub fn tier_list(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x1c + i * 2); debug_assert!(i < 4); m.r16(a) as i16 }
+    pub fn set_tier_list(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x1c + i * 2); debug_assert!(i < 4); m.w16(a, v as u16) }
+    pub fn update_tier_list(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.tier_list(m, i)); self.set_tier_list(m, i, v) }
+    /// `+0x024 short[4] fTierFinishPrize`
+    pub fn tier_finish_prize(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x24 + i * 2); debug_assert!(i < 4); m.r16(a) as i16 }
+    pub fn set_tier_finish_prize(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x24 + i * 2); debug_assert!(i < 4); m.w16(a, v as u16) }
+    pub fn update_tier_finish_prize(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.tier_finish_prize(m, i)); self.set_tier_finish_prize(m, i, v) }
+    /// `+0x02c short[4] fTierFinishPrizeChange`
+    pub fn tier_finish_prize_change(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x2c + i * 2); debug_assert!(i < 4); m.r16(a) as i16 }
+    pub fn set_tier_finish_prize_change(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x2c + i * 2); debug_assert!(i < 4); m.w16(a, v as u16) }
+    pub fn update_tier_finish_prize_change(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.tier_finish_prize_change(m, i)); self.set_tier_finish_prize_change(m, i, v) }
+    /// `+0x034 short[65] fTournamentList`
+    pub fn tournament_list(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0x34 + i * 2); debug_assert!(i < 65); m.r16(a) as i16 }
+    pub fn set_tournament_list(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0x34 + i * 2); debug_assert!(i < 65); m.w16(a, v as u16) }
+    pub fn update_tournament_list(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.tournament_list(m, i)); self.set_tournament_list(m, i, v) }
+    /// `+0x0b6 short[17] fTrackList`
+    pub fn track_list(self, m: &mut Mem, i: u32) -> i16 { let a = self.0.wrapping_add(0xb6 + i * 2); debug_assert!(i < 17); m.r16(a) as i16 }
+    pub fn set_track_list(self, m: &mut Mem, i: u32, v: i16) { let a = self.0.wrapping_add(0xb6 + i * 2); debug_assert!(i < 17); m.w16(a, v as u16) }
+    pub fn update_track_list(self, m: &mut Mem, i: u32, f: impl FnOnce(i16) -> i16) { let v = f(self.track_list(m, i)); self.set_track_list(m, i, v) }
+    /// `+0x0d8 char[16] fDirection`
+    pub fn direction(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0xd8 + i * 1); debug_assert!(i < 16); m.r8(a) as i8 }
+    pub fn set_direction(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0xd8 + i * 1); debug_assert!(i < 16); m.w8(a, v as u8) }
+    pub fn update_direction(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.direction(m, i)); self.set_direction(m, i, v) }
+    /// `+0x0e8 char[16] fMirror`
+    pub fn mirror(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0xe8 + i * 1); debug_assert!(i < 16); m.r8(a) as i8 }
+    pub fn set_mirror(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0xe8 + i * 1); debug_assert!(i < 16); m.w8(a, v as u8) }
+    pub fn update_mirror(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.mirror(m, i)); self.set_mirror(m, i, v) }
+    /// `+0x0f8 char[16] fTimeOfDay`
+    pub fn time_of_day(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0xf8 + i * 1); debug_assert!(i < 16); m.r8(a) as i8 }
+    pub fn set_time_of_day(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0xf8 + i * 1); debug_assert!(i < 16); m.w8(a, v as u8) }
+    pub fn update_time_of_day(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.time_of_day(m, i)); self.set_time_of_day(m, i, v) }
+    /// `+0x108 char[16] fWeather`
+    pub fn weather(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x108 + i * 1); debug_assert!(i < 16); m.r8(a) as i8 }
+    pub fn set_weather(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x108 + i * 1); debug_assert!(i < 16); m.w8(a, v as u8) }
+    pub fn update_weather(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.weather(m, i)); self.set_weather(m, i, v) }
+    /// `+0x118 struct tCompetitor[6] fCompetitors`
+    pub fn competitors(self, i: u32) -> Competitor { debug_assert!(i < 6); Competitor(self.0.wrapping_add(0x118 + i * 0x10)) }
+    /// `+0x178 struct tCarLineup[6] fCarLineup`
+    pub fn car_lineup(self, i: u32) -> CarLineup { debug_assert!(i < 6); CarLineup(self.0.wrapping_add(0x178 + i * 0x14)) }
+    /// `+0x1f0 char[64] fBestPlacement`
+    pub fn best_placement(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x1f0 + i * 1); debug_assert!(i < 64); m.r8(a) as i8 }
+    pub fn set_best_placement(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x1f0 + i * 1); debug_assert!(i < 64); m.w8(a, v as u8) }
+    pub fn update_best_placement(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.best_placement(m, i)); self.set_best_placement(m, i, v) }
+    /// `+0x230 char fPrevBestPlacement`
+    pub fn prev_best_placement(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x230); m.r8(a) as i8 }
+    pub fn set_prev_best_placement(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x230); m.w8(a, v as u8) }
+    pub fn update_prev_best_placement(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.prev_best_placement(m)); self.set_prev_best_placement(m, v) }
+    /// `+0x231 uchar[6] fFinishPoints`
+    pub fn finish_points(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x231 + i * 1); debug_assert!(i < 6); m.r8(a) }
+    pub fn set_finish_points(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x231 + i * 1); debug_assert!(i < 6); m.w8(a, v) }
+    pub fn update_finish_points(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.finish_points(m, i)); self.set_finish_points(m, i, v) }
+    /// `+0x237 uchar[6] fRanking`
+    pub fn ranking(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x237 + i * 1); debug_assert!(i < 6); m.r8(a) }
+    pub fn set_ranking(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x237 + i * 1); debug_assert!(i < 6); m.w8(a, v) }
+    pub fn update_ranking(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.ranking(m, i)); self.set_ranking(m, i, v) }
+    /// `+0x240 struct tAwardInformation fAwards`
+    pub fn awards(self) -> AwardInformation { AwardInformation(self.0.wrapping_add(0x240)) }
+}
+
+/// `tTourneyInfo` (0x54 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TourneyInfo(pub u32);
+impl TourneyInfo {
+    pub const SIZE: u32 = 0x54;
+    /// Element `i` of an array of `tTourneyInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char fTournamentID`
+    pub fn tournament_id(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_tournament_id(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_tournament_id(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.tournament_id(m)); self.set_tournament_id(m, v) }
+    /// `+0x001 uchar fNumTracks`
+    pub fn num_tracks(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_num_tracks(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_num_tracks(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.num_tracks(m)); self.set_num_tracks(m, v) }
+    /// `+0x002 uchar fTrackOffset`
+    pub fn track_offset(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_track_offset(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_track_offset(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.track_offset(m)); self.set_track_offset(m, v) }
+    /// `+0x003 uchar fOpponentCarClass`
+    pub fn opponent_car_class(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_opponent_car_class(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_opponent_car_class(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.opponent_car_class(m)); self.set_opponent_car_class(m, v) }
+    /// `+0x004 uchar fTraffic`
+    pub fn traffic(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_traffic(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_traffic(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.traffic(m)); self.set_traffic(m, v) }
+    /// `+0x005 uchar fKnockout`
+    pub fn knockout(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x5); m.r8(a) }
+    pub fn set_knockout(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x5); m.w8(a, v) }
+    pub fn update_knockout(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.knockout(m)); self.set_knockout(m, v) }
+    /// `+0x006 uchar fNumCars`
+    pub fn num_cars(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x6); m.r8(a) }
+    pub fn set_num_cars(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x6); m.w8(a, v) }
+    pub fn update_num_cars(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.num_cars(m)); self.set_num_cars(m, v) }
+    /// `+0x007 uchar fAwardCar`
+    pub fn award_car(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x7); m.r8(a) }
+    pub fn set_award_car(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x7); m.w8(a, v) }
+    pub fn update_award_car(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.award_car(m)); self.set_award_car(m, v) }
+    /// `+0x008 uchar fAwardCarModel`
+    pub fn award_car_model(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x8); m.r8(a) }
+    pub fn set_award_car_model(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x8); m.w8(a, v) }
+    pub fn update_award_car_model(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.award_car_model(m)); self.set_award_car_model(m, v) }
+    /// `+0x009 uchar fAwardCarUpgrades`
+    pub fn award_car_upgrades(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x9); m.r8(a) }
+    pub fn set_award_car_upgrades(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x9); m.w8(a, v) }
+    pub fn update_award_car_upgrades(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.award_car_upgrades(m)); self.set_award_car_upgrades(m, v) }
+    /// `+0x00a ushort fActivateFlags`
+    pub fn activate_flags(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0xa); m.r16(a) }
+    pub fn set_activate_flags(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0xa); m.w16(a, v) }
+    pub fn update_activate_flags(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.activate_flags(m)); self.set_activate_flags(m, v) }
+    /// `+0x00c ushort fRequiredFlags`
+    pub fn required_flags(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0xc); m.r16(a) }
+    pub fn set_required_flags(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0xc); m.w16(a, v) }
+    pub fn update_required_flags(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.required_flags(m)); self.set_required_flags(m, v) }
+    /// `+0x00e uchar fActivatedTrack`
+    pub fn activated_track(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0xe); m.r8(a) }
+    pub fn set_activated_track(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0xe); m.w8(a, v) }
+    pub fn update_activated_track(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.activated_track(m)); self.set_activated_track(m, v) }
+    /// `+0x00f uchar fActivatedCarClass`
+    pub fn activated_car_class(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0xf); m.r8(a) }
+    pub fn set_activated_car_class(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0xf); m.w8(a, v) }
+    pub fn update_activated_car_class(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.activated_car_class(m)); self.set_activated_car_class(m, v) }
+    /// `+0x010 uchar fActivatedCar`
+    pub fn activated_car(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x10); m.r8(a) }
+    pub fn set_activated_car(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x10); m.w8(a, v) }
+    pub fn update_activated_car(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.activated_car(m)); self.set_activated_car(m, v) }
+    /// `+0x011 uchar fRequiredTournamentID`
+    pub fn required_tournament_id(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x11); m.r8(a) }
+    pub fn set_required_tournament_id(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x11); m.w8(a, v) }
+    pub fn update_required_tournament_id(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.required_tournament_id(m)); self.set_required_tournament_id(m, v) }
+    /// `+0x012 uchar fRequiredCar`
+    pub fn required_car(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x12); m.r8(a) }
+    pub fn set_required_car(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x12); m.w8(a, v) }
+    pub fn update_required_car(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.required_car(m)); self.set_required_car(m, v) }
+    /// `+0x013 uchar fRequiredUpgrades`
+    pub fn required_upgrades(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x13); m.r8(a) }
+    pub fn set_required_upgrades(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x13); m.w8(a, v) }
+    pub fn update_required_upgrades(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.required_upgrades(m)); self.set_required_upgrades(m, v) }
+    /// `+0x014 uchar fSpecificUpgrades`
+    pub fn specific_upgrades(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x14); m.r8(a) }
+    pub fn set_specific_upgrades(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x14); m.w8(a, v) }
+    pub fn update_specific_upgrades(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.specific_upgrades(m)); self.set_specific_upgrades(m, v) }
+    /// `+0x015 uchar fRequiredCheatID`
+    pub fn required_cheat_id(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x15); m.r8(a) }
+    pub fn set_required_cheat_id(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x15); m.w8(a, v) }
+    pub fn update_required_cheat_id(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.required_cheat_id(m)); self.set_required_cheat_id(m, v) }
+    /// `+0x016 uchar fTrophyID`
+    pub fn trophy_id(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x16); m.r8(a) }
+    pub fn set_trophy_id(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x16); m.w8(a, v) }
+    pub fn update_trophy_id(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.trophy_id(m)); self.set_trophy_id(m, v) }
+    /// `+0x017 uchar fPad`
+    pub fn pad(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x17); m.r8(a) }
+    pub fn set_pad(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x17); m.w8(a, v) }
+    pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.pad(m)); self.set_pad(m, v) }
+    /// `+0x018 long[6] fPrize`
+    pub fn prize(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x18 + i * 4); debug_assert!(i < 6); m.r32(a) as i32 }
+    pub fn set_prize(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x18 + i * 4); debug_assert!(i < 6); m.w32(a, v as u32) }
+    pub fn update_prize(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.prize(m, i)); self.set_prize(m, i, v) }
+    /// `+0x030 long fEntranceFee`
+    pub fn entrance_fee(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x30); m.r32(a) as i32 }
+    pub fn set_entrance_fee(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x30); m.w32(a, v as u32) }
+    pub fn update_entrance_fee(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.entrance_fee(m)); self.set_entrance_fee(m, v) }
+    /// `+0x034 uchar[5] fPersonalities`
+    pub fn personalities(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x34 + i * 1); debug_assert!(i < 5); m.r8(a) }
+    pub fn set_personalities(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x34 + i * 1); debug_assert!(i < 5); m.w8(a, v) }
+    pub fn update_personalities(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.personalities(m, i)); self.set_personalities(m, i, v) }
+    /// `+0x039 uchar[5] fOpponentCar`
+    pub fn opponent_car(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x39 + i * 1); debug_assert!(i < 5); m.r8(a) }
+    pub fn set_opponent_car(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x39 + i * 1); debug_assert!(i < 5); m.w8(a, v) }
+    pub fn update_opponent_car(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.opponent_car(m, i)); self.set_opponent_car(m, i, v) }
+    /// `+0x03e uchar[5] fOpponentUpgrades`
+    pub fn opponent_upgrades(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x3e + i * 1); debug_assert!(i < 5); m.r8(a) }
+    pub fn set_opponent_upgrades(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x3e + i * 1); debug_assert!(i < 5); m.w8(a, v) }
+    pub fn update_opponent_upgrades(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.opponent_upgrades(m, i)); self.set_opponent_upgrades(m, i, v) }
+    /// `+0x043 uchar fActivatedTrackClass`
+    pub fn activated_track_class(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x43); m.r8(a) }
+    pub fn set_activated_track_class(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x43); m.w8(a, v) }
+    pub fn update_activated_track_class(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.activated_track_class(m)); self.set_activated_track_class(m, v) }
+    /// `+0x044 uchar fActivatedCheat`
+    pub fn activated_cheat(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x44); m.r8(a) }
+    pub fn set_activated_cheat(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x44); m.w8(a, v) }
+    pub fn update_activated_cheat(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.activated_cheat(m)); self.set_activated_cheat(m, v) }
+    /// `+0x045 uchar fNumLaps`
+    pub fn num_laps(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x45); m.r8(a) }
+    pub fn set_num_laps(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x45); m.w8(a, v) }
+    pub fn update_num_laps(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.num_laps(m)); self.set_num_laps(m, v) }
+    /// `+0x046 uchar[14] fReserved`
+    pub fn reserved(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x46 + i * 1); debug_assert!(i < 14); m.r8(a) }
+    pub fn set_reserved(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x46 + i * 1); debug_assert!(i < 14); m.w8(a, v) }
+    pub fn update_reserved(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.reserved(m, i)); self.set_reserved(m, i, v) }
+}
+
+/// `tTrackInfo` (0x28 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TrackInfo(pub u32);
+impl TrackInfo {
+    pub const SIZE: u32 = 0x28;
+    /// Element `i` of an array of `tTrackInfo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char fTrackNumber`
+    pub fn track_number(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_track_number(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_track_number(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.track_number(m)); self.set_track_number(m, v) }
+    /// `+0x001 uchar fDirection`
+    pub fn direction(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_direction(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_direction(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.direction(m)); self.set_direction(m, v) }
+    /// `+0x002 uchar fMirrored`
+    pub fn mirrored(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_mirrored(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_mirrored(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.mirrored(m)); self.set_mirrored(m, v) }
+    /// `+0x003 uchar fTimeOfDay`
+    pub fn time_of_day(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_time_of_day(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_time_of_day(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.time_of_day(m)); self.set_time_of_day(m, v) }
+    /// `+0x004 uchar fWeather`
+    pub fn weather(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_weather(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_weather(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.weather(m)); self.set_weather(m, v) }
+    /// `+0x005 uchar fRandom`
+    pub fn random(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x5); m.r8(a) }
+    pub fn set_random(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x5); m.w8(a, v) }
+    pub fn update_random(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.random(m)); self.set_random(m, v) }
+    /// `+0x006 uchar fSituations`
+    pub fn situations(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x6); m.r8(a) }
+    pub fn set_situations(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x6); m.w8(a, v) }
+    pub fn update_situations(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.situations(m)); self.set_situations(m, v) }
+    /// `+0x007 uchar fPad`
+    pub fn pad(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x7); m.r8(a) }
+    pub fn set_pad(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x7); m.w8(a, v) }
+    pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.pad(m)); self.set_pad(m, v) }
+    /// `+0x008 long[6] fPrize`
+    pub fn prize(self, m: &mut Mem, i: u32) -> i32 { let a = self.0.wrapping_add(0x8 + i * 4); debug_assert!(i < 6); m.r32(a) as i32 }
+    pub fn set_prize(self, m: &mut Mem, i: u32, v: i32) { let a = self.0.wrapping_add(0x8 + i * 4); debug_assert!(i < 6); m.w32(a, v as u32) }
+    pub fn update_prize(self, m: &mut Mem, i: u32, f: impl FnOnce(i32) -> i32) { let v = f(self.prize(m, i)); self.set_prize(m, i, v) }
+    /// `+0x020 ulong fDifficulty`
+    pub fn difficulty(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x20); m.r32(a) }
+    pub fn set_difficulty(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x20); m.w32(a, v) }
+    pub fn update_difficulty(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.difficulty(m)); self.set_difficulty(m, v) }
+    /// `+0x024 uchar[4] fReserved`
+    pub fn reserved(self, m: &mut Mem, i: u32) -> u8 { let a = self.0.wrapping_add(0x24 + i * 1); debug_assert!(i < 4); m.r8(a) }
+    pub fn set_reserved(self, m: &mut Mem, i: u32, v: u8) { let a = self.0.wrapping_add(0x24 + i * 1); debug_assert!(i < 4); m.w8(a, v) }
+    pub fn update_reserved(self, m: &mut Mem, i: u32, f: impl FnOnce(u8) -> u8) { let v = f(self.reserved(m, i)); self.set_reserved(m, i, v) }
+}
+
+/// `tTrackInformation` (0x30 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TrackInformation(pub u32);
+impl TrackInformation {
+    pub const SIZE: u32 = 0x30;
+    /// Element `i` of an array of `tTrackInformation` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char fTrackID`
+    pub fn track_id(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_track_id(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_track_id(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.track_id(m)); self.set_track_id(m, v) }
+    /// `+0x001 uchar fSimNumber`
+    pub fn sim_number(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x1); m.r8(a) }
+    pub fn set_sim_number(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x1); m.w8(a, v) }
+    pub fn update_sim_number(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.sim_number(m)); self.set_sim_number(m, v) }
+    /// `+0x002 uchar fTrackDifficulty`
+    pub fn track_difficulty(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2); m.r8(a) }
+    pub fn set_track_difficulty(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2); m.w8(a, v) }
+    pub fn update_track_difficulty(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.track_difficulty(m)); self.set_track_difficulty(m, v) }
+    /// `+0x003 uchar fAvailable`
+    pub fn available(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x3); m.r8(a) }
+    pub fn set_available(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x3); m.w8(a, v) }
+    pub fn update_available(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.available(m)); self.set_available(m, v) }
+    /// `+0x004 uchar fIsEgg`
+    pub fn is_egg(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x4); m.r8(a) }
+    pub fn set_is_egg(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x4); m.w8(a, v) }
+    pub fn update_is_egg(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.is_egg(m)); self.set_is_egg(m, v) }
+    /// `+0x005 uchar fLengthKM`
+    pub fn length_km(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x5); m.r8(a) }
+    pub fn set_length_km(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x5); m.w8(a, v) }
+    pub fn update_length_km(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.length_km(m)); self.set_length_km(m, v) }
+    /// `+0x006 uchar fLengthMiles`
+    pub fn length_miles(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x6); m.r8(a) }
+    pub fn set_length_miles(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x6); m.w8(a, v) }
+    pub fn update_length_miles(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.length_miles(m)); self.set_length_miles(m, v) }
+    /// `+0x007 uchar fNumMoments`
+    pub fn num_moments(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x7); m.r8(a) }
+    pub fn set_num_moments(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x7); m.w8(a, v) }
+    pub fn update_num_moments(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.num_moments(m)); self.set_num_moments(m, v) }
+    /// `+0x008 char[8] fShapeName`
+    pub fn shape_name(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x8 + i * 1); debug_assert!(i < 8); m.r8(a) as i8 }
+    pub fn set_shape_name(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x8 + i * 1); debug_assert!(i < 8); m.w8(a, v as u8) }
+    pub fn update_shape_name(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.shape_name(m, i)); self.set_shape_name(m, i, v) }
+    /// `+0x010 char[8] fSplineName`
+    pub fn spline_name(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x10 + i * 1); debug_assert!(i < 8); m.r8(a) as i8 }
+    pub fn set_spline_name(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x10 + i * 1); debug_assert!(i < 8); m.w8(a, v as u8) }
+    pub fn update_spline_name(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.spline_name(m, i)); self.set_spline_name(m, i, v) }
+    /// `+0x018 char fCountry`
+    pub fn country(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x18); m.r8(a) as i8 }
+    pub fn set_country(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x18); m.w8(a, v as u8) }
+    pub fn update_country(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.country(m)); self.set_country(m, v) }
+    /// `+0x019 char fDispatch`
+    pub fn dispatch(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x19); m.r8(a) as i8 }
+    pub fn set_dispatch(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x19); m.w8(a, v as u8) }
+    pub fn update_dispatch(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.dispatch(m)); self.set_dispatch(m, v) }
+    /// `+0x01a char fReverseCall`
+    pub fn reverse_call(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x1a); m.r8(a) as i8 }
+    pub fn set_reverse_call(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x1a); m.w8(a, v as u8) }
+    pub fn update_reverse_call(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.reverse_call(m)); self.set_reverse_call(m, v) }
+    /// `+0x01b char fLanguage`
+    pub fn language(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x1b); m.r8(a) as i8 }
+    pub fn set_language(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x1b); m.w8(a, v as u8) }
+    pub fn update_language(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.language(m)); self.set_language(m, v) }
+    /// `+0x01c char[6] fTrafficCars`
+    pub fn traffic_cars(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x1c + i * 1); debug_assert!(i < 6); m.r8(a) as i8 }
+    pub fn set_traffic_cars(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x1c + i * 1); debug_assert!(i < 6); m.w8(a, v as u8) }
+    pub fn update_traffic_cars(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.traffic_cars(m, i)); self.set_traffic_cars(m, i, v) }
+    /// `+0x022 short fTX`
+    pub fn tx(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x22); m.r16(a) as i16 }
+    pub fn set_tx(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x22); m.w16(a, v as u16) }
+    pub fn update_tx(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.tx(m)); self.set_tx(m, v) }
+    /// `+0x024 short fTY`
+    pub fn ty(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x24); m.r16(a) as i16 }
+    pub fn set_ty(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x24); m.w16(a, v as u16) }
+    pub fn update_ty(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.ty(m)); self.set_ty(m, v) }
+    /// `+0x026 short fSX`
+    pub fn sx(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x26); m.r16(a) as i16 }
+    pub fn set_sx(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x26); m.w16(a, v as u16) }
+    pub fn update_sx(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sx(m)); self.set_sx(m, v) }
+    /// `+0x028 short fSY`
+    pub fn sy(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x28); m.r16(a) as i16 }
+    pub fn set_sy(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x28); m.w16(a, v as u16) }
+    pub fn update_sy(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.sy(m)); self.set_sy(m, v) }
+    /// `+0x02a uchar fSpeedoCountry`
+    pub fn speedo_country(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2a); m.r8(a) }
+    pub fn set_speedo_country(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2a); m.w8(a, v) }
+    pub fn update_speedo_country(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.speedo_country(m)); self.set_speedo_country(m, v) }
+    /// `+0x02b uchar fPad`
+    pub fn pad(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x2b); m.r8(a) }
+    pub fn set_pad(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x2b); m.w8(a, v) }
+    pub fn update_pad(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.pad(m)); self.set_pad(m, v) }
+    /// `+0x02c long fRotate`
+    pub fn rotate(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x2c); m.r32(a) as i32 }
+    pub fn set_rotate(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x2c); m.w32(a, v as u32) }
+    pub fn update_rotate(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.rotate(m)); self.set_rotate(m, v) }
+}
+
+/// `tTrackManager` (0x88 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct TrackManager(pub u32);
+impl TrackManager {
+    pub const SIZE: u32 = 0x88;
+    /// Element `i` of an array of `tTrackManager` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 ulong fNumTracks`
+    pub fn num_tracks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x0); m.r32(a) }
+    pub fn set_num_tracks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x0); m.w32(a, v) }
+    pub fn update_num_tracks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.num_tracks(m)); self.set_num_tracks(m, v) }
+    /// `+0x004 struct tTrackInformation* fTracks`
+    pub fn tracks(self, m: &mut Mem) -> TrackInformation { let a = self.0.wrapping_add(0x4); TrackInformation(m.r32(a)) }
+    pub fn set_tracks(self, m: &mut Mem, v: TrackInformation) { let a = self.0.wrapping_add(0x4); m.w32(a, v.0) }
+    /// `+0x008 void[16] fAvailableTracks`
+    pub fn available_tracks(self, m: &mut Mem, i: u32) -> u32 { let a = self.0.wrapping_add(0x8 + i * 4); debug_assert!(i < 16); m.r32(a) }
+    pub fn set_available_tracks(self, m: &mut Mem, i: u32, v: u32) { let a = self.0.wrapping_add(0x8 + i * 4); debug_assert!(i < 16); m.w32(a, v) }
+    pub fn update_available_tracks(self, m: &mut Mem, i: u32, f: impl FnOnce(u32) -> u32) { let v = f(self.available_tracks(m, i)); self.set_available_tracks(m, i, v) }
+    /// `+0x048 void[16] fViewableTracks`
+    pub fn viewable_tracks(self, m: &mut Mem, i: u32) -> u32 { let a = self.0.wrapping_add(0x48 + i * 4); debug_assert!(i < 16); m.r32(a) }
+    pub fn set_viewable_tracks(self, m: &mut Mem, i: u32, v: u32) { let a = self.0.wrapping_add(0x48 + i * 4); debug_assert!(i < 16); m.w32(a, v) }
+    pub fn update_viewable_tracks(self, m: &mut Mem, i: u32, f: impl FnOnce(u32) -> u32) { let v = f(self.viewable_tracks(m, i)); self.set_viewable_tracks(m, i, v) }
+}
+
 /// `trigger_t` (0x48 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct Trigger(pub u32);
 impl Trigger {
     pub const SIZE: u32 = 0x48;
@@ -4411,6 +10529,7 @@ impl Trigger {
 
 /// `trigger_anyTrigger_t` (0x8 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TriggerAnyTrigger(pub u32);
 impl TriggerAnyTrigger {
     pub const SIZE: u32 = 0x8;
@@ -4428,6 +10547,7 @@ impl TriggerAnyTrigger {
 
 /// `trigger_offroad_t` (0x48 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TriggerOffroad(pub u32);
 impl TriggerOffroad {
     pub const SIZE: u32 = 0x48;
@@ -4465,6 +10585,7 @@ impl TriggerOffroad {
 
 /// `trigger_roadblock_t` (0x14 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TriggerRoadblock(pub u32);
 impl TriggerRoadblock {
     pub const SIZE: u32 = 0x14;
@@ -4494,6 +10615,7 @@ impl TriggerRoadblock {
 
 /// `trigger_simple_t` (0x14 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TriggerSimple(pub u32);
 impl TriggerSimple {
     pub const SIZE: u32 = 0x14;
@@ -4523,6 +10645,7 @@ impl TriggerSimple {
 
 /// `trigger_trafficAccident_t` (0x38 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TriggerTrafficAccident(pub u32);
 impl TriggerTrafficAccident {
     pub const SIZE: u32 = 0x38;
@@ -4544,6 +10667,7 @@ impl TriggerTrafficAccident {
 
 /// `trigger_trafficPath_t` (0x40 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TriggerTrafficPath(pub u32);
 impl TriggerTrafficPath {
     pub const SIZE: u32 = 0x40;
@@ -4583,6 +10707,7 @@ impl TriggerTrafficPath {
 
 /// `Trk_NewSimQuad` (0x1 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TrkNewSimQuad(pub u32);
 impl TrkNewSimQuad {
     pub const SIZE: u32 = 0x1;
@@ -4596,6 +10721,7 @@ impl TrkNewSimQuad {
 
 /// `Trk_NewSimSlice` (0x5 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TrkNewSimSlice(pub u32);
 impl TrkNewSimSlice {
     pub const SIZE: u32 = 0x5;
@@ -4625,6 +10751,7 @@ impl TrkNewSimSlice {
 
 /// `Trk_NewSlice` (0x20 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TrkNewSlice(pub u32);
 impl TrkNewSlice {
     pub const SIZE: u32 = 0x20;
@@ -4682,6 +10809,7 @@ impl TrkNewSlice {
 
 /// `Trk_NewStrip` (0x4 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct TrkNewStrip(pub u32);
 impl TrkNewStrip {
     pub const SIZE: u32 = 0x4;
@@ -4707,6 +10835,7 @@ impl TrkNewStrip {
 
 /// `Udff_tInfo` (0xc bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct UdffInfo(pub u32);
 impl UdffInfo {
     pub const SIZE: u32 = 0xc;
@@ -4726,8 +10855,292 @@ impl UdffInfo {
     pub fn update_mem_ptr(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.mem_ptr(m)); self.set_mem_ptr(m, v) }
 }
 
+/// `tUserNameMenuItem` (0x8c bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct UserNameMenuItem(pub u32);
+/// `tUserNameMenuItem` derives from `tMenuItem`: its members are reachable through it.
+impl core::ops::Deref for UserNameMenuItem {
+    type Target = MenuItem;
+    fn deref(&self) -> &MenuItem { unsafe { &*(self as *const Self as *const MenuItem) } }
+}
+impl UserNameMenuItem {
+    /// The `tMenuItem` it derives from (the same address).
+    pub fn base(self) -> MenuItem { MenuItem(self.0) }
+}
+impl UserNameMenuItem {
+    pub const SIZE: u32 = 0x8c;
+    /// Element `i` of an array of `tUserNameMenuItem` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tMenuItem tMenuItem`
+    pub fn t_menu_item(self) -> MenuItem { MenuItem(self.0.wrapping_add(0x0)) }
+    /// `+0x01c char* fData`
+    pub fn data(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x1c); m.r32(a) }
+    pub fn set_data(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x1c); m.w32(a, v) }
+    pub fn update_data(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.data(m)); self.set_data(m, v) }
+    /// `+0x020 short fMaxStringLength`
+    pub fn max_string_length(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x20); m.r16(a) as i16 }
+    pub fn set_max_string_length(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x20); m.w16(a, v as u16) }
+    pub fn update_max_string_length(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.max_string_length(m)); self.set_max_string_length(m, v) }
+    /// `+0x022 short fCurrentColumn`
+    pub fn current_column(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x22); m.r16(a) as i16 }
+    pub fn set_current_column(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x22); m.w16(a, v as u16) }
+    pub fn update_current_column(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.current_column(m)); self.set_current_column(m, v) }
+    /// `+0x024 short fCurrentRow`
+    pub fn current_row(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x24); m.r16(a) as i16 }
+    pub fn set_current_row(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x24); m.w16(a, v as u16) }
+    pub fn update_current_row(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.current_row(m)); self.set_current_row(m, v) }
+    /// `+0x026 char[10][9] fRowList`
+    pub fn row_list(self, m: &mut Mem, i: u32) -> i8 { let a = self.0.wrapping_add(0x26 + i * 1); debug_assert!(i < 90); m.r8(a) as i8 }
+    pub fn set_row_list(self, m: &mut Mem, i: u32, v: i8) { let a = self.0.wrapping_add(0x26 + i * 1); debug_assert!(i < 90); m.w8(a, v as u8) }
+    pub fn update_row_list(self, m: &mut Mem, i: u32, f: impl FnOnce(i8) -> i8) { let v = f(self.row_list(m, i)); self.set_row_list(m, i, v) }
+    /// `+0x080 short fPlayer`
+    pub fn player(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x80); m.r16(a) as i16 }
+    pub fn set_player(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x80); m.w16(a, v as u16) }
+    pub fn update_player(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.player(m)); self.set_player(m, v) }
+    /// `+0x082 short fFadeVal`
+    pub fn fade_val(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x82); m.r16(a) as i16 }
+    pub fn set_fade_val(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x82); m.w16(a, v as u16) }
+    pub fn update_fade_val(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_val(m)); self.set_fade_val(m, v) }
+    /// `+0x084 short fFadeDir`
+    pub fn fade_dir(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x84); m.r16(a) as i16 }
+    pub fn set_fade_dir(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x84); m.w16(a, v as u16) }
+    pub fn update_fade_dir(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.fade_dir(m)); self.set_fade_dir(m, v) }
+    /// `+0x088 void fInTransition`
+    pub fn in_transition(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x88); m.r32(a) }
+    pub fn set_in_transition(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x88); m.w32(a, v) }
+    pub fn update_in_transition(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.in_transition(m)); self.set_in_transition(m, v) }
+}
+
+/// `tVertex` (0x4 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Vertex(pub u32);
+impl Vertex {
+    pub const SIZE: u32 = 0x4;
+    /// Element `i` of an array of `tVertex` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short x`
+    pub fn x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x002 short y`
+    pub fn y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.y(m)); self.set_y(m, v) }
+}
+
+/// `tVideo` (0x8 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct Video(pub u32);
+impl Video {
+    pub const SIZE: u32 = 0x8;
+    /// Element `i` of an array of `tVideo` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 char x`
+    pub fn x(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x0); m.r8(a) as i8 }
+    pub fn set_x(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x0); m.w8(a, v as u8) }
+    pub fn update_x(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.x(m)); self.set_x(m, v) }
+    /// `+0x001 char y`
+    pub fn y(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x1); m.r8(a) as i8 }
+    pub fn set_y(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x1); m.w8(a, v as u8) }
+    pub fn update_y(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.y(m)); self.set_y(m, v) }
+    /// `+0x002 char width`
+    pub fn width(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x2); m.r8(a) as i8 }
+    pub fn set_width(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x2); m.w8(a, v as u8) }
+    pub fn update_width(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.width(m)); self.set_width(m, v) }
+    /// `+0x003 char height`
+    pub fn height(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x3); m.r8(a) as i8 }
+    pub fn set_height(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x3); m.w8(a, v as u8) }
+    pub fn update_height(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.height(m)); self.set_height(m, v) }
+    /// `+0x004 char tileWidth`
+    pub fn tile_width(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x4); m.r8(a) as i8 }
+    pub fn set_tile_width(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x4); m.w8(a, v as u8) }
+    pub fn update_tile_width(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.tile_width(m)); self.set_tile_width(m, v) }
+    /// `+0x005 char tileHeight`
+    pub fn tile_height(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x5); m.r8(a) as i8 }
+    pub fn set_tile_height(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x5); m.w8(a, v as u8) }
+    pub fn update_tile_height(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.tile_height(m)); self.set_tile_height(m, v) }
+    /// `+0x006 char deltaX`
+    pub fn delta_x(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x6); m.r8(a) as i8 }
+    pub fn set_delta_x(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x6); m.w8(a, v as u8) }
+    pub fn update_delta_x(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.delta_x(m)); self.set_delta_x(m, v) }
+    /// `+0x007 char deltaY`
+    pub fn delta_y(self, m: &mut Mem) -> i8 { let a = self.0.wrapping_add(0x7); m.r8(a) as i8 }
+    pub fn set_delta_y(self, m: &mut Mem, v: i8) { let a = self.0.wrapping_add(0x7); m.w8(a, v as u8) }
+    pub fn update_delta_y(self, m: &mut Mem, f: impl FnOnce(i8) -> i8) { let v = f(self.delta_y(m)); self.set_delta_y(m, v) }
+}
+
+/// `tVideoTransition` (0x18 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct VideoTransition(pub u32);
+impl VideoTransition {
+    pub const SIZE: u32 = 0x18;
+    /// Element `i` of an array of `tVideoTransition` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 enum tScreenMainState state`
+    pub fn state(self, m: &mut Mem) -> i32 { let a = self.0.wrapping_add(0x0); m.r32(a) as i32 }
+    pub fn set_state(self, m: &mut Mem, v: i32) { let a = self.0.wrapping_add(0x0); m.w32(a, v as u32) }
+    pub fn update_state(self, m: &mut Mem, f: impl FnOnce(i32) -> i32) { let v = f(self.state(m)); self.set_state(m, v) }
+    /// `+0x004 ushort flags`
+    pub fn flags(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0x4); m.r16(a) }
+    pub fn set_flags(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0x4); m.w16(a, v) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x006 uchar u`
+    pub fn u(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x6); m.r8(a) }
+    pub fn set_u(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x6); m.w8(a, v) }
+    pub fn update_u(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.u(m)); self.set_u(m, v) }
+    /// `+0x007 uchar v`
+    pub fn v(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x7); m.r8(a) }
+    pub fn set_v(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x7); m.w8(a, v) }
+    pub fn update_v(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.v(m)); self.set_v(m, v) }
+    /// `+0x008 uchar uw`
+    pub fn uw(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x8); m.r8(a) }
+    pub fn set_uw(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x8); m.w8(a, v) }
+    pub fn update_uw(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.uw(m)); self.set_uw(m, v) }
+    /// `+0x009 uchar vh`
+    pub fn vh(self, m: &mut Mem) -> u8 { let a = self.0.wrapping_add(0x9); m.r8(a) }
+    pub fn set_vh(self, m: &mut Mem, v: u8) { let a = self.0.wrapping_add(0x9); m.w8(a, v) }
+    pub fn update_vh(self, m: &mut Mem, f: impl FnOnce(u8) -> u8) { let v = f(self.vh(m)); self.set_vh(m, v) }
+    /// `+0x00a ushort clut`
+    pub fn clut(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0xa); m.r16(a) }
+    pub fn set_clut(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0xa); m.w16(a, v) }
+    pub fn update_clut(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.clut(m)); self.set_clut(m, v) }
+    /// `+0x00c ushort tpage`
+    pub fn tpage(self, m: &mut Mem) -> u16 { let a = self.0.wrapping_add(0xc); m.r16(a) }
+    pub fn set_tpage(self, m: &mut Mem, v: u16) { let a = self.0.wrapping_add(0xc); m.w16(a, v) }
+    pub fn update_tpage(self, m: &mut Mem, f: impl FnOnce(u16) -> u16) { let v = f(self.tpage(m)); self.set_tpage(m, v) }
+    /// `+0x010 uint tint`
+    pub fn tint(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_tint(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_tint(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.tint(m)); self.set_tint(m, v) }
+    /// `+0x014 short bright`
+    pub fn bright(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x14); m.r16(a) as i16 }
+    pub fn set_bright(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x14); m.w16(a, v as u16) }
+    pub fn update_bright(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.bright(m)); self.set_bright(m, v) }
+}
+
+/// `tVideoWall` (0x38 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct VideoWall(pub u32);
+impl VideoWall {
+    pub const SIZE: u32 = 0x38;
+    /// Element `i` of an array of `tVideoWall` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 struct tTVConfig* fTVs`
+    pub fn t_vs(self, m: &mut Mem) -> TVConfig { let a = self.0.wrapping_add(0x0); TVConfig(m.r32(a)) }
+    pub fn set_t_vs(self, m: &mut Mem, v: TVConfig) { let a = self.0.wrapping_add(0x0); m.w32(a, v.0) }
+    /// `+0x004 short fFirstTVShape`
+    pub fn first_tv_shape(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x4); m.r16(a) as i16 }
+    pub fn set_first_tv_shape(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x4); m.w16(a, v as u16) }
+    pub fn update_first_tv_shape(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.first_tv_shape(m)); self.set_first_tv_shape(m, v) }
+    /// `+0x006 short fNumTVs`
+    pub fn num_t_vs(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x6); m.r16(a) as i16 }
+    pub fn set_num_t_vs(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x6); m.w16(a, v as u16) }
+    pub fn update_num_t_vs(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_t_vs(m)); self.set_num_t_vs(m, v) }
+    /// `+0x008 struct tTexture_ShapeInfo* fTVShapes`
+    pub fn tv_shapes(self, m: &mut Mem) -> TextureShapeInfo { let a = self.0.wrapping_add(0x8); TextureShapeInfo(m.r32(a)) }
+    pub fn set_tv_shapes(self, m: &mut Mem, v: TextureShapeInfo) { let a = self.0.wrapping_add(0x8); m.w32(a, v.0) }
+    /// `+0x00c short* tvOrder`
+    pub fn tv_order(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0xc); m.r32(a) }
+    pub fn set_tv_order(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0xc); m.w32(a, v) }
+    pub fn update_tv_order(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.tv_order(m)); self.set_tv_order(m, v) }
+    /// `+0x010 ulong fTVTicks`
+    pub fn tv_ticks(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x10); m.r32(a) }
+    pub fn set_tv_ticks(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x10); m.w32(a, v) }
+    pub fn update_tv_ticks(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.tv_ticks(m)); self.set_tv_ticks(m, v) }
+    /// `+0x014 short fTransitionDirection`
+    pub fn transition_direction(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x14); m.r16(a) as i16 }
+    pub fn set_transition_direction(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x14); m.w16(a, v as u16) }
+    pub fn update_transition_direction(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.transition_direction(m)); self.set_transition_direction(m, v) }
+    /// `+0x016 short fFlipAxis`
+    pub fn flip_axis(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x16); m.r16(a) as i16 }
+    pub fn set_flip_axis(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x16); m.w16(a, v as u16) }
+    pub fn update_flip_axis(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.flip_axis(m)); self.set_flip_axis(m, v) }
+    /// `+0x018 short fOffsetX`
+    pub fn offset_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x18); m.r16(a) as i16 }
+    pub fn set_offset_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x18); m.w16(a, v as u16) }
+    pub fn update_offset_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.offset_x(m)); self.set_offset_x(m, v) }
+    /// `+0x01a short fOffsetY`
+    pub fn offset_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1a); m.r16(a) as i16 }
+    pub fn set_offset_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1a); m.w16(a, v as u16) }
+    pub fn update_offset_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.offset_y(m)); self.set_offset_y(m, v) }
+    /// `+0x01c short fAvailableTextID`
+    pub fn available_text_id(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1c); m.r16(a) as i16 }
+    pub fn set_available_text_id(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1c); m.w16(a, v as u16) }
+    pub fn update_available_text_id(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.available_text_id(m)); self.set_available_text_id(m, v) }
+    /// `+0x01e short fAvailable`
+    pub fn available(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x1e); m.r16(a) as i16 }
+    pub fn set_available(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x1e); m.w16(a, v as u16) }
+    pub fn update_available(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.available(m)); self.set_available(m, v) }
+    /// `+0x020 short fAvailableBright`
+    pub fn available_bright(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x20); m.r16(a) as i16 }
+    pub fn set_available_bright(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x20); m.w16(a, v as u16) }
+    pub fn update_available_bright(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.available_bright(m)); self.set_available_bright(m, v) }
+    /// `+0x022 short fValid`
+    pub fn valid(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x22); m.r16(a) as i16 }
+    pub fn set_valid(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x22); m.w16(a, v as u16) }
+    pub fn update_valid(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.valid(m)); self.set_valid(m, v) }
+    /// `+0x024 short fAvailableX`
+    pub fn available_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x24); m.r16(a) as i16 }
+    pub fn set_available_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x24); m.w16(a, v as u16) }
+    pub fn update_available_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.available_x(m)); self.set_available_x(m, v) }
+    /// `+0x026 short fAvailableY`
+    pub fn available_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x26); m.r16(a) as i16 }
+    pub fn set_available_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x26); m.w16(a, v as u16) }
+    pub fn update_available_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.available_y(m)); self.set_available_y(m, v) }
+    /// `+0x028 struct tTexture_ShapeInfo* fIconShapes`
+    pub fn icon_shapes(self, m: &mut Mem) -> TextureShapeInfo { let a = self.0.wrapping_add(0x28); TextureShapeInfo(m.r32(a)) }
+    pub fn set_icon_shapes(self, m: &mut Mem, v: TextureShapeInfo) { let a = self.0.wrapping_add(0x28); m.w32(a, v.0) }
+    /// `+0x02c short fIcon`
+    pub fn icon(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2c); m.r16(a) as i16 }
+    pub fn set_icon(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2c); m.w16(a, v as u16) }
+    pub fn update_icon(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.icon(m)); self.set_icon(m, v) }
+    /// `+0x02e short fIconFrames`
+    pub fn icon_frames(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2e); m.r16(a) as i16 }
+    pub fn set_icon_frames(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2e); m.w16(a, v as u16) }
+    pub fn update_icon_frames(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.icon_frames(m)); self.set_icon_frames(m, v) }
+    /// `+0x030 short fIconX`
+    pub fn icon_x(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x30); m.r16(a) as i16 }
+    pub fn set_icon_x(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x30); m.w16(a, v as u16) }
+    pub fn update_icon_x(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.icon_x(m)); self.set_icon_x(m, v) }
+    /// `+0x032 short fIconY`
+    pub fn icon_y(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x32); m.r16(a) as i16 }
+    pub fn set_icon_y(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x32); m.w16(a, v as u16) }
+    pub fn update_icon_y(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.icon_y(m)); self.set_icon_y(m, v) }
+    /// `+0x034 void fUpdated`
+    pub fn updated(self, m: &mut Mem) -> u32 { let a = self.0.wrapping_add(0x34); m.r32(a) }
+    pub fn set_updated(self, m: &mut Mem, v: u32) { let a = self.0.wrapping_add(0x34); m.w32(a, v) }
+    pub fn update_updated(self, m: &mut Mem, f: impl FnOnce(u32) -> u32) { let v = f(self.updated(m)); self.set_updated(m, v) }
+}
+
+/// `tVideoWallConfig` (0x14 bytes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
+pub struct VideoWallConfig(pub u32);
+impl VideoWallConfig {
+    pub const SIZE: u32 = 0x14;
+    /// Element `i` of an array of `tVideoWallConfig` starting here.
+    pub fn at(self, i: u32) -> Self { Self(self.0.wrapping_add(i.wrapping_mul(Self::SIZE))) }
+    /// `+0x000 short numVideos`
+    pub fn num_videos(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x0); m.r16(a) as i16 }
+    pub fn set_num_videos(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x0); m.w16(a, v as u16) }
+    pub fn update_num_videos(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.num_videos(m)); self.set_num_videos(m, v) }
+    /// `+0x002 short flags`
+    pub fn flags(self, m: &mut Mem) -> i16 { let a = self.0.wrapping_add(0x2); m.r16(a) as i16 }
+    pub fn set_flags(self, m: &mut Mem, v: i16) { let a = self.0.wrapping_add(0x2); m.w16(a, v as u16) }
+    pub fn update_flags(self, m: &mut Mem, f: impl FnOnce(i16) -> i16) { let v = f(self.flags(m)); self.set_flags(m, v) }
+    /// `+0x004 struct tVideo[4]* videos`
+    pub fn videos(self, m: &mut Mem, i: u32) -> Video { let a = self.0.wrapping_add(0x4 + i * 4); debug_assert!(i < 4); Video(m.r32(a)) }
+    pub fn set_videos(self, m: &mut Mem, i: u32, v: Video) { let a = self.0.wrapping_add(0x4 + i * 4); debug_assert!(i < 4); m.w32(a, v.0) }
+}
+
 /// `Physics_tWheelAccStruct` (0x30 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 pub struct WheelAcc(pub u32);
 impl WheelAcc {
     pub const SIZE: u32 = 0x30;
@@ -4771,17 +11184,17 @@ pub static STRUCTS: &[(&str, u32, &[Field])] = &[
     ("AICop_BasicPerpInfo", 0xc, &[Field { off: 0x0, size: 0x8, name: "copsAssigned_", elem: 0x4, sub: None }, Field { off: 0x8, size: 0x4, name: "crime_", elem: 0x0, sub: None }]),
     ("AICop_PerpChaseInfo", 0x24, &[Field { off: 0x0, size: 0x4, name: "engagementTime_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "copGameInfo_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "chaseLevelIndex_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "bestChaseLevelIndex_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "chaseLevel_", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "totalEngagementPercent_", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "blockadeDone_", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "engagementPercentIncreasePerTick_", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "copFreeTicks_", elem: 0x0, sub: None }]),
     ("AICop_spikeBelt_t", 0x14, &[Field { off: 0x0, size: 0x4, name: "active_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "leftLatPos_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "rightLatPos_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "freshenTime_", elem: 0x0, sub: None }]),
-    ("AIDataRecord_t", 0x58, &[Field { off: 0x0, size: 0x4, name: "numElements_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "bSize_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x40, name: "name_", elem: 0x1, sub: None }, Field { off: 0x48, size: 0x4, name: "dataBuffer_", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "preAllocatedBuffer_", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "recordMethod_", elem: 0x0, sub: None }]),
-    ("AIDelayCar", 0x3c, &[Field { off: 0x0, size: 0x4, name: "delayFactor_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "basisCar_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "targetCar_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "deltaMeters_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "slice_", elem: 0x0, sub: None }, Field { off: 0x14, size: 0xc, name: "deltaPosition_", elem: 0x0, sub: Some(55) }, Field { off: 0x20, size: 0xc, name: "position_", elem: 0x0, sub: Some(55) }, Field { off: 0x2c, size: 0x4, name: "deltaRoadPosition_", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "roadPosition_", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "laneIndex_", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "currentSpeed_", elem: 0x0, sub: None }]),
+    ("AIDataRecord_t", 0x58, &[Field { off: 0x0, size: 0x4, name: "numElements_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "bSize_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x40, name: "name_", elem: 0x1, sub: None }, Field { off: 0x48, size: 0x4, name: "dataBuffer_", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "preAllocatedBuffer_", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "recordMethod_", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("AIDelayCar", 0x3c, &[Field { off: 0x0, size: 0x4, name: "delayFactor_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "basisCar_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "targetCar_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "deltaMeters_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "slice_", elem: 0x0, sub: None }, Field { off: 0x14, size: 0xc, name: "deltaPosition_", elem: 0x0, sub: Some(72) }, Field { off: 0x20, size: 0xc, name: "position_", elem: 0x0, sub: Some(72) }, Field { off: 0x2c, size: 0x4, name: "deltaRoadPosition_", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "roadPosition_", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "laneIndex_", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "currentSpeed_", elem: 0x0, sub: None }]),
     ("AIHigh_BTC_AIPerp", 0xac, &[Field { off: 0x0, size: 0x88, name: "AIHigh_BTC_Perp", elem: 0x0, sub: Some(9) }, Field { off: 0x88, size: 0x4, name: "perpMode_", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x4, name: "creationTime_", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x4, name: "madeContactTime_", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "timeUntilContact_", elem: 0x0, sub: None }, Field { off: 0x98, size: 0x4, name: "escapeDuration_", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x4, name: "originalMass_", elem: 0x0, sub: None }, Field { off: 0xa0, size: 0x4, name: "originalMassInv_", elem: 0x0, sub: None }, Field { off: 0xa4, size: 0x4, name: "closestCopCarObj_", elem: 0x0, sub: None }, Field { off: 0xa8, size: 0x4, name: "closestCopCarDistanceMeters_", elem: 0x0, sub: None }]),
     ("AIHigh_BTC_Cop", 0x64, &[Field { off: 0x0, size: 0x58, name: "AIHigh_BasicCop", elem: 0x0, sub: Some(12) }, Field { off: 0x58, size: 0x4, name: "perpTarget_", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "chaseIndex_", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "freezeMode_", elem: 0x0, sub: None }]),
     ("AIHigh_BTC_HumanCop", 0x8c, &[Field { off: 0x0, size: 0x64, name: "AIHigh_BTC_Cop", elem: 0x0, sub: Some(6) }, Field { off: 0x64, size: 0x4, name: "currentStage_", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "stageRepeatCount_", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "stageTimeMultiplier_", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "timeLeft_", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "chaseStartTime_", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "wingmanStatus_", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "needPerp_", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "initialDirection_", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "initialMovement_", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "requestedDesiredSpeed_", elem: 0x0, sub: None }]),
     ("AIHigh_BTC_HumanPerp", 0x88, &[Field { off: 0x0, size: 0x88, name: "AIHigh_BTC_Perp", elem: 0x0, sub: Some(9) }]),
     ("AIHigh_BTC_Perp", 0x88, &[Field { off: 0x0, size: 0x7c, name: "AIHigh_BasicPerp", elem: 0x0, sub: Some(13) }, Field { off: 0x7c, size: 0x4, name: "caught_", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "hudActivated_", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "originalActivationCop_", elem: 0x0, sub: None }]),
     ("AIHigh_BTC_Wingman", 0x7c, &[Field { off: 0x0, size: 0x64, name: "AIHigh_BTC_Cop", elem: 0x0, sub: Some(6) }, Field { off: 0x64, size: 0x4, name: "currentRole_", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "newRole_", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "newHumanBoss_", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "spikeBeltPlaced_", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "spikeBeltSlice_", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "spikeBeltInterceptReleaseTime_", elem: 0x0, sub: None }]),
-    ("AIHigh_Base", 0x18, &[Field { off: 0x0, size: 0x4, name: "carObj_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "state_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "stateType_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "schedulingOff_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "lastTrafficTriggerCheckSlice_", elem: 0x0, sub: None }]),
-    ("AIHigh_BasicCop", 0x58, &[Field { off: 0x0, size: 0x18, name: "AIHigh_Base", elem: 0x0, sub: Some(11) }, Field { off: 0x18, size: 0x4, name: "type_", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "copIndex_", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x34, name: "blockade_", elem: 0x0, sub: Some(43) }, Field { off: 0x54, size: 0x4, name: "driveAway_", elem: 0x0, sub: None }]),
-    ("AIHigh_BasicPerp", 0x7c, &[Field { off: 0x0, size: 0x18, name: "AIHigh_Base", elem: 0x0, sub: Some(11) }, Field { off: 0x18, size: 0x4, name: "pullOverMode_", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x30, name: "positionVSCopList_", elem: 0x8, sub: Some(57) }, Field { off: 0x4c, size: 0x18, name: "copVSPositionList_", elem: 0x4, sub: None }, Field { off: 0x64, size: 0x4, name: "beatingTicksLeft_", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "lastPullOverTime_", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "lastArrestingCop_", elem: 0x0, sub: None }, Field { off: 0x70, size: 0xc, name: "basicPerpInfo_", elem: 0x0, sub: Some(0) }]),
+    ("AIHigh_Base", 0x18, &[Field { off: 0x0, size: 0x4, name: "carObj_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "state_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "stateType_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "schedulingOff_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "lastTrafficTriggerCheckSlice_", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("AIHigh_BasicCop", 0x58, &[Field { off: 0x0, size: 0x18, name: "AIHigh_Base", elem: 0x0, sub: Some(11) }, Field { off: 0x18, size: 0x4, name: "type_", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "copIndex_", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x34, name: "blockade_", elem: 0x0, sub: Some(50) }, Field { off: 0x54, size: 0x4, name: "driveAway_", elem: 0x0, sub: None }]),
+    ("AIHigh_BasicPerp", 0x7c, &[Field { off: 0x0, size: 0x18, name: "AIHigh_Base", elem: 0x0, sub: Some(11) }, Field { off: 0x18, size: 0x4, name: "pullOverMode_", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x30, name: "positionVSCopList_", elem: 0x8, sub: Some(74) }, Field { off: 0x4c, size: 0x18, name: "copVSPositionList_", elem: 0x4, sub: None }, Field { off: 0x64, size: 0x4, name: "beatingTicksLeft_", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "lastPullOverTime_", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "lastArrestingCop_", elem: 0x0, sub: None }, Field { off: 0x70, size: 0xc, name: "basicPerpInfo_", elem: 0x0, sub: Some(0) }]),
     ("AIHigh_Cop", 0x6c, &[Field { off: 0x0, size: 0x58, name: "AIHigh_BasicCop", elem: 0x0, sub: Some(12) }, Field { off: 0x58, size: 0x4, name: "perpTarget_", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "forcePurgatory_", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "chaseIndex_", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "requestSpikeBeltAtSlice_", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "aggressionLevel_", elem: 0x0, sub: None }]),
     ("AIHigh_Human", 0xb0, &[Field { off: 0x0, size: 0xb0, name: "AIHigh_Player", elem: 0x0, sub: Some(18) }]),
     ("AIHigh_None", 0x18, &[Field { off: 0x0, size: 0x18, name: "AIHigh_Base", elem: 0x0, sub: Some(11) }]),
@@ -4797,8 +11210,8 @@ pub static STRUCTS: &[(&str, u32, &[Field])] = &[
     ("AISpeechInfo_t", 0x18, &[Field { off: 0x0, size: 0x4, name: "speechMode", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "speechIntensity", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "speechSource", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "playerCarIndex", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "copCarIndex", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "warningNumber", elem: 0x0, sub: None }]),
     ("AISpeeds_tLeaderBoard", 0x10, &[Field { off: 0x0, size: 0x4, name: "leadRacer", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "leadHumanRacer", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "leadAIRacer", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "lastAIRacer", elem: 0x0, sub: None }]),
     ("AISpeeds_tSlotInfo", 0x10, &[Field { off: 0x0, size: 0x4, name: "distanceMaintainTime32", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "minDistanceMeters", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "maxDistanceMeters", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "fallBackRandomTime_TickPercent", elem: 0x0, sub: None }]),
-    ("AIState_Base", 0x8, &[Field { off: 0x0, size: 0x4, name: "carObj_", elem: 0x0, sub: None }]),
-    ("AIState_Chase", 0x94, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }, Field { off: 0x8, size: 0x3c, name: "delayCar_", elem: 0x0, sub: Some(4) }, Field { off: 0x44, size: 0x4, name: "noTurnAroundEndTime_", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "targetCar_", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0xc, name: "relPosition_", elem: 0x0, sub: Some(55) }, Field { off: 0x58, size: 0x4, name: "longTargetRegion_", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "latTargetRegion_", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "targetDir_", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "carDir_", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "longMetersBetween_", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "latMetersBetween_", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "murderMode_", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "murderEndTime_", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "inTargetRegion_", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "nitrousTicks_", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "nitrousMinForeDistance_", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "nitrousMinAftDistance_", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "aggressionLevel_", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x4, name: "slowDownEndTime_", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x4, name: "barrierTicks32_", elem: 0x0, sub: None }]),
+    ("AIState_Base", 0x8, &[Field { off: 0x0, size: 0x4, name: "carObj_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("AIState_Chase", 0x94, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }, Field { off: 0x8, size: 0x3c, name: "delayCar_", elem: 0x0, sub: Some(4) }, Field { off: 0x44, size: 0x4, name: "noTurnAroundEndTime_", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "targetCar_", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0xc, name: "relPosition_", elem: 0x0, sub: Some(72) }, Field { off: 0x58, size: 0x4, name: "longTargetRegion_", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "latTargetRegion_", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "targetDir_", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "carDir_", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "longMetersBetween_", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "latMetersBetween_", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "murderMode_", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "murderEndTime_", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "inTargetRegion_", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "nitrousTicks_", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "nitrousMinForeDistance_", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "nitrousMinAftDistance_", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "aggressionLevel_", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x4, name: "slowDownEndTime_", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x4, name: "barrierTicks32_", elem: 0x0, sub: None }]),
     ("AIState_Cruise", 0x14, &[Field { off: 0x0, size: 0x8, name: "AIState_Normal", elem: 0x0, sub: Some(37) }, Field { off: 0x8, size: 0x4, name: "cruiseMode_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "cruiseSpeed_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "cruiseFactor_", elem: 0x0, sub: None }]),
     ("AIState_Donuts", 0x10, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }, Field { off: 0x8, size: 0x4, name: "donutLookForward_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "donutMode_", elem: 0x0, sub: None }]),
     ("AIState_GotoSlice", 0x10, &[Field { off: 0x0, size: 0x8, name: "AIState_Normal", elem: 0x0, sub: Some(37) }, Field { off: 0x8, size: 0x4, name: "targetSlice_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "stopWhenArrivedAtSlice_", elem: 0x0, sub: None }]),
@@ -4806,62 +11219,217 @@ pub static STRUCTS: &[(&str, u32, &[Field])] = &[
     ("AIState_NonActive", 0x8, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }]),
     ("AIState_None", 0x8, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }]),
     ("AIState_Normal", 0x8, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }]),
-    ("AIState_Offroad", 0x68, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }, Field { off: 0x8, size: 0x4, name: "startSlice_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0xc, name: "startPosition_", elem: 0x0, sub: Some(55) }, Field { off: 0x18, size: 0x24, name: "startOrientation_", elem: 0x0, sub: Some(68) }, Field { off: 0x3c, size: 0xc, name: "startHeading_", elem: 0x0, sub: Some(55) }, Field { off: 0x48, size: 0x4, name: "targetSlice_", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0xc, name: "targetPosition_", elem: 0x0, sub: Some(55) }, Field { off: 0x58, size: 0x4, name: "longMetersBetween_", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "letGo_", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "maxSpeedMPS_", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "releaseTime_", elem: 0x0, sub: None }]),
+    ("AIState_Offroad", 0x68, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }, Field { off: 0x8, size: 0x4, name: "startSlice_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0xc, name: "startPosition_", elem: 0x0, sub: Some(72) }, Field { off: 0x18, size: 0x24, name: "startOrientation_", elem: 0x0, sub: Some(121) }, Field { off: 0x3c, size: 0xc, name: "startHeading_", elem: 0x0, sub: Some(72) }, Field { off: 0x48, size: 0x4, name: "targetSlice_", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0xc, name: "targetPosition_", elem: 0x0, sub: Some(72) }, Field { off: 0x58, size: 0x4, name: "longMetersBetween_", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "letGo_", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "maxSpeedMPS_", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "releaseTime_", elem: 0x0, sub: None }]),
     ("AIState_Purgatory", 0x8, &[Field { off: 0x0, size: 0x8, name: "AIState_NonActive", elem: 0x0, sub: Some(35) }]),
     ("AIState_RovingTraffic", 0x18, &[Field { off: 0x0, size: 0x8, name: "AIState_Base", elem: 0x0, sub: Some(29) }, Field { off: 0x8, size: 0x4, name: "path_", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "numPathPoints_", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "pathIndex_", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "waitTick_", elem: 0x0, sub: None }]),
     ("AITrigger_TriggerManager", 0x34c, &[Field { off: 0x0, size: 0x4, name: "numTriggers_", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "invNumTriggers_", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x190, name: "triggers_", elem: 0x4, sub: None }, Field { off: 0x198, size: 0x190, name: "checkTime_", elem: 0x4, sub: None }, Field { off: 0x328, size: 0x24, name: "lastTriggerChecked_", elem: 0x4, sub: None }]),
-    ("BWorldSm_Pos", 0x84, &[Field { off: 0x0, size: 0x2, name: "slice", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "stripQuadInd", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "simRotFlag", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x30, name: "quadPts", elem: 0xc, sub: Some(55) }, Field { off: 0x38, size: 0x20, name: "quadPts16", elem: 0x8, sub: Some(56) }, Field { off: 0x58, size: 0x1, name: "sliceChanged", elem: 0x0, sub: None }, Field { off: 0x59, size: 0x1, name: "quadChanged", elem: 0x0, sub: None }, Field { off: 0x5a, size: 0x1, name: "offEdge", elem: 0x0, sub: None }, Field { off: 0x5b, size: 0x1, name: "triangleFlag", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0xc, name: "normal", elem: 0x0, sub: Some(55) }, Field { off: 0x68, size: 0xc, name: "forward", elem: 0x0, sub: Some(55) }, Field { off: 0x74, size: 0x1, name: "quad", elem: 0x0, sub: None }, Field { off: 0x75, size: 0x1, name: "chunk", elem: 0x0, sub: None }, Field { off: 0x76, size: 0x1, name: "lastRezRequested", elem: 0x0, sub: None }, Field { off: 0x77, size: 0x1, name: "rez", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "simQuad", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "strip", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "simSlice", elem: 0x0, sub: None }]),
+    ("tAcademyDefinition", 0x3120, &[Field { off: 0x0, size: 0x20, name: "fTiers", elem: 0x4, sub: Some(150) }, Field { off: 0x20, size: 0x500, name: "fMissions", elem: 0x14, sub: Some(148) }, Field { off: 0x520, size: 0x2c00, name: "fStages", elem: 0x2c, sub: Some(219) }]),
+    ("tActiveLine", 0xc, &[Field { off: 0x0, size: 0x2, name: "startTick", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "endTick", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "x1", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "y1", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "type", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x2, name: "data", elem: 0x0, sub: None }]),
+    ("tAllScreens", 0x3bd8, &[Field { off: 0x0, size: 0x5b8, name: "screenMain", elem: 0x0, sub: Some(196) }, Field { off: 0x5b8, size: 0x3a0, name: "screenCarSelect", elem: 0x0, sub: Some(190) }, Field { off: 0x958, size: 0x3d0, name: "screenCarSelectDuel", elem: 0x0, sub: Some(191) }, Field { off: 0xd28, size: 0x438, name: "screenCarSelectTwoPlayer", elem: 0x0, sub: Some(192) }, Field { off: 0x1160, size: 0x438, name: "screenCarSelectPlayerTwo", elem: 0x0, sub: Some(192) }, Field { off: 0x1598, size: 0x44c, name: "screenPinkSlipsCarSelectTwoPlayer", elem: 0x0, sub: Some(201) }, Field { off: 0x19e4, size: 0x44c, name: "screenPinkSlipsCarSelectPlayerTwo", elem: 0x0, sub: Some(201) }, Field { off: 0x1e30, size: 0x74, name: "screenTrackRecords", elem: 0x0, sub: Some(208) }, Field { off: 0x1ea4, size: 0x2a4, name: "screenTrackInfo", elem: 0x0, sub: Some(207) }, Field { off: 0x2148, size: 0x2a0, name: "screenTrackSelect", elem: 0x0, sub: Some(209) }, Field { off: 0x23e8, size: 0x2c8, name: "screenTournSelect", elem: 0x0, sub: Some(202) }, Field { off: 0x26b0, size: 0x94, name: "screenTournamentStandings", elem: 0x0, sub: Some(204) }, Field { off: 0x2744, size: 0x188, name: "screenTournamentTrophy", elem: 0x0, sub: Some(206) }, Field { off: 0x28cc, size: 0x158, name: "screenTrophyRoom", elem: 0x0, sub: Some(211) }, Field { off: 0x2a24, size: 0x68, name: "screenTrophyInfo", elem: 0x0, sub: Some(210) }, Field { off: 0x2a8c, size: 0x17c, name: "screenControllerConfig", elem: 0x0, sub: Some(194) }, Field { off: 0x2c08, size: 0x64, name: "screenDisplay", elem: 0x0, sub: Some(195) }, Field { off: 0x2c6c, size: 0x7c, name: "screenAudio", elem: 0x0, sub: Some(188) }, Field { off: 0x2ce8, size: 0x5a4, name: "screenMemcard", elem: 0x0, sub: Some(197) }, Field { off: 0x328c, size: 0xcc, name: "screenUserName", elem: 0x0, sub: Some(212) }, Field { off: 0x3358, size: 0x188, name: "screenPinkSlipCongrats", elem: 0x0, sub: Some(198) }, Field { off: 0x34e0, size: 0x94, name: "screenPinkSlipStandings", elem: 0x0, sub: Some(199) }, Field { off: 0x3574, size: 0x94, name: "screenTournamentStandings3item", elem: 0x0, sub: Some(205) }, Field { off: 0x3608, size: 0x2c8, name: "screenPinkSlips", elem: 0x0, sub: Some(200) }, Field { off: 0x38d0, size: 0x184, name: "screenBeTheCopCongrats", elem: 0x0, sub: Some(189) }, Field { off: 0x3a54, size: 0x184, name: "screenTournamentCongrats", elem: 0x0, sub: Some(203) }]),
+    ("tAwardInformation", 0x44, &[Field { off: 0x0, size: 0x4, name: "fMoney", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fTournMoney", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x2, name: "fActivateFlags", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x1, name: "fActivateTrack", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "fActivateCarClass", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "fActivateCar", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fActivateTrackClass", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fActivateCheat", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "fAwardCar", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "fAwardCarGarageFull", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "fAwardCarBonusMoney", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "fAwardCarModel", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x1, name: "fAwardCarColor", elem: 0x0, sub: None }, Field { off: 0x2d, size: 0x1, name: "fAwardCarUpgrades", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "fCompletedTier", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x2, name: "fCompletedText", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "fCompletedCar", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "fCompletedGarageFull", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "fCompletedBonusMoney", elem: 0x0, sub: None }]),
+    ("tBTCPerpInfo", 0x10, &[Field { off: 0x0, size: 0x8, name: "name", elem: 0x1, sub: None }, Field { off: 0x8, size: 0x4, name: "time", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "caught", elem: 0x0, sub: None }]),
+    ("BWorldSm_Pos", 0x84, &[Field { off: 0x0, size: 0x2, name: "slice", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "stripQuadInd", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "simRotFlag", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x30, name: "quadPts", elem: 0xc, sub: Some(72) }, Field { off: 0x38, size: 0x20, name: "quadPts16", elem: 0x8, sub: Some(73) }, Field { off: 0x58, size: 0x1, name: "sliceChanged", elem: 0x0, sub: None }, Field { off: 0x59, size: 0x1, name: "quadChanged", elem: 0x0, sub: None }, Field { off: 0x5a, size: 0x1, name: "offEdge", elem: 0x0, sub: None }, Field { off: 0x5b, size: 0x1, name: "triangleFlag", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0xc, name: "normal", elem: 0x0, sub: Some(72) }, Field { off: 0x68, size: 0xc, name: "forward", elem: 0x0, sub: Some(72) }, Field { off: 0x74, size: 0x1, name: "quad", elem: 0x0, sub: None }, Field { off: 0x75, size: 0x1, name: "chunk", elem: 0x0, sub: None }, Field { off: 0x76, size: 0x1, name: "lastRezRequested", elem: 0x0, sub: None }, Field { off: 0x77, size: 0x1, name: "rez", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "simQuad", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "strip", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "simSlice", elem: 0x0, sub: None }]),
+    ("tBlankMenuItemGoToMenuNFS4Button", 0x2c, &[Field { off: 0x0, size: 0x2c, name: "tMenuItemGoToMenuNFS4Button", elem: 0x0, sub: Some(132) }]),
+    ("tBlankMenuItemNFS4LeftRightChoice", 0x28, &[Field { off: 0x0, size: 0x28, name: "tMenuItemNFS4LeftRightChoice", elem: 0x0, sub: Some(138) }]),
     ("blockade_t", 0x34, &[Field { off: 0x0, size: 0x4, name: "mode", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "target", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "flags", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "chaseLevel", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "requestSpikeBeltAtSlice", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "direction", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "latPos", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "rotation", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "reverse", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "releaseTime", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "initialPlayerDistanceMetersInt", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x2, name: "blockadeSpeechFlags", elem: 0x0, sub: None }]),
-    ("Car_tObj", 0x8dc, &[Field { off: 0x0, size: 0x240, name: "N", elem: 0x0, sub: Some(70) }, Field { off: 0x240, size: 0x9, name: "carName", elem: 0x1, sub: None }, Field { off: 0x249, size: 0x9, name: "carNameLocalized", elem: 0x1, sub: None }, Field { off: 0x254, size: 0x4, name: "carIndex", elem: 0x0, sub: None }, Field { off: 0x258, size: 0x4, name: "humanIndex", elem: 0x0, sub: None }, Field { off: 0x25c, size: 0x4, name: "sortIndex", elem: 0x0, sub: None }, Field { off: 0x260, size: 0x4, name: "carFlags", elem: 0x0, sub: None }, Field { off: 0x264, size: 0x4, name: "lap", elem: 0x0, sub: None }, Field { off: 0x268, size: 0x4, name: "unlap", elem: 0x0, sub: None }, Field { off: 0x26c, size: 0x4, name: "roadSpan", elem: 0x0, sub: None }, Field { off: 0x270, size: 0x4, name: "glue", elem: 0x0, sub: None }, Field { off: 0x274, size: 0x4, name: "blowout", elem: 0x0, sub: None }, Field { off: 0x278, size: 0x4, name: "pullOver", elem: 0x0, sub: None }, Field { off: 0x27c, size: 0x4, name: "revLimit", elem: 0x0, sub: None }, Field { off: 0x280, size: 0x4, name: "swapCar", elem: 0x0, sub: None }, Field { off: 0x284, size: 0x4, name: "swapTime", elem: 0x0, sub: None }, Field { off: 0x288, size: 0x4, name: "carInfo", elem: 0x0, sub: None }, Field { off: 0x28c, size: 0xc0, name: "wheel", elem: 0x30, sub: Some(50) }, Field { off: 0x34c, size: 0xa0, name: "stats", elem: 0x0, sub: Some(49) }, Field { off: 0x3ec, size: 0x4, name: "crash", elem: 0x0, sub: None }, Field { off: 0x3f0, size: 0x4, name: "wrongway", elem: 0x0, sub: None }, Field { off: 0x3f4, size: 0xc, name: "angularAcc", elem: 0x0, sub: Some(55) }, Field { off: 0x400, size: 0xc, name: "linearAcc", elem: 0x0, sub: Some(55) }, Field { off: 0x40c, size: 0xc, name: "linearAcc_ch", elem: 0x0, sub: Some(55) }, Field { off: 0x418, size: 0xc, name: "linearVel_ch", elem: 0x0, sub: Some(55) }, Field { off: 0x424, size: 0xc, name: "angularVel_ch", elem: 0x0, sub: Some(55) }, Field { off: 0x430, size: 0xc, name: "linearAcc_rh", elem: 0x0, sub: Some(55) }, Field { off: 0x43c, size: 0x1c, name: "control", elem: 0x0, sub: Some(45) }, Field { off: 0x458, size: 0x1, name: "RSGasLevel", elem: 0x0, sub: None }, Field { off: 0x459, size: 0x1, name: "RSBrakeLevel", elem: 0x0, sub: None }, Field { off: 0x45c, size: 0x4, name: "RSSteering", elem: 0x0, sub: None }, Field { off: 0x460, size: 0x4, name: "RSControl", elem: 0x0, sub: None }, Field { off: 0x464, size: 0x4, name: "specs", elem: 0x0, sub: None }, Field { off: 0x468, size: 0x4, name: "flywheelRpm", elem: 0x0, sub: None }, Field { off: 0x46c, size: 0x4, name: "wheelSpin", elem: 0x0, sub: None }, Field { off: 0x470, size: 0x4, name: "frontWheelSpin", elem: 0x0, sub: None }, Field { off: 0x474, size: 0x4, name: "wheelLock", elem: 0x0, sub: None }, Field { off: 0x478, size: 0x4, name: "slide", elem: 0x0, sub: None }, Field { off: 0x47c, size: 0x4, name: "gTransferFront", elem: 0x0, sub: None }, Field { off: 0x480, size: 0x4, name: "gTransferRight", elem: 0x0, sub: None }, Field { off: 0x484, size: 0x4, name: "frontSkid", elem: 0x0, sub: None }, Field { off: 0x488, size: 0x4, name: "rearSkid", elem: 0x0, sub: None }, Field { off: 0x48c, size: 0x4, name: "oldSkidState", elem: 0x0, sub: None }, Field { off: 0x490, size: 0x30, name: "oldSkidPoint", elem: 0xc, sub: Some(55) }, Field { off: 0x4c0, size: 0x4, name: "oldAudioSkidState", elem: 0x0, sub: None }, Field { off: 0x4c4, size: 0x4, name: "funcUpdateRoadInfo", elem: 0x0, sub: None }, Field { off: 0x4c8, size: 0x4, name: "funcReplay", elem: 0x0, sub: None }, Field { off: 0x4cc, size: 0x4, name: "funcControl", elem: 0x0, sub: None }, Field { off: 0x4d0, size: 0x4, name: "funcStats", elem: 0x0, sub: None }, Field { off: 0x4d4, size: 0x4, name: "funcHandlingPhysics", elem: 0x0, sub: None }, Field { off: 0x4d8, size: 0x4, name: "funcGravityPhysics", elem: 0x0, sub: None }, Field { off: 0x4dc, size: 0x4, name: "funcQDPhysicsUpdateVel", elem: 0x0, sub: None }, Field { off: 0x4e0, size: 0x4, name: "funcQDPhysicsUpdateRot", elem: 0x0, sub: None }, Field { off: 0x4e4, size: 0x4, name: "funcTestMeForCollisions", elem: 0x0, sub: None }, Field { off: 0x4e8, size: 0x4, name: "funcDoPostCollisionStuff", elem: 0x0, sub: None }, Field { off: 0x4ec, size: 0x4, name: "personalityIndex", elem: 0x0, sub: None }, Field { off: 0x4f0, size: 0x4, name: "personality", elem: 0x0, sub: None }, Field { off: 0x4f4, size: 0x40, name: "script", elem: 0x0, sub: Some(24) }, Field { off: 0x534, size: 0x18, name: "speechInfo", elem: 0x0, sub: Some(26) }, Field { off: 0x54c, size: 0x4, name: "carInLane", elem: 0x0, sub: None }, Field { off: 0x550, size: 0x4, name: "desiredDirection", elem: 0x0, sub: None }, Field { off: 0x554, size: 0x4, name: "direction", elem: 0x0, sub: None }, Field { off: 0x558, size: 0x4, name: "desiredLatPos", elem: 0x0, sub: None }, Field { off: 0x55c, size: 0x4, name: "desiredSpeed", elem: 0x0, sub: None }, Field { off: 0x560, size: 0x4, name: "originalDesiredSpeed", elem: 0x0, sub: None }, Field { off: 0x564, size: 0x4, name: "currentSpeed", elem: 0x0, sub: None }, Field { off: 0x568, size: 0x4, name: "speed", elem: 0x0, sub: None }, Field { off: 0x56c, size: 0x4, name: "laneSlack", elem: 0x0, sub: None }, Field { off: 0x570, size: 0x4, name: "AIFlags", elem: 0x0, sub: None }, Field { off: 0x574, size: 0x4, name: "roadPosition", elem: 0x0, sub: None }, Field { off: 0x578, size: 0x4, name: "basisCar", elem: 0x0, sub: None }, Field { off: 0x57c, size: 0x4, name: "aiShiftDuration", elem: 0x0, sub: None }, Field { off: 0x580, size: 0x4, name: "aiShiftTimer", elem: 0x0, sub: None }, Field { off: 0x584, size: 0x4, name: "redLine", elem: 0x0, sub: None }, Field { off: 0x588, size: 0x4, name: "tailgateTimer", elem: 0x0, sub: None }, Field { off: 0x58c, size: 0x4, name: "physicsModelTimer", elem: 0x0, sub: None }, Field { off: 0x590, size: 0x4, name: "trafficSpeedRandomizingFactor", elem: 0x0, sub: None }, Field { off: 0x594, size: 0x4, name: "laneChangeSpeed", elem: 0x0, sub: None }, Field { off: 0x598, size: 0x1c, name: "topSpeeds", elem: 0x4, sub: None }, Field { off: 0x5b4, size: 0x1c, name: "invTopSpeeds", elem: 0x4, sub: None }, Field { off: 0x5d0, size: 0xe0, name: "accTable", elem: 0x2, sub: None }, Field { off: 0x6b0, size: 0x4, name: "accelerationRecord", elem: 0x0, sub: None }, Field { off: 0x6b4, size: 0x4, name: "curveSpeedTable", elem: 0x0, sub: None }, Field { off: 0x6b8, size: 0x4, name: "brakeInfo", elem: 0x0, sub: None }, Field { off: 0x6bc, size: 0x4, name: "speedFactor", elem: 0x0, sub: None }, Field { off: 0x6c0, size: 0x4, name: "barrierThinkHarder", elem: 0x0, sub: None }, Field { off: 0x6c4, size: 0x4, name: "laneIndex", elem: 0x0, sub: None }, Field { off: 0x6c8, size: 0x4, name: "copTopSpeed", elem: 0x0, sub: None }, Field { off: 0x6cc, size: 0x4, name: "copAccMult", elem: 0x0, sub: None }, Field { off: 0x6d0, size: 0xc, name: "desiredVector", elem: 0x0, sub: Some(55) }, Field { off: 0x6dc, size: 0x4, name: "aCarWRTDesired", elem: 0x0, sub: None }, Field { off: 0x6e0, size: 0xc, name: "angularAcc_ch", elem: 0x0, sub: Some(55) }, Field { off: 0x6ec, size: 0x4, name: "driveDirectionReverseTime", elem: 0x0, sub: None }, Field { off: 0x6f0, size: 0x4, name: "driveDirection", elem: 0x0, sub: None }, Field { off: 0x6f4, size: 0x4, name: "driveDirectionTimer", elem: 0x0, sub: None }, Field { off: 0x6f8, size: 0x4, name: "aCar", elem: 0x0, sub: None }, Field { off: 0x6fc, size: 0x4, name: "aDesired", elem: 0x0, sub: None }, Field { off: 0x700, size: 0x4, name: "aCarWRTRoad", elem: 0x0, sub: None }, Field { off: 0x704, size: 0x4, name: "lateralVelocity", elem: 0x0, sub: None }, Field { off: 0x708, size: 0xc, name: "targetPos", elem: 0x0, sub: Some(55) }, Field { off: 0x714, size: 0x4, name: "targetLatPos", elem: 0x0, sub: None }, Field { off: 0x718, size: 0x4, name: "rampDesiredLatPos", elem: 0x0, sub: None }, Field { off: 0x71c, size: 0x4, name: "preferredLateralPosition", elem: 0x0, sub: None }, Field { off: 0x720, size: 0x4, name: "preferredLateralPositionPower", elem: 0x0, sub: None }, Field { off: 0x724, size: 0x4, name: "timeOffRoad", elem: 0x0, sub: None }, Field { off: 0x728, size: 0x4, name: "max_clacc", elem: 0x0, sub: None }, Field { off: 0x72c, size: 0x4, name: "max_aa", elem: 0x0, sub: None }, Field { off: 0x730, size: 0x4, name: "aiGlue", elem: 0x0, sub: None }, Field { off: 0x734, size: 0x4, name: "drag", elem: 0x0, sub: None }, Field { off: 0x738, size: 0x4, name: "slackProb", elem: 0x0, sub: None }, Field { off: 0x73c, size: 0x4, name: "accNitrous", elem: 0x0, sub: None }, Field { off: 0x740, size: 0x4, name: "speedNitrous", elem: 0x0, sub: None }, Field { off: 0x744, size: 0x4, name: "wipeOutStartTick", elem: 0x0, sub: None }, Field { off: 0x748, size: 0x4, name: "wipeOutEndTick", elem: 0x0, sub: None }, Field { off: 0x74c, size: 0x4, name: "btcGlueModifier", elem: 0x0, sub: None }, Field { off: 0x750, size: 0x4, name: "donutMode", elem: 0x0, sub: None }, Field { off: 0x754, size: 0x4, name: "AIFishtailEndTick", elem: 0x0, sub: None }, Field { off: 0x758, size: 0x4, name: "lookAheadSlice", elem: 0x0, sub: None }, Field { off: 0x75c, size: 0x4, name: "forceNoSimOptz", elem: 0x0, sub: None }, Field { off: 0x760, size: 0x4, name: "gripFactor", elem: 0x0, sub: None }, Field { off: 0x764, size: 0x4, name: "fallBehindCar", elem: 0x0, sub: None }, Field { off: 0x768, size: 0x4, name: "nextAIRacer", elem: 0x0, sub: None }, Field { off: 0x76c, size: 0x4, name: "caravanFollowBehindDistanceMeters", elem: 0x0, sub: None }, Field { off: 0x770, size: 0x4, name: "caravanTimer", elem: 0x0, sub: None }, Field { off: 0x774, size: 0x4, name: "AISlot", elem: 0x0, sub: None }, Field { off: 0x778, size: 0x4, name: "damageMult", elem: 0x0, sub: None }, Field { off: 0x77c, size: 0x4, name: "topSpeedUpgradeMult", elem: 0x0, sub: None }, Field { off: 0x780, size: 0x4, name: "accUpgradeMult", elem: 0x0, sub: None }, Field { off: 0x784, size: 0x4, name: "extraWallCollisionAllowance", elem: 0x0, sub: None }, Field { off: 0x788, size: 0x8, name: "collision", elem: 0x0, sub: Some(52) }, Field { off: 0x790, size: 0x4, name: "audioDamageScrape", elem: 0x0, sub: None }, Field { off: 0x794, size: 0x4, name: "audioCount", elem: 0x0, sub: None }, Field { off: 0x798, size: 0xa8, name: "audio", elem: 0x18, sub: Some(51) }, Field { off: 0x840, size: 0x98, name: "render", elem: 0x0, sub: Some(53) }, Field { off: 0x8d8, size: 0x4, name: "async_handle", elem: 0x0, sub: None }]),
+    ("tBoundingSphere", 0x8, &[Field { off: 0x0, size: 0x6, name: "cp", elem: 0x0, sub: Some(53) }, Field { off: 0x6, size: 0x2, name: "radius", elem: 0x0, sub: None }]),
+    ("tBuildEntry", 0x4, &[Field { off: 0x0, size: 0x2, name: "chunkInd", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "geomRez", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "enableBits", elem: 0x0, sub: None }]),
+    ("COORD16", 0x6, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "y", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "z", elem: 0x0, sub: None }]),
+    ("CVECTOR", 0x4, &[Field { off: 0x0, size: 0x1, name: "r", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "g", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "b", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "cd", elem: 0x0, sub: None }]),
+    ("Car_tObj", 0x8dc, &[Field { off: 0x0, size: 0x240, name: "N", elem: 0x0, sub: Some(152) }, Field { off: 0x240, size: 0x9, name: "carName", elem: 0x1, sub: None }, Field { off: 0x249, size: 0x9, name: "carNameLocalized", elem: 0x1, sub: None }, Field { off: 0x254, size: 0x4, name: "carIndex", elem: 0x0, sub: None }, Field { off: 0x258, size: 0x4, name: "humanIndex", elem: 0x0, sub: None }, Field { off: 0x25c, size: 0x4, name: "sortIndex", elem: 0x0, sub: None }, Field { off: 0x260, size: 0x4, name: "carFlags", elem: 0x0, sub: None }, Field { off: 0x264, size: 0x4, name: "lap", elem: 0x0, sub: None }, Field { off: 0x268, size: 0x4, name: "unlap", elem: 0x0, sub: None }, Field { off: 0x26c, size: 0x4, name: "roadSpan", elem: 0x0, sub: None }, Field { off: 0x270, size: 0x4, name: "glue", elem: 0x0, sub: None }, Field { off: 0x274, size: 0x4, name: "blowout", elem: 0x0, sub: None }, Field { off: 0x278, size: 0x4, name: "pullOver", elem: 0x0, sub: None }, Field { off: 0x27c, size: 0x4, name: "revLimit", elem: 0x0, sub: None }, Field { off: 0x280, size: 0x4, name: "swapCar", elem: 0x0, sub: None }, Field { off: 0x284, size: 0x4, name: "swapTime", elem: 0x0, sub: None }, Field { off: 0x288, size: 0x4, name: "carInfo", elem: 0x0, sub: None }, Field { off: 0x28c, size: 0xc0, name: "wheel", elem: 0x30, sub: Some(63) }, Field { off: 0x34c, size: 0xa0, name: "stats", elem: 0x0, sub: Some(62) }, Field { off: 0x3ec, size: 0x4, name: "crash", elem: 0x0, sub: None }, Field { off: 0x3f0, size: 0x4, name: "wrongway", elem: 0x0, sub: None }, Field { off: 0x3f4, size: 0xc, name: "angularAcc", elem: 0x0, sub: Some(72) }, Field { off: 0x400, size: 0xc, name: "linearAcc", elem: 0x0, sub: Some(72) }, Field { off: 0x40c, size: 0xc, name: "linearAcc_ch", elem: 0x0, sub: Some(72) }, Field { off: 0x418, size: 0xc, name: "linearVel_ch", elem: 0x0, sub: Some(72) }, Field { off: 0x424, size: 0xc, name: "angularVel_ch", elem: 0x0, sub: Some(72) }, Field { off: 0x430, size: 0xc, name: "linearAcc_rh", elem: 0x0, sub: Some(72) }, Field { off: 0x43c, size: 0x1c, name: "control", elem: 0x0, sub: Some(56) }, Field { off: 0x458, size: 0x1, name: "RSGasLevel", elem: 0x0, sub: None }, Field { off: 0x459, size: 0x1, name: "RSBrakeLevel", elem: 0x0, sub: None }, Field { off: 0x45c, size: 0x4, name: "RSSteering", elem: 0x0, sub: None }, Field { off: 0x460, size: 0x4, name: "RSControl", elem: 0x0, sub: None }, Field { off: 0x464, size: 0x4, name: "specs", elem: 0x0, sub: None }, Field { off: 0x468, size: 0x4, name: "flywheelRpm", elem: 0x0, sub: None }, Field { off: 0x46c, size: 0x4, name: "wheelSpin", elem: 0x0, sub: None }, Field { off: 0x470, size: 0x4, name: "frontWheelSpin", elem: 0x0, sub: None }, Field { off: 0x474, size: 0x4, name: "wheelLock", elem: 0x0, sub: None }, Field { off: 0x478, size: 0x4, name: "slide", elem: 0x0, sub: None }, Field { off: 0x47c, size: 0x4, name: "gTransferFront", elem: 0x0, sub: None }, Field { off: 0x480, size: 0x4, name: "gTransferRight", elem: 0x0, sub: None }, Field { off: 0x484, size: 0x4, name: "frontSkid", elem: 0x0, sub: None }, Field { off: 0x488, size: 0x4, name: "rearSkid", elem: 0x0, sub: None }, Field { off: 0x48c, size: 0x4, name: "oldSkidState", elem: 0x0, sub: None }, Field { off: 0x490, size: 0x30, name: "oldSkidPoint", elem: 0xc, sub: Some(72) }, Field { off: 0x4c0, size: 0x4, name: "oldAudioSkidState", elem: 0x0, sub: None }, Field { off: 0x4c4, size: 0x4, name: "funcUpdateRoadInfo", elem: 0x0, sub: None }, Field { off: 0x4c8, size: 0x4, name: "funcReplay", elem: 0x0, sub: None }, Field { off: 0x4cc, size: 0x4, name: "funcControl", elem: 0x0, sub: None }, Field { off: 0x4d0, size: 0x4, name: "funcStats", elem: 0x0, sub: None }, Field { off: 0x4d4, size: 0x4, name: "funcHandlingPhysics", elem: 0x0, sub: None }, Field { off: 0x4d8, size: 0x4, name: "funcGravityPhysics", elem: 0x0, sub: None }, Field { off: 0x4dc, size: 0x4, name: "funcQDPhysicsUpdateVel", elem: 0x0, sub: None }, Field { off: 0x4e0, size: 0x4, name: "funcQDPhysicsUpdateRot", elem: 0x0, sub: None }, Field { off: 0x4e4, size: 0x4, name: "funcTestMeForCollisions", elem: 0x0, sub: None }, Field { off: 0x4e8, size: 0x4, name: "funcDoPostCollisionStuff", elem: 0x0, sub: None }, Field { off: 0x4ec, size: 0x4, name: "personalityIndex", elem: 0x0, sub: None }, Field { off: 0x4f0, size: 0x4, name: "personality", elem: 0x0, sub: None }, Field { off: 0x4f4, size: 0x40, name: "script", elem: 0x0, sub: Some(24) }, Field { off: 0x534, size: 0x18, name: "speechInfo", elem: 0x0, sub: Some(26) }, Field { off: 0x54c, size: 0x4, name: "carInLane", elem: 0x0, sub: None }, Field { off: 0x550, size: 0x4, name: "desiredDirection", elem: 0x0, sub: None }, Field { off: 0x554, size: 0x4, name: "direction", elem: 0x0, sub: None }, Field { off: 0x558, size: 0x4, name: "desiredLatPos", elem: 0x0, sub: None }, Field { off: 0x55c, size: 0x4, name: "desiredSpeed", elem: 0x0, sub: None }, Field { off: 0x560, size: 0x4, name: "originalDesiredSpeed", elem: 0x0, sub: None }, Field { off: 0x564, size: 0x4, name: "currentSpeed", elem: 0x0, sub: None }, Field { off: 0x568, size: 0x4, name: "speed", elem: 0x0, sub: None }, Field { off: 0x56c, size: 0x4, name: "laneSlack", elem: 0x0, sub: None }, Field { off: 0x570, size: 0x4, name: "AIFlags", elem: 0x0, sub: None }, Field { off: 0x574, size: 0x4, name: "roadPosition", elem: 0x0, sub: None }, Field { off: 0x578, size: 0x4, name: "basisCar", elem: 0x0, sub: None }, Field { off: 0x57c, size: 0x4, name: "aiShiftDuration", elem: 0x0, sub: None }, Field { off: 0x580, size: 0x4, name: "aiShiftTimer", elem: 0x0, sub: None }, Field { off: 0x584, size: 0x4, name: "redLine", elem: 0x0, sub: None }, Field { off: 0x588, size: 0x4, name: "tailgateTimer", elem: 0x0, sub: None }, Field { off: 0x58c, size: 0x4, name: "physicsModelTimer", elem: 0x0, sub: None }, Field { off: 0x590, size: 0x4, name: "trafficSpeedRandomizingFactor", elem: 0x0, sub: None }, Field { off: 0x594, size: 0x4, name: "laneChangeSpeed", elem: 0x0, sub: None }, Field { off: 0x598, size: 0x1c, name: "topSpeeds", elem: 0x4, sub: None }, Field { off: 0x5b4, size: 0x1c, name: "invTopSpeeds", elem: 0x4, sub: None }, Field { off: 0x5d0, size: 0xe0, name: "accTable", elem: 0x2, sub: None }, Field { off: 0x6b0, size: 0x4, name: "accelerationRecord", elem: 0x0, sub: None }, Field { off: 0x6b4, size: 0x4, name: "curveSpeedTable", elem: 0x0, sub: None }, Field { off: 0x6b8, size: 0x4, name: "brakeInfo", elem: 0x0, sub: None }, Field { off: 0x6bc, size: 0x4, name: "speedFactor", elem: 0x0, sub: None }, Field { off: 0x6c0, size: 0x4, name: "barrierThinkHarder", elem: 0x0, sub: None }, Field { off: 0x6c4, size: 0x4, name: "laneIndex", elem: 0x0, sub: None }, Field { off: 0x6c8, size: 0x4, name: "copTopSpeed", elem: 0x0, sub: None }, Field { off: 0x6cc, size: 0x4, name: "copAccMult", elem: 0x0, sub: None }, Field { off: 0x6d0, size: 0xc, name: "desiredVector", elem: 0x0, sub: Some(72) }, Field { off: 0x6dc, size: 0x4, name: "aCarWRTDesired", elem: 0x0, sub: None }, Field { off: 0x6e0, size: 0xc, name: "angularAcc_ch", elem: 0x0, sub: Some(72) }, Field { off: 0x6ec, size: 0x4, name: "driveDirectionReverseTime", elem: 0x0, sub: None }, Field { off: 0x6f0, size: 0x4, name: "driveDirection", elem: 0x0, sub: None }, Field { off: 0x6f4, size: 0x4, name: "driveDirectionTimer", elem: 0x0, sub: None }, Field { off: 0x6f8, size: 0x4, name: "aCar", elem: 0x0, sub: None }, Field { off: 0x6fc, size: 0x4, name: "aDesired", elem: 0x0, sub: None }, Field { off: 0x700, size: 0x4, name: "aCarWRTRoad", elem: 0x0, sub: None }, Field { off: 0x704, size: 0x4, name: "lateralVelocity", elem: 0x0, sub: None }, Field { off: 0x708, size: 0xc, name: "targetPos", elem: 0x0, sub: Some(72) }, Field { off: 0x714, size: 0x4, name: "targetLatPos", elem: 0x0, sub: None }, Field { off: 0x718, size: 0x4, name: "rampDesiredLatPos", elem: 0x0, sub: None }, Field { off: 0x71c, size: 0x4, name: "preferredLateralPosition", elem: 0x0, sub: None }, Field { off: 0x720, size: 0x4, name: "preferredLateralPositionPower", elem: 0x0, sub: None }, Field { off: 0x724, size: 0x4, name: "timeOffRoad", elem: 0x0, sub: None }, Field { off: 0x728, size: 0x4, name: "max_clacc", elem: 0x0, sub: None }, Field { off: 0x72c, size: 0x4, name: "max_aa", elem: 0x0, sub: None }, Field { off: 0x730, size: 0x4, name: "aiGlue", elem: 0x0, sub: None }, Field { off: 0x734, size: 0x4, name: "drag", elem: 0x0, sub: None }, Field { off: 0x738, size: 0x4, name: "slackProb", elem: 0x0, sub: None }, Field { off: 0x73c, size: 0x4, name: "accNitrous", elem: 0x0, sub: None }, Field { off: 0x740, size: 0x4, name: "speedNitrous", elem: 0x0, sub: None }, Field { off: 0x744, size: 0x4, name: "wipeOutStartTick", elem: 0x0, sub: None }, Field { off: 0x748, size: 0x4, name: "wipeOutEndTick", elem: 0x0, sub: None }, Field { off: 0x74c, size: 0x4, name: "btcGlueModifier", elem: 0x0, sub: None }, Field { off: 0x750, size: 0x4, name: "donutMode", elem: 0x0, sub: None }, Field { off: 0x754, size: 0x4, name: "AIFishtailEndTick", elem: 0x0, sub: None }, Field { off: 0x758, size: 0x4, name: "lookAheadSlice", elem: 0x0, sub: None }, Field { off: 0x75c, size: 0x4, name: "forceNoSimOptz", elem: 0x0, sub: None }, Field { off: 0x760, size: 0x4, name: "gripFactor", elem: 0x0, sub: None }, Field { off: 0x764, size: 0x4, name: "fallBehindCar", elem: 0x0, sub: None }, Field { off: 0x768, size: 0x4, name: "nextAIRacer", elem: 0x0, sub: None }, Field { off: 0x76c, size: 0x4, name: "caravanFollowBehindDistanceMeters", elem: 0x0, sub: None }, Field { off: 0x770, size: 0x4, name: "caravanTimer", elem: 0x0, sub: None }, Field { off: 0x774, size: 0x4, name: "AISlot", elem: 0x0, sub: None }, Field { off: 0x778, size: 0x4, name: "damageMult", elem: 0x0, sub: None }, Field { off: 0x77c, size: 0x4, name: "topSpeedUpgradeMult", elem: 0x0, sub: None }, Field { off: 0x780, size: 0x4, name: "accUpgradeMult", elem: 0x0, sub: None }, Field { off: 0x784, size: 0x4, name: "extraWallCollisionAllowance", elem: 0x0, sub: None }, Field { off: 0x788, size: 0x8, name: "collision", elem: 0x0, sub: Some(65) }, Field { off: 0x790, size: 0x4, name: "audioDamageScrape", elem: 0x0, sub: None }, Field { off: 0x794, size: 0x4, name: "audioCount", elem: 0x0, sub: None }, Field { off: 0x798, size: 0xa8, name: "audio", elem: 0x18, sub: Some(64) }, Field { off: 0x840, size: 0x98, name: "render", elem: 0x0, sub: Some(66) }, Field { off: 0x8d8, size: 0x4, name: "async_handle", elem: 0x0, sub: None }]),
     ("Car_tControl", 0x1c, &[Field { off: 0x0, size: 0x1, name: "desiredGasLevel", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "desiredBrakeLevel", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "desiredGear", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "gasLevel", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "brakeLevel", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "lastGear", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "gear", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "downShifting", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "gearShiftTimer", elem: 0x0, sub: None }, Field { off: 0x9, size: 0x1, name: "handBrake", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x1, name: "horn", elem: 0x0, sub: None }, Field { off: 0xb, size: 0x1, name: "lights", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x1, name: "lookBehind", elem: 0x0, sub: None }, Field { off: 0xd, size: 0x1, name: "abort", elem: 0x0, sub: None }, Field { off: 0xe, size: 0x1, name: "event", elem: 0x0, sub: None }, Field { off: 0xf, size: 0x1, name: "queuedEvent", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "desiredSteering", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "steering", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "hanno", elem: 0x0, sub: None }]),
+    ("tCarInLineup", 0x4, &[Field { off: 0x0, size: 0x1, name: "isPlayerCar", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "isAlive", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "AIPersonality", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "LineupPosition", elem: 0x0, sub: None }]),
     ("tCarInfo", 0xcc, &[Field { off: 0x0, size: 0x1, name: "fCarID", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fSimNumber", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fCarClass", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fABSAvailable", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fDefaultColor", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fCopClass", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "fDefaultTires", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "fAvailable", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x8, name: "fShapeName", elem: 0x1, sub: None }, Field { off: 0x10, size: 0x8, name: "fSmallName", elem: 0x1, sub: None }, Field { off: 0x18, size: 0x8, name: "fQTVRName", elem: 0x1, sub: None }, Field { off: 0x20, size: 0x10, name: "fPrices", elem: 0x4, sub: None }, Field { off: 0x30, size: 0x14, name: "fStats", elem: 0x1, sub: None }, Field { off: 0x44, size: 0x40, name: "fColorList", elem: 0x4, sub: None }, Field { off: 0x84, size: 0x10, name: "fSpeechColors", elem: 0x1, sub: None }, Field { off: 0x94, size: 0x8, name: "fHudColor", elem: 0x4, sub: None }, Field { off: 0x9c, size: 0x8, name: "fDayTachFile", elem: 0x1, sub: None }, Field { off: 0xa4, size: 0x8, name: "fNightTachFile", elem: 0x1, sub: None }, Field { off: 0xac, size: 0x1, name: "fNumLightColors", elem: 0x0, sub: None }, Field { off: 0xad, size: 0x1, name: "fNumDarkColors", elem: 0x0, sub: None }, Field { off: 0xae, size: 0x1, name: "fCountries", elem: 0x0, sub: None }, Field { off: 0xaf, size: 0x10, name: "fColorOrder", elem: 0x1, sub: None }, Field { off: 0xbf, size: 0x1, name: "fPursuitAvailable", elem: 0x0, sub: None }, Field { off: 0xc0, size: 0x1, name: "fEnginePatch", elem: 0x0, sub: None }, Field { off: 0xc1, size: 0x1, name: "fSpeechCarID", elem: 0x0, sub: None }, Field { off: 0xc2, size: 0x1, name: "fTractionAvailable", elem: 0x0, sub: None }, Field { off: 0xc3, size: 0x1, name: "fExoticCar", elem: 0x0, sub: None }, Field { off: 0xc4, size: 0x1, name: "fUpgrades", elem: 0x0, sub: None }, Field { off: 0xc5, size: 0x1, name: "fColor", elem: 0x0, sub: None }, Field { off: 0xc6, size: 0x1, name: "fViewable", elem: 0x0, sub: None }, Field { off: 0xc7, size: 0x1, name: "fCountry", elem: 0x0, sub: None }, Field { off: 0xc8, size: 0x1, name: "fCarIndex", elem: 0x0, sub: None }, Field { off: 0xc9, size: 0x3, name: "fReserved", elem: 0x1, sub: None }]),
-    ("tCarManager", 0x38c, &[Field { off: 0x0, size: 0x4, name: "fNumCars", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fCars", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x100, name: "fCarGarage", elem: 0x4, sub: Some(71) }, Field { off: 0x108, size: 0x100, name: "fPinkSlipsCars", elem: 0x4, sub: Some(71) }, Field { off: 0x208, size: 0x30, name: "fAvailableCars", elem: 0x1, sub: None }, Field { off: 0x238, size: 0x30, name: "fViewableCars", elem: 0x1, sub: None }, Field { off: 0x268, size: 0x60, name: "fPinkSlipsAvailableCars", elem: 0x1, sub: None }, Field { off: 0x2c8, size: 0x60, name: "fPinkSlipsViewableCars", elem: 0x1, sub: None }, Field { off: 0x328, size: 0x62, name: "fCarTextList", elem: 0x2, sub: None }]),
+    ("tCarLineup", 0x14, &[Field { off: 0x0, size: 0x4, name: "isPlayerCar", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "personality", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "position", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "carModel", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x1, name: "carColor", elem: 0x0, sub: None }, Field { off: 0x11, size: 0x1, name: "carUpgrades", elem: 0x0, sub: None }]),
+    ("tCarManager", 0x38c, &[Field { off: 0x0, size: 0x4, name: "fNumCars", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fCars", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x100, name: "fCarGarage", elem: 0x4, sub: Some(158) }, Field { off: 0x108, size: 0x100, name: "fPinkSlipsCars", elem: 0x4, sub: Some(158) }, Field { off: 0x208, size: 0x30, name: "fAvailableCars", elem: 0x1, sub: None }, Field { off: 0x238, size: 0x30, name: "fViewableCars", elem: 0x1, sub: None }, Field { off: 0x268, size: 0x60, name: "fPinkSlipsAvailableCars", elem: 0x1, sub: None }, Field { off: 0x2c8, size: 0x60, name: "fPinkSlipsViewableCars", elem: 0x1, sub: None }, Field { off: 0x328, size: 0x62, name: "fCarTextList", elem: 0x2, sub: None }]),
     ("Car_tSpecs", 0x1d0, &[Field { off: 0x0, size: 0x4, name: "mass", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "numGears", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "gearShiftDelay", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x20, name: "velToRpmRatio", elem: 0x4, sub: None }, Field { off: 0x2c, size: 0x20, name: "gearEfficiency", elem: 0x4, sub: None }, Field { off: 0x4c, size: 0xa4, name: "torqueCurve", elem: 0x4, sub: None }, Field { off: 0xf0, size: 0x4, name: "redline", elem: 0x0, sub: None }, Field { off: 0xf4, size: 0x4, name: "maxSpeed", elem: 0x0, sub: None }, Field { off: 0xf8, size: 0x4, name: "frontDriveRatio", elem: 0x0, sub: None }, Field { off: 0xfc, size: 0x4, name: "maxBrakeAcc", elem: 0x0, sub: None }, Field { off: 0x100, size: 0x4, name: "frontBrakeRatio", elem: 0x0, sub: None }, Field { off: 0x104, size: 0x4, name: "wheelBase", elem: 0x0, sub: None }, Field { off: 0x108, size: 0x4, name: "frontGripBias", elem: 0x0, sub: None }, Field { off: 0x10c, size: 0x4, name: "maxSteeringAcc", elem: 0x0, sub: None }, Field { off: 0x110, size: 0x4, name: "steeringRamp", elem: 0x0, sub: None }, Field { off: 0x114, size: 0x4, name: "lateralGripMult", elem: 0x0, sub: None }, Field { off: 0x118, size: 0x4, name: "frontAeroDownForce", elem: 0x0, sub: None }, Field { off: 0x11c, size: 0x4, name: "rearAeroDownForce", elem: 0x0, sub: None }, Field { off: 0x120, size: 0x4, name: "gasOffFactor", elem: 0x0, sub: None }, Field { off: 0x124, size: 0x4, name: "gTransferFactor", elem: 0x0, sub: None }, Field { off: 0x128, size: 0x4, name: "slideMultiplier", elem: 0x0, sub: None }, Field { off: 0x12c, size: 0x4, name: "spinVelCap", elem: 0x0, sub: None }, Field { off: 0x130, size: 0x4, name: "dampingPitchRate", elem: 0x0, sub: None }, Field { off: 0x134, size: 0x4, name: "dampingRollRate", elem: 0x0, sub: None }, Field { off: 0x138, size: 0x4, name: "suspensionStiffness", elem: 0x0, sub: None }, Field { off: 0x13c, size: 0x4, name: "pitchAngularVelCap", elem: 0x0, sub: None }, Field { off: 0x140, size: 0x4, name: "rollAngularVelCap", elem: 0x0, sub: None }, Field { off: 0x144, size: 0x4, name: "damageFactor", elem: 0x0, sub: None }, Field { off: 0x148, size: 0x4, name: "bodyPitchFactor", elem: 0x0, sub: None }, Field { off: 0x14c, size: 0x4, name: "bodyRollFactor", elem: 0x0, sub: None }, Field { off: 0x150, size: 0x4, name: "tireRange", elem: 0x0, sub: None }, Field { off: 0x154, size: 0x4, name: "rideOffset", elem: 0x0, sub: None }, Field { off: 0x158, size: 0x4, name: "dragFactor", elem: 0x0, sub: None }, Field { off: 0x15c, size: 0x4, name: "redlineInv", elem: 0x0, sub: None }, Field { off: 0x160, size: 0x20, name: "gearVelInv", elem: 0x4, sub: None }, Field { off: 0x180, size: 0x20, name: "velToRpmRatioInv", elem: 0x4, sub: None }, Field { off: 0x1a0, size: 0x20, name: "gearAccCoeff", elem: 0x4, sub: None }, Field { off: 0x1c0, size: 0x4, name: "dragCoeff", elem: 0x0, sub: None }, Field { off: 0x1c4, size: 0x4, name: "alphaToAccRotInertia", elem: 0x0, sub: None }, Field { off: 0x1c8, size: 0x4, name: "accToAlphaRotInertia", elem: 0x0, sub: None }, Field { off: 0x1cc, size: 0x4, name: "lateralGripMultInv", elem: 0x0, sub: None }]),
     ("Car_tStats", 0xa0, &[Field { off: 0x0, size: 0x4, name: "extractSlice", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "sliceTotal", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "sliceTime", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "lastSlice", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "lap", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "lapTime", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x10, name: "time", elem: 0x4, sub: None }, Field { off: 0x2c, size: 0x10, name: "topSpeed", elem: 0x4, sub: None }, Field { off: 0x3c, size: 0x4, name: "position", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "fatalCrashes", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "finishType", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "checkpointDifference", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "checkpointUpdate", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "checkpointDisplay", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "numWarnings", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "numFines", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "numArrests", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "carType", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "carClass", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "carNameIndex", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "carFlags", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "finalDamage", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "finalNumWarnings", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "finalNumFines", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "finalNumArrests", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "finalFinishType", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "finalPosition", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "finalTotalTime", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x10, name: "finalLapTime", elem: 0x4, sub: None }, Field { off: 0x9c, size: 0x4, name: "finalBestLap", elem: 0x0, sub: None }]),
-    ("Car_tWheel", 0x30, &[Field { off: 0x0, size: 0xc, name: "currentPos", elem: 0x0, sub: Some(55) }, Field { off: 0xc, size: 0xc, name: "roadNormal", elem: 0x0, sub: Some(55) }, Field { off: 0x18, size: 0x4, name: "actualHeight", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "wheelAcc", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "wheelInAir", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "rebound", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "impactCompression", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "roadSurfaceType", elem: 0x0, sub: None }]),
+    ("Car_tWheel", 0x30, &[Field { off: 0x0, size: 0xc, name: "currentPos", elem: 0x0, sub: Some(72) }, Field { off: 0xc, size: 0xc, name: "roadNormal", elem: 0x0, sub: Some(72) }, Field { off: 0x18, size: 0x4, name: "actualHeight", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "wheelAcc", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "wheelInAir", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "rebound", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "impactCompression", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "roadSurfaceType", elem: 0x0, sub: None }]),
     ("Cars_tAudio", 0x18, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "channel", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "surface1", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "surface2", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "force", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "panangle", elem: 0x0, sub: None }]),
     ("Cars_tCollisionInfo", 0x8, &[Field { off: 0x0, size: 0x4, name: "resetTimer", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "smoking", elem: 0x0, sub: None }]),
     ("Cars_tRenderInfo", 0x98, &[Field { off: 0x0, size: 0x2, name: "colorIndex", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "currentCountry", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "newCountry", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "textureStartIndex", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "bodyPitch", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "bodyRoll", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "currentPitch", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "currentRoll", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "currentHeight", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "pitchFactor", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "rollFactor", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "world_otz", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "sub_otz", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "sub_ot", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "sub_otSize", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "sub_otOffset", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "sort_carObj", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x2, name: "sort_flag", elem: 0x0, sub: None }, Field { off: 0x3e, size: 0x2, name: "damageParts", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "light", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "palCopy", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x2, name: "palNum", elem: 0x0, sub: None }, Field { off: 0x4a, size: 0x28, name: "palCopyNum", elem: 0x2, sub: None }, Field { off: 0x72, size: 0x1, name: "medOnly", elem: 0x0, sub: None }, Field { off: 0x73, size: 0x1, name: "upgradeFlags", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x2, name: "headLight", elem: 0x0, sub: None }, Field { off: 0x76, size: 0x2, name: "brakeLight", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "signalLight", elem: 0x2, sub: None }, Field { off: 0x7c, size: 0x2, name: "currentCarType", elem: 0x0, sub: None }, Field { off: 0x7e, size: 0x2, name: "newCarType", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x2, name: "inside", elem: 0x0, sub: None }, Field { off: 0x82, size: 0x2, name: "detail", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x2, name: "VRamX", elem: 0x0, sub: None }, Field { off: 0x86, size: 0x2, name: "VRamY", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x2, name: "textureOffsetU", elem: 0x0, sub: None }, Field { off: 0x8a, size: 0x2, name: "textureOffsetV", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x2, name: "licenseOffsetU", elem: 0x1, sub: None }, Field { off: 0x8e, size: 0x2, name: "licenseOffsetV", elem: 0x1, sub: None }, Field { off: 0x90, size: 0x4, name: "rideHeight", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "upgradeHeight", elem: 0x0, sub: None }]),
-    ("Chunk", 0x70, &[Field { off: 0x0, size: 0x10, name: "boundPts", elem: 0x4, sub: Some(72) }, Field { off: 0x10, size: 0x10, name: "chunkboundPts", elem: 0x4, sub: Some(72) }, Field { off: 0x20, size: 0x6, name: "quadCounts", elem: 0x1, sub: None }, Field { off: 0x26, size: 0x2, name: "pad", elem: 0x1, sub: None }, Field { off: 0x28, size: 0x4, name: "renderQuads", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "stripBuf", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "lorezstripBuf", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "objInstanceBuf", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "objSpecialInstanceBuf", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "simSliceBuf", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "simQuadBuf", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "simObjBuf", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "sfxBuf", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "lineBuf", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "objVertexBuf", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "objQuadBuf", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "objQuadInstanceBuf", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x2, name: "firstSimSliceInd", elem: 0x0, sub: None }, Field { off: 0x6a, size: 0x2, name: "chunkInd", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "vertexBuf", elem: 0x0, sub: None }]),
+    ("tCheat", 0xc, &[Field { off: 0x0, size: 0x8, name: "name", elem: 0x1, sub: None }, Field { off: 0x8, size: 0x4, name: "cheat", elem: 0x0, sub: None }]),
+    ("Chunk", 0x70, &[Field { off: 0x0, size: 0x10, name: "boundPts", elem: 0x4, sub: Some(177) }, Field { off: 0x10, size: 0x10, name: "chunkboundPts", elem: 0x4, sub: Some(177) }, Field { off: 0x20, size: 0x6, name: "quadCounts", elem: 0x1, sub: None }, Field { off: 0x26, size: 0x2, name: "pad", elem: 0x1, sub: None }, Field { off: 0x28, size: 0x4, name: "renderQuads", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "stripBuf", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "lorezstripBuf", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "objInstanceBuf", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "objSpecialInstanceBuf", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "simSliceBuf", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "simQuadBuf", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "simObjBuf", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "sfxBuf", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "lineBuf", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "objVertexBuf", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "objQuadBuf", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x4, name: "objQuadInstanceBuf", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x2, name: "firstSimSliceInd", elem: 0x0, sub: None }, Field { off: 0x6a, size: 0x2, name: "chunkInd", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "vertexBuf", elem: 0x0, sub: None }]),
+    ("tCompRGB", 0x3, &[Field { off: 0x0, size: 0x1, name: "r", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "g", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "b", elem: 0x0, sub: None }]),
+    ("tCompetitor", 0x10, &[Field { off: 0x0, size: 0x4, name: "fPersonality", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fVariation", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fIsPlayerCar", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "fEliminated", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x2, name: "fPoints", elem: 0x0, sub: None }, Field { off: 0xe, size: 0x1, name: "fPosition", elem: 0x0, sub: None }]),
+    ("tControllerData", 0x80, &[Field { off: 0x0, size: 0x20, name: "steering", elem: 0x1, sub: None }, Field { off: 0x20, size: 0x20, name: "gas", elem: 0x1, sub: None }, Field { off: 0x40, size: 0x20, name: "brake", elem: 0x1, sub: None }, Field { off: 0x60, size: 0x20, name: "states", elem: 0x1, sub: None }]),
     ("coorddef", 0xc, &[Field { off: 0x0, size: 0x4, name: "x", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "y", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "z", elem: 0x0, sub: None }]),
     ("CCOORD16", 0x8, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "y", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "z", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "light", elem: 0x0, sub: None }]),
     ("._96", 0x8, &[Field { off: 0x0, size: 0x4, name: "copIndex", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "carIndex", elem: 0x0, sub: None }]),
+    ("tCredit", 0x144, &[Field { off: 0x0, size: 0x2, name: "titleTextID", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "subTitleTextID", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "titleX", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "titleY", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x2, name: "titleJustify", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x2, name: "titleWidth", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x2, name: "subTitleX", elem: 0x0, sub: None }, Field { off: 0xe, size: 0x2, name: "subTitleY", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x2, name: "subTitleJustify", elem: 0x0, sub: None }, Field { off: 0x12, size: 0x2, name: "subTitleWidth", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x2, name: "textX", elem: 0x0, sub: None }, Field { off: 0x16, size: 0x2, name: "textY", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x2, name: "textJustify", elem: 0x0, sub: None }, Field { off: 0x1a, size: 0x2, name: "creditType", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x2, name: "bgNumber", elem: 0x0, sub: None }, Field { off: 0x1e, size: 0x2, name: "pad", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x124, name: "text", elem: 0x1, sub: None }]),
+    ("tCreditManager", 0x38, &[Field { off: 0x0, size: 0x4, name: "CreditBuffer", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fTVFade", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "fTextFade", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "fTextFadeDir", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "fCreditsInitialized", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fRequestDeInit", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fNumCredits", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "fShowCreditNum", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "fCurrCredit", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "StartedTransition", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "StartedLines", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "StartedTextFade", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "fLineTicks", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "fStartTicks", elem: 0x0, sub: None }]),
+    ("DVECTOR", 0x4, &[Field { off: 0x0, size: 0x2, name: "vx", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "vy", elem: 0x0, sub: None }]),
+    ("tDialogBackUpOnly", 0x98, &[Field { off: 0x0, size: 0x98, name: "tDialogMessageString", elem: 0x0, sub: Some(82) }]),
+    ("tDialogBase", 0x90, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x2, name: "specificPlayer", elem: 0x0, sub: None }, Field { off: 0x66, size: 0x2, name: "left", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x2, name: "top", elem: 0x0, sub: None }, Field { off: 0x6a, size: 0x2, name: "width", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x2, name: "height", elem: 0x0, sub: None }, Field { off: 0x6e, size: 0x2, name: "reservedheight", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "currentlyOn", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "startTicks", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "timeOutTicks", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x2, name: "OffsetX", elem: 0x0, sub: None }, Field { off: 0x7e, size: 0x2, name: "OffsetY", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x2, name: "MaxW", elem: 0x0, sub: None }, Field { off: 0x82, size: 0x2, name: "MaxH", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "fFullyOpen", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x2, name: "fDefault", elem: 0x0, sub: None }, Field { off: 0x8a, size: 0x2, name: "ReturnValue", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x4, name: "fFadeText", elem: 0x0, sub: None }]),
+    ("tDialogHelp", 0xd4, &[Field { off: 0x0, size: 0x90, name: "tDialogBase", elem: 0x0, sub: Some(79) }, Field { off: 0x90, size: 0x2, name: "variant", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "text", elem: 0x0, sub: None }, Field { off: 0xb0, size: 0x1c, name: "cont", elem: 0x4, sub: None }, Field { off: 0xcc, size: 0x2, name: "numItems", elem: 0x0, sub: None }, Field { off: 0xce, size: 0x2, name: "helpcontrollers", elem: 0x0, sub: None }, Field { off: 0xd0, size: 0x2, name: "lefttext", elem: 0x0, sub: None }]),
+    ("tDialogInteractive", 0xa0, &[Field { off: 0x0, size: 0x98, name: "tDialogMessageString", elem: 0x0, sub: Some(82) }, Field { off: 0x98, size: 0x4, name: "ReadyToReturnValue", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x4, name: "fCurrentlyRunning", elem: 0x0, sub: None }]),
+    ("tDialogMessageString", 0x98, &[Field { off: 0x0, size: 0x90, name: "tDialogBase", elem: 0x0, sub: Some(79) }, Field { off: 0x90, size: 0x4, name: "string", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "Centerit", elem: 0x0, sub: None }]),
+    ("tDialogMessageStringWithTimeout", 0x98, &[Field { off: 0x0, size: 0x98, name: "tDialogMessageString", elem: 0x0, sub: Some(82) }]),
+    ("tDialogNoInputMessage", 0x98, &[Field { off: 0x0, size: 0x98, name: "tDialogMessageString", elem: 0x0, sub: Some(82) }]),
+    ("tDialogYesNo", 0xa8, &[Field { off: 0x0, size: 0xa0, name: "tDialogInteractive", elem: 0x0, sub: Some(81) }, Field { off: 0xa0, size: 0x8, name: "yesnowords", elem: 0x4, sub: None }]),
+    ("tDialogYesNoMem", 0xa8, &[Field { off: 0x0, size: 0xa8, name: "tDialogYesNo", elem: 0x0, sub: Some(85) }]),
+    ("tDialogYesNoTri", 0xa8, &[Field { off: 0x0, size: 0xa8, name: "tDialogYesNo", elem: 0x0, sub: Some(85) }]),
+    ("tDrawShapeExtended", 0x18, &[Field { off: 0x0, size: 0x2, name: "flip_axis", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x10, name: "tint", elem: 0x4, sub: None }, Field { off: 0x14, size: 0x4, name: "custom_shapes", elem: 0x0, sub: None }]),
+    ("tFEApplication", 0x380, &[Field { off: 0x0, size: 0x4, name: "fCurrentMusic", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x8, name: "fCurrentMenu", elem: 0x4, sub: None }, Field { off: 0xc, size: 0x8, name: "fCurrentScreen", elem: 0x4, sub: None }, Field { off: 0x14, size: 0x8, name: "fTransitionToMenu", elem: 0x4, sub: None }, Field { off: 0x1c, size: 0x8, name: "fTransitionToScreen", elem: 0x4, sub: None }, Field { off: 0x24, size: 0x8, name: "fParentMenu", elem: 0x4, sub: None }, Field { off: 0x2c, size: 0x98, name: "messagePopup", elem: 0x0, sub: Some(82) }, Field { off: 0xc4, size: 0x80, name: "backList", elem: 0x4, sub: None }, Field { off: 0x144, size: 0x8, name: "backDepth", elem: 0x4, sub: None }, Field { off: 0x14c, size: 0x8, name: "fLastKeyPressed", elem: 0x4, sub: None }, Field { off: 0x154, size: 0x2, name: "fYOffset", elem: 0x0, sub: None }, Field { off: 0x158, size: 0xd4, name: "helpPopup", elem: 0x0, sub: Some(80) }, Field { off: 0x22c, size: 0x1, name: "fPlayer", elem: 0x0, sub: None }, Field { off: 0x22d, size: 0x1, name: "fInputPlayer", elem: 0x0, sub: None }, Field { off: 0x230, size: 0x8, name: "waitingForOtherPlayer", elem: 0x4, sub: None }, Field { off: 0x238, size: 0x98, name: "MemCardDialog", elem: 0x0, sub: Some(83) }, Field { off: 0x2d0, size: 0x98, name: "NoInputMemCardDialog", elem: 0x0, sub: Some(84) }, Field { off: 0x368, size: 0x8, name: "gotName", elem: 0x4, sub: None }, Field { off: 0x370, size: 0x8, name: "needName", elem: 0x4, sub: None }, Field { off: 0x378, size: 0x8, name: "speechToPlay", elem: 0x4, sub: None }]),
+    ("tFEStream", 0x2e8, &[Field { off: 0x0, size: 0x2, name: "totalCars", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "totalModels", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "currentCar", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "numPlayers", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x198, name: "playerCars", elem: 0xcc, sub: Some(58) }, Field { off: 0x1a0, size: 0x2, name: "numOpponents", elem: 0x0, sub: None }, Field { off: 0x1a4, size: 0x78, name: "carLineup", elem: 0x14, sub: Some(59) }, Field { off: 0x21c, size: 0x2, name: "numCops", elem: 0x0, sub: None }, Field { off: 0x21e, size: 0x2, name: "numSuperCops", elem: 0x0, sub: None }, Field { off: 0x220, size: 0x18, name: "copCars", elem: 0x4, sub: None }, Field { off: 0x238, size: 0xc, name: "copCountry", elem: 0x2, sub: None }, Field { off: 0x244, size: 0x2, name: "numTraffic", elem: 0x0, sub: None }, Field { off: 0x246, size: 0xc, name: "trafficCars", elem: 0x2, sub: None }, Field { off: 0x252, size: 0x2, name: "numPerpObjects", elem: 0x0, sub: None }, Field { off: 0x254, size: 0x2, name: "numPerps", elem: 0x0, sub: None }, Field { off: 0x258, size: 0x4, name: "pMission", elem: 0x0, sub: None }, Field { off: 0x25c, size: 0x4, name: "pStages", elem: 0x0, sub: None }, Field { off: 0x260, size: 0x30, name: "perps", elem: 0x8, sub: Some(173) }, Field { off: 0x290, size: 0x30, name: "trackInfo", elem: 0x0, sub: Some(228) }, Field { off: 0x2c0, size: 0x28, name: "track", elem: 0x0, sub: Some(227) }]),
+    ("Force_tGlobal", 0x8, &[Field { off: 0x0, size: 0x1, name: "active", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "high", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "low", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "jolt", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "time", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fade", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "actuator", elem: 0x1, sub: None }]),
     ("tfrontEnd", 0x450, &[Field { off: 0x0, size: 0x2, name: "randomSeed", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "currentPlayer", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "gameMode", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "raceType", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "style", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "skillLevel", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "catchup", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "ghostcar", elem: 0x0, sub: None }, Field { off: 0x9, size: 0x1, name: "tractionassist", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x1, name: "bestline", elem: 0x0, sub: None }, Field { off: 0xc, size: 0xa, name: "pinkSlipsWinner", elem: 0x2, sub: None }, Field { off: 0x16, size: 0x5, name: "timeOfDay", elem: 0x1, sub: None }, Field { off: 0x1b, size: 0x5, name: "weather", elem: 0x1, sub: None }, Field { off: 0x20, size: 0x1, name: "fog", elem: 0x0, sub: None }, Field { off: 0x21, size: 0x1, name: "localSpeech", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x1, name: "opponentUpgrades", elem: 0x0, sub: None }, Field { off: 0x23, size: 0x5, name: "track", elem: 0x1, sub: None }, Field { off: 0x28, size: 0x4, name: "recordlaptime", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x1, name: "laps", elem: 0x0, sub: None }, Field { off: 0x2d, size: 0x5, name: "lapind", elem: 0x1, sub: None }, Field { off: 0x32, size: 0x5, name: "trackdirection", elem: 0x1, sub: None }, Field { off: 0x37, size: 0x5, name: "trackmirrored", elem: 0x1, sub: None }, Field { off: 0x3c, size: 0x5, name: "traffic", elem: 0x1, sub: None }, Field { off: 0x41, size: 0x5, name: "situations", elem: 0x1, sub: None }, Field { off: 0x46, size: 0x1, name: "pinkSlipsTrackIndex", elem: 0x0, sub: None }, Field { off: 0x47, size: 0x1, name: "pinkSlipsNumTracks", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x2, name: "pinkSlipsWins", elem: 0x1, sub: None }, Field { off: 0x4c, size: 0x8, name: "pinkSlipsCash", elem: 0x4, sub: None }, Field { off: 0x54, size: 0x2, name: "cheatFlags", elem: 0x0, sub: None }, Field { off: 0x56, size: 0x2, name: "cheatFlagsActive", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x2, name: "secretFlags", elem: 0x0, sub: None }, Field { off: 0x5a, size: 0x2, name: "pinkSlipsForfeit", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x2, name: "playerCar", elem: 0x1, sub: None }, Field { off: 0x5e, size: 0x2, name: "transmission", elem: 0x1, sub: None }, Field { off: 0x60, size: 0x60, name: "carColors", elem: 0x1, sub: None }, Field { off: 0xc0, size: 0x60, name: "carCountry", elem: 0x1, sub: None }, Field { off: 0x120, size: 0x1, name: "tournament", elem: 0x0, sub: None }, Field { off: 0x121, size: 0x1, name: "specialevent", elem: 0x0, sub: None }, Field { off: 0x122, size: 0x1, name: "tier", elem: 0x0, sub: None }, Field { off: 0x123, size: 0x2, name: "garageCar", elem: 0x1, sub: None }, Field { off: 0x125, size: 0x2, name: "pinkSlipsCar", elem: 0x1, sub: None }, Field { off: 0x127, size: 0x1, name: "upgrade", elem: 0x0, sub: None }, Field { off: 0x128, size: 0x1, name: "dealerCar", elem: 0x0, sub: None }, Field { off: 0x129, size: 0x1, name: "sellerCar", elem: 0x0, sub: None }, Field { off: 0x12a, size: 0x1, name: "carListType", elem: 0x0, sub: None }, Field { off: 0x12b, size: 0x1, name: "policeTier", elem: 0x0, sub: None }, Field { off: 0x12c, size: 0x1, name: "policeMission", elem: 0x0, sub: None }, Field { off: 0x12d, size: 0x1, name: "congratsCopCar", elem: 0x0, sub: None }, Field { off: 0x12e, size: 0x1, name: "congratsCopCountry", elem: 0x0, sub: None }, Field { off: 0x130, size: 0x4, name: "settingsActive", elem: 0x2, sub: None }, Field { off: 0x134, size: 0x60, name: "steeringSensitivity", elem: 0x1, sub: None }, Field { off: 0x194, size: 0x60, name: "tireType", elem: 0x1, sub: None }, Field { off: 0x1f4, size: 0x60, name: "suspension", elem: 0x1, sub: None }, Field { off: 0x254, size: 0x60, name: "carDownforce", elem: 0x1, sub: None }, Field { off: 0x2b4, size: 0x60, name: "engineTuning", elem: 0x1, sub: None }, Field { off: 0x314, size: 0x2, name: "ABS", elem: 0x1, sub: None }, Field { off: 0x316, size: 0x1, name: "damage", elem: 0x0, sub: None }, Field { off: 0x317, size: 0x2, name: "rampSteer", elem: 0x1, sub: None }, Field { off: 0x319, size: 0x2, name: "rampGas", elem: 0x1, sub: None }, Field { off: 0x31b, size: 0x2, name: "rampBrake", elem: 0x1, sub: None }, Field { off: 0x31d, size: 0x1, name: "oppCar", elem: 0x0, sub: None }, Field { off: 0x31e, size: 0x1, name: "oppNumber", elem: 0x0, sub: None }, Field { off: 0x31f, size: 0x1, name: "measurement", elem: 0x0, sub: None }, Field { off: 0x320, size: 0x2, name: "displaySpeed", elem: 0x1, sub: None }, Field { off: 0x322, size: 0x2, name: "displayTach", elem: 0x1, sub: None }, Field { off: 0x324, size: 0x2, name: "displayMap", elem: 0x1, sub: None }, Field { off: 0x326, size: 0x2, name: "displayOpponentID", elem: 0x1, sub: None }, Field { off: 0x328, size: 0x2, name: "displayTime", elem: 0x1, sub: None }, Field { off: 0x32a, size: 0x2, name: "displayPosition", elem: 0x1, sub: None }, Field { off: 0x32c, size: 0x2, name: "displayLapNumber", elem: 0x1, sub: None }, Field { off: 0x32e, size: 0x2, name: "displayMirror", elem: 0x1, sub: None }, Field { off: 0x330, size: 0x8, name: "cameraType", elem: 0x1, sub: None }, Field { off: 0x338, size: 0x8, name: "cameraSway", elem: 0x1, sub: None }, Field { off: 0x340, size: 0x1, name: "language", elem: 0x0, sub: None }, Field { off: 0x341, size: 0x1, name: "musicVolume", elem: 0x0, sub: None }, Field { off: 0x342, size: 0x1, name: "sfxVolume", elem: 0x0, sub: None }, Field { off: 0x343, size: 0x1, name: "narrationVolume", elem: 0x0, sub: None }, Field { off: 0x344, size: 0x1, name: "engineVolume", elem: 0x0, sub: None }, Field { off: 0x345, size: 0x1, name: "ambientVolume", elem: 0x0, sub: None }, Field { off: 0x346, size: 0x1, name: "audioMode", elem: 0x0, sub: None }, Field { off: 0x347, size: 0x1, name: "song", elem: 0x0, sub: None }, Field { off: 0x348, size: 0x1, name: "sensitivity", elem: 0x0, sub: None }, Field { off: 0x349, size: 0x2, name: "steeringRange", elem: 0x1, sub: None }, Field { off: 0x34b, size: 0x2, name: "deadSpot", elem: 0x1, sub: None }, Field { off: 0x34d, size: 0x2, name: "ImaxRange", elem: 0x1, sub: None }, Field { off: 0x34f, size: 0x2, name: "IImaxRange", elem: 0x1, sub: None }, Field { off: 0x351, size: 0x2, name: "J1MAX", elem: 0x1, sub: None }, Field { off: 0x353, size: 0x2, name: "J1MIN", elem: 0x1, sub: None }, Field { off: 0x355, size: 0x2, name: "J2MAX", elem: 0x1, sub: None }, Field { off: 0x357, size: 0x2, name: "J2MIN", elem: 0x1, sub: None }, Field { off: 0x359, size: 0x2, name: "shockMode", elem: 0x1, sub: None }, Field { off: 0x35b, size: 0x2, name: "shockImpact", elem: 0x1, sub: None }, Field { off: 0x35e, size: 0x4, name: "controlType", elem: 0x2, sub: None }, Field { off: 0x362, size: 0x2, name: "controlConfig", elem: 0x1, sub: None }, Field { off: 0x364, size: 0x10, name: "playerNameList", elem: 0x1, sub: None }, Field { off: 0x374, size: 0x10, name: "allUpperCasedPlayerNameList", elem: 0x1, sub: None }, Field { off: 0x384, size: 0x10, name: "licensePlate", elem: 0x1, sub: None }, Field { off: 0x394, size: 0x1, name: "headstart", elem: 0x0, sub: None }, Field { off: 0x395, size: 0x1, name: "numBTracksActivated", elem: 0x0, sub: None }, Field { off: 0x396, size: 0x1, name: "checkPointType", elem: 0x0, sub: None }, Field { off: 0x397, size: 0x2, name: "checkPointDisplay", elem: 0x1, sub: None }, Field { off: 0x399, size: 0x2, name: "defaultedPlayerName", elem: 0x1, sub: None }, Field { off: 0x39c, size: 0xa0, name: "FEPlayList", elem: 0x4, sub: None }, Field { off: 0x43c, size: 0x8, name: "gPinkSlipsNoCheat", elem: 0x4, sub: None }, Field { off: 0x444, size: 0x4, name: "GotAPlayList", elem: 0x0, sub: None }, Field { off: 0x448, size: 0x8, name: "AnalogOn", elem: 0x4, sub: None }]),
     ("GameSetup_tCarData", 0xb4, &[Field { off: 0x0, size: 0x4, name: "carType", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "carClass", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "Transmission", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "Colour", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "ColourSV", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "ColourChange", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "RampSteering", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "RampGas", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "RampBrake", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "BrakeBias", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "GearRatio", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "SteeringQuickness", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "Traction", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "BrakeAssist", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "TireType", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "EngineMods", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "WeightTransfer", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "GroundEffects", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "ABS", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "Bestline", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "Personality", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "StartingPos", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "carNameIndex", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x8, name: "driver", elem: 0x1, sub: None }, Field { off: 0x64, size: 0x4, name: "pad", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x8, name: "license", elem: 0x1, sub: None }, Field { off: 0x70, size: 0x4, name: "HudSpeed", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "HudSpeedMult", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "HudTach", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "HudMap", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "HudOpponentID", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "HudTime", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "HudLapnum", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x4, name: "HudPosition", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x4, name: "HudMirror", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "HudColour", elem: 0x0, sub: None }, Field { off: 0x98, size: 0x4, name: "HudTachColour", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x4, name: "SpeechColour", elem: 0x0, sub: None }, Field { off: 0xa0, size: 0x4, name: "Country", elem: 0x0, sub: None }, Field { off: 0xa4, size: 0x10, name: "Camera", elem: 0x4, sub: None }]),
     ("GameSetup_tControllerData", 0x58, &[Field { off: 0x0, size: 0x8, name: "controllerConfig", elem: 0x4, sub: None }, Field { off: 0x8, size: 0x8, name: "deadSpot", elem: 0x4, sub: None }, Field { off: 0x10, size: 0x8, name: "steeringRange", elem: 0x4, sub: None }, Field { off: 0x18, size: 0x8, name: "IImaxRange", elem: 0x4, sub: None }, Field { off: 0x20, size: 0x8, name: "ImaxRange", elem: 0x4, sub: None }, Field { off: 0x28, size: 0x8, name: "J1MIN", elem: 0x4, sub: None }, Field { off: 0x30, size: 0x8, name: "J1MAX", elem: 0x4, sub: None }, Field { off: 0x38, size: 0x8, name: "J2MIN", elem: 0x4, sub: None }, Field { off: 0x40, size: 0x8, name: "J2MAX", elem: 0x4, sub: None }, Field { off: 0x48, size: 0x8, name: "shockMode", elem: 0x4, sub: None }, Field { off: 0x50, size: 0x8, name: "shockImpact", elem: 0x4, sub: None }]),
-    ("GameSetup_tData", 0xa28, &[Field { off: 0x0, size: 0x4, name: "raceType", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "numLaps", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "skill", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "commMode", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "tournamentMultiplier", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "cops", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "trafficDensity", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "localCar", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "catchupLogic", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "replayMode", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "instantReplay", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "mirrorTrack", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "reverseTrack", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "measurement", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "sgge", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "track", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "trackSegment", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "song", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "Weather", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "Fog", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "Damage", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "Time", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "randSeed", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "easter", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x58, name: "controllerData", elem: 0x0, sub: Some(60) }, Field { off: 0xb8, size: 0x4, name: "pinkSlipsForfeit", elem: 0x0, sub: None }, Field { off: 0xbc, size: 0x4, name: "checkpointType", elem: 0x0, sub: None }, Field { off: 0xc0, size: 0x8, name: "checkpointHUD", elem: 0x4, sub: None }, Field { off: 0xc8, size: 0x4, name: "dispatchSpeech", elem: 0x0, sub: None }, Field { off: 0xcc, size: 0x4, name: "reverseCallSpeech", elem: 0x0, sub: None }, Field { off: 0xd0, size: 0x4, name: "languageSpeech", elem: 0x0, sub: None }, Field { off: 0xd4, size: 0x4, name: "SceneNumber", elem: 0x0, sub: None }, Field { off: 0xd8, size: 0x4, name: "SceneStartLap", elem: 0x0, sub: None }, Field { off: 0xdc, size: 0x4, name: "SceneEndLap", elem: 0x0, sub: None }, Field { off: 0xe0, size: 0xcc, name: "userSetting", elem: 0x0, sub: Some(63) }, Field { off: 0x1ac, size: 0x4, name: "numPerps", elem: 0x0, sub: None }, Field { off: 0x1b0, size: 0x4, name: "stageOffset", elem: 0x0, sub: None }, Field { off: 0x1b4, size: 0x4, name: "perpArrests", elem: 0x0, sub: None }, Field { off: 0x1b8, size: 0x4, name: "finalPerpArrests", elem: 0x0, sub: None }, Field { off: 0x1bc, size: 0x208, name: "perpInfo", elem: 0x34, sub: Some(62) }, Field { off: 0x3c4, size: 0x4, name: "numCars", elem: 0x0, sub: None }, Field { off: 0x3c8, size: 0x4, name: "numPlayerRaceCars", elem: 0x0, sub: None }, Field { off: 0x3cc, size: 0x4, name: "numOpponentRaceCars", elem: 0x0, sub: None }, Field { off: 0x3d0, size: 0x4, name: "opponentCarType", elem: 0x0, sub: None }, Field { off: 0x3d4, size: 0x654, name: "carInfo", elem: 0xb4, sub: Some(59) }]),
+    ("GameSetup_tData", 0xa28, &[Field { off: 0x0, size: 0x4, name: "raceType", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "numLaps", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "skill", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "commMode", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "tournamentMultiplier", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "cops", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "trafficDensity", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "localCar", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "catchupLogic", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "replayMode", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "instantReplay", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "mirrorTrack", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "reverseTrack", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "measurement", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "sgge", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "track", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "trackSegment", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "song", elem: 0x0, sub: None }, Field { off: 0x48, size: 0x4, name: "Weather", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "Fog", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "Damage", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "Time", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "randSeed", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "easter", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x58, name: "controllerData", elem: 0x0, sub: Some(94) }, Field { off: 0xb8, size: 0x4, name: "pinkSlipsForfeit", elem: 0x0, sub: None }, Field { off: 0xbc, size: 0x4, name: "checkpointType", elem: 0x0, sub: None }, Field { off: 0xc0, size: 0x8, name: "checkpointHUD", elem: 0x4, sub: None }, Field { off: 0xc8, size: 0x4, name: "dispatchSpeech", elem: 0x0, sub: None }, Field { off: 0xcc, size: 0x4, name: "reverseCallSpeech", elem: 0x0, sub: None }, Field { off: 0xd0, size: 0x4, name: "languageSpeech", elem: 0x0, sub: None }, Field { off: 0xd4, size: 0x4, name: "SceneNumber", elem: 0x0, sub: None }, Field { off: 0xd8, size: 0x4, name: "SceneStartLap", elem: 0x0, sub: None }, Field { off: 0xdc, size: 0x4, name: "SceneEndLap", elem: 0x0, sub: None }, Field { off: 0xe0, size: 0xcc, name: "userSetting", elem: 0x0, sub: Some(97) }, Field { off: 0x1ac, size: 0x4, name: "numPerps", elem: 0x0, sub: None }, Field { off: 0x1b0, size: 0x4, name: "stageOffset", elem: 0x0, sub: None }, Field { off: 0x1b4, size: 0x4, name: "perpArrests", elem: 0x0, sub: None }, Field { off: 0x1b8, size: 0x4, name: "finalPerpArrests", elem: 0x0, sub: None }, Field { off: 0x1bc, size: 0x208, name: "perpInfo", elem: 0x34, sub: Some(96) }, Field { off: 0x3c4, size: 0x4, name: "numCars", elem: 0x0, sub: None }, Field { off: 0x3c8, size: 0x4, name: "numPlayerRaceCars", elem: 0x0, sub: None }, Field { off: 0x3cc, size: 0x4, name: "numOpponentRaceCars", elem: 0x0, sub: None }, Field { off: 0x3d0, size: 0x4, name: "opponentCarType", elem: 0x0, sub: None }, Field { off: 0x3d4, size: 0x654, name: "carInfo", elem: 0xb4, sub: Some(93) }]),
     ("GameSetup_tPerpData", 0x34, &[Field { off: 0x0, size: 0x4, name: "CarType", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "Colour", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "SpeechColour", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "HudColour", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "Personality", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "TimeLimit", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "WingmanTime", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "SpikeBeltTime", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "BlockadeCopTime", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "Distance", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "SpeedFactor", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "WeightFactor", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "GlueFactor", elem: 0x0, sub: None }]),
     ("GameSetup_tUserSetting", 0xcc, &[Field { off: 0x0, size: 0x4, name: "language", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "display", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "bestlap", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "audioMode", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "musicLevel", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "sfxLevel", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "engineLevel", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "speechLevel", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "ambientLevel", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "interactive", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "numplaylistsongs", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0xa0, name: "playlist", elem: 0x4, sub: None }]),
+    ("tGlobalMenuDefs", 0x3b18, &[Field { off: 0x0, size: 0x2c, name: "itemMainOnePlayerRace", elem: 0x0, sub: Some(132) }, Field { off: 0x2c, size: 0x2c, name: "itemMainTwoPlayerRace", elem: 0x0, sub: Some(132) }, Field { off: 0x58, size: 0x2c, name: "itemMainTrophyRoom", elem: 0x0, sub: Some(132) }, Field { off: 0x84, size: 0x2c, name: "itemMainOptions", elem: 0x0, sub: Some(132) }, Field { off: 0xb0, size: 0x7c, name: "menuMain", elem: 0x0, sub: Some(144) }, Field { off: 0x12c, size: 0x2c, name: "itemTournTrophyRoom", elem: 0x0, sub: Some(132) }, Field { off: 0x158, size: 0x2c, name: "itemSETrophyRoom", elem: 0x0, sub: Some(132) }, Field { off: 0x184, size: 0x7c, name: "menuTrophyRoomSelect", elem: 0x0, sub: Some(144) }, Field { off: 0x200, size: 0x7c, name: "menuTrophyInfo", elem: 0x0, sub: Some(125) }, Field { off: 0x27c, size: 0x2c, name: "itemSkillBeginner", elem: 0x0, sub: Some(132) }, Field { off: 0x2a8, size: 0x2c, name: "itemSkillIntermediate", elem: 0x0, sub: Some(132) }, Field { off: 0x2d4, size: 0x2c, name: "itemSkillExpert", elem: 0x0, sub: Some(132) }, Field { off: 0x300, size: 0x7c, name: "menuSkillLevel", elem: 0x0, sub: Some(144) }, Field { off: 0x37c, size: 0x2c, name: "itemOnePlayerTestDrive", elem: 0x0, sub: Some(132) }, Field { off: 0x3a8, size: 0x2c, name: "itemOnePlayerSingleRace", elem: 0x0, sub: Some(132) }, Field { off: 0x3d4, size: 0x2c, name: "itemOnePlayerPursuit", elem: 0x0, sub: Some(132) }, Field { off: 0x400, size: 0x2c, name: "itemOnePlayerTournament", elem: 0x0, sub: Some(132) }, Field { off: 0x42c, size: 0x2c, name: "itemOnePlayerSpecialEvents", elem: 0x0, sub: Some(132) }, Field { off: 0x458, size: 0x7c, name: "menuOnePlayer", elem: 0x0, sub: Some(144) }, Field { off: 0x4d4, size: 0x2c, name: "itemSingleRaceSolo", elem: 0x0, sub: Some(132) }, Field { off: 0x500, size: 0x2c, name: "itemSingleRaceDuel", elem: 0x0, sub: Some(132) }, Field { off: 0x52c, size: 0x2c, name: "itemSingleRaceFullGrid", elem: 0x0, sub: Some(132) }, Field { off: 0x558, size: 0x7c, name: "menuSingleRace", elem: 0x0, sub: Some(144) }, Field { off: 0x5d4, size: 0x2c, name: "itemHotPursuitSolo", elem: 0x0, sub: Some(132) }, Field { off: 0x600, size: 0x2c, name: "itemHotPursuitDuel", elem: 0x0, sub: Some(132) }, Field { off: 0x62c, size: 0x7c, name: "menuHotPursuit", elem: 0x0, sub: Some(144) }, Field { off: 0x6a8, size: 0x14, name: "iteratorTournament", elem: 0x0, sub: Some(118) }, Field { off: 0x6bc, size: 0x2c, name: "itemTournamentContinue", elem: 0x0, sub: Some(132) }, Field { off: 0x6e8, size: 0x28, name: "itemTournamentSelect", elem: 0x0, sub: Some(138) }, Field { off: 0x710, size: 0x7c, name: "menuTournament", elem: 0x0, sub: Some(144) }, Field { off: 0x78c, size: 0x14, name: "iteratorSpecialEvent", elem: 0x0, sub: Some(118) }, Field { off: 0x7a0, size: 0x2c, name: "itemSpecialEventContinue", elem: 0x0, sub: Some(132) }, Field { off: 0x7cc, size: 0x28, name: "itemSpecialEventSelect", elem: 0x0, sub: Some(138) }, Field { off: 0x7f4, size: 0x7c, name: "menuSpecialEvent", elem: 0x0, sub: Some(144) }, Field { off: 0x870, size: 0x2c, name: "itemTwoPlayerTestDrive", elem: 0x0, sub: Some(132) }, Field { off: 0x89c, size: 0x2c, name: "itemTwoPlayerDuel", elem: 0x0, sub: Some(132) }, Field { off: 0x8c8, size: 0x2c, name: "itemTwoPlayerHotPursuit", elem: 0x0, sub: Some(132) }, Field { off: 0x8f4, size: 0x2c, name: "itemTwoPlayerPinkSlips", elem: 0x0, sub: Some(132) }, Field { off: 0x920, size: 0x7c, name: "menuTwoPlayer", elem: 0x0, sub: Some(144) }, Field { off: 0x99c, size: 0x2c, name: "itemBestOfOne", elem: 0x0, sub: Some(132) }, Field { off: 0x9c8, size: 0x2c, name: "itemBestOfThree", elem: 0x0, sub: Some(132) }, Field { off: 0x9f4, size: 0x2c, name: "itemBestOfFive", elem: 0x0, sub: Some(132) }, Field { off: 0xa20, size: 0x7c, name: "menuPinkSlipSelect", elem: 0x0, sub: Some(144) }, Field { off: 0xa9c, size: 0x2c, name: "itemPinkSlipsContinue", elem: 0x0, sub: Some(132) }, Field { off: 0xac8, size: 0x28, name: "itemTrack1", elem: 0x0, sub: Some(138) }, Field { off: 0xaf0, size: 0x28, name: "itemTrack2", elem: 0x0, sub: Some(138) }, Field { off: 0xb18, size: 0x28, name: "itemTrack3", elem: 0x0, sub: Some(138) }, Field { off: 0xb40, size: 0x28, name: "itemTrack4", elem: 0x0, sub: Some(138) }, Field { off: 0xb68, size: 0x28, name: "itemTrack5", elem: 0x0, sub: Some(138) }, Field { off: 0xb90, size: 0x7c, name: "menuPinkSlipsBestOfThree", elem: 0x0, sub: Some(144) }, Field { off: 0xc0c, size: 0x7c, name: "menuPinkSlipsBestOfFive", elem: 0x0, sub: Some(144) }, Field { off: 0xc88, size: 0x18, name: "iteratorTrack", elem: 0x0, sub: Some(119) }, Field { off: 0xca0, size: 0x2c, name: "itemTrackContinue", elem: 0x0, sub: Some(132) }, Field { off: 0xccc, size: 0x28, name: "itemTrack", elem: 0x0, sub: Some(138) }, Field { off: 0xcf4, size: 0x2c, name: "itemTrackRecords", elem: 0x0, sub: Some(132) }, Field { off: 0xd20, size: 0x7c, name: "menuSingleTrackSelect", elem: 0x0, sub: Some(144) }, Field { off: 0xd9c, size: 0x7c, name: "menuTestDriveTrackSelect", elem: 0x0, sub: Some(144) }, Field { off: 0xe18, size: 0x14, name: "iteratorLaps", elem: 0x0, sub: Some(114) }, Field { off: 0xe2c, size: 0x14, name: "iteratorTrackDirection", elem: 0x0, sub: Some(114) }, Field { off: 0xe40, size: 0x14, name: "iteratorTrackMirrored", elem: 0x0, sub: Some(114) }, Field { off: 0xe54, size: 0x14, name: "iteratorTimeOfDay", elem: 0x0, sub: Some(114) }, Field { off: 0xe68, size: 0x14, name: "iteratorWeather", elem: 0x0, sub: Some(114) }, Field { off: 0xe7c, size: 0x14, name: "iteratorTraffic", elem: 0x0, sub: Some(114) }, Field { off: 0xe90, size: 0x10, name: "iteratorLocalSpeech", elem: 0x0, sub: Some(110) }, Field { off: 0xea0, size: 0x20, name: "itemLaps", elem: 0x0, sub: Some(140) }, Field { off: 0xec0, size: 0x20, name: "itemTrackDirection", elem: 0x0, sub: Some(140) }, Field { off: 0xee0, size: 0x24, name: "itemTrackMirrored", elem: 0x0, sub: Some(141) }, Field { off: 0xf04, size: 0x24, name: "itemTimeOfDay", elem: 0x0, sub: Some(141) }, Field { off: 0xf28, size: 0x24, name: "itemWeather", elem: 0x0, sub: Some(141) }, Field { off: 0xf4c, size: 0x24, name: "itemTraffic", elem: 0x0, sub: Some(141) }, Field { off: 0xf70, size: 0x24, name: "itemLocalSpeech", elem: 0x0, sub: Some(141) }, Field { off: 0xf94, size: 0x84, name: "menuTrackOptions", elem: 0x0, sub: Some(147) }, Field { off: 0x1018, size: 0x2c, name: "menuTrackRecordsItem", elem: 0x0, sub: Some(48) }, Field { off: 0x1044, size: 0x80, name: "menuTrackRecords", elem: 0x0, sub: Some(156) }, Field { off: 0x10c4, size: 0x2c, name: "itemTrackInfoContinue", elem: 0x0, sub: Some(132) }, Field { off: 0x10f0, size: 0x7c, name: "menuTrackInfo", elem: 0x0, sub: Some(144) }, Field { off: 0x116c, size: 0x1c, name: "iteratorCar1", elem: 0x0, sub: Some(111) }, Field { off: 0x1188, size: 0x20, name: "iteratorColor", elem: 0x0, sub: Some(112) }, Field { off: 0x11a8, size: 0x2c, name: "itemCarSelectRace", elem: 0x0, sub: Some(132) }, Field { off: 0x11d4, size: 0x28, name: "itemCar", elem: 0x0, sub: Some(138) }, Field { off: 0x11fc, size: 0x28, name: "itemColor", elem: 0x0, sub: Some(138) }, Field { off: 0x1224, size: 0x2c, name: "itemShowcase", elem: 0x0, sub: Some(132) }, Field { off: 0x1250, size: 0x7c, name: "menuSingleCarSelect", elem: 0x0, sub: Some(144) }, Field { off: 0x12cc, size: 0x1c, name: "iteratorGarageCar", elem: 0x0, sub: Some(111) }, Field { off: 0x12e8, size: 0x28, name: "itemGarageCar", elem: 0x0, sub: Some(138) }, Field { off: 0x1310, size: 0x2c, name: "itemCarDealer", elem: 0x0, sub: Some(132) }, Field { off: 0x133c, size: 0x2c, name: "itemUpgradeCar", elem: 0x0, sub: Some(132) }, Field { off: 0x1368, size: 0x7c, name: "menuCarGarage", elem: 0x0, sub: Some(144) }, Field { off: 0x13e4, size: 0x7c, name: "menuPostCarGarage", elem: 0x0, sub: Some(144) }, Field { off: 0x1460, size: 0x1c, name: "iteratorOpponentCar", elem: 0x0, sub: Some(111) }, Field { off: 0x147c, size: 0x2c, name: "itemDuelRace", elem: 0x0, sub: Some(132) }, Field { off: 0x14a8, size: 0x28, name: "itemCar2", elem: 0x0, sub: Some(138) }, Field { off: 0x14d0, size: 0x28, name: "itemColor2", elem: 0x0, sub: Some(138) }, Field { off: 0x14f8, size: 0x2c, name: "itemGoToDuelBuyCar", elem: 0x0, sub: Some(132) }, Field { off: 0x1524, size: 0x28, name: "itemOpponentCar", elem: 0x0, sub: Some(138) }, Field { off: 0x154c, size: 0x7c, name: "menuDuelCarSelect", elem: 0x0, sub: Some(144) }, Field { off: 0x15c8, size: 0x7c, name: "menuHPDuelCarSelect", elem: 0x0, sub: Some(144) }, Field { off: 0x1644, size: 0x2c, name: "itemPlayerOneRace", elem: 0x0, sub: Some(132) }, Field { off: 0x1670, size: 0x28, name: "itemCarP1", elem: 0x0, sub: Some(138) }, Field { off: 0x1698, size: 0x28, name: "itemColorP1", elem: 0x0, sub: Some(138) }, Field { off: 0x16c0, size: 0x7c, name: "menuPlayerOneCarSelect", elem: 0x0, sub: Some(146) }, Field { off: 0x173c, size: 0x2c, name: "itemPlayerTwoRace", elem: 0x0, sub: Some(132) }, Field { off: 0x1768, size: 0x28, name: "itemCarP2", elem: 0x0, sub: Some(138) }, Field { off: 0x1790, size: 0x28, name: "itemColorP2", elem: 0x0, sub: Some(138) }, Field { off: 0x17b8, size: 0x7c, name: "menuPlayerTwoCarSelect", elem: 0x0, sub: Some(146) }, Field { off: 0x1834, size: 0x2c, name: "itemPlayerOneGarageRace", elem: 0x0, sub: Some(132) }, Field { off: 0x1860, size: 0x28, name: "itemGarageCarP1", elem: 0x0, sub: Some(138) }, Field { off: 0x1888, size: 0x7c, name: "menuPlayerOneGarage", elem: 0x0, sub: Some(146) }, Field { off: 0x1904, size: 0x2c, name: "itemPlayerTwoGarageRace", elem: 0x0, sub: Some(132) }, Field { off: 0x1930, size: 0x28, name: "itemGarageCarP2", elem: 0x0, sub: Some(138) }, Field { off: 0x1958, size: 0x7c, name: "menuPlayerTwoGarage", elem: 0x0, sub: Some(146) }, Field { off: 0x19d4, size: 0x1c, name: "iteratorPinkSlipsCar", elem: 0x0, sub: Some(111) }, Field { off: 0x19f0, size: 0x2c, name: "itemPlayerOnePinkSlipRace", elem: 0x0, sub: Some(132) }, Field { off: 0x1a1c, size: 0x28, name: "itemPinkSlipCarP1", elem: 0x0, sub: Some(138) }, Field { off: 0x1a44, size: 0x7c, name: "menuPlayerOnePinkSlipCarSelect", elem: 0x0, sub: Some(146) }, Field { off: 0x1ac0, size: 0x2c, name: "itemPlayerTwoPinkSlipRace", elem: 0x0, sub: Some(132) }, Field { off: 0x1aec, size: 0x28, name: "itemPinkSlipCarP2", elem: 0x0, sub: Some(138) }, Field { off: 0x1b14, size: 0x7c, name: "menuPlayerTwoPinkSlipCarSelect", elem: 0x0, sub: Some(146) }, Field { off: 0x1b90, size: 0x2c, name: "itemGoToBuyCar", elem: 0x0, sub: Some(132) }, Field { off: 0x1bbc, size: 0x2c, name: "itemGoToSellCar", elem: 0x0, sub: Some(132) }, Field { off: 0x1be8, size: 0x7c, name: "menuGoToCarDealer", elem: 0x0, sub: Some(144) }, Field { off: 0x1c64, size: 0x1c, name: "iteratorDealerCar", elem: 0x0, sub: Some(111) }, Field { off: 0x1c80, size: 0x20, name: "iteratorDealerColor", elem: 0x0, sub: Some(112) }, Field { off: 0x1ca0, size: 0x28, name: "itemDealerCar", elem: 0x0, sub: Some(138) }, Field { off: 0x1cc8, size: 0x28, name: "itemDealerColor", elem: 0x0, sub: Some(138) }, Field { off: 0x1cf0, size: 0x2c, name: "itemBuyCar", elem: 0x0, sub: Some(132) }, Field { off: 0x1d1c, size: 0x2c, name: "itemDealerShowroom", elem: 0x0, sub: Some(132) }, Field { off: 0x1d48, size: 0x7c, name: "menuCarDealer", elem: 0x0, sub: Some(144) }, Field { off: 0x1dc4, size: 0x1c, name: "iteratorSellerCar", elem: 0x0, sub: Some(111) }, Field { off: 0x1de0, size: 0x28, name: "itemSellerCar", elem: 0x0, sub: Some(138) }, Field { off: 0x1e08, size: 0x2c, name: "itemSellCar", elem: 0x0, sub: Some(132) }, Field { off: 0x1e34, size: 0x7c, name: "menuCarSeller", elem: 0x0, sub: Some(144) }, Field { off: 0x1eb0, size: 0x2c, name: "itemPurchaseUpgrade1", elem: 0x0, sub: Some(132) }, Field { off: 0x1edc, size: 0x2c, name: "itemPurchaseUpgrade2", elem: 0x0, sub: Some(132) }, Field { off: 0x1f08, size: 0x2c, name: "itemPurchaseUpgrade3", elem: 0x0, sub: Some(132) }, Field { off: 0x1f34, size: 0x7c, name: "menuCarUpgrades", elem: 0x0, sub: Some(144) }, Field { off: 0x1fb0, size: 0x14, name: "iteratorTransmission", elem: 0x0, sub: Some(114) }, Field { off: 0x1fc4, size: 0x14, name: "iteratorABS", elem: 0x0, sub: Some(114) }, Field { off: 0x1fd8, size: 0x10, name: "iteratorDamage", elem: 0x0, sub: Some(110) }, Field { off: 0x1fe8, size: 0x10, name: "iteratorOpponentUpgrades", elem: 0x0, sub: Some(110) }, Field { off: 0x1ff8, size: 0x20, name: "itemTransmission", elem: 0x0, sub: Some(140) }, Field { off: 0x2018, size: 0x20, name: "itemABS", elem: 0x0, sub: Some(140) }, Field { off: 0x2038, size: 0x20, name: "itemDamage", elem: 0x0, sub: Some(140) }, Field { off: 0x2058, size: 0x20, name: "itemTransmission2", elem: 0x0, sub: Some(140) }, Field { off: 0x2078, size: 0x20, name: "itemABS2", elem: 0x0, sub: Some(140) }, Field { off: 0x2098, size: 0x20, name: "itemDamage2", elem: 0x0, sub: Some(140) }, Field { off: 0x20b8, size: 0x20, name: "itemOpponentUpgrades", elem: 0x0, sub: Some(140) }, Field { off: 0x20d8, size: 0x84, name: "menuCarOptions", elem: 0x0, sub: Some(147) }, Field { off: 0x215c, size: 0x84, name: "menuCarOptionsPlayerOne", elem: 0x0, sub: Some(147) }, Field { off: 0x21e0, size: 0x84, name: "menuCarOptionsPlayerTwo", elem: 0x0, sub: Some(147) }, Field { off: 0x2264, size: 0x84, name: "menuPinkSlipCarOptionsPlayerOne", elem: 0x0, sub: Some(147) }, Field { off: 0x22e8, size: 0x84, name: "menuPinkSlipCarOptionsPlayerTwo", elem: 0x0, sub: Some(147) }, Field { off: 0x236c, size: 0x7c, name: "menuShowroom", elem: 0x0, sub: Some(125) }, Field { off: 0x23e8, size: 0x2c, name: "itemOptionsAudio", elem: 0x0, sub: Some(132) }, Field { off: 0x2414, size: 0x2c, name: "itemOptionsDisplay", elem: 0x0, sub: Some(132) }, Field { off: 0x2440, size: 0x2c, name: "itemOptionsControllers", elem: 0x0, sub: Some(132) }, Field { off: 0x246c, size: 0x2c, name: "itemOptionsMemoryCard", elem: 0x0, sub: Some(132) }, Field { off: 0x2498, size: 0x2c, name: "itemOptionsUsername", elem: 0x0, sub: Some(132) }, Field { off: 0x24c4, size: 0x2c, name: "itemOptionsCredits", elem: 0x0, sub: Some(132) }, Field { off: 0x24f0, size: 0x7c, name: "menuOptions", elem: 0x0, sub: Some(144) }, Field { off: 0x256c, size: 0x10, name: "iteratorMusicVolume", elem: 0x0, sub: Some(116) }, Field { off: 0x257c, size: 0x10, name: "iteratorSoundEffectsVolume", elem: 0x0, sub: Some(116) }, Field { off: 0x258c, size: 0x10, name: "iteratorEngineVolume", elem: 0x0, sub: Some(116) }, Field { off: 0x259c, size: 0x10, name: "iteratorSpeechVolume", elem: 0x0, sub: Some(116) }, Field { off: 0x25ac, size: 0x10, name: "iteratorAmbientVolume", elem: 0x0, sub: Some(116) }, Field { off: 0x25bc, size: 0x10, name: "iteratorAudioMode", elem: 0x0, sub: Some(110) }, Field { off: 0x25cc, size: 0x38, name: "itemMusicVolume", elem: 0x0, sub: Some(134) }, Field { off: 0x2604, size: 0x38, name: "itemSoundEffectsVolume", elem: 0x0, sub: Some(134) }, Field { off: 0x263c, size: 0x38, name: "itemEngineVolume", elem: 0x0, sub: Some(134) }, Field { off: 0x2674, size: 0x38, name: "itemSpeechVolume", elem: 0x0, sub: Some(134) }, Field { off: 0x26ac, size: 0x38, name: "itemAmbientVolume", elem: 0x0, sub: Some(134) }, Field { off: 0x26e4, size: 0x2c, name: "itemAudioMode", elem: 0x0, sub: Some(129) }, Field { off: 0x2710, size: 0x48, name: "itemSlidingPlayList", elem: 0x0, sub: Some(142) }, Field { off: 0x2758, size: 0x88, name: "menuPlayListMenu", elem: 0x0, sub: Some(107) }, Field { off: 0x27e0, size: 0x80, name: "menuAudio", elem: 0x0, sub: Some(156) }, Field { off: 0x2860, size: 0x14, name: "iteratorDisplaySpeedometer", elem: 0x0, sub: Some(114) }, Field { off: 0x2874, size: 0x14, name: "iteratorDisplayMap", elem: 0x0, sub: Some(114) }, Field { off: 0x2888, size: 0x14, name: "iteratorDisplayOpponentID", elem: 0x0, sub: Some(114) }, Field { off: 0x289c, size: 0x14, name: "iteratorDisplayTime", elem: 0x0, sub: Some(114) }, Field { off: 0x28b0, size: 0x14, name: "iteratorDisplayPosition", elem: 0x0, sub: Some(114) }, Field { off: 0x28c4, size: 0x14, name: "iteratorDisplayLapNumber", elem: 0x0, sub: Some(114) }, Field { off: 0x28d8, size: 0x10, name: "iteratorDisplaySplitTime", elem: 0x0, sub: Some(110) }, Field { off: 0x28e8, size: 0x14, name: "iteratorDisplaySplitDisplay", elem: 0x0, sub: Some(114) }, Field { off: 0x28fc, size: 0x2c, name: "itemDisplaySpeedometer", elem: 0x0, sub: Some(129) }, Field { off: 0x2928, size: 0x2c, name: "itemDisplayMap", elem: 0x0, sub: Some(129) }, Field { off: 0x2954, size: 0x2c, name: "itemDisplayOpponentID", elem: 0x0, sub: Some(129) }, Field { off: 0x2980, size: 0x30, name: "itemDisplayTime", elem: 0x0, sub: Some(139) }, Field { off: 0x29b0, size: 0x30, name: "itemDisplayPosition", elem: 0x0, sub: Some(139) }, Field { off: 0x29e0, size: 0x30, name: "itemDisplayLapNumber", elem: 0x0, sub: Some(139) }, Field { off: 0x2a10, size: 0x2c, name: "itemDisplaySplitTime", elem: 0x0, sub: Some(129) }, Field { off: 0x2a3c, size: 0x2c, name: "itemDisplaySplitDisplay", elem: 0x0, sub: Some(129) }, Field { off: 0x2a68, size: 0x80, name: "menuDisplayOptions", elem: 0x0, sub: Some(156) }, Field { off: 0x2ae8, size: 0x14, name: "iteratorControllerConfigSelected", elem: 0x0, sub: Some(114) }, Field { off: 0x2afc, size: 0x2c, name: "itemControllerConfigSelected", elem: 0x0, sub: Some(128) }, Field { off: 0x2b28, size: 0x44, name: "itemControllerSettings", elem: 0x0, sub: Some(143) }, Field { off: 0x2b6c, size: 0x80, name: "menuControllerConfig", elem: 0x0, sub: Some(156) }, Field { off: 0x2bec, size: 0x14, name: "iteratorControllerShockMode", elem: 0x0, sub: Some(117) }, Field { off: 0x2c00, size: 0x28, name: "itemControllerShockMode", elem: 0x0, sub: Some(104) }, Field { off: 0x2c28, size: 0x14, name: "iteratorControllerShockImpact", elem: 0x0, sub: Some(117) }, Field { off: 0x2c3c, size: 0x28, name: "itemControllerShockImpact", elem: 0x0, sub: Some(104) }, Field { off: 0x2c64, size: 0x14, name: "iteratorControllerSteeringRange1", elem: 0x0, sub: Some(117) }, Field { off: 0x2c78, size: 0x30, name: "itemControllerSteeringRange1", elem: 0x0, sub: Some(108) }, Field { off: 0x2ca8, size: 0x14, name: "iteratorControllerDeadSpot1", elem: 0x0, sub: Some(117) }, Field { off: 0x2cbc, size: 0x30, name: "itemControllerDeadSpot1", elem: 0x0, sub: Some(108) }, Field { off: 0x2cec, size: 0x14, name: "iteratorControllerSteeringRange2", elem: 0x0, sub: Some(117) }, Field { off: 0x2d00, size: 0x30, name: "itemControllerSteeringRange2", elem: 0x0, sub: Some(108) }, Field { off: 0x2d30, size: 0x14, name: "iteratorControllerDeadSpot2", elem: 0x0, sub: Some(117) }, Field { off: 0x2d44, size: 0x30, name: "itemControllerDeadSpot2", elem: 0x0, sub: Some(108) }, Field { off: 0x2d74, size: 0x14, name: "iteratorControllerJoyRange", elem: 0x0, sub: Some(117) }, Field { off: 0x2d88, size: 0x30, name: "itemControllerJoyRange", elem: 0x0, sub: Some(108) }, Field { off: 0x2db8, size: 0x14, name: "iteratorControllerCenterPoint", elem: 0x0, sub: Some(117) }, Field { off: 0x2dcc, size: 0x30, name: "itemControllerCenterPoint", elem: 0x0, sub: Some(108) }, Field { off: 0x2dfc, size: 0x14, name: "iteratorControllerIMax", elem: 0x0, sub: Some(117) }, Field { off: 0x2e10, size: 0x30, name: "itemControllerIMax", elem: 0x0, sub: Some(108) }, Field { off: 0x2e40, size: 0x14, name: "iteratorControllerIIMax", elem: 0x0, sub: Some(117) }, Field { off: 0x2e54, size: 0x30, name: "itemControllerIIMax", elem: 0x0, sub: Some(108) }, Field { off: 0x2e84, size: 0x74, name: "menuControllerDualShock", elem: 0x0, sub: Some(106) }, Field { off: 0x2ef8, size: 0x74, name: "menuControllerAnalog", elem: 0x0, sub: Some(106) }, Field { off: 0x2f6c, size: 0x74, name: "menuControllerDualShockAnalog", elem: 0x0, sub: Some(106) }, Field { off: 0x2fe0, size: 0x74, name: "menuControllerNegcon", elem: 0x0, sub: Some(106) }, Field { off: 0x3054, size: 0x2c, name: "itemSaveGame", elem: 0x0, sub: Some(123) }, Field { off: 0x3080, size: 0x2c, name: "itemLoadGame", elem: 0x0, sub: Some(123) }, Field { off: 0x30ac, size: 0x80, name: "menuMemory", elem: 0x0, sub: Some(156) }, Field { off: 0x312c, size: 0x8c, name: "menuItemUserName", elem: 0x0, sub: Some(242) }, Field { off: 0x31b8, size: 0x8c, name: "menuItemUserName1", elem: 0x0, sub: Some(242) }, Field { off: 0x3244, size: 0x8c, name: "menuItemUserName2", elem: 0x0, sub: Some(242) }, Field { off: 0x32d0, size: 0x80, name: "menuUserName", elem: 0x0, sub: Some(156) }, Field { off: 0x3350, size: 0x10, name: "iteratorChangeTrophy", elem: 0x0, sub: Some(110) }, Field { off: 0x3360, size: 0x28, name: "itemChangeTrophy", elem: 0x0, sub: Some(49) }, Field { off: 0x3388, size: 0x7c, name: "menuTrophyRoom", elem: 0x0, sub: Some(145) }, Field { off: 0x3404, size: 0x2c, name: "itemPinkSlipStandingsForward", elem: 0x0, sub: Some(132) }, Field { off: 0x3430, size: 0x2c, name: "itemPinkSlipStandingsExit", elem: 0x0, sub: Some(132) }, Field { off: 0x345c, size: 0x7c, name: "menuPinkSlipStandings", elem: 0x0, sub: Some(144) }, Field { off: 0x34d8, size: 0x2c, name: "itemTournStandingsForward", elem: 0x0, sub: Some(132) }, Field { off: 0x3504, size: 0x2c, name: "itemTournStandingsExit", elem: 0x0, sub: Some(132) }, Field { off: 0x3530, size: 0x7c, name: "menuTournamentStandings", elem: 0x0, sub: Some(144) }, Field { off: 0x35ac, size: 0x2c, name: "itemTournamentFinishedHome", elem: 0x0, sub: Some(132) }, Field { off: 0x35d8, size: 0x7c, name: "menuTournamentFinished", elem: 0x0, sub: Some(144) }, Field { off: 0x3654, size: 0x7c, name: "menuTournamentTrophy", elem: 0x0, sub: Some(125) }, Field { off: 0x36d0, size: 0x80, name: "menuPostGamePlayer1Name", elem: 0x0, sub: Some(156) }, Field { off: 0x3750, size: 0x80, name: "menuPostGamePlayer2Name", elem: 0x0, sub: Some(156) }, Field { off: 0x37d0, size: 0x2c, name: "itemPostGameTrackRecordsContinue", elem: 0x0, sub: Some(48) }, Field { off: 0x37fc, size: 0x80, name: "menuPostGameTrackRecords", elem: 0x0, sub: Some(156) }, Field { off: 0x387c, size: 0x7c, name: "menuPinkSlipCongrats", elem: 0x0, sub: Some(125) }, Field { off: 0x38f8, size: 0x7c, name: "menuBeTheCopCongrats", elem: 0x0, sub: Some(125) }, Field { off: 0x3974, size: 0x7c, name: "menuTierCompleteCongrats", elem: 0x0, sub: Some(125) }, Field { off: 0x39f0, size: 0x7c, name: "menuCredits", elem: 0x0, sub: Some(125) }, Field { off: 0x3a6c, size: 0x2c, name: "itemMemContinue", elem: 0x0, sub: Some(123) }, Field { off: 0x3a98, size: 0x80, name: "menuPostGameSave", elem: 0x0, sub: Some(156) }]),
+    ("tHelpData", 0x12, &[Field { off: 0x0, size: 0x1, name: "autoGenerate", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x10, name: "items", elem: 0x4, sub: Some(100) }]),
+    ("helpKeyData", 0x4, &[Field { off: 0x0, size: 0x2, name: "text", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "button", elem: 0x0, sub: None }]),
+    ("tHrz_Lightning", 0x68, &[Field { off: 0x0, size: 0x60, name: "forks", elem: 0x6, sub: Some(102) }, Field { off: 0x60, size: 0x4, name: "brightness", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x1, name: "numForks", elem: 0x0, sub: None }]),
+    ("tHrz_LightningFork", 0x6, &[Field { off: 0x0, size: 0x4, name: "pos", elem: 0x0, sub: Some(77) }, Field { off: 0x4, size: 0x1, name: "pmxIndex", elem: 0x0, sub: None }]),
     ("Input_tResults", 0x4, &[Field { off: 0x0, size: 0x1, name: "steering", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "gas", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "brake", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "flags", elem: 0x0, sub: None }]),
-    ("tListIterator", 0x10, &[Field { off: 0x0, size: 0x4, name: "fSelectionList", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fValue", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "fMinValue", elem: 0x0, sub: None }, Field { off: 0x9, size: 0x1, name: "fMaxValue", elem: 0x0, sub: None }]),
-    ("tListIteratorCar", 0x1c, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(65) }, Field { off: 0x10, size: 0x4, name: "fCarListFilter", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fCarManager", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fNameLength", elem: 0x0, sub: None }]),
-    ("tListIteratorCarColor", 0x20, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(65) }, Field { off: 0x10, size: 0x4, name: "fPlayer", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fPlayerCar", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fIndexSize", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "fCarManager", elem: 0x0, sub: None }]),
+    ("tInsideBoxControllerLeftRightSlider", 0x28, &[Field { off: 0x0, size: 0x28, name: "tInsideBoxLeftRightSlider", elem: 0x0, sub: Some(105) }]),
+    ("tInsideBoxLeftRightSlider", 0x28, &[Field { off: 0x0, size: 0x28, name: "tMenuItemLeftRightSlider", elem: 0x0, sub: Some(137) }]),
+    ("tInsideBoxMenu", 0x74, &[Field { off: 0x0, size: 0x6c, name: "tMenu", elem: 0x0, sub: Some(124) }, Field { off: 0x6c, size: 0x2, name: "fPrevItem", elem: 0x0, sub: None }, Field { off: 0x6e, size: 0x2, name: "fMoving", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x2, name: "fMovingDir", elem: 0x0, sub: None }]),
+    ("tInsideBoxSongMenu", 0x88, &[Field { off: 0x0, size: 0x74, name: "tInsideBoxMenu", elem: 0x0, sub: Some(106) }, Field { off: 0x74, size: 0xa, name: "fOnOffFade", elem: 0x2, sub: None }, Field { off: 0x7e, size: 0xa, name: "fSelFade", elem: 0x2, sub: None }]),
+    ("tInsideBoxTwoWaySlider", 0x30, &[Field { off: 0x0, size: 0x28, name: "tMenuItemLeftRightSlider", elem: 0x0, sub: Some(137) }, Field { off: 0x28, size: 0x2, name: "fType", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "fActive", elem: 0x0, sub: None }]),
+    ("tItemButton", 0x14, &[Field { off: 0x0, size: 0x2, name: "type", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "text", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "nextMenu", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "value", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "selection", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x1, name: "defaultvalue", elem: 0x0, sub: None }, Field { off: 0x11, size: 0x1, name: "flags", elem: 0x0, sub: None }, Field { off: 0x12, size: 0x1, name: "cases", elem: 0x0, sub: None }]),
+    ("tListIterator", 0x10, &[Field { off: 0x0, size: 0x4, name: "fSelectionList", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fValue", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "fMinValue", elem: 0x0, sub: None }, Field { off: 0x9, size: 0x1, name: "fMaxValue", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("tListIteratorCar", 0x1c, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(110) }, Field { off: 0x10, size: 0x4, name: "fCarListFilter", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fCarManager", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fNameLength", elem: 0x0, sub: None }]),
+    ("tListIteratorCarColor", 0x20, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(110) }, Field { off: 0x10, size: 0x4, name: "fPlayer", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fPlayerCar", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fIndexSize", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "fCarManager", elem: 0x0, sub: None }]),
+    ("tListIteratorDoubleIndexed", 0x1c, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(110) }, Field { off: 0x10, size: 0x4, name: "fIndex1", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "index1multiplier", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fIndex2", elem: 0x0, sub: None }]),
+    ("tListIteratorIndexed", 0x14, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(110) }, Field { off: 0x10, size: 0x4, name: "fIndex", elem: 0x0, sub: None }]),
+    ("tListIteratorMultiPlayer", 0x10, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(110) }]),
+    ("tListIteratorRange", 0x10, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(110) }]),
+    ("tListIteratorRangeIndexed", 0x14, &[Field { off: 0x0, size: 0x10, name: "tListIteratorRange", elem: 0x0, sub: Some(116) }, Field { off: 0x10, size: 0x4, name: "fIndex", elem: 0x0, sub: None }]),
+    ("tListIteratorTournament", 0x14, &[Field { off: 0x0, size: 0x10, name: "tListIterator", elem: 0x0, sub: Some(110) }, Field { off: 0x10, size: 0x4, name: "fTournamentManager", elem: 0x0, sub: None }]),
+    ("tListIteratorTrack", 0x18, &[Field { off: 0x0, size: 0x14, name: "tListIteratorIndexed", elem: 0x0, sub: Some(114) }, Field { off: 0x14, size: 0x4, name: "fTrackManager", elem: 0x0, sub: None }]),
+    ("MCRDFILE_def", 0x2c, &[Field { off: 0x0, size: 0x4, name: "name", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "title", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "size", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "offset", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "flags", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "pData", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "icon", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "numicons", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "numblocks", elem: 0x0, sub: None }]),
     ("matrixtdef", 0x24, &[Field { off: 0x0, size: 0x24, name: "m", elem: 0x4, sub: None }]),
-    ("BO_tNewtonCollisionInfo", 0x30, &[Field { off: 0x0, size: 0x4, name: "collided", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "impulse", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "otherObj", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "sfxType", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "disableCollisionTimer", elem: 0x0, sub: None }, Field { off: 0x14, size: 0xc, name: "collisionPoint", elem: 0x0, sub: Some(55) }, Field { off: 0x20, size: 0x4, name: "lastCollision", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "lastOtherObj", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "lastImpulse", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "lastTime", elem: 0x0, sub: None }]),
-    ("BO_tNewtonObj", 0x240, &[Field { off: 0x0, size: 0x4, name: "objID", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "oldSlice", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "totalSlice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x84, name: "simRoadInfo", elem: 0x0, sub: Some(42) }, Field { off: 0x8c, size: 0x4, name: "distToPlayer", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x1, name: "simOptz", elem: 0x0, sub: None }, Field { off: 0x91, size: 0x1, name: "active", elem: 0x0, sub: None }, Field { off: 0x92, size: 0x1, name: "reOrthoCounter", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "gravityMult", elem: 0x0, sub: None }, Field { off: 0x98, size: 0x4, name: "cumulatedRot", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x4, name: "lastUpdated", elem: 0x0, sub: None }, Field { off: 0xa0, size: 0xc, name: "position", elem: 0x0, sub: Some(55) }, Field { off: 0xac, size: 0xc, name: "linearVel", elem: 0x0, sub: Some(55) }, Field { off: 0xb8, size: 0x4, name: "mass", elem: 0x0, sub: None }, Field { off: 0xbc, size: 0x4, name: "massInv", elem: 0x0, sub: None }, Field { off: 0xc0, size: 0x4, name: "speedXZ", elem: 0x0, sub: None }, Field { off: 0xc4, size: 0x4, name: "xRelRoadCenter", elem: 0x0, sub: None }, Field { off: 0xc8, size: 0x2, name: "positionXZ", elem: 0x0, sub: None }, Field { off: 0xca, size: 0x2, name: "eIndexEnvMap", elem: 0x0, sub: None }, Field { off: 0xcc, size: 0x2, name: "eIndexShadow", elem: 0x0, sub: None }, Field { off: 0xd0, size: 0x8, name: "wheelRot", elem: 0x4, sub: None }, Field { off: 0xd8, size: 0x4, name: "wheelFrontX", elem: 0x0, sub: None }, Field { off: 0xdc, size: 0x4, name: "wheelFrontZ", elem: 0x0, sub: None }, Field { off: 0xe0, size: 0x4, name: "wheelBackX", elem: 0x0, sub: None }, Field { off: 0xe4, size: 0x4, name: "wheelBackZ", elem: 0x0, sub: None }, Field { off: 0xe8, size: 0x4, name: "wheelWidthF", elem: 0x0, sub: None }, Field { off: 0xec, size: 0x4, name: "wheelWidthB", elem: 0x0, sub: None }, Field { off: 0xf0, size: 0x24, name: "orientMat", elem: 0x0, sub: Some(68) }, Field { off: 0x114, size: 0xc, name: "angularVel", elem: 0x0, sub: Some(55) }, Field { off: 0x120, size: 0x4, name: "moInertia", elem: 0x0, sub: None }, Field { off: 0x124, size: 0x4, name: "moInertiaInv", elem: 0x0, sub: None }, Field { off: 0x128, size: 0xc, name: "orientationToGround", elem: 0x0, sub: Some(55) }, Field { off: 0x134, size: 0xc, name: "dimension", elem: 0x0, sub: Some(55) }, Field { off: 0x140, size: 0x4, name: "dimensionRadius", elem: 0x0, sub: None }, Field { off: 0x144, size: 0x24, name: "roadMatrix", elem: 0x0, sub: Some(68) }, Field { off: 0x168, size: 0xc, name: "roadCenterPoint", elem: 0x0, sub: Some(55) }, Field { off: 0x174, size: 0x4, name: "roadGravityModifier", elem: 0x0, sub: None }, Field { off: 0x178, size: 0x4, name: "roadYaw", elem: 0x0, sub: None }, Field { off: 0x17c, size: 0x2, name: "flightTime", elem: 0x0, sub: None }, Field { off: 0x17e, size: 0x2, name: "deadTimer", elem: 0x0, sub: None }, Field { off: 0x180, size: 0x4, name: "groundElevation", elem: 0x0, sub: None }, Field { off: 0x184, size: 0x4, name: "groundVel", elem: 0x0, sub: None }, Field { off: 0x188, size: 0x4, name: "objAltitude", elem: 0x0, sub: None }, Field { off: 0x18c, size: 0x30, name: "collision", elem: 0x0, sub: Some(69) }, Field { off: 0x1bc, size: 0x4, name: "groundSurfaceType", elem: 0x0, sub: None }, Field { off: 0x1c0, size: 0x4, name: "driveSurfaceType", elem: 0x0, sub: None }, Field { off: 0x1c4, size: 0x24, name: "shadowMat", elem: 0x0, sub: Some(68) }, Field { off: 0x1e8, size: 0x30, name: "shadowCoord", elem: 0xc, sub: Some(55) }, Field { off: 0x218, size: 0x28, name: "damage", elem: 0x4, sub: None }]),
+    ("tMemCardData", 0x14ac, &[Field { off: 0x0, size: 0x4, name: "fSize", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "bonus", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x450, name: "frontEnd", elem: 0x0, sub: Some(92) }, Field { off: 0x458, size: 0xe0, name: "carInfo", elem: 0x0, sub: Some(181) }, Field { off: 0x538, size: 0x10, name: "trackInfo", elem: 0x0, sub: Some(184) }, Field { off: 0x548, size: 0xb0, name: "tournament", elem: 0x0, sub: Some(183) }, Field { off: 0x5f8, size: 0xe9c, name: "records", elem: 0x14, sub: Some(176) }, Field { off: 0x1494, size: 0x4, name: "pinkSlipsNoCheat", elem: 0x0, sub: None }, Field { off: 0x1498, size: 0x4, name: "frontEndCRC", elem: 0x0, sub: None }, Field { off: 0x149c, size: 0x4, name: "carInfoCRC", elem: 0x0, sub: None }, Field { off: 0x14a0, size: 0x4, name: "trackInfoCRC", elem: 0x0, sub: None }, Field { off: 0x14a4, size: 0x4, name: "tournamentCRC", elem: 0x0, sub: None }, Field { off: 0x14a8, size: 0x4, name: "recordsCRC", elem: 0x0, sub: None }]),
+    ("tMemoryCardMenuItem", 0x2c, &[Field { off: 0x0, size: 0x2c, name: "tMenuItemGoToMenuButtonFade", elem: 0x0, sub: Some(131) }]),
+    ("tMenu", 0x6c, &[Field { off: 0x0, size: 0x4, name: "fFlags", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "fTitle", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "fCurrentItem", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "fNeverAnyEnabled", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x40, name: "fItemList", elem: 0x4, sub: None }, Field { off: 0x50, size: 0x4, name: "fScreen", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "fNextMenu", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "fChildMenu", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x4, name: "fOptionsMenu", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "fOnButtonPress", elem: 0x0, sub: None }, Field { off: 0x64, size: 0x2, name: "VertHelp", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("tMenuBlank", 0x7c, &[Field { off: 0x0, size: 0x7c, name: "tMenuNFS4", elem: 0x0, sub: Some(144) }]),
+    ("tMenuCommand", 0x8, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "nextMenu", elem: 0x0, sub: None }]),
+    ("tMenuItem", 0x1c, &[Field { off: 0x0, size: 0x4, name: "fFlags", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fTextDescription", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x2, name: "fSelFade", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "fButtonImage", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "fNumFrames", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fNewMenu", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("tMenuItemControllerLeftRightChoice", 0x2c, &[Field { off: 0x0, size: 0x2c, name: "tMenuItemLeftRightFade", elem: 0x0, sub: Some(136) }]),
+    ("tMenuItemDisplayLeftRightChoice", 0x2c, &[Field { off: 0x0, size: 0x2c, name: "tMenuItemLeftRightFade", elem: 0x0, sub: Some(136) }]),
+    ("tMenuItemGoToMenuButton", 0x20, &[Field { off: 0x0, size: 0x1c, name: "tMenuItemInteractive", elem: 0x0, sub: Some(133) }, Field { off: 0x1c, size: 0x4, name: "fOnButtonPress", elem: 0x0, sub: None }]),
+    ("tMenuItemGoToMenuButtonFade", 0x2c, &[Field { off: 0x0, size: 0x20, name: "tMenuItemGoToMenuButton", elem: 0x0, sub: Some(130) }, Field { off: 0x20, size: 0x2, name: "fFadeVal", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x2, name: "fFadeDir", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "fInTransition", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x2, name: "fEnableVal", elem: 0x0, sub: None }]),
+    ("tMenuItemGoToMenuNFS4Button", 0x2c, &[Field { off: 0x0, size: 0x20, name: "tMenuItemGoToMenuButton", elem: 0x0, sub: Some(130) }, Field { off: 0x20, size: 0x4, name: "fOrdinalPos", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "fOffset", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x2, name: "fTransitionVal", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x2, name: "fTransitionSpeed", elem: 0x0, sub: None }, Field { off: 0x2a, size: 0x2, name: "fEnabledTransitionVal", elem: 0x0, sub: None }]),
+    ("tMenuItemInteractive", 0x1c, &[Field { off: 0x0, size: 0x1c, name: "tMenuItem", elem: 0x0, sub: Some(127) }]),
+    ("tMenuItemLeftRightAudioSlider", 0x38, &[Field { off: 0x0, size: 0x28, name: "tMenuItemLeftRightSlider", elem: 0x0, sub: Some(137) }, Field { off: 0x28, size: 0x2, name: "fFadeVal", elem: 0x0, sub: None }, Field { off: 0x2a, size: 0x2, name: "fFadeDir", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "fInTransition", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x2, name: "fAudioArt", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "flareextra", elem: 0x0, sub: None }]),
+    ("tMenuItemLeftRightChoice", 0x20, &[Field { off: 0x0, size: 0x1c, name: "tMenuItemInteractive", elem: 0x0, sub: Some(133) }, Field { off: 0x1c, size: 0x4, name: "fData", elem: 0x0, sub: None }]),
+    ("tMenuItemLeftRightFade", 0x2c, &[Field { off: 0x0, size: 0x20, name: "tMenuItemLeftRightChoice", elem: 0x0, sub: Some(135) }, Field { off: 0x20, size: 0x2, name: "fFadeVal", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x2, name: "fFadeDir", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "fInTransition", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "flareextra", elem: 0x0, sub: None }]),
+    ("tMenuItemLeftRightSlider", 0x28, &[Field { off: 0x0, size: 0x1c, name: "tMenuItemInteractive", elem: 0x0, sub: Some(133) }, Field { off: 0x1c, size: 0x4, name: "fData", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x2, name: "fX", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x2, name: "fY", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "fWidth", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x2, name: "fHeight", elem: 0x0, sub: None }]),
+    ("tMenuItemNFS4LeftRightChoice", 0x28, &[Field { off: 0x0, size: 0x20, name: "tMenuItemLeftRightChoice", elem: 0x0, sub: Some(135) }, Field { off: 0x20, size: 0x2, name: "fOffset", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x2, name: "fTransitionVal", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "fTransitionSpeed", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x2, name: "fEnabledTransitionVal", elem: 0x0, sub: None }]),
+    ("tMenuItemOnOffLeftRightChoice", 0x30, &[Field { off: 0x0, size: 0x2c, name: "tMenuItemLeftRightFade", elem: 0x0, sub: Some(136) }, Field { off: 0x2c, size: 0x2, name: "fOnFade", elem: 0x0, sub: None }]),
+    ("tMenuItemOptionsLeftRightChoice", 0x20, &[Field { off: 0x0, size: 0x20, name: "tMenuItemLeftRightChoice", elem: 0x0, sub: Some(135) }]),
+    ("tMenuItemOptionsTwoItemChoice", 0x24, &[Field { off: 0x0, size: 0x20, name: "tMenuItemLeftRightChoice", elem: 0x0, sub: Some(135) }, Field { off: 0x20, size: 0x2, name: "fOnOffFade", elem: 0x0, sub: None }]),
+    ("tMenuItemSlidingActivated", 0x48, &[Field { off: 0x0, size: 0x44, name: "tMenuItemSlidingMenu", elem: 0x0, sub: Some(143) }, Field { off: 0x44, size: 0x4, name: "fActive", elem: 0x0, sub: None }]),
+    ("tMenuItemSlidingMenu", 0x44, &[Field { off: 0x0, size: 0x1c, name: "tMenuItem", elem: 0x0, sub: Some(127) }, Field { off: 0x1c, size: 0x4, name: "currMenu", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x4, name: "nextMenu", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "fWidth", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x2, name: "fHeight", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x2, name: "fOpenHeight", elem: 0x0, sub: None }, Field { off: 0x2a, size: 0x2, name: "fSlideOffset", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x2, name: "fFadeVal", elem: 0x0, sub: None }, Field { off: 0x2e, size: 0x2, name: "fFadeDir", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x4, name: "fInTransition", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "fTransitioningOut", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "fClosing", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x2, name: "fDiffX", elem: 0x0, sub: None }, Field { off: 0x3e, size: 0x2, name: "fDiffY", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "fFillback", elem: 0x0, sub: None }]),
+    ("tMenuNFS4", 0x7c, &[Field { off: 0x0, size: 0x6c, name: "tMenu", elem: 0x0, sub: Some(124) }, Field { off: 0x6c, size: 0x4, name: "fInItemTransition", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "fInMenuTransition", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x2, name: "fTransitionVal", elem: 0x0, sub: None }, Field { off: 0x76, size: 0x1, name: "fTransitionDirection", elem: 0x0, sub: None }, Field { off: 0x77, size: 0x1, name: "fLastItem", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x1, name: "fNumItems", elem: 0x0, sub: None }]),
+    ("tMenuNFS4Bottom", 0x7c, &[Field { off: 0x0, size: 0x7c, name: "tMenuNFS4", elem: 0x0, sub: Some(144) }]),
+    ("tMenuNFS4TwoPlayer", 0x7c, &[Field { off: 0x0, size: 0x7c, name: "tMenuNFS4", elem: 0x0, sub: Some(144) }]),
+    ("tMenuOptions", 0x84, &[Field { off: 0x0, size: 0x7c, name: "tMenuNFS4", elem: 0x0, sub: Some(144) }, Field { off: 0x7c, size: 0x4, name: "fMenuEnterTicks", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x2, name: "fPlayer", elem: 0x0, sub: None }]),
+    ("tMissionInfo", 0x14, &[Field { off: 0x0, size: 0x1, name: "fDescriptionID", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fTrackNumber", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fDirection", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fMirrored", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fTimeOfDay", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fWeather", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "fTraffic", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "fPad", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x2, name: "fStageOffset", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x1, name: "fNumStages", elem: 0x0, sub: None }, Field { off: 0xb, size: 0x9, name: "fReserved", elem: 0x1, sub: None }]),
+    ("tMissionManager", 0x8, &[Field { off: 0x0, size: 0x1, name: "fNumTiers", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fDefinition", elem: 0x0, sub: None }]),
+    ("tMissionTierInfo", 0x4, &[Field { off: 0x0, size: 0x1, name: "fNumMissions", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fDescriptionID", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fMissionOffset", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fPad", elem: 0x0, sub: None }]),
+    ("BO_tNewtonCollisionInfo", 0x30, &[Field { off: 0x0, size: 0x4, name: "collided", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "impulse", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "otherObj", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "sfxType", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "disableCollisionTimer", elem: 0x0, sub: None }, Field { off: 0x14, size: 0xc, name: "collisionPoint", elem: 0x0, sub: Some(72) }, Field { off: 0x20, size: 0x4, name: "lastCollision", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "lastOtherObj", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "lastImpulse", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "lastTime", elem: 0x0, sub: None }]),
+    ("BO_tNewtonObj", 0x240, &[Field { off: 0x0, size: 0x4, name: "objID", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "oldSlice", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "totalSlice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x84, name: "simRoadInfo", elem: 0x0, sub: Some(47) }, Field { off: 0x8c, size: 0x4, name: "distToPlayer", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x1, name: "simOptz", elem: 0x0, sub: None }, Field { off: 0x91, size: 0x1, name: "active", elem: 0x0, sub: None }, Field { off: 0x92, size: 0x1, name: "reOrthoCounter", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x4, name: "gravityMult", elem: 0x0, sub: None }, Field { off: 0x98, size: 0x4, name: "cumulatedRot", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x4, name: "lastUpdated", elem: 0x0, sub: None }, Field { off: 0xa0, size: 0xc, name: "position", elem: 0x0, sub: Some(72) }, Field { off: 0xac, size: 0xc, name: "linearVel", elem: 0x0, sub: Some(72) }, Field { off: 0xb8, size: 0x4, name: "mass", elem: 0x0, sub: None }, Field { off: 0xbc, size: 0x4, name: "massInv", elem: 0x0, sub: None }, Field { off: 0xc0, size: 0x4, name: "speedXZ", elem: 0x0, sub: None }, Field { off: 0xc4, size: 0x4, name: "xRelRoadCenter", elem: 0x0, sub: None }, Field { off: 0xc8, size: 0x2, name: "positionXZ", elem: 0x0, sub: None }, Field { off: 0xca, size: 0x2, name: "eIndexEnvMap", elem: 0x0, sub: None }, Field { off: 0xcc, size: 0x2, name: "eIndexShadow", elem: 0x0, sub: None }, Field { off: 0xd0, size: 0x8, name: "wheelRot", elem: 0x4, sub: None }, Field { off: 0xd8, size: 0x4, name: "wheelFrontX", elem: 0x0, sub: None }, Field { off: 0xdc, size: 0x4, name: "wheelFrontZ", elem: 0x0, sub: None }, Field { off: 0xe0, size: 0x4, name: "wheelBackX", elem: 0x0, sub: None }, Field { off: 0xe4, size: 0x4, name: "wheelBackZ", elem: 0x0, sub: None }, Field { off: 0xe8, size: 0x4, name: "wheelWidthF", elem: 0x0, sub: None }, Field { off: 0xec, size: 0x4, name: "wheelWidthB", elem: 0x0, sub: None }, Field { off: 0xf0, size: 0x24, name: "orientMat", elem: 0x0, sub: Some(121) }, Field { off: 0x114, size: 0xc, name: "angularVel", elem: 0x0, sub: Some(72) }, Field { off: 0x120, size: 0x4, name: "moInertia", elem: 0x0, sub: None }, Field { off: 0x124, size: 0x4, name: "moInertiaInv", elem: 0x0, sub: None }, Field { off: 0x128, size: 0xc, name: "orientationToGround", elem: 0x0, sub: Some(72) }, Field { off: 0x134, size: 0xc, name: "dimension", elem: 0x0, sub: Some(72) }, Field { off: 0x140, size: 0x4, name: "dimensionRadius", elem: 0x0, sub: None }, Field { off: 0x144, size: 0x24, name: "roadMatrix", elem: 0x0, sub: Some(121) }, Field { off: 0x168, size: 0xc, name: "roadCenterPoint", elem: 0x0, sub: Some(72) }, Field { off: 0x174, size: 0x4, name: "roadGravityModifier", elem: 0x0, sub: None }, Field { off: 0x178, size: 0x4, name: "roadYaw", elem: 0x0, sub: None }, Field { off: 0x17c, size: 0x2, name: "flightTime", elem: 0x0, sub: None }, Field { off: 0x17e, size: 0x2, name: "deadTimer", elem: 0x0, sub: None }, Field { off: 0x180, size: 0x4, name: "groundElevation", elem: 0x0, sub: None }, Field { off: 0x184, size: 0x4, name: "groundVel", elem: 0x0, sub: None }, Field { off: 0x188, size: 0x4, name: "objAltitude", elem: 0x0, sub: None }, Field { off: 0x18c, size: 0x30, name: "collision", elem: 0x0, sub: Some(151) }, Field { off: 0x1bc, size: 0x4, name: "groundSurfaceType", elem: 0x0, sub: None }, Field { off: 0x1c0, size: 0x4, name: "driveSurfaceType", elem: 0x0, sub: None }, Field { off: 0x1c4, size: 0x24, name: "shadowMat", elem: 0x0, sub: Some(121) }, Field { off: 0x1e8, size: 0x30, name: "shadowCoord", elem: 0xc, sub: Some(72) }, Field { off: 0x218, size: 0x28, name: "damage", elem: 0x4, sub: None }]),
+    ("tNfsSystemInfo", 0x4, &[Field { off: 0x0, size: 0x4, name: "userRam", elem: 0x0, sub: None }]),
+    ("tNightInitCache", 0x303, &[Field { off: 0x0, size: 0x303, name: "table", elem: 0x3, sub: Some(69) }]),
+    ("tOldMenu", 0x50, &[Field { off: 0x0, size: 0x4, name: "artFileName", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "backgrName", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x2, name: "driver", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x2, name: "current", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x2, name: "flags", elem: 0x0, sub: None }, Field { off: 0xe, size: 0x2, name: "helpvariant", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x40, name: "item", elem: 0x4, sub: None }]),
+    ("tOptionsMenu", 0x80, &[Field { off: 0x0, size: 0x6c, name: "tMenu", elem: 0x0, sub: Some(124) }, Field { off: 0x6c, size: 0x4, name: "fInMenuTransition", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x1, name: "fTransitionDirection", elem: 0x0, sub: None }, Field { off: 0x72, size: 0x2, name: "fPrevItem", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "fScreenFade", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "fFirstFrame", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "fNumFrames", elem: 0x0, sub: None }]),
+    ("tOverlay", 0x18, &[Field { off: 0x0, size: 0x10, name: "location", elem: 0x8, sub: Some(175) }, Field { off: 0x10, size: 0x2, name: "transition", elem: 0x0, sub: None }, Field { off: 0x12, size: 0x2, name: "delta", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x2, name: "direction", elem: 0x0, sub: None }, Field { off: 0x16, size: 0x2, name: "ID", elem: 0x0, sub: None }]),
     ("tOwnedCarInfo", 0x4, &[Field { off: 0x0, size: 0x1, name: "fCarID", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fUpgrades", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fCarColor", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fPad", elem: 0x0, sub: None }]),
+    ("tPListIterator", 0xc, &[Field { off: 0x0, size: 0x4, name: "fSelectionList", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fValue", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("tPListIteratorIndexed", 0x10, &[Field { off: 0x0, size: 0xc, name: "tPListIterator", elem: 0x0, sub: Some(159) }, Field { off: 0xc, size: 0x4, name: "fIndex", elem: 0x0, sub: None }]),
+    ("tPMenu", 0x54, &[Field { off: 0x0, size: 0x4, name: "fCurrentItem", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fHighlight", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x40, name: "fItemList", elem: 0x4, sub: None }, Field { off: 0x48, size: 0x4, name: "fNextMenu", elem: 0x0, sub: None }, Field { off: 0x4c, size: 0x4, name: "fNumItems", elem: 0x0, sub: None }, Field { off: 0x50, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("tPMenuCommand", 0x8, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "nextMenu", elem: 0x0, sub: None }]),
+    ("tPMenuItem", 0xc, &[Field { off: 0x0, size: 0x4, name: "fFlags", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fTextDescription", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("tPMenuItemCommandButton", 0x10, &[Field { off: 0x0, size: 0xc, name: "tPMenuItemInteractive", elem: 0x0, sub: Some(166) }, Field { off: 0xc, size: 0x4, name: "fCommand", elem: 0x0, sub: None }]),
+    ("tPMenuItemGoToMenuButton", 0x14, &[Field { off: 0x0, size: 0xc, name: "tPMenuItemInteractive", elem: 0x0, sub: Some(166) }, Field { off: 0xc, size: 0x4, name: "fNewMenu", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "fOnButtonPress", elem: 0x0, sub: None }]),
+    ("tPMenuItemInteractive", 0xc, &[Field { off: 0x0, size: 0xc, name: "tPMenuItem", elem: 0x0, sub: Some(163) }]),
+    ("tPMenuItemLeftRightChoice", 0x10, &[Field { off: 0x0, size: 0xc, name: "tPMenuItemInteractive", elem: 0x0, sub: Some(166) }, Field { off: 0xc, size: 0x4, name: "fData", elem: 0x0, sub: None }]),
+    ("tPMenuItemLeftRightSlider", 0x14, &[Field { off: 0x0, size: 0xc, name: "tPMenuItemInteractive", elem: 0x0, sub: Some(166) }, Field { off: 0xc, size: 0x4, name: "fData", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x1, name: "fMaxVal", elem: 0x0, sub: None }]),
+    ("tPMenuItemLeftRightSliderIndexed", 0x18, &[Field { off: 0x0, size: 0x14, name: "tPMenuItemLeftRightSlider", elem: 0x0, sub: Some(168) }, Field { off: 0x14, size: 0x4, name: "fIndex", elem: 0x0, sub: None }]),
+    ("tPMenuItemNonInteractiveText", 0xc, &[Field { off: 0x0, size: 0xc, name: "tPMenuItem", elem: 0x0, sub: Some(163) }]),
+    ("tPSXToFEMapping", 0x8, &[Field { off: 0x0, size: 0x4, name: "PSXKey", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "FEKey", elem: 0x0, sub: None }]),
+    ("tPauseMenuDefs", 0x358, &[Field { off: 0x0, size: 0xc, name: "itemGamePaused", elem: 0x0, sub: Some(170) }, Field { off: 0xc, size: 0x10, name: "itemContinue", elem: 0x0, sub: Some(164) }, Field { off: 0x1c, size: 0x10, name: "itemRestart", elem: 0x0, sub: Some(164) }, Field { off: 0x2c, size: 0x14, name: "itemOptions", elem: 0x0, sub: Some(165) }, Field { off: 0x40, size: 0x10, name: "itemQuitRace", elem: 0x0, sub: Some(164) }, Field { off: 0x50, size: 0x10, name: "itemForfeitRace", elem: 0x0, sub: Some(164) }, Field { off: 0x60, size: 0x54, name: "menuPause", elem: 0x0, sub: Some(161) }, Field { off: 0xb4, size: 0xc, name: "itemOptionsTitle", elem: 0x0, sub: Some(170) }, Field { off: 0xc0, size: 0x14, name: "itemAudioSettings", elem: 0x0, sub: Some(165) }, Field { off: 0xd4, size: 0x14, name: "itemControllerSettings", elem: 0x0, sub: Some(165) }, Field { off: 0xe8, size: 0x54, name: "menuOptions", elem: 0x0, sub: Some(161) }, Field { off: 0x13c, size: 0xc, name: "itemAudioSettingsTitle", elem: 0x0, sub: Some(170) }, Field { off: 0x148, size: 0xc, name: "iteratorAudioMode", elem: 0x0, sub: Some(159) }, Field { off: 0x154, size: 0x10, name: "itemAudioSettingsAudioMode", elem: 0x0, sub: Some(167) }, Field { off: 0x164, size: 0x14, name: "itemAudioSettingsMusicVolume", elem: 0x0, sub: Some(168) }, Field { off: 0x178, size: 0x14, name: "itemAudioSettingsFXVolume", elem: 0x0, sub: Some(168) }, Field { off: 0x18c, size: 0x14, name: "itemAudioSettingsSpeechVolume", elem: 0x0, sub: Some(168) }, Field { off: 0x1a0, size: 0x14, name: "itemAudioSettingsEngineVolume", elem: 0x0, sub: Some(168) }, Field { off: 0x1b4, size: 0x14, name: "itemAudioSettingsAmbientVolume", elem: 0x0, sub: Some(168) }, Field { off: 0x1c8, size: 0x54, name: "menuAudioSettings", elem: 0x0, sub: Some(161) }, Field { off: 0x21c, size: 0x10, name: "iteratorConfig", elem: 0x0, sub: Some(160) }, Field { off: 0x22c, size: 0xc, name: "itemControllerSettingsTitle", elem: 0x0, sub: Some(170) }, Field { off: 0x238, size: 0x10, name: "itemControllerConfig", elem: 0x0, sub: Some(167) }, Field { off: 0x248, size: 0x18, name: "itemControllerShockMode", elem: 0x0, sub: Some(169) }, Field { off: 0x260, size: 0x18, name: "itemControllerShockImpact", elem: 0x0, sub: Some(169) }, Field { off: 0x278, size: 0x54, name: "menuControllerConfig", elem: 0x0, sub: Some(161) }, Field { off: 0x2cc, size: 0xc, name: "itemConfirmTitle", elem: 0x0, sub: Some(170) }, Field { off: 0x2d8, size: 0xc, name: "itemConfirmAreYouSure", elem: 0x0, sub: Some(170) }, Field { off: 0x2e4, size: 0x10, name: "itemConfirmNo", elem: 0x0, sub: Some(164) }, Field { off: 0x2f4, size: 0x10, name: "itemConfirmYes", elem: 0x0, sub: Some(164) }, Field { off: 0x304, size: 0x54, name: "menuConfirmYesNo", elem: 0x0, sub: Some(161) }]),
+    ("tPerpModelList", 0x8, &[Field { off: 0x0, size: 0x4, name: "carModel", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "carColor", elem: 0x0, sub: None }]),
+    ("tQuat", 0x8, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "y", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "z", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "w", elem: 0x0, sub: None }]),
+    ("RECT", 0x8, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "y", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "w", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "h", elem: 0x0, sub: None }]),
+    ("tRecordBuffer", 0x14, &[Field { off: 0x0, size: 0x8, name: "sName", elem: 0x1, sub: None }, Field { off: 0x8, size: 0x4, name: "nCar", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "nTime", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "nBestLap", elem: 0x0, sub: None }]),
     ("RelCoord16", 0x4, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "z", elem: 0x0, sub: None }]),
+    ("tReplayBuffer", 0x6a2c, &[Field { off: 0x0, size: 0xa28, name: "gameSetup", elem: 0x0, sub: Some(95) }, Field { off: 0xa28, size: 0x4, name: "size", elem: 0x0, sub: None }, Field { off: 0xa2c, size: 0x6000, name: "buffer", elem: 0x1, sub: None }]),
+    ("tReplayCameraModes", 0x10, &[Field { off: 0x0, size: 0x4, name: "defaultCamera", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "timeCounter", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "cameraMode", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "cutToNextCamera", elem: 0x0, sub: None }]),
     ("tReplayInterface", 0x20, &[Field { off: 0x0, size: 0x4, name: "pause", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "speed", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "end", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "camera", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "selection", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "depressed", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "changeCamera", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x4, name: "statsScreen", elem: 0x0, sub: None }]),
-    ("tSaveCarInfo", 0xe0, &[Field { off: 0x0, size: 0x80, name: "fSaveInfo", elem: 0x4, sub: Some(71) }, Field { off: 0x80, size: 0x30, name: "fSaveAvailable", elem: 0x1, sub: None }, Field { off: 0xb0, size: 0x30, name: "fSaveViewable", elem: 0x1, sub: None }]),
+    ("tSaveCarInfo", 0xe0, &[Field { off: 0x0, size: 0x80, name: "fSaveInfo", elem: 0x4, sub: Some(158) }, Field { off: 0x80, size: 0x30, name: "fSaveAvailable", elem: 0x1, sub: None }, Field { off: 0xb0, size: 0x30, name: "fSaveViewable", elem: 0x1, sub: None }]),
+    ("tSaveSurface", 0x8, &[Field { off: 0x0, size: 0x4, name: "fSimQuad", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fSurface", elem: 0x0, sub: None }]),
+    ("tSaveTournament", 0xb0, &[Field { off: 0x0, size: 0x4, name: "fSaveMoney", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fSaveTier", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fSaveTournament", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "fSaveTrack", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "fSaveNumRacers", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x60, name: "fSaveCompetitors", elem: 0x10, sub: Some(70) }, Field { off: 0x68, size: 0x40, name: "fSaveBestPlacement", elem: 0x1, sub: None }, Field { off: 0xa8, size: 0x8, name: "fSaveTierFinishPrize", elem: 0x2, sub: None }]),
+    ("tSaveTrackInfo", 0x10, &[Field { off: 0x0, size: 0x10, name: "fTrackActivated", elem: 0x1, sub: None }]),
     ("Sched_tFunctionSchedule", 0x10, &[Field { off: 0x0, size: 0x4, name: "priority", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "function", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "var1", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "var2", elem: 0x0, sub: None }]),
-    ("Sched_tSchedule", 0x18, &[Field { off: 0x0, size: 0x4, name: "maxNumFunctions", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "numFunctions", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x10, name: "func", elem: 0x10, sub: Some(75) }]),
+    ("Sched_tSchedule", 0x18, &[Field { off: 0x0, size: 0x4, name: "maxNumFunctions", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "numFunctions", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x10, name: "func", elem: 0x10, sub: Some(185) }]),
+    ("tScreen", 0x64, &[Field { off: 0x0, size: 0x28, name: "fPermShapes", elem: 0x0, sub: Some(213) }, Field { off: 0x28, size: 0x28, name: "fSwapShapes", elem: 0x0, sub: Some(213) }, Field { off: 0x50, size: 0x4, name: "fTransitionTicks", elem: 0x0, sub: None }, Field { off: 0x54, size: 0x4, name: "fTransitionOff", elem: 0x0, sub: None }, Field { off: 0x58, size: 0x4, name: "fInternalScreenFadeVal", elem: 0x0, sub: None }, Field { off: 0x5c, size: 0x2, name: "fScreenFadeVal", elem: 0x0, sub: None }, Field { off: 0x60, size: 0x4, name: "vtable", elem: 0x0, sub: None }]),
+    ("tScreenAudio", 0x7c, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x2, name: "fShapeCount", elem: 0x0, sub: None }, Field { off: 0x66, size: 0x1, name: "prevAudioMode", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x2, name: "audioTest", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "audioTestHandle", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x2, name: "fPrevSelectedSong", elem: 0x0, sub: None }, Field { off: 0x72, size: 0x1, name: "fCurrentAudioMode", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x2, name: "fSelectedSong", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "songlist", elem: 0x0, sub: None }]),
+    ("tScreenBeTheCopCongrats", 0x184, &[Field { off: 0x0, size: 0x184, name: "tScreenCongrats", elem: 0x0, sub: Some(193) }]),
+    ("tScreenCarSelect", 0x3a0, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0xa8, name: "fOverlays", elem: 0x18, sub: Some(157) }, Field { off: 0x10c, size: 0x10, name: "fCurrentOverlays", elem: 0x4, sub: None }, Field { off: 0x11c, size: 0x2, name: "fState", elem: 0x0, sub: None }, Field { off: 0x11e, size: 0x2, name: "fPreviousCar", elem: 0x0, sub: None }, Field { off: 0x120, size: 0x2, name: "fPreviousCarID", elem: 0x0, sub: None }, Field { off: 0x122, size: 0x2, name: "fPreviousCountry", elem: 0x0, sub: None }, Field { off: 0x124, size: 0x1e0, name: "tvConfigs", elem: 0x30, sub: Some(221) }, Field { off: 0x304, size: 0x70, name: "fVideoWall", elem: 0x38, sub: Some(246) }, Field { off: 0x374, size: 0x4, name: "fBrightness", elem: 0x2, sub: None }, Field { off: 0x378, size: 0x4, name: "fDestBrightness", elem: 0x2, sub: None }, Field { off: 0x37c, size: 0x8, name: "fFadeTicks", elem: 0x4, sub: None }, Field { off: 0x384, size: 0x4, name: "fTVsInitialized", elem: 0x0, sub: None }, Field { off: 0x388, size: 0x4, name: "fInShowroom", elem: 0x0, sub: None }, Field { off: 0x38c, size: 0x4, name: "fShowroomTicks", elem: 0x0, sub: None }, Field { off: 0x390, size: 0x4, name: "fSpeechTicks", elem: 0x0, sub: None }, Field { off: 0x394, size: 0x4, name: "fSpeechPlayed", elem: 0x0, sub: None }, Field { off: 0x398, size: 0x4, name: "fSplineInterval", elem: 0x0, sub: None }, Field { off: 0x39c, size: 0x4, name: "fCameraRotation", elem: 0x0, sub: None }]),
+    ("tScreenCarSelectDuel", 0x3d0, &[Field { off: 0x0, size: 0x3a0, name: "tScreenCarSelect", elem: 0x0, sub: Some(190) }, Field { off: 0x3a0, size: 0x2, name: "fPreviousOpponent", elem: 0x0, sub: None }, Field { off: 0x3a4, size: 0x4, name: "fOpponentTVsInitialized", elem: 0x0, sub: None }, Field { off: 0x3a8, size: 0x28, name: "fOpponentShapes", elem: 0x0, sub: Some(213) }]),
+    ("tScreenCarSelectTwoPlayer", 0x438, &[Field { off: 0x0, size: 0x3a0, name: "tScreenCarSelect", elem: 0x0, sub: Some(190) }, Field { off: 0x3a0, size: 0x98, name: "CarDialog", elem: 0x0, sub: Some(78) }]),
+    ("tScreenCongrats", 0x184, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "congratsMessage", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "trophy", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "smallSpinningThing", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "fNumSpinShapes", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "fNumSmallSpinShapes", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "fCarPlayer", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "TotalCash", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "CashAwarded", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "framenum", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "starttick", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x4, name: "InExtraSpin", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x4, name: "InExtraSpinTick", elem: 0x0, sub: None }, Field { off: 0x94, size: 0xcc, name: "fCarInfo", elem: 0x0, sub: Some(58) }, Field { off: 0x160, size: 0x4, name: "fGotCar", elem: 0x0, sub: None }, Field { off: 0x164, size: 0x4, name: "fEnterTick", elem: 0x0, sub: None }, Field { off: 0x168, size: 0x4, name: "fCountedDown", elem: 0x0, sub: None }, Field { off: 0x16c, size: 0x4, name: "fStartCountdownNOW", elem: 0x0, sub: None }, Field { off: 0x170, size: 0x4, name: "fCountSpeed", elem: 0x0, sub: None }, Field { off: 0x174, size: 0x4, name: "fSpeechToPlay", elem: 0x0, sub: None }, Field { off: 0x178, size: 0x2, name: "fCarX", elem: 0x0, sub: None }, Field { off: 0x17a, size: 0x2, name: "fCarY", elem: 0x0, sub: None }, Field { off: 0x17c, size: 0x4, name: "fCarCX", elem: 0x0, sub: None }, Field { off: 0x180, size: 0x4, name: "fCarCY", elem: 0x0, sub: None }]),
+    ("tScreenControllerConfig", 0x17c, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x8, name: "fShaker", elem: 0x0, sub: Some(91) }, Field { off: 0x6c, size: 0x1, name: "fPrevConfig", elem: 0x0, sub: None }, Field { off: 0x6d, size: 0x1, name: "fTextConfig", elem: 0x0, sub: None }, Field { off: 0x6e, size: 0x1, name: "fTextController", elem: 0x0, sub: None }, Field { off: 0x6f, size: 0x1, name: "fPrevController", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "fFade", elem: 0x2, sub: None }, Field { off: 0x74, size: 0x4, name: "fFadeController", elem: 0x2, sub: None }, Field { off: 0x78, size: 0x4, name: "fStartTick", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x2, name: "fGotTick", elem: 0x0, sub: None }, Field { off: 0x7e, size: 0x2, name: "fAnim", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x2, name: "fAnimFrame", elem: 0x0, sub: None }, Field { off: 0x82, size: 0x2, name: "fAnimStart", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x2, name: "fAnimStop", elem: 0x0, sub: None }, Field { off: 0x86, size: 0x2, name: "fAnimStep", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x2, name: "fAnimController", elem: 0x0, sub: None }, Field { off: 0x8a, size: 0x2, name: "fSwap", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x2, name: "fAnimFade", elem: 0x0, sub: None }, Field { off: 0x8e, size: 0x2, name: "fAnimFadeStart", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x2, name: "fAnimFadeStop", elem: 0x0, sub: None }, Field { off: 0x92, size: 0x2, name: "fAnimFadeFrame", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x2, name: "fAnimFadeController", elem: 0x0, sub: None }, Field { off: 0x96, size: 0x2, name: "CurrentlyLoadedArt", elem: 0x0, sub: None }, Field { off: 0x98, size: 0x2, name: "negconChoice", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x4, name: "fTransitionedIn", elem: 0x0, sub: None }, Field { off: 0xa0, size: 0x4, name: "fTransitioningIn", elem: 0x0, sub: None }, Field { off: 0xa4, size: 0x4, name: "fTransitioningOut", elem: 0x0, sub: None }, Field { off: 0xa8, size: 0x2, name: "fArrowFade", elem: 0x0, sub: None }, Field { off: 0xaa, size: 0x2, name: "fArrowFadeDir", elem: 0x0, sub: None }, Field { off: 0xac, size: 0x2, name: "fTextTypeOn", elem: 0x0, sub: None }, Field { off: 0xb0, size: 0x4, name: "fFadeTextOut", elem: 0x0, sub: None }, Field { off: 0xb4, size: 0x2, name: "mult", elem: 0x0, sub: None }, Field { off: 0xb8, size: 0xa8, name: "negconPopUp", elem: 0x0, sub: Some(85) }, Field { off: 0x160, size: 0x4, name: "fTimeOutStartTick", elem: 0x0, sub: None }, Field { off: 0x164, size: 0x4, name: "SuperFastFadeOut", elem: 0x0, sub: None }, Field { off: 0x168, size: 0x4, name: "fPlayedInSound", elem: 0x0, sub: None }, Field { off: 0x16c, size: 0x2, name: "fShakingItem", elem: 0x0, sub: None }, Field { off: 0x170, size: 0x4, name: "fResetShakeTimeOut", elem: 0x0, sub: None }, Field { off: 0x174, size: 0x1, name: "fCurrentController", elem: 0x0, sub: None }, Field { off: 0x178, size: 0x4, name: "player", elem: 0x0, sub: None }]),
+    ("tScreenDisplay", 0x64, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }]),
+    ("tScreenMain", 0x5b8, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "hVideo", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "fFrame", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "fStartTicks", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "fAnimTicks", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x2, name: "fAnimLocation", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "fState", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x300, name: "tvConfigs", elem: 0x30, sub: Some(221) }, Field { off: 0x37c, size: 0x40, name: "tvStates", elem: 0x4, sub: None }, Field { off: 0x3bc, size: 0x180, name: "tvTransitions", elem: 0x18, sub: Some(245) }, Field { off: 0x53c, size: 0x4, name: "fTVsInitialized", elem: 0x0, sub: None }, Field { off: 0x540, size: 0x1, name: "fTransitionDirection", elem: 0x0, sub: None }, Field { off: 0x544, size: 0x4, name: "fAnimationUploaded", elem: 0x0, sub: None }, Field { off: 0x548, size: 0x2, name: "fPreviousAnim", elem: 0x0, sub: None }, Field { off: 0x54a, size: 0x2, name: "fWarningFade", elem: 0x0, sub: None }, Field { off: 0x54c, size: 0x2, name: "fPreviousMovie", elem: 0x0, sub: None }, Field { off: 0x54e, size: 0x2, name: "fCurrentMovie", elem: 0x0, sub: None }, Field { off: 0x550, size: 0x4, name: "bVideoAborted", elem: 0x0, sub: None }, Field { off: 0x554, size: 0x4, name: "fMovieTicks", elem: 0x0, sub: None }, Field { off: 0x558, size: 0x50, name: "fVideoShapes", elem: 0x28, sub: Some(213) }, Field { off: 0x5a8, size: 0x4, name: "fCurrentSlot", elem: 0x0, sub: None }, Field { off: 0x5ac, size: 0x8, name: "fCurrentBG", elem: 0x4, sub: None }, Field { off: 0x5b4, size: 0x4, name: "fNumTVsInTransition", elem: 0x0, sub: None }]),
+    ("tScreenMemcard", 0x5a4, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "theNFS4icon", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "card", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "pCI", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x1e0, name: "fMemTitle", elem: 0x1, sub: None }, Field { off: 0x250, size: 0xf, name: "goticon", elem: 0x1, sub: None }, Field { off: 0x25f, size: 0xf, name: "numicon", elem: 0x1, sub: None }, Field { off: 0x26e, size: 0xf, name: "numblock", elem: 0x1, sub: None }, Field { off: 0x280, size: 0x294, name: "fMemFile", elem: 0x2c, sub: Some(120) }, Field { off: 0x514, size: 0x1e, name: "fMemIconClutId", elem: 0x2, sub: None }, Field { off: 0x532, size: 0x1e, name: "fFadeIcon", elem: 0x2, sub: None }, Field { off: 0x550, size: 0x4, name: "fReadyToGetNewIcons", elem: 0x0, sub: None }, Field { off: 0x554, size: 0x4, name: "fInitedMemCard", elem: 0x0, sub: None }, Field { off: 0x558, size: 0x28, name: "fMemCardMessage", elem: 0x1, sub: None }, Field { off: 0x580, size: 0x4, name: "fMemCardMessageTextSys", elem: 0x0, sub: None }, Field { off: 0x584, size: 0x4, name: "message", elem: 0x0, sub: None }, Field { off: 0x588, size: 0x2, name: "memcardanimframe", elem: 0x0, sub: None }, Field { off: 0x58a, size: 0x2, name: "count", elem: 0x0, sub: None }, Field { off: 0x58c, size: 0x2, name: "cursorPosition", elem: 0x0, sub: None }, Field { off: 0x590, size: 0x4, name: "checkingstart", elem: 0x0, sub: None }, Field { off: 0x594, size: 0x4, name: "fSomePunkInQAPulledOutTheMemoryCardWhileLoadingIcons", elem: 0x0, sub: None }, Field { off: 0x598, size: 0x4, name: "fScreenFadeReadyTick", elem: 0x0, sub: None }, Field { off: 0x59c, size: 0x2, name: "player", elem: 0x0, sub: None }, Field { off: 0x5a0, size: 0x4, name: "fGetNewIcons", elem: 0x0, sub: None }]),
+    ("tScreenPinkSlipCongrats", 0x188, &[Field { off: 0x0, size: 0x184, name: "tScreenCongrats", elem: 0x0, sub: Some(193) }, Field { off: 0x184, size: 0x2, name: "fWinner", elem: 0x0, sub: None }]),
+    ("tScreenPinkSlipStandings", 0x94, &[Field { off: 0x0, size: 0x94, name: "tScreenTournamentStandings3item", elem: 0x0, sub: Some(205) }]),
+    ("tScreenPinkSlips", 0x2c8, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "fMenu", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "hVideo", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "fFrame", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x2, name: "fPreviousTrack", elem: 0x0, sub: None }, Field { off: 0x72, size: 0x2, name: "fBrightness", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x2, name: "fDestBrightness", elem: 0x0, sub: None }, Field { off: 0x76, size: 0x2, name: "fStartBrightness", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "fStartTicks", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "fTVTicks", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x1, name: "fTransitionDirection", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x180, name: "fTrackTVs", elem: 0x30, sub: Some(221) }, Field { off: 0x204, size: 0xc0, name: "fImageTVs", elem: 0x30, sub: Some(221) }, Field { off: 0x2c4, size: 0x4, name: "fTVsInitialized", elem: 0x0, sub: None }]),
+    ("tScreenPinkSlipsCarSelect", 0x44c, &[Field { off: 0x0, size: 0x438, name: "tScreenCarSelectTwoPlayer", elem: 0x0, sub: Some(192) }, Field { off: 0x438, size: 0x4, name: "waitfordialog", elem: 0x0, sub: None }, Field { off: 0x43c, size: 0x4, name: "pCI", elem: 0x0, sub: None }, Field { off: 0x440, size: 0x4, name: "fStartCheckTick", elem: 0x0, sub: None }, Field { off: 0x444, size: 0x4, name: "fCardFailed", elem: 0x0, sub: None }, Field { off: 0x448, size: 0x4, name: "fExitingScreen", elem: 0x0, sub: None }]),
+    ("tScreenTournSelect", 0x2c8, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "hVideo", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "fFrame", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x180, name: "tvConfigs", elem: 0x30, sub: Some(221) }, Field { off: 0x1ec, size: 0xc0, name: "trophyTV", elem: 0x30, sub: Some(221) }, Field { off: 0x2ac, size: 0x2, name: "fPreviousMovie", elem: 0x0, sub: None }, Field { off: 0x2ae, size: 0x2, name: "fCurrentMovie", elem: 0x0, sub: None }, Field { off: 0x2b0, size: 0x4, name: "fStartTicks", elem: 0x0, sub: None }, Field { off: 0x2b4, size: 0x4, name: "fTVTicks", elem: 0x0, sub: None }, Field { off: 0x2b8, size: 0x2, name: "fTransitionDirection", elem: 0x0, sub: None }, Field { off: 0x2ba, size: 0x1, name: "fPreviousTrophy", elem: 0x0, sub: None }, Field { off: 0x2bc, size: 0x4, name: "fTVsInitialized", elem: 0x0, sub: None }, Field { off: 0x2c0, size: 0x4, name: "PreCalculatedTournamentY", elem: 0x0, sub: None }, Field { off: 0x2c4, size: 0x4, name: "fPrevi", elem: 0x0, sub: None }]),
+    ("tScreenTournamentCongrats", 0x184, &[Field { off: 0x0, size: 0x184, name: "tScreenCongrats", elem: 0x0, sub: Some(193) }]),
+    ("tScreenTournamentStandings", 0x94, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "moneyFinal", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "moneyAwarded", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "moneyDamage", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "moneyBonus", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x4, name: "starttick", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "gotmoney", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "gotbonus", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x4, name: "gotbilled", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x4, name: "fDrawMoney", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "fCountedDown", elem: 0x0, sub: None }, Field { off: 0x8c, size: 0x4, name: "fStartCountdownNOW", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x4, name: "fCountSpeed", elem: 0x0, sub: None }]),
+    ("tScreenTournamentStandings3item", 0x94, &[Field { off: 0x0, size: 0x94, name: "tScreenTournamentStandings", elem: 0x0, sub: Some(204) }]),
+    ("tScreenTournamentTrophy", 0x188, &[Field { off: 0x0, size: 0x184, name: "tScreenCongrats", elem: 0x0, sub: Some(193) }, Field { off: 0x184, size: 0x2, name: "fShapeCount", elem: 0x0, sub: None }, Field { off: 0x186, size: 0x1, name: "fDoUpdate", elem: 0x0, sub: None }]),
+    ("tScreenTrackInfo", 0x2a4, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x28, name: "fTrack", elem: 0x0, sub: Some(227) }, Field { off: 0x8c, size: 0x1e0, name: "tvConfigs", elem: 0x30, sub: Some(221) }, Field { off: 0x26c, size: 0x38, name: "fVideoWall", elem: 0x0, sub: Some(246) }]),
+    ("tScreenTrackRecords", 0x74, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "TrackRecords", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "flare_intensity", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "flareextra", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x4, name: "fReadNewData", elem: 0x0, sub: None }]),
+    ("tScreenTrackSelect", 0x2a0, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "hVideo", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x4, name: "fFrame", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x2, name: "fPreviousTrack", elem: 0x0, sub: None }, Field { off: 0x6e, size: 0x2, name: "fMovieTrack", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x2, name: "fBrightness", elem: 0x0, sub: None }, Field { off: 0x72, size: 0x2, name: "fDestBrightness", elem: 0x0, sub: None }, Field { off: 0x74, size: 0x2, name: "fStartBrightness", elem: 0x0, sub: None }, Field { off: 0x78, size: 0x4, name: "fStartTicks", elem: 0x0, sub: None }, Field { off: 0x7c, size: 0x4, name: "fTicksSet", elem: 0x0, sub: None }, Field { off: 0x80, size: 0x1e0, name: "tvConfigs", elem: 0x30, sub: Some(221) }, Field { off: 0x260, size: 0x38, name: "fVideoWall", elem: 0x0, sub: Some(246) }, Field { off: 0x298, size: 0x4, name: "fTVsInitialized", elem: 0x0, sub: None }, Field { off: 0x29c, size: 0x4, name: "fVideoTicks", elem: 0x0, sub: None }]),
+    ("tScreenTrophyInfo", 0x68, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "BannerCol", elem: 0x0, sub: None }]),
+    ("tScreenTrophyRoom", 0x158, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x28, name: "fTrophyShapes", elem: 0x0, sub: Some(213) }, Field { off: 0x8c, size: 0x2, name: "fNumTrophies", elem: 0x0, sub: None }, Field { off: 0x90, size: 0x4, name: "startTicks", elem: 0x0, sub: None }, Field { off: 0x94, size: 0x2, name: "fShapeCount", elem: 0x0, sub: None }, Field { off: 0x98, size: 0x4, name: "fLoadingTrophy", elem: 0x0, sub: None }, Field { off: 0x9c, size: 0x1, name: "fPreviousTrophy", elem: 0x0, sub: None }, Field { off: 0x9d, size: 0x1, name: "fDoUpdate", elem: 0x0, sub: None }, Field { off: 0xa0, size: 0x4, name: "fClearScreen", elem: 0x0, sub: None }, Field { off: 0xa4, size: 0x1, name: "fBrightness", elem: 0x0, sub: None }, Field { off: 0xa8, size: 0x4, name: "fStartTicks", elem: 0x0, sub: None }, Field { off: 0xac, size: 0x20, name: "fTextInfo", elem: 0x2, sub: None }, Field { off: 0xcc, size: 0x1, name: "thisisuseless", elem: 0x0, sub: None }, Field { off: 0xd0, size: 0x4, name: "tier", elem: 0x0, sub: None }, Field { off: 0xd4, size: 0x4, name: "fRealCurrentTourn", elem: 0x2, sub: None }, Field { off: 0xd8, size: 0x80, name: "fTrophyList", elem: 0x2, sub: None }]),
+    ("tScreenUserName", 0xcc, &[Field { off: 0x0, size: 0x64, name: "tScreen", elem: 0x0, sub: Some(187) }, Field { off: 0x64, size: 0x4, name: "callingMenu", elem: 0x0, sub: None }, Field { off: 0x68, size: 0x2, name: "fTextFade", elem: 0x0, sub: None }, Field { off: 0x6c, size: 0x4, name: "fInTransition", elem: 0x0, sub: None }, Field { off: 0x70, size: 0x5a, name: "fRowList", elem: 0x1, sub: None }]),
+    ("tShapeInformation", 0x28, &[Field { off: 0x0, size: 0x4, name: "fShapes", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fFile", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "fDestFile", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "async_handle", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x2, name: "fNumShapes", elem: 0x0, sub: None }, Field { off: 0x12, size: 0x2, name: "fFlags", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x10, name: "fFilename", elem: 0x1, sub: None }, Field { off: 0x24, size: 0x4, name: "fLoadCancelled", elem: 0x0, sub: None }]),
     ("Sim_tSimGlobalVar", 0x18, &[Field { off: 0x0, size: 0x4, name: "gameStarted", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "gameTicks", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "time32Hz", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "schedule64Hz", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "schedule32Hz", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "schedule32Hz2", elem: 0x0, sub: None }]),
-    ("sim_queue", 0x20c, &[Field { off: 0x0, size: 0x100, name: "Buffer", elem: 0x4, sub: Some(64) }, Field { off: 0x100, size: 0x100, name: "Validity", elem: 0x4, sub: None }, Field { off: 0x200, size: 0x4, name: "HeadTime", elem: 0x0, sub: None }, Field { off: 0x204, size: 0x8, name: "TailTime", elem: 0x4, sub: None }]),
+    ("sim_queue", 0x20c, &[Field { off: 0x0, size: 0x100, name: "Buffer", elem: 0x4, sub: Some(103) }, Field { off: 0x100, size: 0x100, name: "Validity", elem: 0x4, sub: None }, Field { off: 0x200, size: 0x4, name: "HeadTime", elem: 0x0, sub: None }, Field { off: 0x204, size: 0x8, name: "TailTime", elem: 0x4, sub: None }]),
     ("Sim_tSimSystemVar", 0x1c, &[Field { off: 0x0, size: 0x4, name: "restartGame", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "endSimGame", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "pauseSim", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "keyRelease", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "quickPauseSim", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "goalClockTicks", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "currentClockTicks", elem: 0x0, sub: None }]),
-    ("tNormalCacheEntry", 0x20, &[Field { off: 0x0, size: 0x2, name: "sliceInd", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "triangleFlag", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "quadInd", elem: 0x0, sub: None }, Field { off: 0x4, size: 0xc, name: "normal", elem: 0x0, sub: Some(55) }, Field { off: 0x10, size: 0xc, name: "forward", elem: 0x0, sub: Some(55) }, Field { off: 0x1c, size: 0x4, name: "accessTime", elem: 0x0, sub: None }]),
-    ("trigger_t", 0x48, &[Field { off: 0x0, size: 0x8, name: "any", elem: 0x0, sub: Some(82) }, Field { off: 0x0, size: 0x14, name: "simple", elem: 0x0, sub: Some(85) }, Field { off: 0x0, size: 0x14, name: "roadblock", elem: 0x0, sub: Some(84) }, Field { off: 0x0, size: 0x48, name: "offroad", elem: 0x0, sub: Some(83) }, Field { off: 0x0, size: 0x38, name: "trafficAccident", elem: 0x0, sub: Some(86) }, Field { off: 0x0, size: 0x40, name: "trafficPath", elem: 0x0, sub: Some(87) }]),
+    ("tSkid", 0x1c, &[Field { off: 0x0, size: 0xc, name: "pt", elem: 0x0, sub: Some(72) }, Field { off: 0xc, size: 0x4, name: "clr", elem: 0x0, sub: Some(54) }, Field { off: 0x10, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "nseg", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "chunk", elem: 0x0, sub: None }]),
+    ("tSmallCoordXY", 0x4, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "y", elem: 0x0, sub: None }]),
+    ("tStageInfo", 0x2c, &[Field { off: 0x0, size: 0x1, name: "fCarModel", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fColor", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fAIPersonality", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fDirection", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "fTimeLimit", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "fWingman", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x2, name: "fSpikeBelt", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x2, name: "fBlockadeCop", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x1, name: "fPlacement", elem: 0x0, sub: None }, Field { off: 0xd, size: 0x1, name: "fStyle", elem: 0x0, sub: None }, Field { off: 0xe, size: 0x2, name: "fDistance", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "fSpeed", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fWeight", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fGlue", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x1, name: "fSpeechColor", elem: 0x0, sub: None }, Field { off: 0x1d, size: 0xf, name: "fReserved", elem: 0x1, sub: None }]),
+    ("tNormalCacheEntry", 0x20, &[Field { off: 0x0, size: 0x2, name: "sliceInd", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "triangleFlag", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "quadInd", elem: 0x0, sub: None }, Field { off: 0x4, size: 0xc, name: "normal", elem: 0x0, sub: Some(72) }, Field { off: 0x10, size: 0xc, name: "forward", elem: 0x0, sub: Some(72) }, Field { off: 0x1c, size: 0x4, name: "accessTime", elem: 0x0, sub: None }]),
+    ("tTVConfig", 0x30, &[Field { off: 0x0, size: 0x4, name: "state", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "transition", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "destBrightness", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x2, name: "flags", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x2, name: "fxWide", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x2, name: "fxThin", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "tint", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x16, size: 0x2, name: "y", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x2, name: "w", elem: 0x0, sub: None }, Field { off: 0x1a, size: 0x2, name: "h", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x1, name: "u", elem: 0x0, sub: None }, Field { off: 0x1d, size: 0x1, name: "v", elem: 0x0, sub: None }, Field { off: 0x1e, size: 0x1, name: "uw", elem: 0x0, sub: None }, Field { off: 0x1f, size: 0x1, name: "vh", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x1, name: "shapeType", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x2, name: "clut", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "tpage", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x2, name: "shapex", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x2, name: "shapey", elem: 0x0, sub: None }, Field { off: 0x2a, size: 0x2, name: "clutID", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x2, name: "flip_axis", elem: 0x0, sub: None }]),
+    ("tTexture_ShapeInfo", 0x20, &[Field { off: 0x0, size: 0x4, name: "shpptr", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "clutID", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "depth", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x2, name: "width", elem: 0x0, sub: None }, Field { off: 0x12, size: 0x2, name: "height", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x2, name: "centerx", elem: 0x0, sub: None }, Field { off: 0x16, size: 0x2, name: "centery", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x2, name: "shapex", elem: 0x0, sub: None }, Field { off: 0x1a, size: 0x2, name: "shapey", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x2, name: "tpage", elem: 0x0, sub: None }, Field { off: 0x1e, size: 0x2, name: "clut", elem: 0x0, sub: None }]),
+    ("tTierInfo", 0xc, &[Field { off: 0x0, size: 0x1, name: "fNumTournaments", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fDescriptionID", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fTournOffset", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fPad", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x8, name: "fReserved", elem: 0x1, sub: None }]),
+    ("tTournamentDefinition", 0x2924, &[Field { off: 0x0, size: 0x24, name: "fTiers", elem: 0xc, sub: Some(223) }, Field { off: 0x24, size: 0x1500, name: "fTournaments", elem: 0x54, sub: Some(226) }, Field { off: 0x1524, size: 0x1400, name: "fTracks", elem: 0x28, sub: Some(227) }]),
+    ("tTournamentManager", 0x284, &[Field { off: 0x0, size: 0x1, name: "fNumTiers", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fTier", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "fTournament", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "fCurrentTrack", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "fNumRacers", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x4, name: "fMoney", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x4, name: "fDefinition", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x8, name: "fTierList", elem: 0x2, sub: None }, Field { off: 0x24, size: 0x8, name: "fTierFinishPrize", elem: 0x2, sub: None }, Field { off: 0x2c, size: 0x8, name: "fTierFinishPrizeChange", elem: 0x2, sub: None }, Field { off: 0x34, size: 0x82, name: "fTournamentList", elem: 0x2, sub: None }, Field { off: 0xb6, size: 0x22, name: "fTrackList", elem: 0x2, sub: None }, Field { off: 0xd8, size: 0x10, name: "fDirection", elem: 0x1, sub: None }, Field { off: 0xe8, size: 0x10, name: "fMirror", elem: 0x1, sub: None }, Field { off: 0xf8, size: 0x10, name: "fTimeOfDay", elem: 0x1, sub: None }, Field { off: 0x108, size: 0x10, name: "fWeather", elem: 0x1, sub: None }, Field { off: 0x118, size: 0x60, name: "fCompetitors", elem: 0x10, sub: Some(70) }, Field { off: 0x178, size: 0x78, name: "fCarLineup", elem: 0x14, sub: Some(59) }, Field { off: 0x1f0, size: 0x40, name: "fBestPlacement", elem: 0x1, sub: None }, Field { off: 0x230, size: 0x1, name: "fPrevBestPlacement", elem: 0x0, sub: None }, Field { off: 0x231, size: 0x6, name: "fFinishPoints", elem: 0x1, sub: None }, Field { off: 0x237, size: 0x6, name: "fRanking", elem: 0x1, sub: None }, Field { off: 0x240, size: 0x44, name: "fAwards", elem: 0x0, sub: Some(45) }]),
+    ("tTourneyInfo", 0x54, &[Field { off: 0x0, size: 0x1, name: "fTournamentID", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fNumTracks", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fTrackOffset", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fOpponentCarClass", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fTraffic", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fKnockout", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "fNumCars", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "fAwardCar", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "fAwardCarModel", elem: 0x0, sub: None }, Field { off: 0x9, size: 0x1, name: "fAwardCarUpgrades", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x2, name: "fActivateFlags", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x2, name: "fRequiredFlags", elem: 0x0, sub: None }, Field { off: 0xe, size: 0x1, name: "fActivatedTrack", elem: 0x0, sub: None }, Field { off: 0xf, size: 0x1, name: "fActivatedCarClass", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x1, name: "fActivatedCar", elem: 0x0, sub: None }, Field { off: 0x11, size: 0x1, name: "fRequiredTournamentID", elem: 0x0, sub: None }, Field { off: 0x12, size: 0x1, name: "fRequiredCar", elem: 0x0, sub: None }, Field { off: 0x13, size: 0x1, name: "fRequiredUpgrades", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x1, name: "fSpecificUpgrades", elem: 0x0, sub: None }, Field { off: 0x15, size: 0x1, name: "fRequiredCheatID", elem: 0x0, sub: None }, Field { off: 0x16, size: 0x1, name: "fTrophyID", elem: 0x0, sub: None }, Field { off: 0x17, size: 0x1, name: "fPad", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x18, name: "fPrize", elem: 0x4, sub: None }, Field { off: 0x30, size: 0x4, name: "fEntranceFee", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x5, name: "fPersonalities", elem: 0x1, sub: None }, Field { off: 0x39, size: 0x5, name: "fOpponentCar", elem: 0x1, sub: None }, Field { off: 0x3e, size: 0x5, name: "fOpponentUpgrades", elem: 0x1, sub: None }, Field { off: 0x43, size: 0x1, name: "fActivatedTrackClass", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x1, name: "fActivatedCheat", elem: 0x0, sub: None }, Field { off: 0x45, size: 0x1, name: "fNumLaps", elem: 0x0, sub: None }, Field { off: 0x46, size: 0xe, name: "fReserved", elem: 0x1, sub: None }]),
+    ("tTrackInfo", 0x28, &[Field { off: 0x0, size: 0x1, name: "fTrackNumber", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fDirection", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fMirrored", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fTimeOfDay", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fWeather", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fRandom", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "fSituations", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "fPad", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x18, name: "fPrize", elem: 0x4, sub: None }, Field { off: 0x20, size: 0x4, name: "fDifficulty", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x4, name: "fReserved", elem: 0x1, sub: None }]),
+    ("tTrackInformation", 0x30, &[Field { off: 0x0, size: 0x1, name: "fTrackID", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "fSimNumber", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "fTrackDifficulty", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "fAvailable", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "fIsEgg", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "fLengthKM", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "fLengthMiles", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "fNumMoments", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x8, name: "fShapeName", elem: 0x1, sub: None }, Field { off: 0x10, size: 0x8, name: "fSplineName", elem: 0x1, sub: None }, Field { off: 0x18, size: 0x1, name: "fCountry", elem: 0x0, sub: None }, Field { off: 0x19, size: 0x1, name: "fDispatch", elem: 0x0, sub: None }, Field { off: 0x1a, size: 0x1, name: "fReverseCall", elem: 0x0, sub: None }, Field { off: 0x1b, size: 0x1, name: "fLanguage", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x6, name: "fTrafficCars", elem: 0x1, sub: None }, Field { off: 0x22, size: 0x2, name: "fTX", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "fTY", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x2, name: "fSX", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x2, name: "fSY", elem: 0x0, sub: None }, Field { off: 0x2a, size: 0x1, name: "fSpeedoCountry", elem: 0x0, sub: None }, Field { off: 0x2b, size: 0x1, name: "fPad", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "fRotate", elem: 0x0, sub: None }]),
+    ("tTrackManager", 0x88, &[Field { off: 0x0, size: 0x4, name: "fNumTracks", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "fTracks", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x40, name: "fAvailableTracks", elem: 0x4, sub: None }, Field { off: 0x48, size: 0x40, name: "fViewableTracks", elem: 0x4, sub: None }]),
+    ("trigger_t", 0x48, &[Field { off: 0x0, size: 0x8, name: "any", elem: 0x0, sub: Some(231) }, Field { off: 0x0, size: 0x14, name: "simple", elem: 0x0, sub: Some(234) }, Field { off: 0x0, size: 0x14, name: "roadblock", elem: 0x0, sub: Some(233) }, Field { off: 0x0, size: 0x48, name: "offroad", elem: 0x0, sub: Some(232) }, Field { off: 0x0, size: 0x38, name: "trafficAccident", elem: 0x0, sub: Some(235) }, Field { off: 0x0, size: 0x40, name: "trafficPath", elem: 0x0, sub: Some(236) }]),
     ("trigger_anyTrigger_t", 0x8, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }]),
-    ("trigger_offroad_t", 0x48, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "dir", elem: 0x0, sub: None }, Field { off: 0xc, size: 0xc, name: "position", elem: 0x0, sub: Some(55) }, Field { off: 0x18, size: 0x24, name: "orientation", elem: 0x0, sub: Some(68) }, Field { off: 0x3c, size: 0x4, name: "maxSpeed", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "releaseTime", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "endSlice", elem: 0x0, sub: None }]),
+    ("trigger_offroad_t", 0x48, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "dir", elem: 0x0, sub: None }, Field { off: 0xc, size: 0xc, name: "position", elem: 0x0, sub: Some(72) }, Field { off: 0x18, size: 0x24, name: "orientation", elem: 0x0, sub: Some(121) }, Field { off: 0x3c, size: 0x4, name: "maxSpeed", elem: 0x0, sub: None }, Field { off: 0x40, size: 0x4, name: "releaseTime", elem: 0x0, sub: None }, Field { off: 0x44, size: 0x4, name: "endSlice", elem: 0x0, sub: None }]),
     ("trigger_roadblock_t", 0x14, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "dir", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "numCars", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "spikeBelt", elem: 0x0, sub: None }]),
     ("trigger_simple_t", 0x14, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "dir", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "side", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "moving", elem: 0x0, sub: None }]),
-    ("trigger_trafficAccident_t", 0x38, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0xc, name: "position", elem: 0x0, sub: Some(55) }, Field { off: 0x14, size: 0x24, name: "orientation", elem: 0x0, sub: Some(68) }]),
-    ("trigger_trafficPath_t", 0x40, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "dir", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x24, name: "orientation", elem: 0x0, sub: Some(68) }, Field { off: 0x30, size: 0x4, name: "maxSpeed", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "releaseTime", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "numPoints", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "path", elem: 0x0, sub: None }]),
+    ("trigger_trafficAccident_t", 0x38, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0xc, name: "position", elem: 0x0, sub: Some(72) }, Field { off: 0x14, size: 0x24, name: "orientation", elem: 0x0, sub: Some(121) }]),
+    ("trigger_trafficPath_t", 0x40, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "slice", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "dir", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x24, name: "orientation", elem: 0x0, sub: Some(121) }, Field { off: 0x30, size: 0x4, name: "maxSpeed", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "releaseTime", elem: 0x0, sub: None }, Field { off: 0x38, size: 0x4, name: "numPoints", elem: 0x0, sub: None }, Field { off: 0x3c, size: 0x4, name: "path", elem: 0x0, sub: None }]),
     ("Trk_NewSimQuad", 0x1, &[Field { off: 0x0, size: 0x1, name: "surface", elem: 0x0, sub: None }]),
     ("Trk_NewSimSlice", 0x5, &[Field { off: 0x0, size: 0x1, name: "stripIndex", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "quadCount", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "simquadIndex", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "simquadCount", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "simquadStartIndex", elem: 0x0, sub: None }]),
     ("Trk_NewSlice", 0x20, &[Field { off: 0x0, size: 0xc, name: "center", elem: 0x4, sub: None }, Field { off: 0xc, size: 0x3, name: "normal", elem: 0x1, sub: None }, Field { off: 0xf, size: 0x3, name: "forward", elem: 0x1, sub: None }, Field { off: 0x12, size: 0x3, name: "right", elem: 0x1, sub: None }, Field { off: 0x15, size: 0x1, name: "acousticType", elem: 0x0, sub: None }, Field { off: 0x16, size: 0x2, name: "pavedProfile", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x2, name: "leftDrive", elem: 0x0, sub: None }, Field { off: 0x1a, size: 0x2, name: "rightDrive", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x1, name: "chunkIndex", elem: 0x0, sub: None }, Field { off: 0x1d, size: 0x1, name: "laneCount", elem: 0x0, sub: None }, Field { off: 0x1e, size: 0x1, name: "avgPavedWidthLf", elem: 0x0, sub: None }, Field { off: 0x1f, size: 0x1, name: "avgPavedWidthRt", elem: 0x0, sub: None }]),
     ("Trk_NewStrip", 0x4, &[Field { off: 0x0, size: 0x1, name: "topVert", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "botVert", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "quadCount", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "size", elem: 0x0, sub: None }]),
     ("Udff_tInfo", 0xc, &[Field { off: 0x0, size: 0x4, name: "type", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "handle", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "memPtr", elem: 0x0, sub: None }]),
-    ("Physics_tWheelAccStruct", 0x30, &[Field { off: 0x0, size: 0x4, name: "acc", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "roadGrip", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "steeringAcc", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "steeringAngle", elem: 0x0, sub: None }, Field { off: 0x10, size: 0xc, name: "velCap", elem: 0x0, sub: Some(55) }, Field { off: 0x1c, size: 0xc, name: "finalAcc", elem: 0x0, sub: Some(55) }, Field { off: 0x28, size: 0x4, name: "frontTire", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "skid", elem: 0x0, sub: None }]),
+    ("tUserNameMenuItem", 0x8c, &[Field { off: 0x0, size: 0x1c, name: "tMenuItem", elem: 0x0, sub: Some(127) }, Field { off: 0x1c, size: 0x4, name: "fData", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x2, name: "fMaxStringLength", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x2, name: "fCurrentColumn", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "fCurrentRow", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x5a, name: "fRowList", elem: 0x1, sub: None }, Field { off: 0x80, size: 0x2, name: "fPlayer", elem: 0x0, sub: None }, Field { off: 0x82, size: 0x2, name: "fFadeVal", elem: 0x0, sub: None }, Field { off: 0x84, size: 0x2, name: "fFadeDir", elem: 0x0, sub: None }, Field { off: 0x88, size: 0x4, name: "fInTransition", elem: 0x0, sub: None }]),
+    ("tVertex", 0x4, &[Field { off: 0x0, size: 0x2, name: "x", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "y", elem: 0x0, sub: None }]),
+    ("tVideo", 0x8, &[Field { off: 0x0, size: 0x1, name: "x", elem: 0x0, sub: None }, Field { off: 0x1, size: 0x1, name: "y", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x1, name: "width", elem: 0x0, sub: None }, Field { off: 0x3, size: 0x1, name: "height", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x1, name: "tileWidth", elem: 0x0, sub: None }, Field { off: 0x5, size: 0x1, name: "tileHeight", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "deltaX", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "deltaY", elem: 0x0, sub: None }]),
+    ("tVideoTransition", 0x18, &[Field { off: 0x0, size: 0x4, name: "state", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "flags", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x1, name: "u", elem: 0x0, sub: None }, Field { off: 0x7, size: 0x1, name: "v", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x1, name: "uw", elem: 0x0, sub: None }, Field { off: 0x9, size: 0x1, name: "vh", elem: 0x0, sub: None }, Field { off: 0xa, size: 0x2, name: "clut", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x2, name: "tpage", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "tint", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x2, name: "bright", elem: 0x0, sub: None }]),
+    ("tVideoWall", 0x38, &[Field { off: 0x0, size: 0x4, name: "fTVs", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x2, name: "fFirstTVShape", elem: 0x0, sub: None }, Field { off: 0x6, size: 0x2, name: "fNumTVs", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "fTVShapes", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "tvOrder", elem: 0x0, sub: None }, Field { off: 0x10, size: 0x4, name: "fTVTicks", elem: 0x0, sub: None }, Field { off: 0x14, size: 0x2, name: "fTransitionDirection", elem: 0x0, sub: None }, Field { off: 0x16, size: 0x2, name: "fFlipAxis", elem: 0x0, sub: None }, Field { off: 0x18, size: 0x2, name: "fOffsetX", elem: 0x0, sub: None }, Field { off: 0x1a, size: 0x2, name: "fOffsetY", elem: 0x0, sub: None }, Field { off: 0x1c, size: 0x2, name: "fAvailableTextID", elem: 0x0, sub: None }, Field { off: 0x1e, size: 0x2, name: "fAvailable", elem: 0x0, sub: None }, Field { off: 0x20, size: 0x2, name: "fAvailableBright", elem: 0x0, sub: None }, Field { off: 0x22, size: 0x2, name: "fValid", elem: 0x0, sub: None }, Field { off: 0x24, size: 0x2, name: "fAvailableX", elem: 0x0, sub: None }, Field { off: 0x26, size: 0x2, name: "fAvailableY", elem: 0x0, sub: None }, Field { off: 0x28, size: 0x4, name: "fIconShapes", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x2, name: "fIcon", elem: 0x0, sub: None }, Field { off: 0x2e, size: 0x2, name: "fIconFrames", elem: 0x0, sub: None }, Field { off: 0x30, size: 0x2, name: "fIconX", elem: 0x0, sub: None }, Field { off: 0x32, size: 0x2, name: "fIconY", elem: 0x0, sub: None }, Field { off: 0x34, size: 0x4, name: "fUpdated", elem: 0x0, sub: None }]),
+    ("tVideoWallConfig", 0x14, &[Field { off: 0x0, size: 0x2, name: "numVideos", elem: 0x0, sub: None }, Field { off: 0x2, size: 0x2, name: "flags", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x10, name: "videos", elem: 0x4, sub: None }]),
+    ("Physics_tWheelAccStruct", 0x30, &[Field { off: 0x0, size: 0x4, name: "acc", elem: 0x0, sub: None }, Field { off: 0x4, size: 0x4, name: "roadGrip", elem: 0x0, sub: None }, Field { off: 0x8, size: 0x4, name: "steeringAcc", elem: 0x0, sub: None }, Field { off: 0xc, size: 0x4, name: "steeringAngle", elem: 0x0, sub: None }, Field { off: 0x10, size: 0xc, name: "velCap", elem: 0x0, sub: Some(72) }, Field { off: 0x1c, size: 0xc, name: "finalAcc", elem: 0x0, sub: Some(72) }, Field { off: 0x28, size: 0x4, name: "frontTire", elem: 0x0, sub: None }, Field { off: 0x2c, size: 0x4, name: "skid", elem: 0x0, sub: None }]),
 ];
 
 /// The index of structure `name` in [`STRUCTS`].

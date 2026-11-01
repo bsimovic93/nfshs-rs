@@ -284,7 +284,7 @@ pub fn go_to_menu_nfs4_button(c: &mut Cpu, this: u32, text: u32, menu: u32, on_p
     abi::frame(c, 32, |c, _| {
         let mut r = Saved::of(c);
         r.0[..3].copy_from_slice(&[this, frames, image]);
-        r.enter(c, 0x8002_5348, 0x8001_a630, |c| femenu::go_to_menu_button(c, this, text, menu, on_press));
+        r.enter(c, 0x8002_5348, 0x8001_a630, |c| femenu::go_to_menu_button(c, crate::types::MenuItemGoToMenuButton(this), text, crate::types::Menu(menu), on_press));
         let m = &mut c.m;
         m.w32(this + 24, GO_TO_MENU_NFS4_BUTTON_VT);
         m.w16(this + 36, 14);
@@ -415,7 +415,7 @@ fn update_transition(c: &mut Cpu, this: u32, at: u32, selected: u32, ra: u32) {
             m.w16(this + at, 128);
             m.w16(this + at + 2, 0);
         }
-        Saved::of(c).enter(c, 0x8002_47c8, ra, |c| femenu::menu_item_update_transition(c, this, selected));
+        Saved::of(c).enter(c, 0x8002_47c8, ra, |c| femenu::menu_item_update_transition(c, crate::types::MenuItem(this), selected));
     })
 }
 
@@ -445,7 +445,7 @@ pub fn nfs4_left_right_choice(c: &mut Cpu, this: u32, text: u32, data: u32, imag
     abi::frame(c, 32, |c, _| {
         let mut r = Saved::of(c);
         r.0[..3].copy_from_slice(&[this, image, frames]);
-        r.enter(c, 0x8002_4924, 0x8001_a9c0, |c| femenu::left_right_choice(c, this, text, data));
+        r.enter(c, 0x8002_4924, 0x8001_a9c0, |c| femenu::left_right_choice(c, crate::types::MenuItemLeftRightChoice(this), text, crate::types::ListIterator(data)));
         let m = &mut c.m;
         m.w32(this + 24, NFS4_LEFT_RIGHT_CHOICE_VT);
         m.w32(this + 12, image);
@@ -701,7 +701,7 @@ fn construct(c: &mut Cpu, frame: u32, this: u32, base: u32, stack: u32, items: O
         m.w32(sp + 20, on_back);
         m.w32(sp + 24, title);
         if base == 0x8002_548c {
-            r.enter(c, base, ras[0], |c| femenu::menu(&mut c.m, this, flags, screen, next, options, on_back, title));
+            r.enter(c, base, ras[0], |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
         } else {
             r.enter(c, base, ras[0], |c| menu_nfs4_bare(c, this, flags, screen, next, options, on_back, title));
         }
@@ -711,7 +711,7 @@ fn construct(c: &mut Cpu, frame: u32, this: u32, base: u32, stack: u32, items: O
                 if vt == MENU_NFS4_TWO_PLAYER_VT {
                     c.m.w32(this + 88, 0);
                 }
-                femenu::menu_constructor(&mut c.m, this, first, rest);
+                femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, rest);
             }
             None => c.m.w32(this + MENU_VPTR, vt),
         }
@@ -736,7 +736,7 @@ pub fn menu_nfs4_bare(c: &mut Cpu, this: u32, flags: u32, screen: u32, next: u32
         m.w32(sp + 20, on_back);
         m.w32(sp + 16, options);
         m.w32(sp + 24, sx(title));
-        r.enter(c, 0x8002_548c, 0x8001_b298, |c| femenu::menu(&mut c.m, this, flags, screen, next, options, on_back, sx(title)));
+        r.enter(c, 0x8002_548c, 0x8001_b298, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, sx(title)));
         c.m.w32(this + MENU_VPTR, MENU_NFS4_VT);
         this
     })
@@ -756,7 +756,7 @@ pub fn abi_menu_nfs4_dtor(c: &mut Cpu) {
 /// last item the current one, its items counted (flag 0x200: each reflected).
 pub fn menu_nfs4_initialize(c: &mut Cpu, this: u32) {
     abi::frame(c, 24, |c, _| {
-        femenu::initialize(&mut c.m, this);
+        femenu::initialize(&mut c.m, crate::types::Menu(this));
         let m = &mut c.m;
         let cur = m.r8(this + 8);
         let first = item(m, this, 0);
@@ -795,7 +795,7 @@ pub fn abi_menu_nfs4_initialize(c: &mut Cpu) {
 /// `tMenuNFS4::ProcessInput` (FEMENUEXTENDED.CPP, 0x8001b390): `tMenu`'s.
 pub fn menu_nfs4_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
     abi::frame(c, 24, |c, _| {
-        Saved::of(c).enter(c, 0x8002_5598, 0x8001_b3a0, |c| femenu::process_input(c, this, player, key, command));
+        Saved::of(c).enter(c, 0x8002_5598, 0x8001_b3a0, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
     })
 }
 
@@ -918,7 +918,7 @@ pub fn menu_nfs4_draw(c: &mut Cpu, this: u32) {
         if (title as i32) >= 0 {
             r.call_leaving(c, TITLE, &[title], 0x8001_b680);
         }
-        femenu::initialize(&mut c.m, this);
+        femenu::initialize(&mut c.m, crate::types::Menu(this));
         let m = &mut c.m;
         let cur = m.r32(this + 8);
         let it = item(m, this, cur);
@@ -1066,7 +1066,7 @@ pub fn menu_blank_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, c
             return;
         }
         c.m.w32(this + 16, 0);
-        Saved::of(c).enter(c, 0x8002_5598, 0x8001_bb1c, |c| femenu::process_input(c, this, player, key, command));
+        Saved::of(c).enter(c, 0x8002_5598, 0x8001_bb1c, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
     })
 }
 
@@ -1130,7 +1130,7 @@ pub fn menu_options_draw(c: &mut Cpu, this: u32) {
     abi::frame(c, 56, |c, _| {
         let mut r = Saved::of(c);
         r.0[2] = this;
-        let n = femenu::get_number_enabled_items(&mut c.m, this);
+        let n = femenu::get_number_enabled_items(&mut c.m, crate::types::Menu(this));
         r.0[6] = 320;
         r.0[0] = n;
         let (obj, f) = method(&mut c.m, this, MENU_VPTR, MENU_TRANSITION_IS_FINISHED);

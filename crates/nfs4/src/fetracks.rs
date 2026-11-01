@@ -209,7 +209,7 @@ pub fn list_iterator_track(c: &mut Cpu, this: u32, values: u32, index: u32, mana
     abi::frame(c, 32, |c, _| {
         let mut r = Saved::of(c);
         r.0[..2].copy_from_slice(&[this, manager]);
-        r.enter(c, 0x8002_3f80, 0x8002_1ee4, |c| femenu::indexed(c, this, 0, values, index));
+        r.enter(c, 0x8002_3f80, 0x8002_1ee4, |c| femenu::indexed(c, crate::types::ListIteratorIndexed(this), 0, values, index));
         c.m.w32(this + 12, TRACK_ITERATOR_VT);
         c.m.w32(this + MANAGER, manager);
         this

@@ -392,7 +392,7 @@ pub fn calculate_dimensions_help(c: &mut Cpu, this: u32) {
                 }
                 r.0[1] = r.0[1].wrapping_add(1);
             }
-            let n = r.enter(c, 0x8002_58b4, 0x8001_8e18, |c| crate::femenu::get_number_enabled_items(&mut c.m, menu));
+            let n = r.enter(c, 0x8002_58b4, 0x8001_8e18, |c| crate::femenu::get_number_enabled_items(&mut c.m, crate::types::Menu(menu)));
             if sx(n) as i32 >= 2 {
                 enter_add_item(c, &r, this, 83, 80, 0x8001_8e38);
             }
