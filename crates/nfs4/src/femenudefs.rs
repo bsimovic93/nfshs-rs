@@ -77,11 +77,12 @@ fn settings_swap(c: &mut Cpu, bytes: &[(u32, u8)], ra: u32) {
     })
 }
 
-/// `MenuExtended_SetOnePlayer` (FEMENUDEFS.CPP, 0x8002c168): one player (the menu's background),
-/// but not for the second player (nothing). (Its test reads the application through whatever
-/// its caller left in v0.)
+/// `MenuExtended_SetOnePlayer` (FEMENUDEFS.CPP, 0x8002c160, eight bytes before its symbol): one
+/// player (the menu's background), but not for the second player (nothing).
 pub fn abi_set_one_player(c: &mut Cpu) {
-    let (cmd, app) = (c.r[4], c.r[2]);
+    let cmd = c.r[4];
+    let app = c.m.r32(crate::globals::FE_APP);
+    c.r[2] = app;
     abi::frame(c, 24, |c, _| {
         let r = Saved::of(c);
         if c.m.r8(app.wrapping_add(557)) == 1 {
@@ -1372,6 +1373,665 @@ pub fn abi_pink_slips_continue(c: &mut Cpu) {
     }
 }
 
+/// The menus' callbacks as the items hold them (`MenuExtended_SetOnePlayer` from its first
+/// instruction, eight bytes before its symbol, which loads the application).
+const SET_ONE_PLAYER: u32 = 0x8002_C160;
+const SET_TWO_PLAYER: u32 = 0x8002_C1AC;
+const SET_TEST_DRIVE: u32 = 0x8002_C1FC;
+const SET_SINGLE_RACE: u32 = 0x8002_C218;
+const SET_TOURNAMENT: u32 = 0x8002_C258;
+const SET_SPECIAL_EVENT: u32 = 0x8002_C2A0;
+const SET_SOLO_RACE: u32 = 0x8002_C2E8;
+const GO_TO_TWO_PLAYER_SINGLE_RACE: u32 = 0x8002_C308;
+const SET_DUEL_RACE: u32 = 0x8002_C41C;
+const SET_FULL_GRID: u32 = 0x8002_C45C;
+const TRANSITION_FROM_POST_GAME_TO_MAIN_MENU: u32 = 0x8002_C514;
+const TRANSITION_FROM_POST_GAME_TO_MAIN_MENU_AND_SAVE_GAME: u32 = 0x8002_C530;
+const GO_TO_CAR_SELECT: u32 = 0x8002_C57C;
+const GO_TO_DEALER: u32 = 0x8002_C910;
+const GO_TO_SELLER: u32 = 0x8002_C978;
+const GO_TO_UPGRADES: u32 = 0x8002_C9E0;
+const GO_TO_BEST_OF_ONE: u32 = 0x8002_CC04;
+const GO_TO_BEST_OF_THREE: u32 = 0x8002_CC60;
+const GO_TO_BEST_OF_FIVE: u32 = 0x8002_CCBC;
+const GO_TO_RACE: u32 = 0x8002_CD18;
+const GO_TO_2_PLAYER_RACE: u32 = 0x8002_CE74;
+const GO_TO_TOURN_TRACK_INFO: u32 = 0x8002_CFC0;
+const GO_TO_SPECIAL_EVENT_TRACK_INFO: u32 = 0x8002_D128;
+const ENTER_USER_NAME: u32 = 0x8002_D294;
+const GO_TO_SHOWROOM: u32 = 0x8002_D2F8;
+const GO_TO_DEALER_SHOWROOM: u32 = 0x8002_D338;
+const SET_HP_SOLO_RACE: u32 = 0x8002_D378;
+const SET_HP_DUEL_RACE: u32 = 0x8002_D3A4;
+const SET_HOT_PURSUIT: u32 = 0x8002_D3D0;
+const SELL_CAR: u32 = 0x8002_D420;
+const BUY_CAR: u32 = 0x8002_D578;
+const PURCHASE_UPGRADE1: u32 = 0x8002_D80C;
+const PURCHASE_UPGRADE2: u32 = 0x8002_D82C;
+const PURCHASE_UPGRADE3: u32 = 0x8002_D84C;
+const SAVE_GAME: u32 = 0x8002_D86C;
+const LOAD_GAME: u32 = 0x8002_D950;
+const TIER_FINISHED: u32 = 0x8002_DA28;
+const POST_GAME_MENU: u32 = 0x8002_DBC4;
+const FINISHED_PLAYER1_GET_NAME: u32 = 0x8002_DCC4;
+const FINISHED_PLAYER2_GET_NAME: u32 = 0x8002_DDD4;
+const SET_PINK_SLIPS: u32 = 0x8002_DE74;
+const AWARD_PINK_SLIPS_CAR: u32 = 0x8002_DF34;
+const GO_TO_GARAGE: u32 = 0x8002_E1E8;
+const GO_TO_TOURN_TROPHY_ROOM: u32 = 0x8002_E290;
+const GO_TO_SE_TROPHY_ROOM: u32 = 0x8002_E29C;
+const SET_BEGINNER: u32 = 0x8002_E2AC;
+const SET_INTERMEDIATE: u32 = 0x8002_E2B8;
+const SET_EXPERT: u32 = 0x8002_E2C8;
+const EXIT_TOURNEY: u32 = 0x8002_E2D8;
+const EXIT_PINK_SLIPS_EARLY: u32 = 0x8002_E368;
+const PINK_SLIPS_CONTINUE: u32 = 0x8002_E498;
+/// The members' constructors (the items', the menus', the list iterators'), and the sliders'
+/// `SetDimensions`.
+const CAR_ITERATOR: u32 = 0x8001_7A14;
+const CAR_COLOR_ITERATOR: u32 = 0x8001_85E0;
+const NFS4_BUTTON: u32 = 0x8001_A60C;
+const NFS4_CHOICE: u32 = 0x8001_A99C;
+const NFS4_MENU: u32 = 0x8001_B1F8;
+const TWO_PLAYER_MENU: u32 = 0x8001_B79C;
+const BOTTOM_MENU: u32 = 0x8001_B8A8;
+const BLANK_MENU: u32 = 0x8001_B9F8;
+const OPTIONS: u32 = 0x8001_BBAC;
+const FADE: u32 = 0x8001_C4B8;
+const OPTIONS_MENU: u32 = 0x8001_C614;
+const INSIDE_BOX_MENU: u32 = 0x8001_CEF0;
+const SLIDING_MENU: u32 = 0x8001_D2C0;
+const AUDIO_SLIDER: u32 = 0x8001_E65C;
+const SONG_MENU: u32 = 0x8001_EA80;
+const INSIDE_SLIDER: u32 = 0x8001_F3E8;
+const TWO_WAY_SLIDER: u32 = 0x8001_F5D4;
+const USER_NAME: u32 = 0x8001_FD98;
+const TRACK_ITERATOR: u32 = 0x8002_1EB4;
+const ITERATOR: u32 = 0x8002_3DF0;
+const INDEXED_ITERATOR: u32 = 0x8002_3F80;
+const RANGE_ITERATOR: u32 = 0x8002_4554;
+const RANGE_INDEXED_ITERATOR: u32 = 0x8002_4644;
+const CHOICE: u32 = 0x8002_4924;
+const SET_DIMENSIONS: u32 = 0x8002_5330;
+const BUTTON: u32 = 0x8002_5348;
+const TOURNAMENT_ITERATOR: u32 = 0x8003_3ED8;
+/// The application.
+const FE_APP: u32 = crate::globals::FE_APP;
+
+/// A member constructed: the stack's words written (the arguments from the fifth on at
+/// sp+16.., the constructor's spilled pointers from sp+72), `args` in a0.. (those after left
+/// as the last call left them), constructor `f` called (routed to its port).
+fn new(c: &mut Cpu, r: &Saved, sp: u32, f: u32, args: &[u32], stack: &[(u32, u32)], ra: u32) {
+    for &(at, v) in stack {
+        c.m.w32(sp + at, v);
+    }
+    c.r[4..4 + args.len()].copy_from_slice(args);
+    r.call_ptr_leaving(c, f, &[], ra);
+}
+
+/// `tGlobalMenuDefs::tGlobalMenuDefs` (FEMENUDEFS.CPP, 0x8002e504): every menu of the front
+/// end and every item on them constructed in place in turn (each menu after its items, the
+/// items given the menus they go to and their callbacks; the derived items' vtables written
+/// after their bases' constructors), the sliders sized, a few flags and fields set; `this`.
+/// One straight run of code: each row is one constructor's call as the original's registers
+/// and stack have it.
+pub fn abi_global_menu_defs(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 640, |c, sp| {
+        let mut r = Saved::of(c);
+        new(c, &r, sp, NFS4_BUTTON, &[this, 92, this + 1112, SET_ONE_PLAYER], &[(16, 30), (20, 10), (72, this + 1112), (640, this)], 0x8002_E560);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 44, 93, this + 2336, SET_TWO_PLAYER], &[(16, 40), (20, 10), (76, this + 44), (80, this + 2336)], 0x8002_E5A0);
+        r.0[3] = this + 88;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 88, 95, this + 388, 0], &[(16, 50), (20, 10), (84, this + 388)], 0x8002_E5D4);
+        r.0[0] = this + 132;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 132, 94, this + 9456, 0], &[(16, 60), (20, 10)], 0x8002_E600);
+        let main_screen = c.m.r32(MAIN_SCREEN);
+        new(c, &r, sp, NFS4_MENU, &[this + 176, 0x1014, main_screen, 0], &[(16, 0), (20, 0), (24, 181), (28, this), (32, this + 44), (36, this + 132), (40, this + 88), (44, 0)], 0x8002_E644);
+        r.0[0] = this + 13192;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 300, 100, this + 13192, GO_TO_TOURN_TROPHY_ROOM], &[(16, 50), (20, 10), (88, this + 300)], 0x8002_E680);
+        r.0[3] = this + 344;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 344, 106, this + 13192, GO_TO_SE_TROPHY_ROOM], &[(16, 50), (20, 10)], 0x8002_E6B0);
+        new(c, &r, sp, NFS4_MENU, &[this + 388, 0x1014, main_screen, 0], &[(16, 0), (20, 0), (24, 96), (28, this + 300), (32, this + 344), (36, 0)], 0x8002_E6E8);
+        let g1 = c.m.r32(0x8005_2518);
+        new(c, &r, sp, BLANK_MENU, &[this + 512, 0x4010, g1, 0], &[(16, 0), (20, 0), (24, 0xFFFF_FFFF)], 0x8002_E714);
+        r.0[3] = this + 636;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 636, 162, this + 3360, SET_BEGINNER], &[(16, 140), (20, 10), (92, this + 3360)], 0x8002_E74C);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 680, 163, this + 3360, SET_INTERMEDIATE], &[(16, 150), (20, 10), (96, this + 680)], 0x8002_E780);
+        r.0[0] = this + 724;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 724, 164, this + 3360, SET_EXPERT], &[(16, 160), (20, 10)], 0x8002_E7B0);
+        r.0[8] = this + 768;
+        new(c, &r, sp, NFS4_MENU, &[this + 768, 0x1004, main_screen, 0], &[(16, 0), (20, 0), (24, 184), (28, this + 636), (32, this + 680), (36, this + 724), (40, 0)], 0x8002_E7F4);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 892, 97, this + 3484, SET_TEST_DRIVE], &[(16, 240), (20, 10), (100, this + 892), (104, this + 3484)], 0x8002_E834);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 936, 115, this + 1368, SET_SINGLE_RACE], &[(16, 70), (20, 10), (108, this + 936), (112, this + 1368)], 0x8002_E874);
+        r.0[3] = this + 980;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 980, 114, this + 1580, SET_HOT_PURSUIT], &[(16, 80), (20, 10), (116, this + 1580)], 0x8002_E8AC);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1024, 100, this + 1808, SET_TOURNAMENT], &[(16, 90), (20, 10), (120, this + 1024), (124, this + 1808)], 0x8002_E8EC);
+        r.0[0] = this + 1068;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1068, 106, this + 2036, SET_SPECIAL_EVENT], &[(16, 100), (20, 10), (128, this + 2036)], 0x8002_E924);
+        new(c, &r, sp, NFS4_MENU, &[this + 1112, 0x1004, main_screen, 0], &[(16, 0), (20, 0), (24, 182), (28, this + 892), (32, this + 936), (36, this + 980), (40, this + 1024), (44, this + 1068), (48, 0)], 0x8002_E970);
+        r.0[3] = this + 1236;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1236, 109, this + 3360, SET_SOLO_RACE], &[(16, 110), (20, 10)], 0x8002_E9A0);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1280, 110, this + 768, SET_DUEL_RACE], &[(16, 120), (20, 10), (132, this + 1280)], 0x8002_E9D4);
+        r.0[0] = this + 1324;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1324, 112, this + 768, SET_FULL_GRID], &[(16, 130), (20, 10)], 0x8002_EA04);
+        new(c, &r, sp, NFS4_MENU, &[this + 1368, 0x1004, main_screen, 0], &[(16, 0), (20, 0), (24, 183), (28, this + 1236), (32, this + 1280), (36, this + 1324), (40, 0)], 0x8002_EA40);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1492, 109, this + 768, SET_HP_SOLO_RACE], &[(16, 110), (20, 10), (136, this + 1492)], 0x8002_EA74);
+        r.0[0] = this + 1536;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1536, 110, this + 768, SET_HP_DUEL_RACE], &[(16, 120), (20, 10)], 0x8002_EAA4);
+        new(c, &r, sp, NFS4_MENU, &[this + 1580, 0x1004, main_screen, 0], &[(16, 0), (20, 0), (24, 183), (28, this + 1492), (32, this + 1536), (36, 0)], 0x8002_EADC);
+        new(c, &r, sp, TOURNAMENT_ITERATOR, &[this + 1704, 0x8011_59D8, TOURNAMENT_MANAGER], &[(140, this + 1704)], 0x8002_EB00);
+        r.0[0] = GO_TO_TOURN_TRACK_INFO;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1724, 91, 0, GO_TO_TOURN_TRACK_INFO], &[(16, 34), (20, 10), (144, this + 1724)], 0x8002_EB38);
+        r.0[3] = this + 1768;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 1768, 149, this + 1704, 44], &[(16, 10)], 0x8002_EB5C);
+        let g2 = c.m.r32(0x8005_24EC);
+        new(c, &r, sp, NFS4_MENU, &[this + 1808, 0x1000, g2, 0], &[(16, 0), (20, GO_TO_TOURN_TRACK_INFO), (24, 102), (28, this + 1724), (32, this + 1768), (36, 0)], 0x8002_EB94);
+        r.0[3] = this + 1932;
+        new(c, &r, sp, TOURNAMENT_ITERATOR, &[this + 1932, 0x8011_59D9, TOURNAMENT_MANAGER], &[], 0x8002_EBB8);
+        r.0[0] = GO_TO_SPECIAL_EVENT_TRACK_INFO;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 1952, 91, 0, GO_TO_SPECIAL_EVENT_TRACK_INFO], &[(16, 34), (20, 10), (148, this + 1952)], 0x8002_EBF0);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 1996, 106, this + 1932, 54], &[(16, 10), (152, this + 1996)], 0x8002_EC18);
+        let g3 = c.m.r32(0x8005_24EC);
+        new(c, &r, sp, NFS4_MENU, &[this + 2036, 0x1000, g3, 0], &[(16, 0), (20, GO_TO_SPECIAL_EVENT_TRACK_INFO), (24, 101), (28, this + 1952), (32, this + 1996), (36, 0)], 0x8002_EC54);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2160, 97, this + 3484, SET_TEST_DRIVE], &[(16, 240), (20, 10), (156, this + 2160)], 0x8002_EC88);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2204, 115, 0, GO_TO_TWO_PLAYER_SINGLE_RACE], &[(16, 70), (20, 10), (160, this + 2204)], 0x8002_ECBC);
+        r.0[3] = this + 2248;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2248, 114, this + 768, SET_HOT_PURSUIT], &[(16, 80), (20, 10)], 0x8002_ECEC);
+        r.0[0] = 170;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2292, 107, this + 2592, SET_PINK_SLIPS], &[(16, 170), (20, 10), (164, this + 2292), (168, this + 2592)], 0x8002_ED2C);
+        new(c, &r, sp, NFS4_MENU, &[this + 2336, 0x1004, main_screen, 0], &[(16, 0), (20, 0), (24, 182), (28, this + 2160), (32, this + 2204), (36, this + 2248), (40, this + 2292), (44, 0)], 0x8002_ED74);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2460, 193, this + 3360, GO_TO_BEST_OF_ONE], &[(16, 170), (20, 10), (172, this + 2460)], 0x8002_EDA4);
+        r.0[3] = this + 2504;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2504, 194, this + 2960, GO_TO_BEST_OF_THREE], &[(16, 170), (20, 10), (176, this + 2960)], 0x8002_EDD8);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2548, 195, this + 3084, GO_TO_BEST_OF_FIVE], &[(16, 170), (20, 10), (180, this + 2548), (184, this + 3084)], 0x8002_EE14);
+        new(c, &r, sp, NFS4_MENU, &[this + 2592, 0x1000, main_screen, 0], &[(16, 0), (20, 0), (24, 183), (28, this + 2460), (32, this + 2504), (36, this + 2548), (40, 0)], 0x8002_EE54);
+        r.0[8] = this + 2716;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 2716, 91, 0, GO_TO_CAR_SELECT], &[(16, 36), (20, 10)], 0x8002_EE84);
+        r.0[0] = this + 3208;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 2760, 196, this + 3208, 46], &[(16, 10), (188, this + 2760)], 0x8002_EEB4);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 2800, 197, this + 3208, 46], &[(16, 10), (192, this + 2800)], 0x8002_EEDC);
+        r.0[3] = this + 2840;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 2840, 198, this + 3208, 46], &[(16, 10)], 0x8002_EF00);
+        r.0[2] = this + 2880;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 2880, 199, this + 3208, 46], &[(16, 10)], 0x8002_EF24);
+        r.0[4] = this + 2920;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 2920, 200, this + 3208, 46], &[(16, 10)], 0x8002_EF48);
+        let g4 = c.m.r32(0x8005_22F4);
+        new(c, &r, sp, NFS4_MENU, &[this + 2960, 0x1400, g4, 0], &[(16, this + 3988), (20, GO_TO_CAR_SELECT), (24, 191), (28, this + 2716), (32, this + 2760), (36, this + 2800), (40, this + 2840), (44, 0), (196, this + 3988)], 0x8002_EFA0);
+        let g5 = c.m.r32(0x8005_22F4);
+        new(c, &r, sp, NFS4_MENU, &[this + 3084, 0x1400, g5, 0], &[(16, this + 3988), (20, GO_TO_CAR_SELECT), (24, 192), (28, this + 2716), (32, this + 2760), (36, this + 2800), (40, this + 2840), (44, this + 2880), (48, this + 2920), (52, 0)], 0x8002_EFF8);
+        new(c, &r, sp, TRACK_ITERATOR, &[this + 3208, 0x8011_58DB, 0x8011_58FE, TRACK_MANAGER], &[], 0x8002_F01C);
+        r.0[8] = this + 3232;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 3232, 91, 0, GO_TO_CAR_SELECT], &[(16, 28), (20, 10)], 0x8002_F04C);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 3276, 148, this + 3208, 38], &[(16, 10), (200, this + 3276)], 0x8002_F074);
+        r.0[0] = this + 3316;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 3316, 213, this + 4164, 0], &[(16, 58), (20, 10), (204, this + 4164)], 0x8002_F0A8);
+        let g6 = c.m.r32(0x8005_2544);
+        r.0[3] = 201;
+        new(c, &r, sp, NFS4_MENU, &[this + 3360, 0x1600, g6, 0], &[(16, this + 3988), (20, GO_TO_CAR_SELECT), (24, 201), (28, this + 3232), (32, this + 3276), (36, this + 3316), (40, 0)], 0x8002_F0F0);
+        let g7 = c.m.r32(0x8005_2544);
+        new(c, &r, sp, NFS4_MENU, &[this + 3484, 0x1600, g7, 0], &[(16, 0), (20, GO_TO_CAR_SELECT), (24, 201), (28, this + 3232), (32, this + 3276), (36, this + 3316), (40, 0)], 0x8002_F130);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 3608, 0x8005_1E04, 0x8011_58E5, 0x8011_58FE], &[(208, this + 3608)], 0x8002_F160);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 3628, 0x8005_1E14, 0x8011_58EA, 0x8011_58FE], &[(212, this + 3628)], 0x8002_F190);
+        r.0[0] = 0x8005_1DFC;
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 3648, 0x8005_1DFC, 0x8011_58EF, 0x8011_58FE], &[(216, this + 3648)], 0x8002_F1C4);
+        r.0[3] = this + 3668;
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 3668, 0x8005_1DFC, 0x8011_58CE, 0x8011_58FE], &[], 0x8002_F1EC);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 3688, 0x8005_1DFC, 0x8011_58D3, 0x8011_58FE], &[(220, this + 3688)], 0x8002_F218);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 3708, 0x8005_1DFC, 0x8011_58F4, 0x8011_58FE], &[(224, this + 3708)], 0x8002_F244);
+        new(c, &r, sp, ITERATOR, &[this + 3728, 0x8005_1DFC, 0x8011_58D9], &[(228, this + 3728)], 0x8002_F268);
+        r.0[6] = this + 3744;
+        new(c, &r, sp, CHOICE, &[this + 3744, 203, this + 3608], &[], 0x8002_F280);
+        c.m.w32(this + 3768, 0x8001_0850);
+        r.0[0] = 0x8001_0850;
+        r.0[7] = this + 3776;
+        new(c, &r, sp, CHOICE, &[this + 3776, 205, this + 3628], &[], 0x8002_F2A4);
+        c.m.w32(this + 3800, 0x8001_0850);
+        r.0[8] = this + 3808;
+        new(c, &r, sp, CHOICE, &[this + 3808, 206, this + 3648], &[], 0x8002_F2C0);
+        c.m.w32(this + 3832, 0x8001_07F8);
+        c.m.w16(this + 3840, 128);
+        r.0[0] = 0x8001_07F8;
+        r.0[3] = 128;
+        new(c, &r, sp, CHOICE, &[this + 3844, 207, this + 3668], &[(232, this + 3844)], 0x8002_F2F0);
+        c.m.w32(this + 3868, 0x8001_07F8);
+        c.m.w16(this + 3876, 128);
+        new(c, &r, sp, CHOICE, &[this + 3880, 208, this + 3688], &[(236, this + 3880)], 0x8002_F318);
+        c.m.w32(this + 3904, 0x8001_07F8);
+        c.m.w16(this + 3912, 128);
+        new(c, &r, sp, CHOICE, &[this + 3916, 209, this + 3708], &[(240, this + 3916)], 0x8002_F340);
+        c.m.w32(this + 3940, 0x8001_07F8);
+        c.m.w16(this + 3948, 128);
+        new(c, &r, sp, CHOICE, &[this + 3952, 211, this + 3728], &[(244, this + 3952)], 0x8002_F368);
+        c.m.w32(this + 3976, 0x8001_07F8);
+        c.m.w16(this + 3984, 128);
+        new(c, &r, sp, OPTIONS, &[this + 3988, 0x1000, 0, 0], &[(16, 0), (20, 0), (24, 186), (28, 0xFFFF_FFFF), (32, this + 3744), (36, this + 3776), (40, this + 3808), (44, this + 3844), (48, this + 3880), (52, this + 3916), (56, this + 3952), (60, 0)], 0x8002_F3D0);
+        r.0[0] = this + 4120;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 4120, 0, 0, 0], &[(16, 0xFFFF_FFFF), (20, 0xFFFF_FFFF)], 0x8002_F3FC);
+        let g8 = c.m.r32(0x8005_2560);
+        c.m.w32(this + 4144, 0x8001_1480);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 4164, 0x1000, g8, 0], &[(16, 0), (20, 0), (24, 213), (28, 1), (32, 10), (36, 0)], 0x8002_F444);
+        r.0[0] = this + 4292;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 4292, 91, 0, GO_TO_GARAGE], &[(16, 33), (20, 10)], 0x8002_F474);
+        let g9 = c.m.r32(0x8005_255C);
+        new(c, &r, sp, NFS4_MENU, &[this + 4336, 0x1004, g9, 0], &[(16, 0), (20, 0), (24, 250), (28, this + 4292), (32, 0)], 0x8002_F4A8);
+        new(c, &r, sp, CAR_ITERATOR, &[this + 4460, 0x8011_5914, CAR_MANAGER], &[(248, this + 4460)], 0x8002_F4CC);
+        let fe_app = c.m.r32(FE_APP);
+        new(c, &r, sp, CAR_COLOR_ITERATOR, &[this + 4488, 0x8011_5918, fe_app + 556, 0x8011_5914], &[(16, 48), (20, CAR_MANAGER), (252, this + 4488)], 0x8002_F510);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 4520, 190, 0, GO_TO_RACE], &[(16, 128), (20, 10), (256, this + 4520)], 0x8002_F544);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 4564, 147, this + 4460, 28], &[(16, 10), (260, this + 4564)], 0x8002_F56C);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 4604, 289, this + 4488, 38], &[(16, 10), (264, this + 4604)], 0x8002_F594);
+        r.0[0] = this + 4644;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 4644, 275, 0, GO_TO_SHOWROOM], &[(16, 48), (20, 10)], 0x8002_F5C4);
+        let car_select = c.m.r32(CAR_SELECT);
+        new(c, &r, sp, NFS4_MENU, &[this + 4688, 0x1A00, car_select, 0], &[(16, this + 8408), (20, GO_TO_RACE), (24, 187), (28, this + 4520), (32, this + 4564), (36, this + 4604), (40, this + 4644), (44, 0), (268, this + 8408)], 0x8002_F620);
+        new(c, &r, sp, CAR_ITERATOR, &[this + 4812, 0x8011_59DB, CAR_MANAGER], &[(272, this + 4812)], 0x8002_F644);
+        r.0[8] = this + 4840;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 4840, 147, this + 4812, 28], &[(16, 10)], 0x8002_F668);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 4880, 117, this + 7144, 0], &[(16, 58), (20, 10), (276, this + 4880), (280, this + 7144)], 0x8002_F6A4);
+        r.0[0] = this + 4924;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 4924, 146, 0, GO_TO_UPGRADES], &[(16, 68), (20, 10)], 0x8002_F6D4);
+        r.0[3] = 144;
+        new(c, &r, sp, NFS4_MENU, &[this + 4968, 0x1A00, car_select, 0], &[(16, this + 8408), (20, GO_TO_RACE), (24, 144), (28, this + 4520), (32, this + 4840), (36, this + 4880), (40, this + 4924), (44, 0)], 0x8002_F728);
+        new(c, &r, sp, NFS4_MENU, &[this + 5092, 0x1A00, car_select, 0], &[(16, this + 8408), (20, GO_TO_RACE), (24, 144), (28, this + 4520), (32, this + 4924), (36, 0)], 0x8002_F76C);
+        r.0[3] = this + 5216;
+        new(c, &r, sp, CAR_ITERATOR, &[this + 5216, 0x8011_5BD5, CAR_MANAGER], &[], 0x8002_F790);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 5244, 190, 0, GO_TO_RACE], &[(16, 42), (20, 10), (284, this + 5244)], 0x8002_F7C4);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 5288, 147, this + 4460, 12], &[(16, 10)], 0x8002_F7E4);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 5328, 289, this + 4488, 22], &[(16, 10)], 0x8002_F804);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 5368, 121, this + 7496, GO_TO_DEALER], &[(16, 0xFFFF_FFFF), (20, 10), (288, this + 5368), (292, this + 7496)], 0x8002_F844);
+        r.0[0] = this + 5412;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 5412, 189, this + 5216, 32], &[(16, 10)], 0x8002_F868);
+        let duel_select = c.m.r32(DUEL_SELECT);
+        r.0[3] = 0x8005_0000;
+        new(c, &r, sp, NFS4_MENU, &[this + 5452, 0x1800, duel_select, 0], &[(16, this + 8408), (20, GO_TO_RACE), (24, 187), (28, this + 5244), (32, this + 4840), (36, this + 5368), (40, this + 5412), (44, 0)], 0x8002_F8BC);
+        new(c, &r, sp, NFS4_MENU, &[this + 5576, 0x1800, duel_select, 0], &[(16, this + 8408), (20, GO_TO_RACE), (24, 187), (28, this + 5244), (32, this + 4564), (36, this + 4604), (40, this + 5412), (44, 0)], 0x8002_F910);
+        r.0[0] = GO_TO_2_PLAYER_RACE;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 5700, 190, 0, GO_TO_2_PLAYER_RACE], &[(16, 42), (20, 10), (296, this + 5700)], 0x8002_F948);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 5744, 147, this + 4460, 12], &[(16, 10), (300, this + 5744)], 0x8002_F970);
+        r.0[3] = this + 5784;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 5784, 289, this + 4488, 22], &[(16, 10)], 0x8002_F994);
+        let g10 = c.m.r32(0x8005_24D4);
+        new(c, &r, sp, TWO_PLAYER_MENU, &[this + 5824, 0x1008, g10, 0], &[(16, this + 8540), (20, GO_TO_2_PLAYER_RACE), (24, 187), (28, this + 5700), (32, this + 5744), (36, this + 5784), (40, 0), (304, this + 8540)], 0x8002_F9E0);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 5948, 190, 0, GO_TO_2_PLAYER_RACE], &[(16, 42), (20, 10), (308, this + 5948)], 0x8002_FA10);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 5992, 147, this + 4460, 12], &[(16, 10), (312, this + 5992)], 0x8002_FA38);
+        r.0[3] = this + 6032;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 6032, 289, this + 4488, 22], &[(16, 10)], 0x8002_FA5C);
+        let g11 = c.m.r32(0x8005_24D8);
+        new(c, &r, sp, TWO_PLAYER_MENU, &[this + 6072, 0x1008, g11, 0], &[(16, this + 8672), (20, GO_TO_2_PLAYER_RACE), (24, 187), (28, this + 5948), (32, this + 5992), (36, this + 6032), (40, 0), (316, this + 8672)], 0x8002_FAA8);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 6196, 190, 0, GO_TO_2_PLAYER_RACE], &[(16, 42), (20, 10)], 0x8002_FAD0);
+        r.0[3] = this + 6240;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 6240, 147, this + 4812, 12], &[(16, 10)], 0x8002_FAF4);
+        let g12 = c.m.r32(0x8005_24D4);
+        new(c, &r, sp, TWO_PLAYER_MENU, &[this + 6280, 0x1008, g12, 0], &[(16, this + 8540), (20, GO_TO_2_PLAYER_RACE), (24, 187), (28, this + 5700), (32, this + 6240), (36, 0)], 0x8002_FB34);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 6404, 190, 0, GO_TO_2_PLAYER_RACE], &[(16, 42), (20, 10), (320, this + 6404)], 0x8002_FB64);
+        r.0[3] = this + 6448;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 6448, 147, this + 4812, 12], &[(16, 10)], 0x8002_FB88);
+        let g13 = c.m.r32(0x8005_24D8);
+        new(c, &r, sp, TWO_PLAYER_MENU, &[this + 6488, 0x1008, g13, 0], &[(16, this + 8672), (20, GO_TO_2_PLAYER_RACE), (24, 187), (28, this + 6404), (32, this + 6448), (36, 0)], 0x8002_FBC8);
+        r.0[3] = this + 6612;
+        new(c, &r, sp, CAR_ITERATOR, &[this + 6612, 0x8011_59DD, CAR_MANAGER], &[], 0x8002_FBEC);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 6640, 190, 0, GO_TO_2_PLAYER_RACE], &[(16, 42), (20, 10), (324, this + 6640)], 0x8002_FC1C);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 6684, 147, this + 6612, 12], &[(16, 10), (328, this + 6684)], 0x8002_FC44);
+        let g14 = c.m.r32(0x8005_24DC);
+        new(c, &r, sp, TWO_PLAYER_MENU, &[this + 6724, 0x1008, g14, 0], &[(16, this + 8804), (20, GO_TO_2_PLAYER_RACE), (24, 187), (28, this + 6640), (32, this + 6684), (36, 0), (332, this + 8804)], 0x8002_FC8C);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 6848, 190, 0, GO_TO_2_PLAYER_RACE], &[(16, 42), (20, 10), (336, this + 6848)], 0x8002_FCBC);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 6892, 147, this + 6612, 12], &[(16, 10), (340, this + 6892)], 0x8002_FCE4);
+        let g15 = c.m.r32(0x8005_24E0);
+        new(c, &r, sp, TWO_PLAYER_MENU, &[this + 6932, 0x1008, g15, 0], &[(16, this + 8936), (20, GO_TO_2_PLAYER_RACE), (24, 187), (28, this + 6848), (32, this + 6892), (36, 0), (344, this + 8936)], 0x8002_FD2C);
+        r.0[3] = this + 7056;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7056, 121, this + 7496, GO_TO_DEALER], &[(16, 88), (20, 10)], 0x8002_FD5C);
+        r.0[0] = this + 7100;
+        r.0[8] = this + 7732;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7100, 122, this + 7732, GO_TO_SELLER], &[(16, 78), (20, 10)], 0x8002_FD90);
+        new(c, &r, sp, NFS4_MENU, &[this + 7144, 0x2200, car_select, 0], &[(16, 0), (20, 0), (24, 145), (28, this + 7056), (32, this + 7100), (36, 0)], 0x8002_FDC4);
+        r.0[0] = 0x8011_59E0;
+        r.0[3] = this + 7268;
+        new(c, &r, sp, CAR_ITERATOR, &[this + 7268, 0x8011_59E0, CAR_MANAGER], &[], 0x8002_FDEC);
+        new(c, &r, sp, CAR_COLOR_ITERATOR, &[this + 7296, 0x8011_5918, fe_app + 556, 0x8011_59E0], &[(16, 48), (20, CAR_MANAGER), (348, this + 7296)], 0x8002_FE2C);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 7328, 147, this + 7268, 28], &[(16, 10), (352, this + 7328)], 0x8002_FE54);
+        new(c, &r, sp, NFS4_CHOICE, &[this + 7368, 289, this + 7296, 38], &[(16, 10), (356, this + 7368)], 0x8002_FE7C);
+        r.0[3] = this + 7408;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7408, 118, 0, BUY_CAR], &[(16, 88), (20, 10)], 0x8002_FEAC);
+        r.0[0] = this + 7452;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7452, 275, 0, GO_TO_DEALER_SHOWROOM], &[(16, 48), (20, 10)], 0x8002_FEDC);
+        new(c, &r, sp, NFS4_MENU, &[this + 7496, 0x2240, car_select, 0], &[(16, 0), (20, 0), (24, 145), (28, this + 7328), (32, this + 7368), (36, this + 7408), (40, this + 7452), (44, 0)], 0x8002_FF20);
+        r.0[0] = this + 7620;
+        new(c, &r, sp, CAR_ITERATOR, &[this + 7620, 0x8011_59E1, CAR_MANAGER], &[], 0x8002_FF44);
+        r.0[3] = this + 7648;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 7648, 147, this + 7620, 28], &[(16, 10)], 0x8002_FF68);
+        r.0[0] = this + 7688;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7688, 120, 0, SELL_CAR], &[(16, 78), (20, 10)], 0x8002_FF98);
+        new(c, &r, sp, NFS4_MENU, &[this + 7732, 0x2200, car_select, 0], &[(16, 0), (20, 0), (24, 145), (28, this + 7648), (32, this + 7688), (36, 0)], 0x8002_FFCC);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7856, 151, 0, PURCHASE_UPGRADE1], &[(16, 98), (20, 10), (360, this + 7856)], 0x8003_0000);
+        r.0[3] = this + 7900;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7900, 152, 0, PURCHASE_UPGRADE2], &[(16, 108), (20, 10)], 0x8003_0030);
+        r.0[0] = this + 7944;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 7944, 153, 0, PURCHASE_UPGRADE3], &[(16, 118), (20, 10)], 0x8003_0060);
+        new(c, &r, sp, NFS4_MENU, &[this + 7988, 0x2200, car_select, 0], &[(16, 0), (20, 0), (24, 146), (28, this + 7856), (32, this + 7900), (36, this + 7944), (40, 0)], 0x8003_00A0);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 8112, 0x8005_1E1C, 0x8011_5916, fe_app + 556], &[(364, this + 8112)], 0x8003_00D0);
+        r.0[3] = this + 8132;
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 8132, 0x8005_1DFC, 0x8011_5BCC, fe_app + 556], &[], 0x8003_0100);
+        new(c, &r, sp, ITERATOR, &[this + 8152, 0x8005_1DFC, 0x8011_5BCE], &[(368, this + 8152)], 0x8003_0128);
+        r.0[1] = this + 8168;
+        new(c, &r, sp, ITERATOR, &[this + 8168, 0x8005_1E0C, 0x8011_58DA], &[], 0x8003_014C);
+        new(c, &r, sp, CHOICE, &[this + 8184, 267, this + 8112], &[(372, this + 8184)], 0x8003_0168);
+        c.m.w32(this + 8208, 0x8001_0850);
+        r.0[0] = 0x8001_0850;
+        new(c, &r, sp, CHOICE, &[this + 8216, 268, this + 8132], &[(376, this + 8216)], 0x8003_0194);
+        c.m.w32(this + 8240, 0x8001_0850);
+        new(c, &r, sp, CHOICE, &[this + 8248, 274, this + 8152], &[(380, this + 8248)], 0x8003_01B8);
+        c.m.w32(this + 8272, 0x8001_0850);
+        r.0[8] = this + 8280;
+        new(c, &r, sp, CHOICE, &[this + 8280, 267, this + 8112], &[], 0x8003_01D8);
+        c.m.w32(this + 8304, 0x8001_0850);
+        new(c, &r, sp, CHOICE, &[this + 8312, 268, this + 8132], &[(384, this + 8312)], 0x8003_01F8);
+        c.m.w32(this + 8336, 0x8001_0850);
+        r.0[3] = this + 8344;
+        new(c, &r, sp, CHOICE, &[this + 8344, 274, this + 8152], &[], 0x8003_0218);
+        c.m.w32(this + 8368, 0x8001_0850);
+        new(c, &r, sp, CHOICE, &[this + 8376, 271, this + 8168], &[(388, this + 8376)], 0x8003_0238);
+        c.m.w32(this + 8400, 0x8001_0850);
+        r.0[0] = 188;
+        new(c, &r, sp, OPTIONS, &[this + 8408, 0x1000, 0, 0], &[(16, 0), (20, 0), (24, 188), (28, 0xFFFF_FFFF), (32, this + 8184), (36, this + 8216), (40, this + 8248), (44, this + 8376), (48, 0)], 0x8003_0290);
+        let g16 = c.m.r32(0x8005_24D4);
+        new(c, &r, sp, OPTIONS, &[this + 8540, 0x1008, g16, 0], &[(16, 0), (20, 0), (24, 188), (28, 0), (32, this + 8184), (36, this + 8216), (40, this + 8248), (44, 0)], 0x8003_02D4);
+        let g17 = c.m.r32(0x8005_24D8);
+        new(c, &r, sp, OPTIONS, &[this + 8672, 0x1008, g17, 0], &[(16, 0), (20, 0), (24, 188), (28, 1), (32, this + 8280), (36, this + 8312), (40, this + 8344), (44, 0)], 0x8003_0314);
+        let g18 = c.m.r32(0x8005_24DC);
+        new(c, &r, sp, OPTIONS, &[this + 8804, 0x1008, g18, 0], &[(16, 0), (20, 0), (24, 188), (28, 0), (32, this + 8184), (36, this + 8216), (40, this + 8248), (44, 0)], 0x8003_0358);
+        let g19 = c.m.r32(0x8005_24E0);
+        new(c, &r, sp, OPTIONS, &[this + 8936, 0x1008, g19, 0], &[(16, 0), (20, 0), (24, 188), (28, 1), (32, this + 8280), (36, this + 8312), (40, this + 8344), (44, 0)], 0x8003_0398);
+        new(c, &r, sp, BLANK_MENU, &[this + 9068, 0x4000, 0, 0], &[(16, 0), (20, 0), (24, 0xFFFF_FFFF)], 0x8003_03C0);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 9192, 454, this + 10208, 0], &[(16, 180), (20, 10), (392, this + 9192), (396, this + 10208)], 0x8003_03FC);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 9236, 455, this + 10856, 0], &[(16, 190), (20, 10), (400, this + 9236), (404, this + 10856)], 0x8003_0438);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 9280, 457, this + 11116, 0], &[(16, 200), (20, 10), (408, this + 9280), (412, this + 11116)], 0x8003_0474);
+        r.0[3] = this + 9324;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 9324, 458, this + 12460, 0], &[(16, 210), (20, 10)], 0x8003_04A0);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 9368, 459, 0, ENTER_USER_NAME], &[(16, 220), (20, 10), (416, this + 9368)], 0x8003_04D4);
+        r.0[0] = this + 9412;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 9412, 461, this + 14832, 0], &[(16, 230), (20, 10)], 0x8003_0500);
+        new(c, &r, sp, NFS4_MENU, &[this + 9456, 0x1014, main_screen, 0], &[(16, 0), (20, 0), (24, 94), (28, this + 9192), (32, this + 9236), (36, this + 9280), (40, this + 9324), (44, this + 9368), (48, this + 9412), (52, 0)], 0x8003_0558);
+        r.0[0] = this + 9580;
+        new(c, &r, sp, RANGE_ITERATOR, &[this + 9580, 0, 127, 0x8011_5BF9], &[], 0x8003_057C);
+        new(c, &r, sp, RANGE_ITERATOR, &[this + 9596, 0, 127, 0x8011_5BFA], &[(420, this + 9596)], 0x8003_05A4);
+        r.0[3] = this + 9612;
+        new(c, &r, sp, RANGE_ITERATOR, &[this + 9612, 0, 127, 0x8011_5BFC], &[], 0x8003_05C8);
+        new(c, &r, sp, RANGE_ITERATOR, &[this + 9628, 0, 127, 0x8011_5BFB], &[(424, this + 9628)], 0x8003_05F0);
+        new(c, &r, sp, RANGE_ITERATOR, &[this + 9644, 0, 127, 0x8011_5BFD], &[(428, this + 9644)], 0x8003_0618);
+        new(c, &r, sp, ITERATOR, &[this + 9660, 0x8005_1E60, 0x8011_5BFE], &[(432, this + 9660)], 0x8003_0640);
+        new(c, &r, sp, AUDIO_SLIDER, &[this + 9676, 470, this + 9580, 0], &[(436, this + 9676)], 0x8003_0660);
+        new(c, &r, sp, AUDIO_SLIDER, &[this + 9732, 471, this + 9596, 1], &[(440, this + 9732)], 0x8003_0680);
+        r.0[8] = this + 9788;
+        new(c, &r, sp, AUDIO_SLIDER, &[this + 9788, 472, this + 9612, 2], &[], 0x8003_069C);
+        new(c, &r, sp, AUDIO_SLIDER, &[this + 9844, 473, this + 9628, 3], &[(444, this + 9844)], 0x8003_06BC);
+        r.0[3] = this + 9900;
+        new(c, &r, sp, AUDIO_SLIDER, &[this + 9900, 474, this + 9644, 4], &[], 0x8003_06D8);
+        new(c, &r, sp, FADE, &[this + 9956, 475, this + 9660], &[(448, this + 9956)], 0x8003_06F4);
+        c.m.w32(this + 9980, 0x8001_0D88);
+        r.0[0] = this + 10000;
+        new(c, &r, sp, SLIDING_MENU, &[this + 10000, 476, 350, 43], &[(16, 0xFFFF_FF9A), (20, 13), (24, 0)], 0x8003_0734);
+        c.m.w32(this + 10024, 0x8001_0DE0);
+        new(c, &r, sp, SONG_MENU, &[this + 10072, 0x1000, 0, 0], &[(16, 0), (20, 0), (24, 0), (28, 0)], 0x8003_0768);
+        let g20 = c.m.r32(0x8005_2D78);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 10208, 0x1010, g20, 0], &[(16, 0), (20, 0), (24, 0x264), (28, 38), (32, 10), (36, this + 9676), (40, this + 9732), (44, this + 9788), (48, this + 9844), (52, this + 9900), (56, this + 9956), (60, this + 10000), (64, 0)], 0x8003_07D0);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10336, 0x8005_1E24, 0x8011_5BD8, fe_app + 557], &[(452, this + 10336)], 0x8003_0800);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10356, 0x8005_1E30, 0x8011_5BDC, fe_app + 557], &[(456, this + 10356)], 0x8003_0834);
+        r.0[3] = this + 10376;
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10376, 0x8005_1E38, 0x8011_5BDE, fe_app + 557], &[], 0x8003_0864);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10396, 0x8005_1DFC, 0x8011_5BE0, fe_app + 557], &[(460, this + 10396)], 0x8003_0898);
+        r.0[0] = this + 10416;
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10416, 0x8005_1DFC, 0x8011_5BE2, fe_app + 557], &[], 0x8003_08C8);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10436, 0x8005_1DFC, 0x8011_5BE4, fe_app + 557], &[(464, this + 10436)], 0x8003_08FC);
+        new(c, &r, sp, ITERATOR, &[this + 10456, 0x8005_1E40, 0x8011_5C4E], &[(468, this + 10456)], 0x8003_0924);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10472, 0x8005_1E48, 0x8011_5C4F, fe_app + 557], &[(472, this + 10472)], 0x8003_0958);
+        r.0[5] = this + 10492;
+        new(c, &r, sp, FADE, &[this + 10492, 480, this + 10336], &[], 0x8003_0970);
+        c.m.w32(this + 10516, 0x8001_0D88);
+        r.0[8] = this + 10536;
+        new(c, &r, sp, FADE, &[this + 10536, 482, this + 10356], &[], 0x8003_0994);
+        c.m.w32(this + 10560, 0x8001_0D88);
+        new(c, &r, sp, FADE, &[this + 10580, 483, this + 10376], &[(476, this + 10580)], 0x8003_09BC);
+        c.m.w32(this + 10604, 0x8001_0D88);
+        new(c, &r, sp, FADE, &[this + 10624, 484, this + 10396], &[(480, this + 10624)], 0x8003_09E8);
+        c.m.w32(this + 10648, 0x8001_0D30);
+        r.0[0] = 0x8001_0D30;
+        new(c, &r, sp, FADE, &[this + 10672, 487, this + 10416], &[(484, this + 10672)], 0x8003_0A14);
+        c.m.w32(this + 10696, 0x8001_0D30);
+        r.0[3] = this + 10720;
+        new(c, &r, sp, FADE, &[this + 10720, 488, this + 10436], &[], 0x8003_0A34);
+        c.m.w32(this + 10744, 0x8001_0D30);
+        new(c, &r, sp, FADE, &[this + 10768, 485, this + 10456], &[(488, this + 10768)], 0x8003_0A54);
+        c.m.w32(this + 10792, 0x8001_0D88);
+        r.0[0] = this + 10812;
+        new(c, &r, sp, FADE, &[this + 10812, 486, this + 10472], &[], 0x8003_0A7C);
+        let g21 = c.m.r32(0x8005_2D68);
+        c.m.w32(this + 10836, 0x8001_0D88);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 10856, 0x1020, g21, 0], &[(16, 0), (20, 0), (24, 478), (28, 1), (32, 10), (36, this + 10492), (40, this + 10536), (44, this + 10580), (48, this + 10624), (52, this + 10768), (56, this + 10812), (60, this + 10672), (64, this + 10720), (68, 0)], 0x8003_0AF4);
+        new(c, &r, sp, INDEXED_ITERATOR, &[this + 10984, 0x8005_1E58, 0x8011_5C1A, fe_app + 557], &[(492, this + 10984)], 0x8003_0B28);
+        r.0[0] = this + 11004;
+        new(c, &r, sp, FADE, &[this + 11004, 0x20A, this + 10984], &[], 0x8003_0B40);
+        c.m.w32(this + 11028, 0x8001_0C18);
+        new(c, &r, sp, SLIDING_MENU, &[this + 11048, 0x20B, 172, 72], &[(16, 0), (20, 13), (24, 1), (496, this + 11048)], 0x8003_0B80);
+        let g22 = c.m.r32(0x8005_2D60);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 11116, 0x1020, g22, 0], &[(16, 0), (20, 0), (24, 0x209), (28, 0), (32, 10), (36, this + 11004), (40, this + 11048), (44, 0)], 0x8003_0BC4);
+        r.0[0] = this + 11244;
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11244, 0, 127, 0x8011_5C11], &[(16, fe_app + 557)], 0x8003_0BF8);
+        new(c, &r, sp, INSIDE_SLIDER, &[this + 11264, 0x20F, this + 11244], &[(500, this + 11264)], 0x8003_0C14);
+        c.m.w32(this + 11288, 0x8001_0A08);
+        r.0[0] = 0x8001_0A08;
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11304, 0, 127, 0x8011_5C13], &[(16, fe_app + 557), (504, this + 11304)], 0x8003_0C5C);
+        new(c, &r, sp, INSIDE_SLIDER, &[this + 11324, 0x210, this + 11304], &[(508, this + 11324)], 0x8003_0C78);
+        c.m.w32(this + 11348, 0x8001_0A08);
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11364, 0, 127, 0x8011_5C09], &[(16, fe_app + 557), (512, this + 11364)], 0x8003_0CB8);
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11384, 0x212, this + 11364, 0], &[(516, this + 11384)], 0x8003_0CD8);
+        r.0[0] = 0x8005_0000;
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11432, 0, 127, 0x8011_5C0B], &[(16, fe_app + 557), (520, this + 11432)], 0x8003_0D10);
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11452, 0x214, this + 11432, 1], &[(524, this + 11452)], 0x8003_0D30);
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11500, 0, 127, 0x8011_5C0D], &[(16, fe_app + 557), (528, this + 11500)], 0x8003_0D64);
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11520, 0x211, this + 11500, 2], &[(532, this + 11520)], 0x8003_0D84);
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11568, 0, 127, 0x8011_5C0F], &[(16, fe_app + 557), (536, this + 11568)], 0x8003_0DB8);
+        r.0[3] = this + 11588;
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11588, 0x213, this + 11568, 3], &[], 0x8003_0DD4);
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11636, 0, 127, 0x8011_5C01], &[(16, fe_app + 557), (540, this + 11636)], 0x8003_0E08);
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11656, 0x215, this + 11636, 0], &[(544, this + 11656)], 0x8003_0E28);
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11704, 0, 127, 0x8011_5C03], &[(16, fe_app + 557), (548, this + 11704)], 0x8003_0E5C);
+        r.0[8] = this + 11724;
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11724, 0x216, this + 11704, 1], &[], 0x8003_0E78);
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11772, 0, 255, 0x8011_5C05], &[(16, fe_app + 557), (552, this + 11772)], 0x8003_0EAC);
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11792, 0x217, this + 11772, 2], &[(556, this + 11792)], 0x8003_0ECC);
+        new(c, &r, sp, RANGE_INDEXED_ITERATOR, &[this + 11840, 0, 255, 0x8011_5C07], &[(16, fe_app + 557), (560, this + 11840)], 0x8003_0F00);
+        r.0[0] = this + 11860;
+        new(c, &r, sp, TWO_WAY_SLIDER, &[this + 11860, 0x218, this + 11840, 3], &[], 0x8003_0F1C);
+        new(c, &r, sp, INSIDE_BOX_MENU, &[this + 11908, 0x1000, 0, 0], &[(16, 0), (20, 0), (24, 0), (28, this + 11264), (32, this + 11324), (36, 0)], 0x8003_0F54);
+        new(c, &r, sp, INSIDE_BOX_MENU, &[this + 12024, 0x1000, 0, 0], &[(16, 0), (20, 0), (24, 0), (28, this + 11384), (32, this + 11452), (36, this + 11520), (40, this + 11588), (44, 0)], 0x8003_0F98);
+        new(c, &r, sp, INSIDE_BOX_MENU, &[this + 12140, 0x1000, 0, 0], &[(16, 0), (20, 0), (24, 0), (28, this + 11264), (32, this + 11324), (36, this + 11452), (40, this + 11588), (44, 0)], 0x8003_0FDC);
+        new(c, &r, sp, INSIDE_BOX_MENU, &[this + 12256, 0x1000, 0, 0], &[(16, 0), (20, 0), (24, 0), (28, this + 11656), (32, this + 11724), (36, this + 11792), (40, this + 11860), (44, 0)], 0x8003_101C);
+        r.0[8] = this + 12372;
+        new(c, &r, sp, BUTTON, &[this + 12372, 0x287, 0, SAVE_GAME], &[], 0x8003_103C);
+        c.m.w32(this + 12396, 0x8001_0A60);
+        r.0[0] = this + 12416;
+        new(c, &r, sp, BUTTON, &[this + 12416, 0x288, 0, LOAD_GAME], &[], 0x8003_1068);
+        let memcard_screen = c.m.r32(MEMCARD_SCREEN);
+        c.m.w32(this + 12440, 0x8001_0A60);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 12460, 0x1020, memcard_screen, 0], &[(16, 0), (20, 0), (24, 0xFFFF_FFFF), (28, 46), (32, 10), (36, this + 12416), (40, this + 12372), (44, 0), (564, this + 12460)], 0x8003_10C4);
+        r.0[0] = this + 12588;
+        new(c, &r, sp, USER_NAME, &[this + 12588, 505], &[], 0x8003_10D8);
+        new(c, &r, sp, USER_NAME, &[this + 12728, 505], &[(568, this + 12728)], 0x8003_10F0);
+        new(c, &r, sp, USER_NAME, &[this + 12868, 505], &[(572, this + 12868)], 0x8003_1108);
+        let name_screen = c.m.r32(NAME_SCREEN);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 13008, 0x1120, name_screen, 0], &[(16, 0), (20, 0), (24, 0xFFFF_FFFF), (28, 32), (32, 10), (36, this + 12588), (40, 0), (576, this + 13008)], 0x8003_1154);
+        let g23 = c.m.r32(0x8005_24F0);
+        r.0[3] = 0x8005_0000;
+        new(c, &r, sp, ITERATOR, &[this + 13136, g23 + 216, g23 + 204], &[(580, this + 13136)], 0x8003_1178);
+        r.0[0] = this + 13152;
+        new(c, &r, sp, NFS4_CHOICE, &[this + 13152, 95, this + 13136, 0xFFFF_FFFF], &[(16, 0)], 0x8003_1198);
+        let g24 = c.m.r32(0x8005_24F0);
+        c.m.w32(this + 13176, 0x8001_14D8);
+        new(c, &r, sp, BOTTOM_MENU, &[this + 13192, 0x4010, g24, 0], &[(16, 0), (20, 0), (24, 0xFFFF_FFFF), (28, this + 13152), (32, 0)], 0x8003_11D4);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 13316, 91, 0, PINK_SLIPS_CONTINUE], &[(16, 0), (20, 10), (584, this + 13316)], 0x8003_1204);
+        r.0[0] = this + 13360;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 13360, 157, 0, EXIT_PINK_SLIPS_EARLY], &[(16, 0), (20, 10)], 0x8003_1230);
+        let g25 = c.m.r32(0x8005_2300);
+        r.0[3] = 0x2F5;
+        new(c, &r, sp, NFS4_MENU, &[this + 13404, 0x1004, g25, 0], &[(16, 0), (20, 0), (24, 0x2F5), (28, this + 13316), (32, this + 13360), (36, 0)], 0x8003_126C);
+        new(c, &r, sp, NFS4_BUTTON, &[this + 13528, 91, this + 4336, 0], &[(16, 0), (20, 10), (588, this + 13528)], 0x8003_129C);
+        r.0[0] = this + 13572;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 13572, 156, 0, EXIT_TOURNEY], &[(16, 0), (20, 10)], 0x8003_12C8);
+        let standings3_screen = c.m.r32(STANDINGS3_SCREEN);
+        new(c, &r, sp, NFS4_MENU, &[this + 13616, 0x1004, standings3_screen, 0], &[(16, 0), (20, 0), (24, 0x2F5), (28, this + 13528), (32, this + 13572), (36, 0)], 0x8003_1300);
+        r.0[0] = this + 13740;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 13740, 91, this + 13908, 0], &[(16, 0), (20, 10), (592, this + 13908)], 0x8003_1330);
+        let standings_screen = c.m.r32(STANDINGS_SCREEN);
+        new(c, &r, sp, NFS4_MENU, &[this + 13784, 0x1004, standings_screen, 0], &[(16, 0), (20, 0), (24, 0x2F5), (28, this + 13740), (32, 0)], 0x8003_1360);
+        let g26 = c.m.r32(0x8005_2DD8);
+        new(c, &r, sp, BLANK_MENU, &[this + 13908, 0x8000, g26, 0], &[(16, 0), (20, TIER_FINISHED), (24, 0xFFFF_FFFF)], 0x8003_1390);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 14032, 0x1040, name_screen, 0], &[(16, 0), (20, FINISHED_PLAYER1_GET_NAME), (24, 0xFFFF_FFFF), (28, 32), (32, 10), (36, this + 12728), (40, 0)], 0x8003_13E0);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 14160, 0x1080, name_screen, 0], &[(16, 0), (20, FINISHED_PLAYER2_GET_NAME), (24, 0xFFFF_FFFF), (28, 32), (32, 10), (36, this + 12868), (40, 0)], 0x8003_1430);
+        r.0[0] = this + 14288;
+        new(c, &r, sp, NFS4_BUTTON, &[this + 14288, 91, 0, POST_GAME_MENU], &[(16, 0xFFFF_FFFF), (20, 0xFFFF_FFFF)], 0x8003_1460);
+        let g27 = c.m.r32(0x8005_2560);
+        c.m.w32(this + 14312, 0x8001_1480);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 14332, 0x0002_1004, g27, 0], &[(16, 0), (20, 0), (24, 213), (28, 1), (32, 10), (36, this + 14288), (40, 0)], 0x8003_14B4);
+        let pink_standings = c.m.r32(PINK_STANDINGS);
+        new(c, &r, sp, BLANK_MENU, &[this + 14460, 0x8000, pink_standings, 0], &[(16, 0), (20, AWARD_PINK_SLIPS_CAR), (24, 0xFFFF_FFFF)], 0x8003_14E8);
+        let g28 = c.m.r32(0x8005_2DDC);
+        r.0[0] = TRANSITION_FROM_POST_GAME_TO_MAIN_MENU_AND_SAVE_GAME;
+        new(c, &r, sp, BLANK_MENU, &[this + 14584, 0x8000, g28, 0], &[(16, 0), (20, TRANSITION_FROM_POST_GAME_TO_MAIN_MENU_AND_SAVE_GAME), (24, 0xFFFF_FFFF)], 0x8003_151C);
+        let g29 = c.m.r32(0x8005_2DE0);
+        new(c, &r, sp, BLANK_MENU, &[this + 14708, 0x8000, g29, 0], &[(16, 0), (20, TRANSITION_FROM_POST_GAME_TO_MAIN_MENU_AND_SAVE_GAME), (24, 0xFFFF_FFFF)], 0x8003_1548);
+        new(c, &r, sp, BLANK_MENU, &[this + 14832, 0x1010, main_screen, 0], &[(16, 0), (20, 0), (24, 0xFFFF_FFFF)], 0x8003_1574);
+        r.0[0] = this + 14956;
+        new(c, &r, sp, BUTTON, &[this + 14956, 0x28B, 0, TRANSITION_FROM_POST_GAME_TO_MAIN_MENU], &[], 0x8003_1594);
+        c.m.w32(this + 14980, 0x8001_0A60);
+        new(c, &r, sp, OPTIONS_MENU, &[this + 15000, 0x1040, memcard_screen, 0], &[(16, 0), (20, 0), (24, 0xFFFF_FFFF), (28, 46), (32, 10), (36, this + 14956), (40, this + 12372), (44, 0)], 0x8003_15E8);
+        c.m.w32(this + 5912, this + 6072);
+        c.m.w32(this + 6368, this + 6488);
+        c.m.w32(this + 6812, this + 6932);
+        r.0[0] = 5;
+        new(c, &r, sp, SET_DIMENSIONS, &[this + 9676, 0, 0, 120], &[(16, 5)], 0x8003_1620);
+        new(c, &r, sp, SET_DIMENSIONS, &[this + 9732, 0, 0, 120], &[(16, 5)], 0x8003_163C);
+        new(c, &r, sp, SET_DIMENSIONS, &[this + 9788, 0, 0, 120], &[(16, 5)], 0x8003_1658);
+        new(c, &r, sp, SET_DIMENSIONS, &[this + 9844, 0, 0, 120], &[(16, 5)], 0x8003_1674);
+        new(c, &r, sp, SET_DIMENSIONS, &[this + 9900, 0, 0, 120], &[(16, 5)], 0x8003_1690);
+        let g30 = c.m.r32(this + 13740);
+        c.m.w32(this + 6628, 32);
+        c.m.w32(this + 4828, 2);
+        c.m.w32(this + 7284, 1);
+        c.m.w32(this + 7636, 2);
+        c.m.w16(this + 10308, 0);
+        c.m.w16(this + 10956, 0);
+        c.m.w16(this + 11216, 1);
+        c.m.w32(this + 13740, g30 | 64);
+        c.m.w16(this + 12560, 0);
+        c.m.w16(this + 13108, 0);
+        c.m.w16(this + 4264, 1);
+        c.m.w16(this + 612, 0);
+        // the scratch registers as the original leaves them
+        c.r[2] = this;
+        c.r[3] = g30 | 64;
+        c.r[4] = 2;
+        c.r[8] = this + 13008;
+        c.r[9] = 1;
+    })
+}
+
+/// `tGlobalMenuDefs::tGlobalMenuDefs` entered as the original's callers `jal` it.
+pub(crate) fn global_menu_defs_entry(c: &mut Cpu) {
+    abi::leave_prologue(c, 0x8002_e504, None, &[]);
+    abi_global_menu_defs(c);
+}
+
+/// The members destroyed, the last constructed first: (offset, destructor, return address).
+const MEMBERS: [(u32, u32, u32); 249] = [
+    (15000, 0x8001_C6A4, 0x8003_1744), (14956, 0x8002_539C, 0x8003_1750), (14832, 0x8001_BA5C, 0x8003_175C), (14708, 0x8001_BA5C, 0x8003_1768),
+    (14584, 0x8001_BA5C, 0x8003_1774), (14460, 0x8001_BA5C, 0x8003_1780), (14332, 0x8001_C6A4, 0x8003_178C), (14288, 0x8001_A674, 0x8003_1798),
+    (14160, 0x8001_C6A4, 0x8003_17A4), (14032, 0x8001_C6A4, 0x8003_17B0), (13908, 0x8001_BA5C, 0x8003_17BC), (13784, 0x8001_B2B8, 0x8003_17C8),
+    (13740, 0x8001_A674, 0x8003_17D4), (13616, 0x8001_B2B8, 0x8003_17E0), (13572, 0x8001_A674, 0x8003_17EC), (13528, 0x8001_A674, 0x8003_17F8),
+    (13404, 0x8001_B2B8, 0x8003_1804), (13360, 0x8001_A674, 0x8003_1810), (13316, 0x8001_A674, 0x8003_181C), (13192, 0x8001_B910, 0x8003_1828),
+    (13152, 0x8001_AA00, 0x8003_1834), (13136, 0x8002_3E14, 0x8003_1840), (13008, 0x8001_C6A4, 0x8003_184C), (12868, 0x8002_4784, 0x8003_1858),
+    (12728, 0x8002_4784, 0x8003_1864), (12588, 0x8002_4784, 0x8003_1870), (12460, 0x8001_C6A4, 0x8003_187C), (12416, 0x8002_539C, 0x8003_1888),
+    (12372, 0x8002_539C, 0x8003_1894), (12256, 0x8001_CF64, 0x8003_18A0), (12140, 0x8001_CF64, 0x8003_18AC), (12024, 0x8001_CF64, 0x8003_18B8),
+    (11908, 0x8001_CF64, 0x8003_18C4), (11860, 0x8001_F628, 0x8003_18D0), (11840, 0x8002_4690, 0x8003_18DC), (11792, 0x8001_F628, 0x8003_18E8),
+    (11772, 0x8002_4690, 0x8003_18F4), (11724, 0x8001_F628, 0x8003_1900), (11704, 0x8002_4690, 0x8003_190C), (11656, 0x8001_F628, 0x8003_1918),
+    (11636, 0x8002_4690, 0x8003_1924), (11588, 0x8001_F628, 0x8003_1930), (11568, 0x8002_4690, 0x8003_193C), (11520, 0x8001_F628, 0x8003_1948),
+    (11500, 0x8002_4690, 0x8003_1954), (11452, 0x8001_F628, 0x8003_1960), (11432, 0x8002_4690, 0x8003_196C), (11384, 0x8001_F628, 0x8003_1978),
+    (11364, 0x8002_4690, 0x8003_1984), (11324, 0x8001_F428, 0x8003_1990), (11304, 0x8002_4690, 0x8003_199C), (11264, 0x8001_F428, 0x8003_19A8),
+    (11244, 0x8002_4690, 0x8003_19B4), (11116, 0x8001_C6A4, 0x8003_19C0), (11048, 0x8001_D368, 0x8003_19CC), (11004, 0x8002_4974, 0x8003_19D8),
+    (10984, 0x8002_3FC4, 0x8003_19E4), (10856, 0x8001_C6A4, 0x8003_19F0), (10812, 0x8002_4974, 0x8003_19FC), (10768, 0x8002_4974, 0x8003_1A08),
+    (10720, 0x8002_4974, 0x8003_1A14), (10672, 0x8002_4974, 0x8003_1A20), (10624, 0x8002_4974, 0x8003_1A2C), (10580, 0x8002_4974, 0x8003_1A38),
+    (10536, 0x8002_4974, 0x8003_1A44), (10492, 0x8002_4974, 0x8003_1A50), (10472, 0x8002_3FC4, 0x8003_1A5C), (10456, 0x8002_3E14, 0x8003_1A68),
+    (10436, 0x8002_3FC4, 0x8003_1A74), (10416, 0x8002_3FC4, 0x8003_1A80), (10396, 0x8002_3FC4, 0x8003_1A8C), (10376, 0x8002_3FC4, 0x8003_1A98),
+    (10356, 0x8002_3FC4, 0x8003_1AA4), (10336, 0x8002_3FC4, 0x8003_1AB0), (10208, 0x8001_C6A4, 0x8003_1ABC), (10072, 0x8001_EB10, 0x8003_1AC8),
+    (10000, 0x8001_D368, 0x8003_1AD4), (9956, 0x8002_4974, 0x8003_1AE0), (9900, 0x8001_E6A8, 0x8003_1AEC), (9844, 0x8001_E6A8, 0x8003_1AF8),
+    (9788, 0x8001_E6A8, 0x8003_1B04), (9732, 0x8001_E6A8, 0x8003_1B10), (9676, 0x8001_E6A8, 0x8003_1B1C), (9660, 0x8002_3E14, 0x8003_1B28),
+    (9644, 0x8002_45B0, 0x8003_1B34), (9628, 0x8002_45B0, 0x8003_1B40), (9612, 0x8002_45B0, 0x8003_1B4C), (9596, 0x8002_45B0, 0x8003_1B58),
+    (9580, 0x8002_45B0, 0x8003_1B64), (9456, 0x8001_B2B8, 0x8003_1B70), (9412, 0x8001_A674, 0x8003_1B7C), (9368, 0x8001_A674, 0x8003_1B88),
+    (9324, 0x8001_A674, 0x8003_1B94), (9280, 0x8001_A674, 0x8003_1BA0), (9236, 0x8001_A674, 0x8003_1BAC), (9192, 0x8001_A674, 0x8003_1BB8),
+    (9068, 0x8001_BA5C, 0x8003_1BC4), (8936, 0x8001_BC24, 0x8003_1BD0), (8804, 0x8001_BC24, 0x8003_1BDC), (8672, 0x8001_BC24, 0x8003_1BE8),
+    (8540, 0x8001_BC24, 0x8003_1BF4), (8408, 0x8001_BC24, 0x8003_1C00), (8376, 0x8002_4974, 0x8003_1C0C), (8344, 0x8002_4974, 0x8003_1C18),
+    (8312, 0x8002_4974, 0x8003_1C24), (8280, 0x8002_4974, 0x8003_1C30), (8248, 0x8002_4974, 0x8003_1C3C), (8216, 0x8002_4974, 0x8003_1C48),
+    (8184, 0x8002_4974, 0x8003_1C54), (8168, 0x8002_3E14, 0x8003_1C60), (8152, 0x8002_3E14, 0x8003_1C6C), (8132, 0x8002_3FC4, 0x8003_1C78),
+    (8112, 0x8002_3FC4, 0x8003_1C84), (7988, 0x8001_B2B8, 0x8003_1C90), (7944, 0x8001_A674, 0x8003_1C9C), (7900, 0x8001_A674, 0x8003_1CA8),
+    (7856, 0x8001_A674, 0x8003_1CB4), (7732, 0x8001_B2B8, 0x8003_1CC0), (7688, 0x8001_A674, 0x8003_1CCC), (7648, 0x8001_AA00, 0x8003_1CD8),
+    (7620, 0x8001_7A70, 0x8003_1CE4), (7496, 0x8001_B2B8, 0x8003_1CF0), (7452, 0x8001_A674, 0x8003_1CFC), (7408, 0x8001_A674, 0x8003_1D08),
+    (7368, 0x8001_AA00, 0x8003_1D14), (7328, 0x8001_AA00, 0x8003_1D20), (7296, 0x8001_8660, 0x8003_1D2C), (7268, 0x8001_7A70, 0x8003_1D38),
+    (7144, 0x8001_B2B8, 0x8003_1D44), (7100, 0x8001_A674, 0x8003_1D50), (7056, 0x8001_A674, 0x8003_1D5C), (6932, 0x8001_B808, 0x8003_1D68),
+    (6892, 0x8001_AA00, 0x8003_1D74), (6848, 0x8001_A674, 0x8003_1D80), (6724, 0x8001_B808, 0x8003_1D8C), (6684, 0x8001_AA00, 0x8003_1D98),
+    (6640, 0x8001_A674, 0x8003_1DA4), (6612, 0x8001_7A70, 0x8003_1DB0), (6488, 0x8001_B808, 0x8003_1DBC), (6448, 0x8001_AA00, 0x8003_1DC8),
+    (6404, 0x8001_A674, 0x8003_1DD4), (6280, 0x8001_B808, 0x8003_1DE0), (6240, 0x8001_AA00, 0x8003_1DEC), (6196, 0x8001_A674, 0x8003_1DF8),
+    (6072, 0x8001_B808, 0x8003_1E04), (6032, 0x8001_AA00, 0x8003_1E10), (5992, 0x8001_AA00, 0x8003_1E1C), (5948, 0x8001_A674, 0x8003_1E28),
+    (5824, 0x8001_B808, 0x8003_1E34), (5784, 0x8001_AA00, 0x8003_1E40), (5744, 0x8001_AA00, 0x8003_1E4C), (5700, 0x8001_A674, 0x8003_1E58),
+    (5576, 0x8001_B2B8, 0x8003_1E64), (5452, 0x8001_B2B8, 0x8003_1E70), (5412, 0x8001_AA00, 0x8003_1E7C), (5368, 0x8001_A674, 0x8003_1E88),
+    (5328, 0x8001_AA00, 0x8003_1E94), (5288, 0x8001_AA00, 0x8003_1EA0), (5244, 0x8001_A674, 0x8003_1EAC), (5216, 0x8001_7A70, 0x8003_1EB8),
+    (5092, 0x8001_B2B8, 0x8003_1EC4), (4968, 0x8001_B2B8, 0x8003_1ED0), (4924, 0x8001_A674, 0x8003_1EDC), (4880, 0x8001_A674, 0x8003_1EE8),
+    (4840, 0x8001_AA00, 0x8003_1EF4), (4812, 0x8001_7A70, 0x8003_1F00), (4688, 0x8001_B2B8, 0x8003_1F0C), (4644, 0x8001_A674, 0x8003_1F18),
+    (4604, 0x8001_AA00, 0x8003_1F24), (4564, 0x8001_AA00, 0x8003_1F30), (4520, 0x8001_A674, 0x8003_1F3C), (4488, 0x8001_8660, 0x8003_1F48),
+    (4460, 0x8001_7A70, 0x8003_1F54), (4336, 0x8001_B2B8, 0x8003_1F60), (4292, 0x8001_A674, 0x8003_1F6C), (4164, 0x8001_C6A4, 0x8003_1F78),
+    (4120, 0x8001_A674, 0x8003_1F84), (3988, 0x8001_BC24, 0x8003_1F90), (3952, 0x8002_4974, 0x8003_1F9C), (3916, 0x8002_4974, 0x8003_1FA8),
+    (3880, 0x8002_4974, 0x8003_1FB4), (3844, 0x8002_4974, 0x8003_1FC0), (3808, 0x8002_4974, 0x8003_1FCC), (3776, 0x8002_4974, 0x8003_1FD8),
+    (3744, 0x8002_4974, 0x8003_1FE4), (3728, 0x8002_3E14, 0x8003_1FF0), (3708, 0x8002_3FC4, 0x8003_1FFC), (3688, 0x8002_3FC4, 0x8003_2008),
+    (3668, 0x8002_3FC4, 0x8003_2014), (3648, 0x8002_3FC4, 0x8003_2020), (3628, 0x8002_3FC4, 0x8003_202C), (3608, 0x8002_3FC4, 0x8003_2038),
+    (3484, 0x8001_B2B8, 0x8003_2044), (3360, 0x8001_B2B8, 0x8003_2050), (3316, 0x8001_A674, 0x8003_205C), (3276, 0x8001_AA00, 0x8003_2068),
+    (3232, 0x8001_A674, 0x8003_2074), (3208, 0x8002_1F0C, 0x8003_2080), (3084, 0x8001_B2B8, 0x8003_208C), (2960, 0x8001_B2B8, 0x8003_2098),
+    (2920, 0x8001_AA00, 0x8003_20A4), (2880, 0x8001_AA00, 0x8003_20B0), (2840, 0x8001_AA00, 0x8003_20BC), (2800, 0x8001_AA00, 0x8003_20C8),
+    (2760, 0x8001_AA00, 0x8003_20D4), (2716, 0x8001_A674, 0x8003_20E0), (2592, 0x8001_B2B8, 0x8003_20EC), (2548, 0x8001_A674, 0x8003_20F8),
+    (2504, 0x8001_A674, 0x8003_2104), (2460, 0x8001_A674, 0x8003_2110), (2336, 0x8001_B2B8, 0x8003_211C), (2292, 0x8001_A674, 0x8003_2128),
+    (2248, 0x8001_A674, 0x8003_2134), (2204, 0x8001_A674, 0x8003_2140), (2160, 0x8001_A674, 0x8003_214C), (2036, 0x8001_B2B8, 0x8003_2158),
+    (1996, 0x8001_AA00, 0x8003_2164), (1952, 0x8001_A674, 0x8003_2170), (1932, 0x8003_3F28, 0x8003_217C), (1808, 0x8001_B2B8, 0x8003_2188),
+    (1768, 0x8001_AA00, 0x8003_2194), (1724, 0x8001_A674, 0x8003_21A0), (1704, 0x8003_3F28, 0x8003_21AC), (1580, 0x8001_B2B8, 0x8003_21B8),
+    (1536, 0x8001_A674, 0x8003_21C4), (1492, 0x8001_A674, 0x8003_21D0), (1368, 0x8001_B2B8, 0x8003_21DC), (1324, 0x8001_A674, 0x8003_21E8),
+    (1280, 0x8001_A674, 0x8003_21F4), (1236, 0x8001_A674, 0x8003_2200), (1112, 0x8001_B2B8, 0x8003_220C), (1068, 0x8001_A674, 0x8003_2218),
+    (1024, 0x8001_A674, 0x8003_2224), (980, 0x8001_A674, 0x8003_2230), (936, 0x8001_A674, 0x8003_223C), (892, 0x8001_A674, 0x8003_2248),
+    (768, 0x8001_B2B8, 0x8003_2254), (724, 0x8001_A674, 0x8003_2260), (680, 0x8001_A674, 0x8003_226C), (636, 0x8001_A674, 0x8003_2278),
+    (512, 0x8001_BA5C, 0x8003_2284), (388, 0x8001_B2B8, 0x8003_2290), (344, 0x8001_A674, 0x8003_229C), (300, 0x8001_A674, 0x8003_22A8),
+    (176, 0x8001_B2B8, 0x8003_22B4), (132, 0x8001_A674, 0x8003_22C0), (88, 0x8001_A674, 0x8003_22CC), (44, 0x8001_A674, 0x8003_22D8),
+    (0, 0x8001_A674, 0x8003_22E4),
+];
+
+/// `tGlobalMenuDefs::~tGlobalMenuDefs` (FEMENUDEFS.CPP, 0x80031720): every member destroyed
+/// (each told 2: not to free itself), the last constructed first; freed if `flags` & 1.
+pub fn abi_global_menu_defs_destructor(c: &mut Cpu) {
+    let (this, flags) = (c.r[4], c.r[5]);
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        (r.0[0], r.0[1]) = (flags, this);
+        for &(at, dtor, ra) in &MEMBERS {
+            r.call_ptr_leaving(c, dtor, &[this + at, 2], ra);
+        }
+        r.0[0] = flags & 1;
+        if r.0[0] != 0 {
+            r.call_leaving(c, nfs4rc::f_800a4910, &[this], 0x8003_22f8);
+        }
+    })
+}
+
+/// `tGlobalMenuDefs::~tGlobalMenuDefs` entered as the original's callers `jal` it.
+pub(crate) fn global_menu_defs_destructor_entry(c: &mut Cpu) {
+    abi::leave_prologue(c, 0x8003_1720, None, &[]);
+    abi_global_menu_defs_destructor(c);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1432,11 +2092,7 @@ mod tests {
 
     fn cases() -> Vec<Case> {
         vec![
-            ("MenuExtended_SetOnePlayer", 0x8002_c168, nfs4rc::f_8002c168, |c, _| {
-                let a = app(&mut c.m);
-                c.r[2] = a;
-                vec![CMD]
-            }),
+            ("MenuExtended_SetOnePlayer", 0x8002_c160, nfs4rc::f_8002c160, |_, _| vec![CMD]),
             ("MenuExtended_SetTwoPlayer", 0x8002_c1ac, nfs4rc::f_8002c1ac, |_, _| vec![CMD]),
             ("MenuExtended_SetTestDrive", 0x8002_c1fc, nfs4rc::f_8002c1fc, |_, _| vec![CMD]),
             ("MenuExtended_SetSingleRace", 0x8002_c218, nfs4rc::f_8002c218, |_, _| vec![CMD]),
@@ -1497,6 +2153,9 @@ mod tests {
             ("MenuExtended_SetIntermediate", 0x8002_e2b8, nfs4rc::f_8002e2b8, |_, _| vec![CMD]),
             ("MenuExtended_SetExpert", 0x8002_e2c8, nfs4rc::f_8002e2c8, |_, _| vec![CMD]),
             ("MenuExtended_PinkSlipsContinue", 0x8002_e498, nfs4rc::f_8002e498, |_, _| vec![CMD]),
+            // (rebuilt in place over the front end's own, and destroyed, freed or not)
+            ("tGlobalMenuDefs", 0x8002_e504, nfs4rc::f_8002e504, |c, _| vec![menus(&mut c.m)]),
+            ("~tGlobalMenuDefs", 0x8003_1720, nfs4rc::f_80031720, |c, r| vec![menus(&mut c.m), 2 + pick(r, 2)]),
         ]
     }
 

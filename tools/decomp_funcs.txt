@@ -1557,7 +1557,7 @@
 8003fb24 ~tScreenCarSelectDuel
 
 # FEMENUDEFS.CPP
-8002c168 MenuExtended_SetOnePlayer
+8002c160 MenuExtended_SetOnePlayer
 8002c1ac MenuExtended_SetTwoPlayer
 8002c1fc MenuExtended_SetTestDrive
 8002c218 MenuExtended_SetSingleRace
@@ -1614,6 +1614,8 @@
 8002e2d8 MenuExtended_ExitTourney
 8002e368 MenuExtended_ExitPinkSlipsEarly
 8002e498 MenuExtended_PinkSlipsContinue
+8002e504 tGlobalMenuDefs::tGlobalMenuDefs
+80031720 ~tGlobalMenuDefs
 
 # MOVIE.CPP (the rest is the host's: it plays the movies in place of Movie_Play)
 8004d3dc play_movie

@@ -72,7 +72,7 @@ const CARD_START: fn(&mut Cpu) = crate::fememcard::init_memcard_entry;
 const CARD_END: fn(&mut Cpu) = crate::fememcard::deinit_memcard_entry;
 const CARD_CHECK: fn(&mut Cpu) = crate::fememcard::load_game_entry;
 /// The menus' destructor.
-const ALL_MENUS_DTOR: fn(&mut Cpu) = nfs4rc::f_80031720;
+const ALL_MENUS_DTOR: fn(&mut Cpu) = crate::femenudefs::global_menu_defs_destructor_entry;
 /// The host's: `PadGetState`, `PadInfoMode`, `FILE_addbigsync`, `NFS4_LoadingIcon` (hooked).
 const PAD_GET_STATE: u32 = 0x800F_07FC;
 const PAD_INFO_MODE: u32 = 0x800F_08BC;
@@ -1809,7 +1809,7 @@ pub fn abi_output_display_settings(c: &mut Cpu) {
 
 /// `operator new`; the menus' constructor (FEMENUDEFS).
 const NEW: fn(&mut Cpu) = nfs4rc::f_800a48c0;
-const ALL_MENUS_CTOR: fn(&mut Cpu) = nfs4rc::f_8002e504;
+const ALL_MENUS_CTOR: fn(&mut Cpu) = crate::femenudefs::global_menu_defs_entry;
 /// Where each screen of `tAllScreens` is reached from (and its offset in it).
 const SCREEN_POINTERS: [(u32, u32); 26] = [
     (0x8005_22E8, 0), (0x8005_24CC, 1464), (0x8005_24D0, 2392), (0x8005_24D4, 3368), (0x8005_24D8, 4448),
