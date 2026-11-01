@@ -770,7 +770,7 @@ mod tests {
 
     fn cases() -> Vec<Case> {
         vec![
-            ("SetFont", 0x8002_0e38, nfs4rc::f_80020e38, |_, r| vec![pick(r, 6) as i32 as u32 - 1]),
+            ("SetFont", 0x8002_0e38, nfs4rc::f_80020e38, |_, r| vec![pick(r, 6).wrapping_sub(1)]),
             ("FullTextRGB", 0x8002_0eac, nfs4rc::f_80020eac, |_, r| vec![TEXT, coord(r), coord(r), r.next() as u32, font(r), justify(r)]),
             ("FullText", 0x8002_1020, nfs4rc::f_80021020, |_, r| vec![TEXT, coord(r), coord(r), ty(r) % 14, state(r), justify(r)]),
             ("FullTextFade", 0x8002_10a4, nfs4rc::f_800210a4, |_, r| vec![pick(r, 140), TEXT, coord(r), coord(r), ty(r) % 14, state(r), justify(r)]),

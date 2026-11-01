@@ -114,8 +114,8 @@ fn find_road_position(c: &mut Cpu, r: &Saved, car: Car, ra: [u32; 2]) {
 /// A frame's 9 words copied.
 fn copy_matrix(m: &mut Mem, from: Matrix, to: Matrix) {
     for k in 0..9 {
-        let v = m.r32(from.0 + 4 * k);
-        m.w32(to.0 + 4 * k, v);
+        let v = m.r32(from.0.wrapping_add(4 * k));
+        m.w32(to.0.wrapping_add(4 * k), v);
     }
 }
 

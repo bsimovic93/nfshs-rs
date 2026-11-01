@@ -628,8 +628,8 @@ pub fn abi_actual_draw_controller(c: &mut Cpu) {
         let (shape, x, y, scaled);
         if frame != 0 || picture == 1 {
             r.0[2] = SPOTS;
-            let at = SPOTS + 2 * hs(m, this + PICTURE);
-            let (x0, y0) = (b(m, at), b(m, at + 1));
+            let at = SPOTS.wrapping_add(2 * hs(m, this + PICTURE));
+            let (x0, y0) = (b(m, at), b(m, at.wrapping_add(1)));
             r.0[0] = sp + 32;
             port(c, &r, 0x8004_ef70, 0x8004_4004, &[frame + 1, mode(fade), x0, y0, fade, 0, sp + 32], crate::psxfront::abi_scale_shape_extended);
             scaled = true;
@@ -1009,7 +1009,7 @@ pub fn abi_draw_controller(c: &mut Cpu) {
             }
             let shape = shape & 0xFF;
             if shape != 0 {
-                let at = SPOTS + 2 * hs(m, this + PICTURE);
+                let at = SPOTS.wrapping_add(2 * hs(m, this + PICTURE));
                 let (x, y) = (b(m, at), b(m, at + 1));
                 port(c, &r, 0x8004_eb60, 0x8004_4d3c, &[shape, 1536, x, y, 0, 0, sp + 32], crate::psxfront::abi_draw_shape_extended);
             }

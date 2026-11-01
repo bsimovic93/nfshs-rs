@@ -2937,8 +2937,8 @@ mod tests {
             m.w32(it + 20, [0, MENU2][pick(rng, 2) as usize]);
             m.w32(it + ITEM_VPTR, vt);
             m.w32(it + 28, if vt == MEMORY_CARD_VT { [0, NOTHING][pick(rng, 2) as usize] } else { base::iterator(rng) });
-            m.w16(it + 32, [0, 128, pick(rng, 129), pick(rng, 200) - 30][pick(rng, 4) as usize] as u16);
-            m.w16(it + 34, [0, 30, -30i32 as u32, pick(rng, 80) - 40][pick(rng, 4) as usize] as u16);
+            m.w16(it + 32, [0, 128, pick(rng, 129), pick(rng, 200).wrapping_sub(30)][pick(rng, 4) as usize] as u16);
+            m.w16(it + 34, [0, 30, -30i32 as u32, pick(rng, 80).wrapping_sub(40)][pick(rng, 4) as usize] as u16);
             m.w32(it + 36, pick(rng, 2));
             m.w32(it + 40, pick(rng, 70) - 5);
             m.w16(it + 44, pick(rng, 129) as u16);

@@ -1996,7 +1996,12 @@ pub(crate) mod test_util {
                     c.r[r] = 0x8000_0000 | r as u32;
                 }
                 c.r[29] = top;
-                c.r[4..4 + a.len()].copy_from_slice(&a);
+                // (a0..a3, then the stack's from the fifth on, as a caller's `jal` has them)
+                let n = a.len().min(4);
+                c.r[4..4 + n].copy_from_slice(&a[..n]);
+                for (k, &v) in a.iter().enumerate().skip(4) {
+                    c.m.w32(top + 4 * k as u32, v);
+                }
                 c.r[31] = ra;
             };
             enter(&mut c);

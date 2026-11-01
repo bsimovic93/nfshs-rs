@@ -144,27 +144,27 @@ pub fn abi_draw_icon(c: &mut Cpu) {
         let ot = m.r32(0x1F80_0000);
         let prim = crate::mmeffect::add_prim(m, 40);
         r.0[0] = prim;
-        m.w8(prim + 7, 46);
-        m.w8(prim + 3, 9);
+        m.w8(prim.wrapping_add(7), 46);
+        m.w8(prim.wrapping_add(3), 9);
         let grey = (-128i32 as u32).wrapping_sub(fade) as u8;
         for at in [4, 5, 6] {
-            m.w8(prim + at, grey);
+            m.w8(prim.wrapping_add(at), grey);
         }
         // (the OT's linking leaves a1..a3, which the callee keeps)
         (c.r[5], c.r[6], c.r[7]) = (ot, 0xFF00_0000, 0x1F80_0004);
         let clut = r.call_leaving(c, SHAPE_TO_CLUT, &[shape], 0x8004_6860);
         let m = &mut c.m;
         let page = ((mode & 3) << 7) | (((ty & 0x100) as i32 >> 4) as u32) | (((tx & 0x3FF) as i32 >> 6) as u32) | ((ty & 0x200) << 2);
-        m.w16(prim + 14, clut as u16);
-        m.w16(prim + 22, page as u16);
+        m.w16(prim.wrapping_add(14), clut as u16);
+        m.w16(prim.wrapping_add(22), page as u16);
         let u1 = u.wrapping_add(width);
         let v1 = v.wrapping_add(m.r32(sp + 16));
         for (at, b) in [(12, u), (13, v), (20, u1), (21, v), (28, u), (29, v1), (36, u1), (37, v1)] {
-            m.w8(prim + at, b as u8);
+            m.w8(prim.wrapping_add(at), b as u8);
         }
         let (x1, y1) = (x.wrapping_add(w), y.wrapping_add(hgt));
         for (at, hw) in [(8, x), (10, y), (18, y), (24, x), (16, x1), (32, x1), (26, y1), (34, y1)] {
-            m.w16(prim + at, hw as u16);
+            m.w16(prim.wrapping_add(at), hw as u16);
         }
     })
 }
