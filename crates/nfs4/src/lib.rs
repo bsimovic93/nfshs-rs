@@ -61,6 +61,8 @@ pub mod felines;
 pub mod fememcard;
 pub mod femenu;
 pub mod femenudefs;
+pub mod fe3dmenu;
+pub mod minfront;
 pub mod femenuextended;
 pub mod femenuoptions;
 pub mod femission;
@@ -133,6 +135,11 @@ const fn func_ret(addr: u32, name: &'static str, run: fn(&mut Cpu)) -> Func {
 
 /// Every decompiled function the game is routed to, by address.
 pub static FUNCS: &[Func] = &[
+    func_ret(0x8001_28a0, "MinFront_ParseOptions", minfront::abi_parse_options),
+    func(0x8001_28e8, "Fe3D_InitShowroom", fe3dmenu::abi_init_showroom),
+    func(0x8001_2a94, "CameraLookAt", fe3dmenu::abi_camera_look_at),
+    func(0x8001_2ba8, "Draw_MenuRenderingView", fe3dmenu::abi_draw_menu_rendering_view),
+    func(0x8001_2f50, "Draw_EmptyView", fe3dmenu::abi_draw_empty_view),
     func_ret(0x8001_30f8, "tFEApplication::tFEApplication", feapp::abi_fe_application),
     func(0x8001_331c, "tFEApplication::~tFEApplication", feapp::abi_fe_application_dtor),
     func(0x8001_338c, "tFEApplication::PerformMenuInitialization", feapp::abi_perform_menu_initialization),

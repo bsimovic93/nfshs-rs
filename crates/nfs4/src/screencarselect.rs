@@ -33,8 +33,8 @@ const BITS_B: u32 = 0x8001_1A54;
 
 const FIXEDMULT: fn(&mut Cpu) = nfs4rc::f_800e4f14;
 const MENU_COLOR_DATA: fn(&mut Cpu) = nfs4rc::f_800bf8a8;
-const DRAW_CAR_MODEL: fn(&mut Cpu) = nfs4rc::f_80012ba8;
-const DRAW_NO_CAR: fn(&mut Cpu) = nfs4rc::f_80012f50;
+const DRAW_CAR_MODEL: fn(&mut Cpu) = crate::fe3dmenu::draw_menu_rendering_view_entry;
+const DRAW_NO_CAR: fn(&mut Cpu) = crate::fe3dmenu::draw_empty_view_entry;
 /// The host's `PSXDrawSquare`.
 const DRAW_SQUARE: u32 = 0x8004_F12C;
 

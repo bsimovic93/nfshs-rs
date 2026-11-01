@@ -1054,6 +1054,15 @@
 80026cb0 FeTools_deinit
 80026d00 FeTools_FormatMoney
 
+# MINFRONT.CPP (the front end's side of the game's start)
+800128a0 MinFront_ParseOptions
+
+# FE3DMENU.CPP (the showroom's 3D)
+800128e8 Fe3D_InitShowroom
+80012a94 CameraLookAt
+80012ba8 Draw_MenuRenderingView
+80012f50 Draw_EmptyView
+
 # FEAPP.CPP (the front end)
 800143c8 tFEApplication::MainLoop
 800130f8 tFEApplication::tFEApplication
