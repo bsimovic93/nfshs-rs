@@ -1451,3 +1451,20 @@
 80034f70 LoadGame
 80035580 SavePinkSlipsCars
 80035930 SavePinkSlipsCarsWithErrorDialogs
+
+# SCREENMEMCARD.CPP
+80046708 tScreenMemcard::GetShapeInfo
+8004672c tScreenMemcard::DrawIcon
+80046924 tScreenMemcard::LoadIcon
+80046c80 tScreenMemcard::DrawVerticalLine
+80046d34 tScreenMemcard::DrawHorizontalLine
+80046df4 tScreenMemcard::PlaceIcons
+80047148 tScreenMemcard::DrawMemCardStuff
+800476a4 tScreenMemcard::SetEnablings
+80047858 tScreenMemcard::DrawBackground
+80047ec0 tScreenMemcard::DrawForeground
+80047fcc tScreenMemcard::tScreenMemcard
+80048010 tScreenMemcard::ReleaseIcons
+80048088 tScreenMemcard::Initialize
+80048230 tScreenMemcard::Cleanup
+800482c0 ~tScreenMemcard

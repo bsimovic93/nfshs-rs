@@ -85,6 +85,7 @@ pub mod screenaudio;
 pub mod screencongrats;
 pub mod screendisplay;
 pub mod screenmain;
+pub mod screenmemcard;
 pub mod screenpinkslips;
 pub mod screenpost;
 pub mod screentrackinfo;
@@ -738,6 +739,21 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_658c, "tScreenAudio::Initialize", screenaudio::abi_initialize),
     func(0x8004_65ec, "tScreenAudio::Cleanup", screenaudio::abi_cleanup),
     func(0x8004_66e4, "~tScreenAudio", screenaudio::abi_destructor),
+    func(0x8004_6708, "tScreenMemcard::GetShapeInfo", screenmemcard::abi_get_shape_info),
+    func(0x8004_672c, "tScreenMemcard::DrawIcon", screenmemcard::abi_draw_icon),
+    func(0x8004_6924, "tScreenMemcard::LoadIcon", screenmemcard::abi_load_icon),
+    func(0x8004_6c80, "tScreenMemcard::DrawVerticalLine", screenmemcard::abi_draw_vertical_line),
+    func(0x8004_6d34, "tScreenMemcard::DrawHorizontalLine", screenmemcard::abi_draw_horizontal_line),
+    func(0x8004_6df4, "tScreenMemcard::PlaceIcons", screenmemcard::abi_place_icons),
+    func(0x8004_7148, "tScreenMemcard::DrawMemCardStuff", screenmemcard::abi_draw_mem_card_stuff),
+    func(0x8004_76a4, "tScreenMemcard::SetEnablings", screenmemcard::abi_set_enablings),
+    func(0x8004_7858, "tScreenMemcard::DrawBackground", screenmemcard::abi_draw_background),
+    func(0x8004_7ec0, "tScreenMemcard::DrawForeground", screenmemcard::abi_draw_foreground),
+    func_ret(0x8004_7fcc, "tScreenMemcard::tScreenMemcard", screenmemcard::abi_screen_memcard),
+    func(0x8004_8010, "tScreenMemcard::ReleaseIcons", screenmemcard::abi_release_icons),
+    func(0x8004_8088, "tScreenMemcard::Initialize", screenmemcard::abi_initialize),
+    func(0x8004_8230, "tScreenMemcard::Cleanup", screenmemcard::abi_cleanup),
+    func(0x8004_82c0, "~tScreenMemcard", screenmemcard::abi_screen_memcard_destructor),
     func(0x8004_82e0, "tScreenCongrats::Cleanup", screencongrats::abi_cleanup),
     func(0x8004_830c, "tScreenCongrats::GetShapeInfo", screencongrats::abi_get_shape_info),
     func_ret(0x8004_855c, "tScreenCongrats::GetCar", screencongrats::abi_get_car),

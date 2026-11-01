@@ -1942,11 +1942,11 @@ pub fn abi_front_menu(c: &mut Cpu) {
 }
 
 /// The screens' constructors and destructors still recompiled: the car select's (three of
-/// them), the controller's, the memory card's; `operator delete`.
+/// them), the controller's; the memory card's; `operator delete`.
 const CAR_SELECT_CTOR: fn(&mut Cpu) = nfs4rc::f_8003ae58;
 const CAR_SELECT_DTOR: fn(&mut Cpu) = nfs4rc::f_8003af68;
 const CONTROLLER_CTOR: fn(&mut Cpu) = nfs4rc::f_80045c44;
-const MEM_CARD_CTOR: fn(&mut Cpu) = nfs4rc::f_80047fcc;
+const MEM_CARD_CTOR: fn(&mut Cpu) = crate::screenmemcard::screen_memcard_entry;
 const DELETE: fn(&mut Cpu) = nfs4rc::f_800a4910;
 /// A dialog inlined into the screens (its classes' vtables in turn: the dialog's, the
 /// message's, the box's).
