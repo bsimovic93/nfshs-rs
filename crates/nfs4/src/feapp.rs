@@ -709,7 +709,7 @@ const SAVE_PINK_SLIPS: fn(&mut Cpu) = crate::fememcard::save_pink_slips_with_dia
 const PLAYER_NAME: fn(&mut Cpu) = crate::front::player_name_entry;
 const CARD_START: fn(&mut Cpu) = crate::fememcard::init_memcard_entry;
 const CARD_END: fn(&mut Cpu) = crate::fememcard::deinit_memcard_entry;
-const RUN_DEMO_VIDEO: fn(&mut Cpu) = nfs4rc::f_800140e8;
+const RUN_DEMO_VIDEO: fn(&mut Cpu) = run_demo_video_entry;
 /// The front end idle this long (ticks) runs the demo video.
 const IDLE: i32 = 3840;
 
@@ -1221,6 +1221,230 @@ fn start_race(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> u32 {
     c.m.w32(GAME_START, 0);
     r.enter_leaving(c, 0x8001_33f4, 0x8001_5498, |c| perform_menu_destruction(c, this));
     0
+}
+
+/// The memory's largest free block (noted at `MEMORY_FREE`), the demo video's number (the
+/// two alternate), the music's volume setting.
+const LARGEST_FREE: fn(&mut Cpu) = nfs4rc::f_800e5e70;
+const MEMORY_FREE: u32 = 0x8005_19A0;
+const DEMO_VIDEO: u32 = 0x8005_19A4;
+/// The host's `ClearImage` and `DrawSync`.
+const CLEAR_IMAGE: u32 = 0x800E_E35C;
+const DRAW_SYNC: u32 = 0x800E_E1D8;
+
+/// VRAM cleared (1024 by 512, black) and drawn.
+fn clear_vram(c: &mut Cpu, r: &Saved, rect: u32, ras: (u32, u32)) {
+    let m = &mut c.m;
+    m.w16(rect, 0);
+    m.w16(rect + 2, 0);
+    m.w16(rect + 4, 1024);
+    m.w16(rect + 6, 512);
+    r.call_ptr_leaving(c, CLEAR_IMAGE, &[rect, 0, 0, 0], ras.0);
+    r.call_ptr_leaving(c, DRAW_SYNC, &[0], ras.1);
+}
+
+/// `tFEApplication::RunDemoVideo` (FEAPP.CPP, 0x800140e8): from the main menu only: the music
+/// stopped, the menu and the screen transitioned off (frames drawn until both are done), the
+/// screen cleaned up, the front end's graphics freed, the demo video played over cleared VRAM;
+/// everything back (the graphics, the fonts, the loading text, the help's shapes), the menu and
+/// the screen initialised and on, the other demo video next time, the music at its volume.
+pub fn abi_run_demo_video(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 96, |c, sp| {
+        let mut r = Saved::of(c);
+        r.0[5] = this;
+        let all = c.m.r32(SONGS_SCREEN);
+        if c.m.r32(this + MENUS) != all + 176 {
+            return;
+        }
+        r.call_leaving(c, nfs4rc::f_8007b798, &[120], 0x8001_412c);
+        port(c, &r, 0x8001_5a70, 0x8001_4134, &[0], crate::feaudio::abi_systemtask);
+        let menu = c.m.r32(this + MENUS);
+        vcall(c, &r, menu, 104, 40, &[], 0x8001_4158);
+        let screen = c.m.r32(this + 12);
+        port(c, &r, 0x8002_6824, 0x8001_4168, &[screen, 2, 0], crate::fescreen::abi_transition_off);
+        loop {
+            r.0[0] = 0;
+            let menu = c.m.r32(this + MENUS);
+            let mut busy = vcall(c, &r, menu, 104, 56, &[], 0x8001_418c) == 0;
+            if !busy {
+                let screen = c.m.r32(this + 12);
+                busy = vcall(c, &r, screen, 96, 64, &[], 0x8001_41b8) == 0;
+            }
+            if !busy {
+                break;
+            }
+            r.0[0] = 1;
+            r.call_ptr_leaving(c, 0x8001_3894, &[this], 0x8001_41d4);
+            port(c, &r, 0x8001_5a70, 0x8001_41dc, &[0], crate::feaudio::abi_systemtask);
+            c.tick();
+        }
+        let screen = c.m.r32(this + 12);
+        vcall(c, &r, screen, 96, 56, &[], 0x8001_4208);
+        r.0[0] = 0x8005_0000;
+        r.call_leaving(c, nfs4rc::f_800bcb04, &[], 0x8001_4210);
+        r.0[2] = 1024;
+        r.call_leaving(c, nfs4rc::f_800bca4c, &[], 0x8001_4218);
+        r.0[1] = 512;
+        port(c, &r, 0x8004_dd18, 0x8001_4220, &[], crate::psxfront::abi_free_draw_memory);
+        r.0[4] = 0x8005_0000;
+        port(c, &r, 0x8002_6cb0, 0x8001_4228, &[], crate::fetools::abi_deinit);
+        port(c, &r, 0x8001_406c, 0x8001_4230, &[], abi_free_help_shape_cluts);
+        let free = r.call_leaving(c, LARGEST_FREE, &[], 0x8001_4238);
+        let rect = sp + 56;
+        r.0[3] = rect;
+        c.m.w32(MEMORY_FREE, free);
+        clear_vram(c, &r, rect, (0x8001_4264, 0x8001_426c));
+        let k = c.m.r8(DEMO_VIDEO) as u32;
+        port(c, &r, 0x8004_d3dc, 0x8001_4278, &[k], crate::movie::abi_play_movie);
+        clear_vram(c, &r, rect, (0x8001_429c, 0x8001_42a4));
+        let free = r.call_leaving(c, LARGEST_FREE, &[], 0x8001_42ac);
+        c.m.w32(MEMORY_FREE, free);
+        port(c, &r, 0x8004_dca4, 0x8001_42b4, &[], crate::psxfront::abi_allocate_draw_memory);
+        port(c, &r, 0x8002_6bc8, 0x8001_42bc, &[], crate::fetools::abi_init);
+        port(c, &r, 0x8002_5ad8, 0x8001_42c4, &[], crate::fescreen::abi_display_loading_text);
+        r.call_leaving(c, nfs4rc::f_800bc958, &[0xD800, 0x1_8000], 0x8001_42d4);
+        r.call_leaving(c, nfs4rc::f_800780f0, &[], 0x8001_42dc);
+        port(c, &r, 0x8004_f09c, 0x8001_42e4, &[], crate::psxfront::abi_load_all_help_shapes);
+        let free = r.call_leaving(c, LARGEST_FREE, &[], 0x8001_42ec);
+        let menu = c.m.r32(this + MENUS);
+        c.m.w32(MEMORY_FREE, free);
+        vcall(c, &r, menu, 104, 16, &[], 0x8001_4310);
+        let screen = c.m.r32(this + 12);
+        vcall(c, &r, screen, 96, 48, &[], 0x8001_4334);
+        let menu = c.m.r32(this + MENUS);
+        vcall(c, &r, menu, 104, 48, &[], 0x8001_4358);
+        let screen = c.m.r32(this + 12);
+        port(c, &r, 0x8002_6844, 0x8001_4368, &[screen, 2, 0], crate::fescreen::abi_transition_on);
+        let k = c.m.r32(DEMO_VIDEO);
+        c.m.w32(DEMO_VIDEO, 5u32.wrapping_sub(k));
+        port(c, &r, 0x8001_3e34, 0x8001_4380, &[this], abi_update_music);
+        let v = c.m.r8(VOLUME) as u32;
+        r.call_leaving(c, nfs4rc::f_8007bc44, &[(v.wrapping_mul(35) as i32 >> 6) as u32], 0x8001_43a4);
+    })
+}
+
+/// The race's first car's stats; the track raced; the names' grids' names and screen.
+const RACE_STATS: u32 = 0x8011_0E08;
+const TRACK_RACED: u32 = 0x8013_DAEC;
+const NAMES: u32 = 0x8011_5C1C;
+const NAME_SCREEN: u32 = 0x8005_2E44;
+
+/// The name entry for player `p` (its grid's menu at `grid`, the screen's menu at `menu`).
+fn name_entry(m: &mut Mem, grid: u32, menu: u32, p: u32) -> u32 {
+    let all = m.r32(SONGS_SCREEN);
+    let (grid, menu) = (all + grid, all + menu);
+    m.w16(grid + 128, p as u16);
+    m.w32(grid + 28, NAMES + 8 * p);
+    let screen = m.r32(NAME_SCREEN);
+    m.w16(grid + 32, 7);
+    m.w16(grid + 36, 0);
+    m.w16(grid + 34, 0);
+    m.w32(screen + 100, menu);
+    menu
+}
+
+/// `tFEApplication::RunPostGame` (FEAPP.CPP, 0x80015554): after a race (but a test drive or
+/// the pink slips'): the new records cleared, both pads reset, no names wanted; a record lap
+/// (whose: one player's, or two players' first or second) or top times (lap or race, first or
+/// second) noted for each player as the records to enter their name for; then the front end
+/// from the first player's name entry, the second's, or the post-game menu.
+pub fn abi_run_post_game(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 64, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[0], r.0[2]) = (FRONT_END, this);
+        let kind = c.m.r8(RACE_TYPE) as u32;
+        let mut menu = None;
+        if kind != PINK_SLIPS && !(kind == 0 && c.m.r8(FRONT_END + 298) == 0) {
+            r.0[5] = RACE_STATS;
+            port(c, &r, 0x8004_ad14, 0x8001_55ac, &[], crate::statchk::abi_clear_new_records);
+            (r.0[4], r.0[3]) = (FRONT_END, u32::MAX);
+            for p in 0..2u32 {
+                (r.0[1], r.0[0]) = (p + 1, this + 4 * p);
+                let pad = c.m.r8(FRONT_END + p + 866) as u32;
+                port(c, &r, 0x8002_7104, 0x8001_55d0, &[p, pad], crate::front::abi_reset_psx_controller);
+                let m = &mut c.m;
+                m.w32(this + 4 * p + 872, 0);
+                m.w32(this + 4 * p + 880, 0);
+                m.w32(this + 4 * p + 888, u32::MAX);
+            }
+            r.0[0] = this + 8;
+            let track = c.m.r16(TRACK_RACED) as i16 as i32 as u32;
+            if port(c, &r, 0x8004_9cc8, 0x8001_55fc, &[RACE_STATS, track, sp + 24], crate::statchk::abi_is_record_lap_time) != 0 {
+                let m = &mut c.m;
+                let who = m.r16(sp + 24) as i16 as i32 as u32;
+                let v = if m.r8(FRONT_END + 3) == 1 { if who != 0 { 8 } else { 7 } } else { 6 };
+                m.w32(this.wrapping_add(who << 2) + 888, v);
+                m.w32(this.wrapping_add(who << 2) + 880, 1);
+            }
+            let track = c.m.r16(TRACK_RACED) as i16 as i32 as u32;
+            let top = sx(port(c, &r, 0x8004_a194, 0x8001_566c, &[RACE_STATS, track], crate::statchk::abi_is_top_time));
+            let m = &mut c.m;
+            if top != 0 {
+                let who = m.r16(sp + 24) as i16 as i32;
+                if m.r8(FRONT_END + 3) == 1 {
+                    if top & 3 != 0 {
+                        m.w32(this + 880, 1);
+                        let v = if m.r32(this + 888) == u32::MAX || who != 0 {
+                            if top & 2 != 0 { 1 } else { 4 }
+                        } else if top & 2 != 0 {
+                            10
+                        } else {
+                            13
+                        };
+                        m.w32(this + 888, v);
+                    }
+                    if top & 0xC != 0 {
+                        m.w32(this + 884, 1);
+                        let v = if m.r32(this + 892) != u32::MAX && who == 1 {
+                            if top & 8 != 0 { 11 } else { 14 }
+                        } else if top & 8 != 0 {
+                            2
+                        } else {
+                            5
+                        };
+                        m.w32(this + 892, v);
+                    }
+                } else {
+                    m.w32(this + 880, 1);
+                    let v = if m.r32(this + 888) == u32::MAX {
+                        if top & 2 != 0 { 0 } else { 3 }
+                    } else if top & 2 != 0 {
+                        9
+                    } else {
+                        12
+                    };
+                    m.w32(this + 888, v);
+                }
+            }
+            if m.r32(this + 880) != 0 {
+                menu = Some(name_entry(m, 12728, 14032, 0));
+            } else if m.r32(this + 884) != 0 {
+                menu = Some(name_entry(m, 12868, 14160, 1));
+            }
+        }
+        let menu = match menu {
+            Some(v) => v,
+            None => {
+                port(c, &r, 0x8002_dbc4, 0x8001_5828, &[sp + 16], crate::femenudefs::abi_post_game_menu);
+                c.m.r32(sp + 20)
+            }
+        };
+        c.r[2] = port(c, &r, 0x8001_43c8, 0x8001_5838, &[this, menu], abi_main_loop);
+    })
+}
+
+/// `tFEApplication::RunDemoVideo` entered as the original's callers `jal` it.
+fn run_demo_video_entry(c: &mut Cpu) {
+    abi::leave_prologue(c, 0x8001_40e8, None, &[]);
+    abi_run_demo_video(c);
+}
+
+/// `tFEApplication::RunPostGame` entered as the original's callers `jal` it.
+pub(crate) fn run_post_game_entry(c: &mut Cpu) {
+    abi::leave_prologue(c, 0x8001_5554, None, &[]);
+    abi_run_post_game(c);
 }
 
 #[cfg(test)]

@@ -1848,7 +1848,7 @@ const POST_RACE: u32 = 0x8013_E569;
 const FINISHERS: u32 = 0x8011_0E8C;
 const LARGEST_UNUSED: fn(&mut Cpu) = nfs4rc::f_800e5e70;
 const TO_MAIN_MENU: fn(&mut Cpu) = nfs4rc::f_8002c514;
-const RUN_POST_GAME: fn(&mut Cpu) = nfs4rc::f_80015554;
+const RUN_POST_GAME: fn(&mut Cpu) = crate::feapp::run_post_game_entry;
 /// The cars' sound banks freed (the car code's), the words unloaded.
 const CAR_SOUNDS_END: fn(&mut Cpu) = nfs4rc::f_800bcb04;
 const UNLOAD_WORDS: fn(&mut Cpu) = nfs4rc::f_800b9f98;

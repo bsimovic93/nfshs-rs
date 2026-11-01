@@ -1054,7 +1054,7 @@
 80026cb0 FeTools_deinit
 80026d00 FeTools_FormatMoney
 
-# FEAPP.CPP (the front end; RunPostGame and RunDemoVideo still recompiled)
+# FEAPP.CPP (the front end)
 800143c8 tFEApplication::MainLoop
 800130f8 tFEApplication::tFEApplication
 8001331c tFEApplication::~tFEApplication
@@ -1068,6 +1068,8 @@
 80014048 tFEApplication::DisplayHelp
 8001406c FreeHelpShapeCluts
 8001585c tFEApplication::RunFrontEnd
+800140e8 tFEApplication::RunDemoVideo
+80015554 tFEApplication::RunPostGame
 
 # FEFADES.CPP (the front end)
 8004bcd8 CalcFadeVal(int,int,int)
@@ -1612,3 +1614,6 @@
 8002e2d8 MenuExtended_ExitTourney
 8002e368 MenuExtended_ExitPinkSlipsEarly
 8002e498 MenuExtended_PinkSlipsContinue
+
+# MOVIE.CPP (the rest is the host's: it plays the movies in place of Movie_Play)
+8004d3dc play_movie

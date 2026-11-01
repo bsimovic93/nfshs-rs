@@ -78,6 +78,7 @@ pub mod globals;
 pub mod mathnfs;
 pub mod memcard;
 pub mod mmeffect;
+pub mod movie;
 pub mod newton;
 pub mod physics;
 pub mod psxfront;
@@ -143,7 +144,9 @@ pub static FUNCS: &[Func] = &[
     func(0x8001_3ff8, "tFEApplication::SetScreen", feapp::abi_set_screen),
     func(0x8001_4048, "tFEApplication::DisplayHelp", feapp::abi_display_help),
     func(0x8001_406c, "FreeHelpShapeCluts", feapp::abi_free_help_shape_cluts),
+    func(0x8001_40e8, "tFEApplication::RunDemoVideo", feapp::abi_run_demo_video),
     func_ret(0x8001_43c8, "tFEApplication::MainLoop", feapp::abi_main_loop),
+    func_ret(0x8001_5554, "tFEApplication::RunPostGame", feapp::abi_run_post_game),
     func(0x8001_585c, "tFEApplication::RunFrontEnd", feapp::abi_run_front_end),
     func(0x8001_5884, "tDialogMessageStringWithTimeout::~tDialogMessageStringWithTimeout", fedialog::abi_message_with_timeout_destructor),
     func_ret(0x8001_58a8, "FEAudio_StartLoadPatch", feaudio::abi_start_load_patch),
@@ -956,6 +959,7 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_c490, "DrawShape_NFS4RoundRectangle", drawshp::abi_round_rectangle),
     func(0x8004_c69c, "DrawShape_NFS4Rectangle", drawshp::abi_rectangle),
     func(0x8004_c9bc, "DrawShape_NFS4TransRectangle", drawshp::abi_trans_rectangle),
+    func_ret(0x8004_d3dc, "play_movie", movie::abi_play_movie),
     func(0x8004_dbc0, "FeDraw_SetABRMode", mmeffect::abi_set_abr_mode),
     func(0x8004_dc60, "Quick_DD", psxfront::abi_quick_dd),
     func(0x8004_dca4, "PSXFront_AllocateDrawMemory", psxfront::abi_allocate_draw_memory),
