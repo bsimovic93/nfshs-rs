@@ -32,7 +32,7 @@ const BUTTON_KEYS: [(u32, u32, u32); 4] = [(0x4000, 2, 0x8002_3d54), (0x1000, 16
 /// (`Front_ResetPSXController`).
 const PAD_UPDATE: fn(&mut Cpu) = nfs4rc::f_800e4e08;
 const PAD_BUTTONS: fn(&mut Cpu) = nfs4rc::f_800e4da4;
-const RESET_CONTROLLER: fn(&mut Cpu) = nfs4rc::f_80027104;
+const RESET_CONTROLLER: fn(&mut Cpu) = crate::front::reset_psx_controller_entry;
 
 /// `FEInput_VerifyControllerValues` (FEINPUT.CPP, 0x800238b8): a pad plugged in as another kind
 /// than it was reset.

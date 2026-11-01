@@ -1341,8 +1341,8 @@ pub fn initialize_car_tables_flags_and_counters(c: &mut Cpu, car: Car) {
             // the driver's name: a profile's, or "Player" (numbered when two race)
             let humans = NUM_HUMAN_RACE_CARS.get(&mut c.m) as u32;
             let driver = info.0 + 0x5C;
-            if r.call_leaving(c, nfs4rc::f_8002ba50, &[humans], 0x8008_6bfc) != 0 {
-                let name = r.call_leaving(c, nfs4rc::f_8002bb08, &[humans], 0x8008_6c10);
+            if r.call_leaving(c, crate::front::player_name_exist_entry, &[humans], 0x8008_6bfc) != 0 {
+                let name = r.call_leaving(c, crate::front::player_name_mixed_case_entry, &[humans], 0x8008_6c10);
                 r.call_leaving(c, nfs4rc::f_800e50a8, &[driver, name], 0x8008_6c68); // sprintf
             } else if c.m.r8(FRONT_END + 3) == 1 {
                 let word = r.call_leaving(c, nfs4rc::f_800b9f18, &[47], 0x8008_6c30); // TextSys_Word

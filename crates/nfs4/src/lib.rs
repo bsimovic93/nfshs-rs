@@ -71,6 +71,7 @@ pub mod fetracks;
 pub mod fetv;
 pub mod fevideowall;
 pub mod fixed;
+pub mod front;
 pub mod globals;
 pub mod mathnfs;
 pub mod mmeffect;
@@ -529,6 +530,43 @@ pub static FUNCS: &[Func] = &[
     func(0x8002_6bc8, "FeTools_init", fetools::abi_init),
     func(0x8002_6cb0, "FeTools_deinit", fetools::abi_deinit),
     func(0x8002_6d00, "FeTools_FormatMoney", fetools::abi_format_money),
+    func(0x8002_7008, "Front_DeleteAll", front::abi_delete_all),
+    func_ret(0x8002_706c, "Front_ResetSettingsForCar", front::abi_reset_settings_for_car),
+    func(0x8002_70bc, "Front_ResetSettingsMenu", front::abi_reset_settings_menu),
+    func(0x8002_7104, "Front_ResetPSXController", front::abi_reset_psx_controller),
+    func(0x8002_7170, "Front_ResetPSXAnalogs", front::abi_reset_psx_analogs),
+    func_ret(0x8002_71b4, "GetPSXPadValue", front::abi_get_psx_pad_value),
+    func(0x8002_752c, "SetPads", front::abi_set_pads),
+    func(0x8002_7668, "InitFrontEndStructure", front::abi_init_front_end_structure),
+    func_ret(0x8002_7960, "LoadConfig", front::abi_load_config),
+    func(0x8002_7968, "Front_InitialMemCardCheck", front::abi_initial_mem_card_check),
+    func_ret(0x8002_79cc, "Front_SecondaryMemCardCheck", front::abi_secondary_mem_card_check),
+    func(0x8002_7aa0, "Front_InitGraphics", front::abi_init_graphics),
+    func(0x8002_7b18, "Front_InitGraphicsAndDisplayLoading", front::abi_init_graphics_and_display_loading),
+    func_ret(0x8002_8004, "Front_GetLapsForType", front::abi_get_laps_for_type),
+    func(0x8002_80ac, "Front_InitStream", front::abi_init_stream),
+    func(0x8002_80dc, "Front_InitPlayerCars", front::abi_init_player_cars),
+    func(0x8002_84a0, "Front_InitTourneyTraffic", front::abi_init_tourney_traffic),
+    func(0x8002_8614, "Front_InitOpponentCars", front::abi_init_opponent_cars),
+    func(0x8002_8ba8, "Front_InitMissions", front::abi_init_missions),
+    func(0x8002_8cfc, "Front_InitCopCars", front::abi_init_cop_cars),
+    func(0x8002_90bc, "Front_InitPerps", front::abi_init_perps),
+    func(0x8002_9284, "Front_InitTrack", front::abi_init_track),
+    func(0x8002_9458, "Front_InitTraffic", front::abi_init_traffic),
+    func_ret(0x8002_9690, "Front_AppendPlayerCarData", front::abi_append_player_car_data),
+    func_ret(0x8002_9b74, "Front_AppendOpponentData", front::abi_append_opponent_data),
+    func_ret(0x8002_9ea8, "Front_AppendCopData", front::abi_append_cop_data),
+    func_ret(0x8002_a0fc, "Front_AppendPerpData", front::abi_append_perp_data),
+    func_ret(0x8002_a394, "Front_AppendTrafficData", front::abi_append_traffic_data),
+    func_ret(0x8002_a5e4, "Front_AppendTrackData", front::abi_append_track_data),
+    func_ret(0x8002_a724, "Front_EnableLocalSpeech", front::abi_enable_local_speech),
+    func(0x8002_b750, "Front_GetInGameVars", front::abi_get_in_game_vars),
+    func(0x8002_b84c, "SetLicensePlate", front::abi_set_license_plate),
+    func(0x8002_b8f4, "SetPlayList", front::abi_set_play_list),
+    func_ret(0x8002_b9e0, "Front_GetTrackRaced", front::abi_get_track_raced),
+    func_ret(0x8002_ba50, "PlayerNameExist", front::abi_player_name_exist),
+    func_ret(0x8002_ba7c, "PlayerName", front::abi_player_name),
+    func_ret(0x8002_bb08, "PlayerNameMixedCase", front::abi_player_name_mixed_case),
     func(0x8003_2378, "tTournamentManager::Initialize", fetourn::abi_initialize),
     func(0x8003_244c, "tTournamentManager::LoadDescription", fetourn::abi_load_description),
     func(0x8003_2698, "tTournamentManager::ReleaseDescription", fetourn::abi_release_description),
@@ -1612,9 +1650,18 @@ pub(crate) mod test_util {
             }
             return true;
         }
-        c.r[2] = if addr == 0x800F_07FC { 6 } else { 0 };
+        c.r[2] = match addr {
+            0x800F_07FC => 6,
+            // `PadInfoMode`: the modes' count (a2 -1), else mode a2, from PAD_MODES
+            0x800F_08BC if c.r[6] as i32 == -1 => c.m.r32(PAD_MODES),
+            0x800F_08BC => c.m.r32(PAD_MODES + 4 + 4 * (c.r[6] % 7)),
+            _ => 0,
+        };
         true
     }
+
+    /// Where the test CPUs answer `PadInfoMode` from: the count, then seven modes.
+    pub const PAD_MODES: u32 = 0x8014_8AD0;
 
     /// The words where two RAM images differ, but for the dead stack below 0x801FFF00.
     pub fn ram_diff(want: &[u8], got: &[u8]) -> Vec<usize> {

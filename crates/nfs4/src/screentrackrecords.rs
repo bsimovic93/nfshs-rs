@@ -62,8 +62,8 @@ const HALO_2D: fn(&mut Cpu) = nfs4rc::f_800cecd0;
 const PARSE_TIME: fn(&mut Cpu) = nfs4rc::f_8004ae74;
 const GET_RECORDS: fn(&mut Cpu) = nfs4rc::f_8004b2f4;
 const RECORDS_DONE: fn(&mut Cpu) = nfs4rc::f_8004ad14;
-const TRACK_RACED: fn(&mut Cpu) = nfs4rc::f_8002b9e0;
-const UNITS_KIND: fn(&mut Cpu) = nfs4rc::f_80028004;
+const TRACK_RACED: fn(&mut Cpu) = crate::front::get_track_raced_entry;
+const UNITS_KIND: fn(&mut Cpu) = crate::front::get_laps_for_type_entry;
 const RESERVE: fn(&mut Cpu) = nfs4rc::f_800e5f28;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 

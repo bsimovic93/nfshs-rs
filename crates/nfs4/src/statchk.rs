@@ -41,9 +41,9 @@ const NO_TIME: u32 = 144_000;
 
 /// `Front_GetTrackRaced`, `PlayerName`, the track's kind (2 one with its own records),
 /// `memset`, `strcmp`.
-const TRACK_RACED: fn(&mut Cpu) = nfs4rc::f_8002b9e0;
-const PLAYER_NAME: fn(&mut Cpu) = nfs4rc::f_8002ba7c;
-const TRACK_KIND: fn(&mut Cpu) = nfs4rc::f_80028004;
+const TRACK_RACED: fn(&mut Cpu) = crate::front::get_track_raced_entry;
+const PLAYER_NAME: fn(&mut Cpu) = crate::front::player_name_entry;
+const TRACK_KIND: fn(&mut Cpu) = crate::front::get_laps_for_type_entry;
 const MEMSET: fn(&mut Cpu) = nfs4rc::f_800e4f04;
 const STRCMP: fn(&mut Cpu) = nfs4rc::f_800e6968;
 

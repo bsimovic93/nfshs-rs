@@ -400,7 +400,7 @@ const PLAY_LIST: u32 = FRONT_END + 0x444;
 const CD_PATH: u32 = PATHS + 0x80;
 const DVLC: u32 = 0x8012_532C;
 /// The heap's names and the files' (`"ps0"`, `"ps1"`, `"carObj"`, `"%sDCT.BIN"`,
-/// `"gHelpShapes"`, `"%szperm.psh"`); the front end's 50 Hz timer.
+/// `"gHelpShapes"`, `"%szperm.psh"`); `PAD_update`, which the front end's timer runs.
 const PS0: u32 = 0x8001_279C;
 const PS1: u32 = 0x8001_27A0;
 const CAR_OBJ: u32 = 0x8001_27A4;
@@ -444,7 +444,7 @@ const READ_E_MAP_DATA: fn(&mut Cpu) = nfs4rc::f_800bf67c;
 const INIT_SHOWROOM: fn(&mut Cpu) = nfs4rc::f_800128e8;
 const ASYNC_LOAD_FILE_AT: fn(&mut Cpu) = nfs4rc::f_800f2170;
 const READ_STATUS: fn(&mut Cpu) = nfs4rc::f_800f240c;
-const INITIAL_MEM_CARD_CHECK: fn(&mut Cpu) = nfs4rc::f_80027968;
+const INITIAL_MEM_CARD_CHECK: fn(&mut Cpu) = crate::front::initial_mem_card_check_entry;
 const DEL_TIMER: fn(&mut Cpu) = nfs4rc::f_800eb9a4;
 const ADD_TIMER: fn(&mut Cpu) = nfs4rc::f_800eb944;
 const AUDIO_DEINIT_DRIVER: fn(&mut Cpu) = nfs4rc::f_800bca4c;
@@ -455,8 +455,8 @@ const INIT_MENU_CLUT: fn(&mut Cpu) = nfs4rc::f_800e111c;
 const MOVIE_PLAY: fn(&mut Cpu) = nfs4rc::f_8004d3dc;
 const INIT_LINK_MODE: fn(&mut Cpu) = nfs4rc::f_800f1328;
 const LOAD_WORDS: fn(&mut Cpu) = nfs4rc::f_800b9ef0;
-const SECONDARY_MEM_CARD_CHECK: fn(&mut Cpu) = nfs4rc::f_800279cc;
-const SET_PLAY_LIST: fn(&mut Cpu) = nfs4rc::f_8002b8f4;
+const SECONDARY_MEM_CARD_CHECK: fn(&mut Cpu) = crate::front::secondary_mem_card_check_entry;
+const SET_PLAY_LIST: fn(&mut Cpu) = crate::front::set_play_list_entry;
 const LOAD_FE_SAMPLES: fn(&mut Cpu) = nfs4rc::f_800780f0;
 const LOAD_SHAPE: fn(&mut Cpu) = nfs4rc::f_800f2970;
 const LOAD_PMX: fn(&mut Cpu) = crate::fetexture::load_pmx_entry;

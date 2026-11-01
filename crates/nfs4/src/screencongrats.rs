@@ -123,8 +123,8 @@ const DRAW_CAR: u32 = 0x8003_AC64;
 /// `blockmove`.
 const RELEASE_CARS: fn(&mut Cpu) = crate::psxfront::cleanup_spinning_cars_menu_entry;
 const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended_entry;
-const SET_LICENSE_PLATE: fn(&mut Cpu) = nfs4rc::f_8002b84c;
-const PLAYER_NAME: fn(&mut Cpu) = nfs4rc::f_8002ba7c;
+const SET_LICENSE_PLATE: fn(&mut Cpu) = crate::front::set_license_plate_entry;
+const PLAYER_NAME: fn(&mut Cpu) = crate::front::player_name_entry;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 const PLAY_SPEECH: fn(&mut Cpu) = crate::feaudio::async_play_speech_entry;

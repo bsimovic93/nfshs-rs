@@ -79,7 +79,7 @@ const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 /// `GetTPage`, `purgememadr`, `Front_EnableLocalSpeech`.
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
-const LOCAL_SPEECH: fn(&mut Cpu) = nfs4rc::f_8002a724;
+const LOCAL_SPEECH: fn(&mut Cpu) = crate::front::enable_local_speech_entry;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
