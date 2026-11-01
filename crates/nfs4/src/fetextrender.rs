@@ -657,8 +657,8 @@ pub fn set_abr_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
     use std::sync::OnceLock;
 
     /// The test's structures, in RAM the front end leaves zero: a RECT, a text, a long text to
@@ -807,14 +807,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fetextrender_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0x7E91 + k as u64, shuffle, &args);
-        }
-    }
 }

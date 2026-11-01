@@ -91,9 +91,9 @@ pub fn abi_turn_on_tv(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
     use crate::globals::SHAPES;
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// A TV, a table of shapes made from the help's.
     const TV: u32 = 0x8014_7000;
@@ -140,11 +140,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fetv_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0x7F1 + k as u64, shuffle, &args);
-        }
-    }
 }

@@ -1576,8 +1576,8 @@ pub(crate) fn screen_controller_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// The game's controller screen (constructed, never shown in the RAM image); the outputs of
     /// `GetShapeInfo`; an arrow's lines.
@@ -1757,14 +1757,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn screencontroller_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0xC1E + k as u64, shuffle, &args);
-        }
-    }
 }

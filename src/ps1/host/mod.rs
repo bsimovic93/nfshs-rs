@@ -366,6 +366,8 @@ const CAPTURED_FE_DRAWING: [u32; 10] = [
     0x8004_F1C4, // PSXDrawGouraudSquare
     0x8004_F2B4, // PSXDrawTransGouraudSquare
 ];
+/// tScreenTrackSelect::DrawBackground, which draws the spinning track before its video wall.
+const TRACK_SELECT_DRAW_BACKGROUND: u32 = 0x8004_19E0;
 /// Return address of the engine flip's PutDispEnv call.
 const FLIP_PUT_DISP_ENV_RA: u32 = 0x800B_F164;
 
@@ -623,8 +625,9 @@ impl Host for GameHost {
         if self.overlay.len() > 200_000 {
             self.overlay.clear();
         }
-        if self.mode == Mode::FrontEnd && !self.capturing && addr == 0x8004_22DC && c.r[31] == 0x8004_1E5C {
-            // tScreenTrackSelect::DrawVideoWall from DrawBackground, which has just built the
+        if self.mode == Mode::FrontEnd && !self.capturing && addr == 0x8004_22DC && c.stack.last() == Some(&TRACK_SELECT_DRAW_BACKGROUND) {
+            // tScreenTrackSelect::DrawVideoWall from DrawBackground (its caller on the stack: the
+            // decompiled one doesn't pass the original's return address), which has just built the
             // spinning track's two video quads (POLY_FT4, frames streamed to VRAM x 512) in the
             // primitive buffer itself: record them, then run the wall as usual
             let end = c.m.r32(0x1F80_0004);

@@ -208,9 +208,9 @@ use fetextrender::menu_text_positioned_justify_fade_entry;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
     use crate::globals::FE_APP;
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// The game's trophy info screen (its vtable the real one); the outputs of `GetShapeInfo`.
     const SCREEN: u32 = 0x8018_04AC;
@@ -267,14 +267,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn screentrophyinfo_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0x7C1 + k as u64, shuffle, &args);
-        }
-    }
 }

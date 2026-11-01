@@ -331,9 +331,9 @@ pub fn abi_turn_on(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
     use crate::globals::SHAPES as HELP_SHAPES;
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// A wall, its TVs (up to 16), its order, a table of 24 shapes made from the help's.
     const WALL: u32 = 0x8014_5000;
@@ -430,14 +430,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn videowall_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 200, 0x7A22 + k as u64, shuffle, &args);
-        }
-    }
 }

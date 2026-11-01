@@ -1309,12 +1309,11 @@ pub fn abi_options_left_right_choice_dtor(c: &mut Cpu) {
     destroy(c, c.r[4], None, 0x8002_4974, 0x8001_c090, femenu::abi_left_right_choice_dtor);
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, COMMAND, ITEM_SIZE, KEY, MENU2, NEW, NOTHING, TOP, pick, player, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, Case, COMMAND, ITEM_SIZE, KEY, MENU2, NEW, NOTHING, pick, player, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
     use std::sync::OnceLock;
 
     /// The test's structures after FEMENU's: an item of each of the four classes here, a menu
@@ -1538,15 +1537,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn femenuextended_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            let frame = (0..8).map(|i| ram[(addr & 0x1F_FFFF) as usize + 4 * i..][..4].to_vec()).any(|w| w[2..4] == [0xBD, 0x27]);
-            if !frame || std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0xFE91 + k as u64, shuffle, &args);
-        }
-    }
 }

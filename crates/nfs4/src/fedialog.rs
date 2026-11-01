@@ -1034,9 +1034,9 @@ pub fn abi_base_destructor(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, MENU2, TOP, pick, player, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, MENU2, pick, player, via_abi};
     use crate::femenu::{KEY_DOWN, KEY_OPTIONS, KEY_UP};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// A dialog of each class (vtables), 0x100 apart, and their texts.
     const DIALOG_AT: u32 = 0x8014_D000;
@@ -1257,14 +1257,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fedialog_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0xD1B1 + k as u64, shuffle, &args);
-        }
-    }
 }

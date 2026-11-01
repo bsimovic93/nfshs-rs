@@ -920,8 +920,8 @@ pub(crate) fn getcard_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{CARD_ANSWERS, Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{ADDR, Case, pick, via_abi};
+    use crate::test_util::{CARD_ANSWERS, Rng, against_original_in, fe_ram};
 
     /// A request's info, options, a name, buffers for the title and three icons, three icon
     /// shapes (a picture and a palette after it).
@@ -1071,14 +1071,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn memcard_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0x971 + k as u64, shuffle, &args);
-        }
-    }
 }

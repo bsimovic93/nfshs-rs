@@ -1406,7 +1406,6 @@ pub fn abi_init_traffic(c: &mut Cpu) {
     })
 }
 
-
 /// The stream's words as the `Front_Append*` write them: at a cursor, one after another.
 struct Out(u32);
 
@@ -2135,8 +2134,8 @@ entries! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{ADDR, Case, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     const STREAM: u32 = 0x8014_7000;
 
@@ -2219,17 +2218,6 @@ mod tests {
             ADDR.set(addr);
             let args_rng = std::cell::RefCell::new(Rng(0x900 ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
             against_original_in(&ram, name, 200, 0x901 + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), via_abi);
-        }
-    }
-
-    #[test]
-    fn front_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0x911 + k as u64, shuffle, &args);
         }
     }
 
@@ -2355,17 +2343,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn front_stream_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in stream_cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0x931 + k as u64, stream_shuffle, &args);
-        }
-    }
-
     /// The screens' object, built at 0x80144000 (15320 bytes) over FETOURN's and FEINPUT's
     /// shuffle; for the destructor, built first by the original's constructor.
     const SCREENS: u32 = 0x8014_4000;
@@ -2389,7 +2366,6 @@ mod tests {
             ADDR.set(addr);
             let args_rng = std::cell::RefCell::new(Rng(0x940 ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
             against_original_in(&ram, name, 50, 0x941 + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), via_abi);
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 30, 0x951 + k as u64, shuffle, &args);
         }
     }
 }

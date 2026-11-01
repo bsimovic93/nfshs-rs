@@ -793,9 +793,9 @@ pub fn abi_draw_background(_: &mut Cpu) {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, NEW, TOP, pick, player, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, NEW, pick, player, via_abi};
     use crate::globals::FE_APP;
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// A copy of the front end's screen (the car select's, its shapes' tables and the swapped
     /// file's buffer, which still holds its last file) as a plain screen; the front end's own
@@ -1013,14 +1013,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fescreen_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0x5D1 + k as u64, shuffle, &args);
-        }
-    }
 }

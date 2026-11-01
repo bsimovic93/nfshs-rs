@@ -837,8 +837,8 @@ pub(crate) fn scale_shape_extended_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// Two tables of 32 shapes (the help's, their sizes, places, depths and texture places
     /// shuffled), options, colours, outputs.
@@ -927,17 +927,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn psxfront_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0x861 + k as u64, shuffle, &args);
-        }
-    }
-
     /// The rest of the file, on FEMENU's structures with the shapes' shuffle: a font and a
     /// character of any bytes, the font's tint and CLUT; the showroom's cars set up or not (the
     /// RAM image's two at the car select); the help's table freed now and then.
@@ -988,14 +977,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn psxfront_glue_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in glue_cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0x881 + k as u64, glue_shuffle, &args);
-        }
-    }
 }

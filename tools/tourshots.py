@@ -1,5 +1,6 @@
 """Run every tour in docs/DECOMP.md with the decompiled code on and off, screenshot both every
-STEP frames, and report the frames that differ (and the memory cards the tours saved to).
+STEP frames, and report the frames that differ, and whether the memory cards the tours saved to
+load the same.
 
 `nfshs decomp-check` compares RAM, so it can't see what only the host does with the game's
 calls: the showroom car it draws, primitives it captures, its autosave. A port that calls a
@@ -9,7 +10,11 @@ hooked function the wrong way (see hookaudit.py) changes only the picture; this 
 
 Build first (`cargo build --release`). Each tour runs on its own copy of memcard.mcd. The
 screenshots go to OUT/t<K>_on and OUT/t<K>_off (default target/tourshots), fe_<frame>.png;
-compare a differing pair by eye. Exit status 1 when any frame differs.
+compare a differing pair by eye. Cards whose bytes differ are each loaded by the recompiled
+game (past the title screen, where it reads the card) and the RAM compared: the save the
+original builds on its stack keeps whatever bytes no part of it fills, which the front end's
+rewritten code doesn't reproduce, and which loading ignores. Exit status 1 when a frame differs,
+a card loads differently, or a run fails.
 """
 import argparse
 import concurrent.futures as cf
@@ -30,6 +35,35 @@ def tours():
 
 def frames(script):
     return sum(round(float(s.split(':')[0]) * 60) for s in script.split(','))
+
+
+# Past the title screen (three Start presses), where the game reads the card; the RAM then.
+LOAD_SCRIPT = '2:-,0.2:p,2:-,0.2:p,2:-,0.2:p,10:-'
+LOAD_FRAME = 900
+STACK = range(0x1F_0000, 0x20_0000)
+
+
+def loaded_ram(exe, card, out):
+    """The RAM after the recompiled game has loaded `card` (a copy of it)."""
+    copy = out + '.mcd'
+    shutil.copy(card, copy)
+    env = dict(os.environ, BOOT_SCRIPT=LOAD_SCRIPT, NFSHS_MEMCARD=copy, NFSHS_DECOMP='off',
+               BOOT_RAM_FRAME=str(LOAD_FRAME), BOOT_RAM_OUT=out + '.ram')
+    for k in ('NFSHS_DECOMP_OFF', 'NFSHS_DECOMP_ONLY', 'NFSHS_DECOMP_CHECK', 'NFSHS_DECOMP_SCRAMBLE', 'FE_SHOT'):
+        env.pop(k, None)
+    subprocess.run([exe, 'boot-main'], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+    with open(out + '.ram', 'rb') as f:
+        return f.read()
+
+
+def card_verdict(exe, on, off):
+    """'same', 'loads the same' (other bytes, the same RAM once loaded) or 'LOADS DIFFERENTLY'."""
+    a, b = os.path.join(on, 'card.mcd'), os.path.join(off, 'card.mcd')
+    if md5(a) == md5(b):
+        return 'same'
+    ra, rb = loaded_ram(exe, a, os.path.join(on, 'load')), loaded_ram(exe, b, os.path.join(off, 'load'))
+    differ = [i for i in range(0, len(ra), 4) if i not in STACK and ra[i:i + 4] != rb[i:i + 4]]
+    return 'loads the same' if not differ else f'LOADS DIFFERENTLY ({len(differ)} words)'
 
 
 def md5(p):
@@ -77,11 +111,11 @@ def main():
             shots = sorted({n for n in os.listdir(on) + os.listdir(off) if n.endswith('.png')}, key=lambda n: int(re.sub(r'\D', '', n)))
             diff = [n for n in shots if not (os.path.exists(os.path.join(on, n)) and os.path.exists(os.path.join(off, n)))
                     or md5(os.path.join(on, n)) != md5(os.path.join(off, n))]
-            card = 'same' if md5(os.path.join(on, 'card.mcd')) == md5(os.path.join(off, 'card.mcd')) else 'DIFFERENT'
+            card = card_verdict(exe, on, off)
             frames_ = ', '.join(re.sub(r'\D', '', n) for n in diff[:10]) + (' ...' if len(diff) > 10 else '')
             print(f'tour {k} ({frames(scripts[k])} frames, {len(shots)} shots): '
                   + (f'{len(diff)} frames differ: {frames_}' if diff else 'all same') + f'; memory card {card}', flush=True)
-            bad += bool(diff) or card != 'same'
+            bad += bool(diff) or card.startswith('LOADS')
     if bad:
         print(f'screenshots in {a.out}: t<K>_on/fe_<frame>.png against t<K>_off/')
     return 1 if bad else 0

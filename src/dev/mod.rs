@@ -274,11 +274,15 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             let grab = grabbed.clone();
             let started = std::time::Instant::now();
             let ram_at: Option<u32> = std::env::var("BOOT_RAM_FRAME").ok().and_then(|f| f.parse().ok());
+            // BOOT_RAM_OUT: where that frame's RAM goes (else the front end's test image)
+            let ram_out = std::env::var("BOOT_RAM_OUT").unwrap_or_else(|_| "re/boot/fe_ram.bin".into());
             let on_frame: ps1::host::FrameFn = Box::new(move |c, info| {
                 frame += 1;
                 if Some(frame) == ram_at {
-                    let _ = std::fs::create_dir_all("re/boot");
-                    let _ = std::fs::write("re/boot/fe_ram.bin", &c.m.ram);
+                    if let Some(dir) = std::path::Path::new(&ram_out).parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    let _ = std::fs::write(&ram_out, &c.m.ram);
                 }
                 if shot_at.contains(&frame) {
                     grab.borrow_mut().push((frame, info.overlay.clone(), info.vram.clone(), (info.display[2], info.display[3])));

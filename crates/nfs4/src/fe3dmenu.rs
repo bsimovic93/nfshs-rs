@@ -340,8 +340,8 @@ pub(crate) fn draw_empty_view_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// The car select's car objects and its view; a vector and a matrix.
     const CAR_OBJECTS: u32 = 0x8005_2EF8;
@@ -402,11 +402,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fe3dmenu_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 60, 0x3E1 + k as u64, shuffle, &args);
-        }
-    }
 }

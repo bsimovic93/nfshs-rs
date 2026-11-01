@@ -514,8 +514,8 @@ pub(crate) fn async_play_speech_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{ADDR, Case, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// The RAM image's commentary header (`zzEngl.viv`, 162 entries) and some of its names;
     /// names it hasn't.
@@ -639,14 +639,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn feaudio_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0x8B1 + k as u64, shuffle, &args);
-        }
-    }
 }

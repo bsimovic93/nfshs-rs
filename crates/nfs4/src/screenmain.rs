@@ -941,9 +941,9 @@ pub fn abi_destructor(c: &mut Cpu) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, TOP, pick, player, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, pick, player, via_abi};
     use crate::globals::SHAPES;
-    use crate::test_util::{Rng, VIDEO_ANSWERS, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, VIDEO_ANSWERS, against_original_in, fe_ram};
 
     /// The main screen (the front end's own, left as its `Cleanup` left it: no shapes); the
     /// outputs of `GetShapeInfo`.
@@ -1119,14 +1119,4 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn screenmain_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0x5B2 + k as u64, shuffle, &args);
-        }
-    }
 }

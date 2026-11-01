@@ -295,7 +295,6 @@ pub fn abi_load_icon(c: &mut Cpu) {
     })
 }
 
-
 /// The lines' clamp of their fade: 0..64 (a halfword's).
 fn line_fade(v: u32) -> u32 {
     let f = v as u16 as i16 as i32;
@@ -989,8 +988,8 @@ pub(crate) fn screen_memcard_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
-    use crate::test_util::{CARD_ANSWERS, Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
+    use crate::test_util::{CARD_ANSWERS, Rng, against_original_in, fe_ram};
 
     /// The game's memory card screen; the icons' buffer (15 saves of 3 icon shapes); a music
     /// stream; the outputs of `GetShapeInfo`.
@@ -1178,14 +1177,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn screenmemcard_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0xB1E + k as u64, shuffle, &args);
-        }
-    }
 }

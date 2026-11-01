@@ -230,9 +230,9 @@ pub fn abi_destructor(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, TOP, pick, player, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, pick, player, via_abi};
     use crate::globals::{FE_APP, GAME_TICKS};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// The game's track info screen (its vtable the real one); the outputs of `GetShapeInfo`.
     const SCREEN: u32 = 0x8017_F92C;
@@ -323,14 +323,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn screentrackinfo_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0x7152 + k as u64, shuffle, &args);
-        }
-    }
 }

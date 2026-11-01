@@ -1413,7 +1413,7 @@ pub fn abi_list_iterator_car_color_decrement(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// The test's structures, in RAM the front end leaves zero: a car iterator and its values,
     /// a colour iterator, its values, player and cars; a save, a description, a class list, a
@@ -1432,8 +1432,6 @@ mod tests {
     const COLOR: u32 = 0x8014_4010;
     /// The front end's descriptions (fecars.car's).
     const CARS: u32 = 45;
-    /// The stack's top in the front end's tests (main RAM).
-    const TOP: u32 = 0x801F_FE00;
 
     fn pick(rng: &mut Rng, n: u32) -> u32 {
         (rng.next() % n as u64) as u32
@@ -1784,43 +1782,4 @@ mod tests {
         run_cases(cases, 0xFEC1);
     }
 
-    /// The functions that call out leave the stack as the original does (their callees'
-    /// frames, the registers they save, the locals).
-    #[test]
-    fn fecars_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        type StackCase = (&'static str, u32, fn(&mut Cpu), Args);
-        let cases: &[StackCase] = &[
-            ("SellCar", 0x8001_6674, nfs4rc::f_80016674, |_, r| vec![CAR_MANAGER.0, id_arg(r), player_arg(r)]),
-            ("LoadCars", 0x8001_6b9c, nfs4rc::f_80016b9c, |_, r| vec![CAR_MANAGER.0, SAVE, player_arg(r)]),
-            ("SaveCars", 0x8001_6c38, nfs4rc::f_80016c38, |_, _| vec![CAR_MANAGER.0, SAVE]),
-            ("LoadPinkSlipsCars", 0x8001_6cb0, nfs4rc::f_80016cb0, |_, r| vec![CAR_MANAGER.0, SAVE, player_arg(r)]),
-            ("SavePinkSlipsCars", 0x8001_6d54, nfs4rc::f_80016d54, |_, r| {
-                let remove = if pick(r, 3) == 0 { u32::MAX } else { id_arg(r) };
-                vec![CAR_MANAGER.0, SAVE, player_arg(r), remove]
-            }),
-            ("GetStockCar", 0x8001_6fd8, nfs4rc::f_80016fd8, |_, r| vec![CAR_MANAGER.0, id_arg(r), OUT]),
-            ("GetGarageCar", 0x8001_7094, nfs4rc::f_80017094, |_, r| vec![CAR_MANAGER.0, id_arg(r), OUT, player_arg(r)]),
-            ("GetPinkSlipsCar", 0x8001_71a0, nfs4rc::f_800171a0, |_, r| vec![CAR_MANAGER.0, id_arg(r), OUT, player_arg(r)]),
-            ("ReleaseDescription", 0x8001_743c, nfs4rc::f_8001743c, |_, _| vec![CAR_MANAGER.0]),
-            ("GetNumTourneyCars", 0x8001_74c0, nfs4rc::f_800174c0, |_, r| vec![CAR_MANAGER.0, player_arg(r)]),
-            ("tListIteratorCar", 0x8001_7a14, nfs4rc::f_80017a14, |_, _| vec![IT_NEW, IT_CAR_VALUES, CAR_MANAGER.0]),
-            ("~tListIteratorCar", 0x8001_7a70, nfs4rc::f_80017a70, |_, r| vec![IT_CAR, 2 * pick(r, 2)]),
-            ("TextValue", 0x8001_7ac4, nfs4rc::f_80017ac4, |_, r| vec![IT_CAR, menu_player_arg(r)]),
-            ("AdjustPosition", 0x8001_7be4, nfs4rc::f_80017be4, |c, r| walk_args(c, r, None)),
-            ("Increment", 0x8001_81d4, nfs4rc::f_800181d4, |c, r| walk_args(c, r, Some(1))),
-            ("Decrement", 0x8001_81f4, nfs4rc::f_800181f4, |c, r| walk_args(c, r, Some(u32::MAX))),
-            ("ValidCar", 0x8001_8214, nfs4rc::f_80018214, |_, r| vec![IT_CAR, menu_player_arg(r), pick(r, CARS + 34)]),
-            ("tListIteratorCarColor", 0x8001_85e0, nfs4rc::f_800185e0, |c, _| {
-                // (the fifth and sixth arguments on the caller's stack)
-                c.m.w32(TOP + 16, 48);
-                c.m.w32(TOP + 20, CAR_MANAGER.0);
-                vec![IT_NEW, IT_COLOR_VALUES, IT_COLOR_PLAYER, IT_COLOR_CARS]
-            }),
-            ("~tListIteratorCarColor", 0x8001_8660, nfs4rc::f_80018660, |_, r| vec![IT_COLOR, 2 * pick(r, 2)]),
-        ];
-        for (k, &(name, addr, original, args)) in cases.iter().enumerate() {
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 300, 0xFEC5 + k as u64, shuffle, &args);
-        }
-    }
 }

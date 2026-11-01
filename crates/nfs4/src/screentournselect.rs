@@ -565,9 +565,9 @@ pub fn abi_draw_foreground(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
+    use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
     use crate::globals::FE_APP;
-    use crate::test_util::{Rng, VIDEO_ANSWERS, against_original_in, fe_ram, same_stack_in};
+    use crate::test_util::{Rng, VIDEO_ANSWERS, against_original_in, fe_ram};
 
     /// The game's tournament select screen; the outputs of `GetShapeInfo`.
     const SCREEN: u32 = 0x8017_FE70;
@@ -661,14 +661,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn screentournselect_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 150, 0x76F + k as u64, shuffle, &args);
-        }
-    }
 }

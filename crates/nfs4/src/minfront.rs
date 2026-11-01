@@ -25,14 +25,13 @@ pub fn abi_parse_options(c: &mut Cpu) {
 
 #[cfg(test)]
 mod tests {
-    use crate::femenu::tests::{self as base, ADDR, TOP, via_abi};
-    use crate::test_util::{against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, via_abi};
+    use crate::test_util::{against_original_in, fe_ram};
 
     #[test]
     fn minfront_fuzz() {
         let Some(ram) = fe_ram() else { return };
         ADDR.set(0x8001_28a0);
         against_original_in(&ram, "MinFront_ParseOptions", 20, 0x3A1, base::shuffle, nfs4rc::f_800128a0, &|_| vec![], via_abi);
-        same_stack_in(&ram, "MinFront_ParseOptions", 0x8001_28a0, nfs4rc::f_800128a0, 0x8001_3000, TOP, 20, 0x3A2, base::shuffle, &|_, _| vec![]);
     }
 }

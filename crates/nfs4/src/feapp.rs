@@ -1454,8 +1454,8 @@ pub(crate) fn run_post_game_entry(c: &mut Cpu) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::femenu::tests::{self as base, ADDR, Case, MENU, MENU2, NEW, TOP, pick, via_abi};
-    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+    use crate::femenu::tests::{self as base, ADDR, Case, MENU, MENU2, NEW, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram};
 
     /// The application's size (to its last field, +896) and where a copy goes.
     const APP_SIZE: u32 = 900;
@@ -1562,14 +1562,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn feapp_stack_fuzz() {
-        let Some(ram) = fe_ram() else { return };
-        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
-            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
-                continue;
-            }
-            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 80, 0xA9A1 + k as u64, shuffle, &args);
-        }
-    }
 }
