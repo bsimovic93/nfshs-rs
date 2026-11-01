@@ -1726,10 +1726,17 @@ pub fn decomp(c: &mut Cpu, addr: u32) -> bool {
     count(i, |s| s.calls += 1);
     // the registers hold the caller's values, as the original's would
     abi::leave_prologue(c, FUNCS[i].addr, None, &[]);
+    let scrambled = abi::scramble::on() && abi::scramble::front_end(FUNCS[i].addr);
+    if scrambled {
+        abi::scramble::on_entry(c);
+    }
     if check::wanted(i) {
         check::run(c, i);
     } else {
         abi::on_stack(c, FUNCS[i].addr, FUNCS[i].run);
+        if scrambled {
+            abi::scramble::after_return(c);
+        }
     }
     true
 }

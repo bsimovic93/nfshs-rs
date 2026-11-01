@@ -1468,8 +1468,7 @@ fn new(c: &mut Cpu, r: &Saved, sp: u32, f: u32, args: &[u32], stack: &[(u32, u32
     for &(at, v) in stack {
         c.m.w32(sp + at, v);
     }
-    c.r[4..4 + args.len()].copy_from_slice(args);
-    r.call_ptr_leaving(c, f, &[], ra);
+    r.call_ptr_leaving(c, f, args, ra);
 }
 
 /// `tGlobalMenuDefs::tGlobalMenuDefs` (FEMENUDEFS.CPP, 0x8002e504): every menu of the front

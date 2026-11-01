@@ -44,6 +44,7 @@ pub fn call_from(c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32, saved: &[u
 
 /// The arguments in a0..a3 and from the fifth on at sp+16, and the return address.
 fn set_args(c: &mut Cpu, args: &[u32], ra: u32) {
+    scramble::before_call(c);
     let sp = c.r[29];
     for (i, &a) in args.iter().enumerate() {
         if i < 4 {
@@ -109,6 +110,7 @@ impl Saved {
         if c.cont != 0 {
             c.run_cont();
         }
+        scramble::after_call(c);
         // the callee-saved registers, gp, sp and the return address as before
         for k in (16..24).chain([28, 29, 30, 31]) {
             c.r[k] = r[k];
@@ -134,6 +136,7 @@ impl Saved {
         self.load(c);
         set_args(c, args, ra);
         c.call(addr);
+        scramble::after_call(c);
         for k in (16..24).chain([28, 29, 30, 31]) {
             c.r[k] = r[k];
         }
@@ -276,4 +279,100 @@ pub fn leave_prologue(c: &mut Cpu, addr: u32, ra: Option<u32>, regs: &[(usize, u
 /// `rand()`: the BIOS's, through the game's stub (0x800eb430).
 pub fn rand(c: &mut Cpu) -> u32 {
     call(c, nfs4rc::f_800eb430, &[])
+}
+
+/// `NFSHS_DECOMP_SCRAMBLE=1`: an experiment for dropping the front end's stack and register
+/// fidelity. The leftovers a front-end port reproduces or leaves are made junk, so whatever
+/// still matches the original doesn't depend on them: the scratch registers when it is entered,
+/// when a call it makes returns and when it returns (but v0, and its arguments on entry); the
+/// s-registers it mirrors from the original and the dead stack below sp when it calls out. What a
+/// port sets in a register itself before a call is kept (those places are in its code). Run with
+/// `decomp-check --main` and `tools/tourshots.py`; a divergence names a reader of leftovers.
+pub mod scramble {
+    use ps1rt::Cpu;
+    use std::cell::Cell;
+    use std::sync::OnceLock;
+
+    /// The front end's ports: FRONT.BIN, loaded below this.
+    const FRONT_END_END: u32 = 0x8005_2000;
+    /// The main stack (the front end's) and how much below sp is scrambled.
+    const STACK: std::ops::Range<u32> = 0x801F_0000..0x8020_0000;
+    const SPAN: u32 = 4096;
+
+    pub fn on() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var("NFSHS_DECOMP_SCRAMBLE").is_ok_and(|v| v == "1"))
+    }
+
+    pub fn front_end(addr: u32) -> bool {
+        (0x8001_0000..FRONT_END_END).contains(&addr)
+    }
+
+    /// Whether the innermost function running is a front-end port (or recompiled front-end code).
+    fn in_front_end(c: &Cpu) -> bool {
+        on() && c.stack.last().is_some_and(|&f| front_end(f))
+    }
+
+    thread_local!(static SEED: Cell<u32> = const { Cell::new(0x9E37_79B9) });
+
+    fn junk() -> u32 {
+        SEED.with(|s| {
+            let mut x = s.get();
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            s.set(x);
+            x
+        })
+    }
+
+    fn regs(c: &mut Cpu, which: impl Iterator<Item = usize>) {
+        for k in which {
+            c.r[k] = junk();
+        }
+        (c.hi, c.lo) = (junk(), junk());
+    }
+
+    fn stack(c: &mut Cpu) {
+        let sp = c.r[29];
+        if !STACK.contains(&sp) {
+            return;
+        }
+        let lo = sp.saturating_sub(SPAN).max(STACK.start) & !3;
+        let (a, b) = ((lo & 0x1F_FFFF) as usize, (sp & 0x1F_FFFC) as usize);
+        let seed = junk();
+        for (k, w) in c.m.ram[a..b].chunks_exact_mut(4).enumerate() {
+            w.copy_from_slice(&(seed ^ (k as u32).wrapping_mul(0x0101_0101)).to_le_bytes());
+        }
+    }
+
+    /// A front-end port is entered from recompiled code (after its prologue's stores): the
+    /// scratch registers but its arguments, and the dead stack.
+    pub fn on_entry(c: &mut Cpu) {
+        regs(c, [1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25].into_iter());
+        stack(c);
+    }
+
+    /// A front-end port has returned to recompiled code: the scratch registers but v0 and v1 (a
+    /// double comes back in both), and the
+    /// dead stack.
+    pub fn after_return(c: &mut Cpu) {
+        regs(c, [1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25].into_iter());
+        stack(c);
+    }
+
+    /// A front-end port calls out: the s-registers and fp it mirrors, and the dead stack.
+    pub fn before_call(c: &mut Cpu) {
+        if in_front_end(c) {
+            regs(c, (16..24).chain([30]));
+            stack(c);
+        }
+    }
+
+    /// A call a front-end port made has returned: the callee's scratch registers but v0 and v1.
+    pub fn after_call(c: &mut Cpu) {
+        if in_front_end(c) {
+            regs(c, [1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25].into_iter());
+        }
+    }
 }

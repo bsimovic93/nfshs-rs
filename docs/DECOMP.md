@@ -160,6 +160,20 @@ collisions, AI), then the front end.
   host draws or does. To bisect a difference, turn modules off (`NFSHS_DECOMP_OFF` with the
   module's names), then single functions (`NFSHS_DECOMP_ONLY`: turning one off doesn't reach the
   calls other ports make to it).
+- **Leftovers** (`NFSHS_DECOMP_SCRAMBLE=1`): every front-end port's leftovers become junk: the
+  scratch registers on entry, after each call it makes and on return (but v0 and v1, where a
+  double comes back), the s-registers it mirrors and the dead stack below sp when it calls out.
+  Run with `decomp-check --main` and `tools/tourshots.py`: what still matches doesn't depend on
+  the original's stack and register leftovers. Measured 2026-11-01 for the front end being
+  rewritten without them: all eight tours keep the same RAM every frame and the same pictures,
+  but for three things. `tScreenControllerConfig`'s label typing reads the byte before its
+  letter buffer before a letter is typed (the original always has 0x80 there: the top byte of a
+  saved address); `SaveGame` builds the save in its frame and the bytes no part fills go onto
+  the card as they were (loading a save with other bytes there gives the same RAM, so they are
+  inert); the host's autosave tells the saving message's sounds by the dialog in s1/s2. What a
+  port sets in a register by hand before a call is kept, so those places are checked as each
+  module is rewritten. A port passes its arguments as arguments (the scrambler takes registers
+  set by hand around an empty argument list as leftovers).
 - **Switches**: `NFSHS_DECOMP=off` runs everything recompiled; `NFSHS_DECOMP_OFF=Name,...`
   turns single functions off, for bisecting a difference.
 
