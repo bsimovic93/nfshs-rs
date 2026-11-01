@@ -608,30 +608,7 @@ pub fn abi_get_shape_info(c: &mut Cpu) {
 /// the wall dark and off.
 pub fn abi_update_video_wall(c: &mut Cpu) {
     let (this, car) = (c.r[4], c.r[5]);
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[1], r.0[0]) = (this, car);
-        let m = &mut c.m;
-        let changed = b(m, car + 200) != hs(m, this + 286)
-            || m.r8(car) as i8 as i32 as u32 != hs(m, this + 288)
-            || (m.r8(car + 2) == 7 && hs(m, this + 290) != b(m, car + 199));
-        if !changed {
-            return;
-        }
-        if (m.r8(car) as i8) >= 0 {
-            port(c, &r, 0x8002_5dd8, 0x8003_befc, &[this, car + 8], crate::fescreen::abi_async_load_swap_shape_file);
-        }
-        let m = &mut c.m;
-        let v = b(m, car + 200);
-        m.w16(this + 286, v as u16);
-        let v = m.r8(car) as i8 as i16;
-        m.w16(this + 288, v as u16);
-        let v = b(m, car + 199);
-        m.w32(this + 900, 0);
-        m.w16(this + 290, v as u16);
-        port(c, &r, 0x8003_c7b0, 0x8003_bf30, &[this, 0, 0], abi_set_brightness);
-        port(c, &r, 0x8003_7050, 0x8003_bf38, &[this + 772], crate::fevideowall::abi_turn_off);
-    })
+    update_wall(c, this, car, 8, [0x8003_befc, 0x8003_bf30, 0x8003_bf38]);
 }
 
 /// `tScreenCarSelect::AllocateAsyncBuffer` (SCREENCARSELECT.CPP, 0x8003bf4c): the videos'
@@ -1501,6 +1478,1479 @@ mod tests {
                 continue;
             }
             same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0xD1E + k as u64, shuffle, &args);
+        }
+    }
+}
+
+/// `"OpponentVid"`, `"z%s"`, `"zDuel"`; the duel's walls' TV layout; the opponent's car.
+const OPPONENT_NAME: u32 = 0x8001_1AC0;
+const Z_FORMAT: u32 = 0x8001_1ACC;
+const DUEL_FILE: u32 = 0x8001_1AD0;
+const DUEL_TVS: u32 = 0x8005_2428;
+const OPPONENT_CAR: u32 = 0x8011_5BD5;
+
+/// The car's video's file read if the shown car changed (`UpdateVideoWall`'s, the file's name
+/// at `name` in the car's info), the wall dark and off.
+fn update_wall(c: &mut Cpu, this: u32, car: u32, name: u32, ras: [u32; 3]) {
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        (r.0[1], r.0[0]) = (this, car);
+        let m = &mut c.m;
+        let changed = b(m, car + 200) != hs(m, this + 286)
+            || m.r8(car) as i8 as i32 as u32 != hs(m, this + 288)
+            || (m.r8(car + 2) == 7 && hs(m, this + 290) != b(m, car + 199));
+        if !changed {
+            return;
+        }
+        if (m.r8(car) as i8) >= 0 {
+            port(c, &r, 0x8002_5dd8, ras[0], &[this, car + name], crate::fescreen::abi_async_load_swap_shape_file);
+        }
+        let m = &mut c.m;
+        let v = b(m, car + 200);
+        m.w16(this + 286, v as u16);
+        let v = m.r8(car) as i8 as i16;
+        m.w16(this + 288, v as u16);
+        let v = b(m, car + 199);
+        m.w32(this + 900, 0);
+        m.w16(this + 290, v as u16);
+        port(c, &r, 0x8003_c7b0, ras[1], &[this, 0, 0], abi_set_brightness);
+        port(c, &r, 0x8003_7050, ras[2], &[this + 772], crate::fevideowall::abi_turn_off);
+    })
+}
+
+/// `tScreenCarSelectDuel::PreLoad` (SCREENCARSELECT.CPP, 0x8003d3bc): the opponent's shapes'
+/// information, the screen's preload, two videos' buffers (16000 bytes each), the player's car's
+/// (or the first stock car's) shapes and the opponent's read.
+pub fn abi_duel_pre_load(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 280, |c, sp| {
+        let mut r = Saved::of(c);
+        let theirs = this + 936;
+        (r.0[3], r.0[4]) = (this, theirs);
+        c.m.w32(this + 936, 0);
+        port(c, &r, 0x8002_640c, 0x8003_d3f0, &[this, theirs, 5], crate::fescreen::abi_initialize_shapes);
+        port(c, &r, 0x8002_67a0, 0x8003_d3f8, &[this], crate::fescreen::abi_pre_load);
+        let v = r.call_leaving(c, GET_DCT_BUFFER, &[16000, WALL_NAME], 0x8003_d408);
+        c.m.w32(this + 48, v);
+        let v = r.call_leaving(c, GET_DCT_BUFFER, &[16000, OPPONENT_NAME], 0x8003_d41c);
+        c.m.w32(this + 944, v);
+        let car = sp + 16;
+        let ok = virtual_call(c, &r, this, 108, &[car], 0x8003_d43c);
+        if ok ^ 1 != 0 {
+            port(c, &r, 0x8001_6fd8, 0x8003_d458, &[CAR_MANAGER, 0, car], crate::fecars::abi_get_stock_car);
+        }
+        let name = sp + 224;
+        (r.0[1], r.0[0], r.0[2]) = (name, Z_FORMAT, sp + 32);
+        r.call_leaving(c, SPRINTF, &[name, Z_FORMAT, sp + 32], 0x8003_d478);
+        port(c, &r, 0x8002_6260, 0x8003_d488, &[this, name, this + 40], crate::fescreen::abi_async_load_shape_file);
+        let id = b(&mut c.m, OPPONENT_CAR);
+        port(c, &r, 0x8001_6fd8, 0x8003_d4a0, &[CAR_MANAGER, id, car], crate::fecars::abi_get_stock_car);
+        r.call_leaving(c, SPRINTF, &[name, Z_FORMAT, sp + 32], 0x8003_d4b0);
+        port(c, &r, 0x8002_6260, 0x8003_d4c0, &[this, name, theirs], crate::fescreen::abi_async_load_shape_file);
+        c.m.w32(this + 932, 0);
+    })
+}
+
+/// `tScreenCarSelectDuel::AllocateAsyncBuffer` (SCREENCARSELECT.CPP, 0x8003d4e4): nothing (the
+/// preload has them).
+pub fn abi_duel_allocate_async_buffer(_c: &mut Cpu) {}
+
+/// `tScreenCarSelectDuel::FreeAsyncBuffer` (SCREENCARSELECT.CPP, 0x8003d4ec): both videos'.
+pub fn abi_duel_free_async_buffer(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        r.call_leaving(c, RESET_DCT_BUFFER, &[], 0x8003_d500);
+        c.m.w32(this + 48, 0);
+        c.m.w32(this + 944, 0);
+    })
+}
+
+/// `tScreenCarSelectDuel::InitializeVideoWall` (SCREENCARSELECT.CPP, 0x8003d518): two walls
+/// of five TVs, the player's and the opponent's (moved down), their images once loaded.
+pub fn abi_duel_initialize_video_wall(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 56, |c, _| {
+        let mut r = Saved::of(c);
+        let (mine, theirs) = (this + 772, this + 828);
+        (r.0[2], r.0[1], r.0[4], r.0[3]) = (this, mine, 5, DUEL_TVS);
+        let shapes = c.m.r32(this + 40);
+        port(c, &r, 0x8003_6988, 0x8003_d568, &[mine, this + 292, shapes, 0, 5, DUEL_TVS, 0], crate::fevideowall::abi_initialize);
+        port(c, &r, 0x8003_6b84, 0x8003_d57c, &[mine, 249, 270, 45], crate::fevideowall::abi_set_available_text);
+        if c.m.r16(this + 58) & 1 != 0 {
+            port(c, &r, 0x8003_6bc0, 0x8003_d59c, &[mine, 6, 0], crate::fevideowall::abi_set_offset);
+            port(c, &r, 0x8003_6a38, 0x8003_d5a4, &[mine], crate::fevideowall::abi_update_images);
+            c.m.w32(this + 900, 1);
+        }
+        r.0[0] = theirs;
+        let shapes = c.m.r32(this + 936);
+        port(c, &r, 0x8003_6988, 0x8003_d5d0, &[theirs, this + 532, shapes, 0, 5, DUEL_TVS, 0], crate::fevideowall::abi_initialize);
+        port(c, &r, 0x8003_6b84, 0x8003_d5e4, &[mine, 249, 270, 150], crate::fevideowall::abi_set_available_text);
+        if c.m.r16(this + 954) & 1 != 0 {
+            port(c, &r, 0x8003_6bc0, 0x8003_d604, &[theirs, 6, 105], crate::fevideowall::abi_set_offset);
+            port(c, &r, 0x8003_6a38, 0x8003_d60c, &[theirs], crate::fevideowall::abi_update_images);
+            c.m.w32(this + 900, 1);
+        }
+    })
+}
+
+/// `tScreenCarSelectDuel::Initialize` (SCREENCARSELECT.CPP, 0x8003d634): the car select's, in
+/// state 0, not the car select's flag.
+pub fn abi_duel_initialize(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        port(c, &r, 0x8003_c060, 0x8003_d648, &[this], abi_initialize);
+        c.m.w16(this + 284, 0);
+        c.m.w32(IN_CAR_SELECT, 0);
+    })
+}
+
+/// `tScreenCarSelectDuel::Cleanup` (SCREENCARSELECT.CPP, 0x8003d664): the opponent's shapes
+/// freed, the car select's.
+pub fn abi_duel_cleanup(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        port(c, &r, 0x8002_64b4, 0x8003_d67c, &[this, this + 936], crate::fescreen::abi_free_shapes);
+        port(c, &r, 0x8003_af90, 0x8003_d684, &[this], abi_cleanup);
+    })
+}
+
+/// A duel's wall's background shapes (12) faded with the screen and raised by `dy`.
+fn wall_shapes(c: &mut Cpu, r: &mut Saved, k_reg: usize, this: u32, dy: u32, ra: u32) {
+    for k in 0..12u32 {
+        r.0[k_reg] = k;
+        let fade = hs(&mut c.m, this + 92);
+        port(c, r, 0x8004_eb60, ra, &[k, 0, 0, 0u32.wrapping_sub(dy), fade, 0, 0], crate::psxfront::abi_draw_shape_extended);
+    }
+    r.0[k_reg] = 12;
+}
+
+/// `tScreenCarSelectDuel::DrawVideoWall` (SCREENCARSELECT.CPP, 0x8003d694): the wall's
+/// background raised by `dy`, the wall off while the screen fades, its images once loaded
+/// (offset), updated, valid with a car, drawn.
+pub fn abi_duel_draw_video_wall(c: &mut Cpu) {
+    let (this, dy) = (c.r[4], c.r[5]);
+    abi::frame(c, 264, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[2], r.0[0], r.0[1]) = (this, dy, 0);
+        let ok = virtual_call(c, &r, this, 108, &[sp + 32], 0x8003_d6d4);
+        r.0[3] = ok;
+        let dy = sx(dy);
+        r.0[0] = dy;
+        wall_shapes(c, &mut r, 1, this, dy, 0x8003_d708);
+        let mine = this + 772;
+        if (hs(&mut c.m, this + 92) as i32) > 0 && c.m.r32(this + 84) != 0 {
+            port(c, &r, 0x8003_7074, 0x8003_d74c, &[mine], crate::fevideowall::abi_turn_off_instant);
+            port(c, &r, 0x8003_c7b0, 0x8003_d75c, &[this, 0, 0], abi_set_brightness);
+        }
+        r.0[0] = mine;
+        if c.m.r16(this + 58) & 1 != 0 && c.m.r32(this + 900) == 0 {
+            port(c, &r, 0x8003_6bc0, 0x8003_d790, &[mine, 6, 0], crate::fevideowall::abi_set_offset);
+            port(c, &r, 0x8003_6a38, 0x8003_d798, &[mine], crate::fevideowall::abi_update_images);
+            c.m.w32(this + 900, 1);
+        }
+        port(c, &r, 0x8003_6bdc, 0x8003_d7ac, &[mine], crate::fevideowall::abi_update);
+        port(c, &r, 0x8003_6bd4, 0x8003_d7bc, &[mine, sx(ok)], crate::fevideowall::abi_set_valid);
+        let avail = b(&mut c.m, sp + 39);
+        port(c, &r, 0x8003_6bcc, 0x8003_d7c8, &[mine, avail], crate::fevideowall::abi_set_available);
+        port(c, &r, 0x8003_6dac, 0x8003_d7d0, &[mine], crate::fevideowall::abi_draw);
+    })
+}
+
+/// `tScreenCarSelectDuel::DrawOpponentVideoWall` (SCREENCARSELECT.CPP, 0x8003d7ec): the
+/// opponent's wall as `DrawVideoWall` the player's (always valid and available).
+pub fn abi_duel_draw_opponent_video_wall(c: &mut Cpu) {
+    let (this, dy) = (c.r[4], c.r[5]);
+    abi::frame(c, 48, |c, _| {
+        let mut r = Saved::of(c);
+        let dy = sx(dy);
+        (r.0[1], r.0[0], r.0[2]) = (this, 0, dy);
+        wall_shapes(c, &mut r, 0, this, dy, 0x8003_d838);
+        let theirs = this + 828;
+        if (hs(&mut c.m, this + 92) as i32) > 0 && c.m.r32(this + 84) != 0 {
+            port(c, &r, 0x8003_7074, 0x8003_d87c, &[theirs], crate::fevideowall::abi_turn_off_instant);
+            port(c, &r, 0x8003_c7b0, 0x8003_d88c, &[this, 0, 1], abi_set_brightness);
+        }
+        r.0[0] = theirs;
+        if c.m.r16(this + 58) & 1 != 0 && c.m.r32(this + 932) == 0 {
+            port(c, &r, 0x8003_6bc0, 0x8003_d8bc, &[theirs, 6, 105], crate::fevideowall::abi_set_offset);
+            port(c, &r, 0x8003_6a38, 0x8003_d8c4, &[theirs], crate::fevideowall::abi_update_images);
+            c.m.w32(this + 932, 1);
+        }
+        port(c, &r, 0x8003_6bdc, 0x8003_d8d8, &[theirs], crate::fevideowall::abi_update);
+        port(c, &r, 0x8003_6bd4, 0x8003_d8e4, &[theirs, 1], crate::fevideowall::abi_set_valid);
+        port(c, &r, 0x8003_6bcc, 0x8003_d8f0, &[theirs, 1], crate::fevideowall::abi_set_available);
+        port(c, &r, 0x8003_6dac, 0x8003_d8f8, &[theirs], crate::fevideowall::abi_draw);
+    })
+}
+
+/// `tScreenCarSelectDuel::GetShapeInfo` (SCREENCARSELECT.CPP, 0x8003d910): 52 shapes of
+/// `zDuel` and 5 swapped (no file), the car shown noted, no opponent's.
+pub fn abi_duel_get_shape_info(c: &mut Cpu) {
+    let (this, count, swap, file) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+    let swap_file = abi::arg(c, 4);
+    abi::frame(c, 240, |c, sp| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        c.m.w16(count, 52);
+        c.m.w16(swap, 5);
+        r.0[1] = file;
+        let car = sp + 16;
+        let ok = virtual_call(c, &r, this, 108, &[car], 0x8003_d954);
+        if ok ^ 1 != 0 {
+            port(c, &r, 0x8001_6fd8, 0x8003_d970, &[CAR_MANAGER, 0, car], crate::fecars::abi_get_stock_car);
+        }
+        let m = &mut c.m;
+        let v = b(m, sp + 216);
+        m.w16(this + 286, v as u16);
+        let v = m.r8(car) as i8 as i16;
+        m.w16(this + 288, v as u16);
+        let v = b(m, sp + 215);
+        m.w16(this + 928, 0xFFFF);
+        m.w16(this + 290, v as u16);
+        m.w32(file, DUEL_FILE);
+        m.w32(swap_file, 0);
+    })
+}
+
+/// `tScreenCarSelectDuel::UpdateVideoWall` (SCREENCARSELECT.CPP, 0x8003d9cc): as the car
+/// select's, the video's file the car's other name.
+pub fn abi_duel_update_video_wall(c: &mut Cpu) {
+    let (this, car) = (c.r[4], c.r[5]);
+    update_wall(c, this, car, 16, [0x8003_da4c, 0x8003_da80, 0x8003_da88]);
+}
+
+/// `tScreenCarSelectDuel::UpdateOpponentVideoWall` (SCREENCARSELECT.CPP, 0x8003da9c): another
+/// opponent's car: its shapes read, its wall dark and off.
+pub fn abi_duel_update_opponent_video_wall(c: &mut Cpu) {
+    let (this, car) = (c.r[4], c.r[5]);
+    abi::frame(c, 64, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[0], r.0[1]) = (this, car);
+        if b(&mut c.m, car + 200) == hs(&mut c.m, this + 928) {
+            return;
+        }
+        r.call_leaving(c, SPRINTF, &[sp + 16, Z_FORMAT, car + 16], 0x8003_dad8);
+        port(c, &r, 0x8002_6260, 0x8003_dae8, &[this, sp + 16, this + 936], crate::fescreen::abi_async_load_shape_file);
+        let m = &mut c.m;
+        m.w32(this + 932, 0);
+        let v = b(m, car + 200);
+        m.w16(this + 928, v as u16);
+        port(c, &r, 0x8003_c7b0, 0x8003_db04, &[this, 0, 1], abi_set_brightness);
+        port(c, &r, 0x8003_7050, 0x8003_db0c, &[this + 828], crate::fevideowall::abi_turn_off);
+    })
+}
+
+/// The drawing environments' buffers, the screen's height; the second car object; the
+/// duel's slider labels.
+const DRAW_ENV_A: u32 = 0x8013_E6B0;
+const DRAW_ENV_B: u32 = 0x8013_EA9C;
+const SCREEN_HEIGHT: u32 = 0x8013_EF6C;
+const DUEL_LABELS: u32 = 0x8005_2408;
+const GET_DRAWENV: fn(&mut Cpu) = nfs4rc::f_800beb84;
+const SET_DRAW_AREA: fn(&mut Cpu) = nfs4rc::f_800eec70;
+
+/// A drawing area primitive (12 bytes) linked into the OT and set to the screen's band from
+/// `env`'s top plus `dy` (the screen's height less `dy` high), as the original's inline
+/// linking leaves the registers.
+fn draw_area(c: &mut Cpu, r: &Saved, env: u32, sp: u32, dy: u32, ra: u32) {
+    let m = &mut c.m;
+    m.w16(sp + 256, 0);
+    let y = hu(m, env + 2).wrapping_add(dy);
+    m.w16(sp + 260, 512);
+    let h = hu(m, SCREEN_HEIGHT).wrapping_sub(dy);
+    m.w16(sp + 258, y as u16);
+    m.w16(sp + 262, h as u16);
+    let ot = m.r32(0x1F80_0000);
+    let prim = crate::mmeffect::add_prim(m, 12);
+    (c.r[6], c.r[7], c.r[8], c.r[9]) = (ot, 0xFF_FFFF, 0xFF00_0000, 0x1F80_0004);
+    r.call_leaving(c, SET_DRAW_AREA, &[prim, sp + 256], ra);
+}
+
+/// Whether a wall's video shapes can go up: read (`data` at `info + 4`), a shown car's
+/// (`picture`), the car object (`object`) idle, a while after the wall's last change (`since`).
+fn wall_ready(m: &mut ps1rt::Mem, this: u32, info: u32, picture: u32, object: u32, since: u32) -> bool {
+    m.r32(this + info + 4) != 0
+        && hs(m, this + picture) != u32::MAX
+        && {
+            let o = m.r32(object);
+            m.r32(o + 2264) == 0
+        }
+        && !((m.r32(GAME_TICKS).wrapping_sub(m.r32(this + since)) as i32) < 129)
+}
+
+/// `tScreenCarSelectDuel::DrawBackground` (SCREENCARSELECT.CPP, 0x8003db20): the duel's two
+/// halves: the opponent's (its name's plate, its car got and its wall updated, its shapes up
+/// once read, its brightness, its car turning, its wall), the player's below (its band's
+/// background, its car's name's plate, the wall updated (virtual), brightness, car, shapes);
+/// the menu's background (virtual).
+pub fn abi_duel_draw_background(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 280, |c, sp| {
+        let mut r = Saved::of(c);
+        r.0[1] = this;
+        let (ea, eb) = (c.m.r32(DRAW_ENV_A), c.m.r32(DRAW_ENV_B));
+        let env = r.call_leaving(c, GET_DRAWENV, &[ea, eb], 0x8003_db4c);
+        r.0[2] = env;
+        c.m.w16(this + 284, 7);
+        draw_area(c, &r, env, sp, 0, 0x8003_dbd4);
+        let m = &mut c.m;
+        for (at, v) in [(40, 290), (44, 200), (46, 12), (42, 130)] {
+            m.w16(sp + at, v);
+        }
+        let all = m.r32(ALL_MENUS);
+        let t = port(c, &r, 0x8001_7ac4, 0x8003_dc08, &[all + 5216, u32::MAX], crate::fecars::abi_list_iterator_car_text_value);
+        port(c, &r, 0x8004_c490, 0x8003_dc1c, &[sx(t), sp + 40, 0], crate::drawshp::abi_round_rectangle);
+        let car = sp + 48;
+        r.0[0] = car;
+        let id = b(&mut c.m, OPPONENT_CAR);
+        port(c, &r, 0x8001_6fd8, 0x8003_dc38, &[CAR_MANAGER, id, car], crate::fecars::abi_get_stock_car);
+        let m = &mut c.m;
+        let k = b(m, sp + 52);
+        let v = m.r8(car + k + 175);
+        m.w8(sp + 245, v);
+        port(c, &r, 0x8003_da9c, 0x8003_dc54, &[this, car], abi_duel_update_opponent_video_wall);
+        port(c, &r, 0x8002_5e2c, 0x8003_dc60, &[this, this + 936], crate::fescreen::abi_is_shape_file_loaded);
+        let theirs = this + 828;
+        if wall_ready(&mut c.m, this, 936, 848, CAR_OBJECTS + 4, 896) {
+            port(c, &r, 0x8002_6614, 0x8003_dcd4, &[this, this + 936, 0, 65, 5, 0], crate::fescreen::abi_upload_shapes);
+            c.m.w32(this + 932, 0);
+            port(c, &r, 0x8003_70f0, 0x8003_dce0, &[theirs], crate::fevideowall::abi_turn_on);
+            if c.m.r16(this + 886) == c.m.r16(this + 890) {
+                port(c, &r, 0x8003_c7b0, 0x8003_dd00, &[this, 128, 1], abi_set_brightness);
+            }
+        }
+        let m = &mut c.m;
+        let turn = m.r32(this + 924).wrapping_add(3);
+        m.w32(this + 924, turn);
+        m.w8(sp + 244, 0);
+        r.0[0] = 0x8014_0000;
+        let o = m.r32(CAR_OBJECTS + 4);
+        if m.r32(o + 2264) != 0 && !((m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 896)) as i32) < 129) {
+            port(c, &r, 0x8003_c7b0, 0x8003_dd54, &[this, 0, 1], abi_set_brightness);
+            port(c, &r, 0x8003_7050, 0x8003_dd5c, &[theirs], crate::fevideowall::abi_turn_off);
+            let t = c.m.r32(GAME_TICKS);
+            c.m.w32(this + 896, t);
+        }
+        port(c, &r, 0x8003_c7c4, 0x8003_dd74, &[this, 1], abi_update_brightness);
+        let m = &mut c.m;
+        m.w32(SHOWROOM_DRAW, 0);
+        let (shade, turn) = (b(m, this + 886), m.r32(this + 924));
+        port(c, &r, 0x8003_ac64, 0x8003_ddbc, &[car, 278, 184, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, 1], abi_draw_car);
+        let m = &mut c.m;
+        let o = m.r32(CAR_OBJECTS + 4);
+        if m.r32(o + 2264) == 0
+            && m.r16(this + 886) == m.r16(this + 890)
+            && m.r16(this + 886) == 0
+            && !((m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 896)) as i32) < 129)
+        {
+            port(c, &r, 0x8003_c7b0, 0x8003_de1c, &[this, 128, 1], abi_set_brightness);
+            port(c, &r, 0x8003_70f0, 0x8003_de24, &[theirs], crate::fevideowall::abi_turn_on);
+        }
+        virtual_call(c, &r, this, 132, &[105], 0x8003_de40);
+        r.0[0] = 0x8014_0000;
+        draw_area(c, &r, env, sp, 128, 0x8003_dec4);
+        let h = c.m.r32(SCREEN_HEIGHT);
+        let half = ((h as i32) / 2) as u32;
+        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, 0, half, 512, half], 0x8003_dee8);
+        let ok = virtual_call(c, &r, this, 108, &[car], 0x8003_df04);
+        r.0[2] = ok;
+        if ok != 0 {
+            let m = &mut c.m;
+            m.w16(sp + 42, 25);
+            let all = m.r32(ALL_MENUS);
+            let list = if m.r8(FE + 298) == 0 { all + 4460 } else { all + 4812 };
+            let t = port(c, &r, 0x8001_7ac4, 0x8003_df4c, &[list, u32::MAX], crate::fecars::abi_list_iterator_car_text_value);
+            port(c, &r, 0x8004_c490, 0x8003_df60, &[sx(t), sp + 40, 0], crate::drawshp::abi_round_rectangle);
+        } else {
+            c.m.w8(car, 0xFF);
+        }
+        virtual_call(c, &r, this, 100, &[car], 0x8003_df8c);
+        let mine = this + 772;
+        let m = &mut c.m;
+        r.0[0] = 0x8014_0000;
+        let o = m.r32(CAR_OBJECTS);
+        if m.r32(o + 2264) != 0 && !((m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 892)) as i32) < 129) {
+            port(c, &r, 0x8003_c7b0, 0x8003_dfd0, &[this, 0, 0], abi_set_brightness);
+            port(c, &r, 0x8003_7050, 0x8003_dfd8, &[mine], crate::fevideowall::abi_turn_off);
+            let t = c.m.r32(GAME_TICKS);
+            c.m.w32(this + 892, t);
+        }
+        port(c, &r, 0x8003_c7c4, 0x8003_dff0, &[this, 0], abi_update_brightness);
+        let m = &mut c.m;
+        m.w32(SHOWROOM_DRAW, 0);
+        let (shade, turn) = (b(m, this + 884), m.r32(this + 924));
+        port(c, &r, 0x8003_ac64, 0x8003_e034, &[car, 278, 79, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, 0], abi_draw_car);
+        let m = &mut c.m;
+        let o = m.r32(CAR_OBJECTS);
+        if m.r32(o + 2264) == 0
+            && m.r16(this + 884) == m.r16(this + 888)
+            && m.r16(this + 884) == 0
+            && !((m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 892)) as i32) < 129)
+        {
+            let v = if m.r8(sp + 55) != 0 { 128 } else { 32 };
+            port(c, &r, 0x8003_c7b0, 0x8003_e0a8, &[this, v, 0], abi_set_brightness);
+            port(c, &r, 0x8003_70f0, 0x8003_e0b0, &[mine], crate::fevideowall::abi_turn_on);
+        }
+        if ok != 0 {
+            port(c, &r, 0x8002_5e2c, 0x8003_e0c4, &[this, this + 40], crate::fescreen::abi_is_shape_file_loaded);
+            if wall_ready(&mut c.m, this, 40, 792, CAR_OBJECTS, 892) {
+                port(c, &r, 0x8002_5ff0, 0x8003_e128, &[this, 5], crate::fescreen::abi_upload_swap_shapes);
+                port(c, &r, 0x8003_70f0, 0x8003_e130, &[mine], crate::fevideowall::abi_turn_on);
+                let m = &mut c.m;
+                if m.r16(this + 888) == m.r16(this + 884) {
+                    let v = if m.r8(sp + 55) != 0 { 128 } else { 32 };
+                    port(c, &r, 0x8003_c7b0, 0x8003_e164, &[this, v, 0], abi_set_brightness);
+                }
+            }
+        }
+        virtual_call(c, &r, this, 84, &[0], 0x8003_e180);
+    })
+}
+
+/// A car's stat with its upgrades (the car's three upgrade bits), as the sliders show it.
+fn stat(m: &mut ps1rt::Mem, car: u32, k: u32) -> u32 {
+    let off = m.r32(SLIDER_STATS + 4 * k);
+    let bits = b(m, car + 196);
+    let at = car.wrapping_add(off);
+    let mut v = b(m, at + 48);
+    for (bit, o) in [(1, 53), (2, 58), (4, 63)] {
+        if bits & bit != 0 {
+            v = v.wrapping_add(b(m, at + o));
+        }
+    }
+    v
+}
+
+/// `tScreenCarSelectDuel::DrawForeground` (SCREENCARSELECT.CPP, 0x8003e198): the player's
+/// car's five stats as sliders (empty without a car), then the opponent's below.
+pub fn abi_duel_draw_foreground(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 304, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[2], r.0[3], r.0[5]) = (45, 0, 4);
+        let car = sp + 56;
+        let ok = virtual_call(c, &r, this, 108, &[car], 0x8003_e1e8);
+        (r.0[4], r.0[7]) = (ok, DUEL_LABELS);
+        for pass in 0..2u32 {
+            (r.0[1], r.0[6]) = (0, SLIDER_STATS);
+            for k in 0..5u32 {
+                r.0[0] = k;
+                let m = &mut c.m;
+                let label = hs(m, DUEL_LABELS + 2 * k);
+                let y = sx(r.0[2].wrapping_add(4));
+                port(c, &r, 0x8002_12e0, 0x8003_e24c, &[label, 500, y, 1, 0, 4], crate::fetextrender::abi_menu_text_positioned_justify);
+                let v = if ok != 0 { sx(stat(&mut c.m, car, k)) } else { 0 };
+                let y = sx(r.0[2]);
+                r.call_leaving(c, DRAW_SLIDER, &[v, 0, 11, 417, y, 73, 3, 4, 3, 1, 0, 128, 0], 0x8003_e310);
+                r.0[2] = r.0[2].wrapping_add(15);
+                r.0[1] = k + 1;
+            }
+            r.0[0] = 5;
+            r.0[2] = 150;
+            r.0[3] = pass + 1;
+            let id = b(&mut c.m, OPPONENT_CAR);
+            port(c, &r, 0x8001_6fd8, 0x8003_e33c, &[CAR_MANAGER, id, car], crate::fecars::abi_get_stock_car);
+        }
+    })
+}
+
+/// `"zcarsb"`.
+const TWO_PLAYER_FILE: u32 = 0x8001_1AD8;
+
+fn player(m: &mut ps1rt::Mem) -> u32 {
+    let app = m.r32(crate::globals::FE_APP);
+    b(m, app + 556)
+}
+
+/// `tScreenCarSelectTwoPlayer::GetCar` (SCREENCARSELECT.CPP, 0x8003e370): the player's car:
+/// a stock car (its colour), or a garage car (the first player's garage while the second has
+/// none; none at all: no car); its colour index and livery.
+pub fn abi_two_player_get_car(c: &mut Cpu) {
+    let (this, car) = (c.r[4], c.r[5]);
+    let _ = this;
+    abi::frame(c, 48, |c, _| {
+        let mut r = Saved::of(c);
+        let p = player(&mut c.m);
+        (r.0[2], r.0[0], r.0[3], r.0[5], r.0[4]) = (car, p, p, p, FE);
+        let at;
+        if c.m.r8(FE + 298) == 0 {
+            let id = b(&mut c.m, FE + p + 92);
+            port(c, &r, 0x8001_6fd8, 0x8003_e3d0, &[CAR_MANAGER, id, car], crate::fecars::abi_get_stock_car);
+            let m = &mut c.m;
+            let id = m.r8(car) as i8 as i32 as u32;
+            let v = b(m, id.wrapping_add(p * 48).wrapping_add(FE) + 96);
+            at = car + v;
+        } else {
+            r.0[1] = CAR_MANAGER;
+            let n = port(c, &r, 0x8001_747c, 0x8003_e408, &[CAR_MANAGER, p], crate::fecars::abi_get_num_owned_cars);
+            if (sx(n) as i32) <= 0 {
+                r.0[3] = 0;
+            }
+            let who = r.0[3];
+            r.0[0] = who;
+            let n = port(c, &r, 0x8001_747c, 0x8003_e424, &[CAR_MANAGER, who], crate::fecars::abi_get_num_owned_cars);
+            if (sx(n) as i32) <= 0 {
+                c.r[2] = 0;
+                return;
+            }
+            let id = b(&mut c.m, FE + p + 291);
+            port(c, &r, 0x8001_7094, 0x8003_e44c, &[CAR_MANAGER, id, car, who], crate::fecars::abi_get_garage_car);
+            at = car + b(&mut c.m, car + 197);
+        }
+        let m = &mut c.m;
+        let v = m.r8(at + 175);
+        m.w8(car + 197, v);
+        let p = player(m);
+        let id = m.r8(car) as i8 as i32 as u32;
+        let v = m.r8(id.wrapping_add(p * 48).wrapping_add(FE) + 192);
+        m.w8(car + 199, v);
+        c.r[2] = 1;
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::DrawVideoWall` (SCREENCARSELECT.CPP, 0x8003e4c0): the wall's
+/// background raised by `dy`, the player's wall's images once loaded (the second player's
+/// moved down, its text there), off while the screen fades, valid with a car, drawn.
+pub fn abi_two_player_draw_video_wall(c: &mut Cpu) {
+    let (this, dy) = (c.r[4], c.r[5]);
+    abi::frame(c, 264, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[2], r.0[0], r.0[1]) = (this, dy, 0);
+        let ok = virtual_call(c, &r, this, 108, &[sp + 32], 0x8003_e500);
+        r.0[3] = ok;
+        let dy = sx(dy);
+        r.0[0] = dy;
+        wall_shapes(c, &mut r, 1, this, dy, 0x8003_e534);
+        let wall = this + 772;
+        if c.m.r16(this + 58) & 1 != 0 {
+            r.0[1] = 0x8005_0000;
+        }
+        if c.m.r16(this + 58) & 1 != 0 && c.m.r32(this + 900) == 0 {
+            let off = if player(&mut c.m) != 0 { 105 } else { 0 };
+            r.0[0] = wall;
+            port(c, &r, 0x8003_6bc0, 0x8003_e5a0, &[wall, 6, off], crate::fevideowall::abi_set_offset);
+            let h = if player(&mut c.m) != 0 { 150 } else { 45 };
+            port(c, &r, 0x8003_6b84, 0x8003_e5cc, &[wall, 249, 270, h], crate::fevideowall::abi_set_available_text);
+            port(c, &r, 0x8003_6a38, 0x8003_e5d4, &[wall], crate::fevideowall::abi_update_images);
+            c.m.w32(this + 900, 1);
+        }
+        r.0[0] = wall;
+        if (hs(&mut c.m, this + 92) as i32) > 0 && c.m.r32(this + 84) != 0 {
+            port(c, &r, 0x8003_7074, 0x8003_e604, &[wall], crate::fevideowall::abi_turn_off_instant);
+            port(c, &r, 0x8003_c7b0, 0x8003_e614, &[this, 0, 0], abi_set_brightness);
+        }
+        port(c, &r, 0x8003_6bd4, 0x8003_e628, &[wall, sx(ok)], crate::fevideowall::abi_set_valid);
+        let avail = b(&mut c.m, sp + 39);
+        port(c, &r, 0x8003_6bcc, 0x8003_e634, &[wall, avail], crate::fevideowall::abi_set_available);
+        port(c, &r, 0x8003_6bdc, 0x8003_e63c, &[wall], crate::fevideowall::abi_update);
+        port(c, &r, 0x8003_6dac, 0x8003_e644, &[wall], crate::fevideowall::abi_draw);
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::GetShapeInfo` (SCREENCARSELECT.CPP, 0x8003e660): 52 shapes of
+/// `zcarsb`, 5 swapped: the first player's car's video's (noted as shown), none for the
+/// second.
+pub fn abi_two_player_get_shape_info(c: &mut Cpu) {
+    let (this, count, swap, file) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+    let swap_file = abi::arg(c, 4);
+    abi::frame(c, 240, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[1], r.0[0], r.0[2]) = (this, 0, swap_file);
+        let m = &mut c.m;
+        m.w16(count, 52);
+        m.w16(swap, 5);
+        for at in [286, 288, 290] {
+            m.w16(this + at, 0xFFFF);
+        }
+        m.w32(file, TWO_PLAYER_FILE);
+        let ok = virtual_call(c, &r, this, 108, &[sp + 16], 0x8003_e6c8);
+        let first = ok != 0 && player(&mut c.m) == 0;
+        if first {
+            r.0[0] = VIDEO_FILE;
+            let m = &mut c.m;
+            let v = b(m, sp + 216);
+            m.w16(this + 286, v as u16);
+            let v = b(m, sp + 215);
+            m.w16(this + 290, v as u16);
+            let v = m.r8(sp + 16) as i8 as i16;
+            m.w16(this + 288, v as u16);
+            r.call_leaving(c, SPRINTF, &[VIDEO_FILE, VIDEO_FORMAT, sp + 32], 0x8003_e724);
+            c.m.w32(swap_file, VIDEO_FILE);
+        } else {
+            c.m.w32(swap_file, 0);
+        }
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::UpdateVideoWall` (SCREENCARSELECT.CPP, 0x8003e748): as the duel's,
+/// the wall off before it's darkened.
+pub fn abi_two_player_update_video_wall(c: &mut Cpu) {
+    let (this, car) = (c.r[4], c.r[5]);
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        (r.0[1], r.0[0]) = (this, car);
+        let m = &mut c.m;
+        let changed = b(m, car + 200) != hs(m, this + 286)
+            || m.r8(car) as i8 as i32 as u32 != hs(m, this + 288)
+            || (m.r8(car + 2) == 7 && hs(m, this + 290) != b(m, car + 199));
+        if !changed {
+            return;
+        }
+        if (m.r8(car) as i8) >= 0 {
+            port(c, &r, 0x8002_5dd8, 0x8003_e7c4, &[this, car + 16], crate::fescreen::abi_async_load_swap_shape_file);
+        }
+        let m = &mut c.m;
+        let v = b(m, car + 200);
+        m.w16(this + 286, v as u16);
+        let v = m.r8(car) as i8 as i16;
+        m.w16(this + 288, v as u16);
+        let v = b(m, car + 199);
+        m.w32(this + 900, 0);
+        m.w16(this + 290, v as u16);
+        port(c, &r, 0x8003_7050, 0x8003_e7f8, &[this + 772], crate::fevideowall::abi_turn_off);
+        port(c, &r, 0x8003_c7b0, 0x8003_e808, &[this, 0, 0], abi_set_brightness);
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::TurnOffVideoWall` (SCREENCARSELECT.CPP, 0x8003e81c).
+pub fn abi_two_player_turn_off_video_wall(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let r = Saved::of(c);
+        port(c, &r, 0x8003_7074, 0x8003_e82c, &[this + 772], crate::fevideowall::abi_turn_off_instant);
+    })
+}
+
+/// The waiting message's buffer.
+const WAIT_TEXT: u32 = 0x8005_30E8;
+
+/// A drawing area primitive linked into the OT for the rectangle at `sp + 256`, as the
+/// original's inline linking leaves the registers.
+fn link_area(c: &mut Cpu, r: &Saved, sp: u32, ra: u32) {
+    let m = &mut c.m;
+    let ot = m.r32(0x1F80_0000);
+    let prim = crate::mmeffect::add_prim(m, 12);
+    (c.r[6], c.r[7], c.r[8], c.r[9]) = (ot, 0xFF_FFFF, 0xFF00_0000, 0x1F80_0004);
+    r.call_leaving(c, SET_DRAW_AREA, &[prim, sp + 256], ra);
+}
+
+/// `tScreenCarSelectTwoPlayer::DrawBackground` (SCREENCARSELECT.CPP, 0x8003e83c): the
+/// player's half (the first's at the top, the second's below): the car's name's plate, the wall
+/// updated (virtual), brightness and car turning; none: the wall off; the car's video's shapes
+/// up once read; the menu's background (virtual) and the dialog (virtual); the drawing area
+/// clipped to the half.
+pub fn abi_two_player_draw_background(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 296, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[0], r.0[4]) = (this, 79);
+        let (ea, eb) = (c.m.r32(DRAW_ENV_A), c.m.r32(DRAW_ENV_B));
+        let env = r.call_leaving(c, GET_DRAWENV, &[ea, eb], 0x8003_e878);
+        r.0[5] = env;
+        draw_area(c, &r, env, sp, 0, 0x8003_e8f8);
+        (r.0[2], r.0[3], r.0[1]) = (0x8005_0000, 1, sp + 48);
+        let m = &mut c.m;
+        m.w16(sp + 40, 290);
+        m.w16(sp + 42, 25);
+        if player(m) == 1 {
+            m.w16(sp + 42, 130);
+        }
+        m.w16(sp + 44, 200);
+        m.w16(sp + 46, 12);
+        let car = sp + 48;
+        let ok = virtual_call(c, &r, this, 108, &[car], 0x8003_e958);
+        if ok != 0 {
+            let m = &mut c.m;
+            m.w16(sp + 42, 20);
+            if player(m) == 1 {
+                r.0[4] = 184;
+                m.w16(sp + 42, 128);
+            }
+            let turn = m.r32(this + 924).wrapping_add(3);
+            m.w32(this + 924, turn);
+            let name = (m.r8(car) as i8 as i32 as u32).wrapping_add(290);
+            port(c, &r, 0x8004_c490, 0x8003_e9a0, &[name, sp + 40, 0], crate::drawshp::abi_round_rectangle);
+            virtual_call(c, &r, this, 100, &[car], 0x8003_e9bc);
+            r.0[1] = CAR_OBJECTS;
+            let m = &mut c.m;
+            let p = player(m);
+            let o = m.r32(CAR_OBJECTS + 4 * p);
+            if m.r32(o + 2264) != 0 {
+                port(c, &r, 0x8003_c7b0, 0x8003_e9f8, &[this, 0, 0], abi_set_brightness);
+                let t = c.m.r32(GAME_TICKS);
+                c.m.w32(this + 892, t);
+            }
+            let m = &mut c.m;
+            let p = player(m);
+            let o = m.r32(CAR_OBJECTS + 4 * p);
+            if m.r32(o + 2264) == 0
+                && m.r16(this + 884) == m.r16(this + 888)
+                && m.r16(this + 884) == 0
+                && !((m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 892)) as i32) < 129)
+            {
+                let v = if m.r8(sp + 55) != 0 { 128 } else { 32 };
+                port(c, &r, 0x8003_c7b0, 0x8003_ea90, &[this, v, 0], abi_set_brightness);
+                port(c, &r, 0x8003_70f0, 0x8003_ea98, &[this + 772], crate::fevideowall::abi_turn_on);
+            }
+            port(c, &r, 0x8003_c7c4, 0x8003_eaa4, &[this, 0], abi_update_brightness);
+            let m = &mut c.m;
+            m.w32(SHOWROOM_DRAW, 0);
+            let (p, shade, turn) = (player(m), b(m, this + 884), m.r32(this + 924));
+            let y = r.0[4];
+            port(c, &r, 0x8003_ac64, 0x8003_eaf4, &[car, 278, y, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, p], abi_draw_car);
+        } else {
+            c.m.w8(car, 0xFF);
+            virtual_call(c, &r, this, 100, &[car], 0x8003_eb20);
+            let m = &mut c.m;
+            m.w32(SHOWROOM_DRAW, 0);
+            let (p, shade, turn) = (player(m), b(m, this + 884), m.r32(this + 924));
+            port(c, &r, 0x8003_ac64, 0x8003_eb6c, &[car, 278, 79, 0x3FD9_999A, 0xC11E_6666, shade, 0, turn, p], abi_draw_car);
+            virtual_call(c, &r, this, 132, &[], 0x8003_eb88);
+        }
+        port(c, &r, 0x8002_5e2c, 0x8003_eb94, &[this, this + 40], crate::fescreen::abi_is_shape_file_loaded);
+        let p = player(&mut c.m);
+        if wall_ready(&mut c.m, this, 40, 792, CAR_OBJECTS + 4 * p, 892) {
+            let first = if player(&mut c.m) == 1 { 65 } else { 0 };
+            port(c, &r, 0x8002_6614, 0x8003_ec3c, &[this, this + 40, 0, first, 5, 0], crate::fescreen::abi_upload_shapes);
+            port(c, &r, 0x8003_70f0, 0x8003_ec44, &[this + 772], crate::fevideowall::abi_turn_on);
+            r.0[1] = 0x8005_0000;
+            let m = &mut c.m;
+            if m.r16(this + 888) == m.r16(this + 884) {
+                let v = if m.r8(sp + 55) != 0 { 128 } else { 32 };
+                port(c, &r, 0x8003_c7b0, 0x8003_ec78, &[this, v, 0], abi_set_brightness);
+            }
+        }
+        (r.0[1], r.0[2]) = (0x8005_0000, 1);
+        let m = &mut c.m;
+        m.w16(sp + 42, 0);
+        if player(m) == 1 {
+            m.w16(sp + 42, 105);
+        }
+        let dy = hs(m, sp + 42);
+        virtual_call(c, &r, this, 84, &[dy], 0x8003_ecb4);
+        virtual_call(c, &r, this, 140, &[], 0x8003_ecd0);
+        let m = &mut c.m;
+        m.w16(sp + 256, 0);
+        let y = hu(m, env + 2);
+        let h = m.r32(SCREEN_HEIGHT);
+        m.w16(sp + 260, 512);
+        let half = ((h as i32) / 2) as u32;
+        m.w16(sp + 258, y as u16);
+        m.w16(sp + 262, half as u16);
+        if player(m) == 1 {
+            m.w16(sp + 258, y.wrapping_add(half) as u16);
+        }
+        link_area(c, &r, sp, 0x8003_ed70);
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::DrawForeground` (SCREENCARSELECT.CPP, 0x8003ed94): the
+/// player's colour item off but for a pink slips' car, its car's five stats as sliders in its
+/// half.
+pub fn abi_two_player_draw_foreground(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 296, |c, sp| {
+        let mut r = Saved::of(c);
+        r.0[0] = 0x8005_0000;
+        r.0[1] = if player(&mut c.m) == 1 { 150 } else { 45 };
+        let car = sp + 56;
+        let ok = virtual_call(c, &r, this, 108, &[car], 0x8003_edf4);
+        r.0[4] = ok;
+        let m = &mut c.m;
+        let all = m.r32(ALL_MENUS);
+        let item = if player(m) == 0 { all + 5784 } else { all + 6032 };
+        let v = m.r32(item) & !1;
+        m.w32(item, v);
+        if ok == 0 || m.r8(sp + 58) == 7 {
+            m.w32(item, v | 1);
+        }
+        (r.0[2], r.0[6], r.0[5], r.0[3]) = (0, DUEL_LABELS, SLIDER_STATS, car);
+        for k in 0..5u32 {
+            r.0[0] = k;
+            let label = hs(&mut c.m, DUEL_LABELS + 2 * k);
+            let y = sx(r.0[1].wrapping_add(4));
+            port(c, &r, 0x8002_12e0, 0x8003_eed8, &[label, 500, y, 1, 0, 14], crate::fetextrender::abi_menu_text_positioned_justify);
+            let v = if ok != 0 { sx(stat(&mut c.m, car, k)) } else { 0 };
+            let y = sx(r.0[1]);
+            r.call_leaving(c, DRAW_SLIDER, &[v, 0, 11, 417, y, 73, 3, 4, 3, 1, 0, 128, 0], 0x8003_ef9c);
+            r.0[1] = r.0[1].wrapping_add(15);
+            r.0[2] = k + 1;
+        }
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::SetDialog` (SCREENCARSELECT.CPP, 0x8003efd0): while the player
+/// has chosen, the dialog waiting for the other player (by name), off to the side; else hidden.
+pub fn abi_two_player_set_dialog(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[1] = this;
+        let m = &mut c.m;
+        let app = m.r32(crate::globals::FE_APP);
+        let p = b(m, app + 556);
+        r.0[0] = p;
+        let dialog = this + 928;
+        if m.r32(app + 560 + 4 * p) == 0 {
+            port(c, &r, 0x8001_8a44, 0x8003_f078, &[dialog], crate::fedialog::abi_hide);
+            return;
+        }
+        let side = if p != 0 { 60 } else { (-60i32) as u32 };
+        r.0[1] = dialog;
+        m.w16(dialog + 124, 0);
+        m.w16(dialog + 126, side as u16);
+        m.w16(dialog + 100, p as u16);
+        let format = r.call_leaving(c, TEXT_WORD, &[681], 0x8003_f034);
+        r.0[2] = format;
+        let name = port(c, &r, 0x8002_ba7c, 0x8003_f044, &[1u32.wrapping_sub(p)], crate::front::abi_player_name);
+        r.0[0] = WAIT_TEXT;
+        r.call_leaving(c, SPRINTF, &[WAIT_TEXT, format, name], 0x8003_f05c);
+        c.m.w32(dialog + 144, WAIT_TEXT);
+        port(c, &r, 0x8001_8980, 0x8003_f068, &[dialog], crate::fedialog::abi_display);
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::AllocateAsyncBuffer` (SCREENCARSELECT.CPP, 0x8003f090): the
+/// video's buffer (16000 bytes).
+pub fn abi_two_player_allocate_async_buffer(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        let v = r.call_leaving(c, GET_DCT_BUFFER, &[16000, WALL_NAME], 0x8003_f0b0);
+        c.m.w32(this + 48, v);
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::InitializeVideoWall` (SCREENCARSELECT.CPP, 0x8003f0c4): a wall
+/// of five TVs, its images once loaded.
+pub fn abi_two_player_initialize_video_wall(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 48, |c, _| {
+        let mut r = Saved::of(c);
+        let wall = this + 772;
+        (r.0[0], r.0[1]) = (this, wall);
+        let shapes = c.m.r32(this + 40);
+        port(c, &r, 0x8003_6988, 0x8003_f108, &[wall, this + 292, shapes, 0, 5, DUEL_TVS, 0], crate::fevideowall::abi_initialize);
+        if c.m.r16(this + 58) & 1 != 0 {
+            port(c, &r, 0x8003_6a38, 0x8003_f124, &[wall], crate::fevideowall::abi_update_images);
+            c.m.w32(this + 900, 1);
+        }
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::Initialize` (SCREENCARSELECT.CPP, 0x8003f140): the car
+/// select's; the second player's shows no car yet, the first's wall's text placed; state 0,
+/// the walls dark, not the car select's flag.
+pub fn abi_two_player_initialize(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        port(c, &r, 0x8003_c060, 0x8003_f154, &[this], abi_initialize);
+        if player(&mut c.m) == 1 {
+            for at in [286, 288, 290] {
+                c.m.w16(this + at, 0xFFFF);
+            }
+        } else {
+            port(c, &r, 0x8003_6b84, 0x8003_f194, &[this + 772, 249, 270, 45], crate::fevideowall::abi_set_available_text);
+        }
+        let m = &mut c.m;
+        for at in [284, 890, 888, 886, 884] {
+            m.w16(this + at, 0);
+        }
+        m.w32(IN_CAR_SELECT, 0);
+    })
+}
+
+/// `tScreenCarSelectTwoPlayer::Cleanup` (SCREENCARSELECT.CPP, 0x8003f1c0): the dialog hidden,
+/// the car select's.
+pub fn abi_two_player_cleanup(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        port(c, &r, 0x8001_8a44, 0x8003_f1d8, &[this + 928], crate::fedialog::abi_hide);
+        port(c, &r, 0x8003_af90, 0x8003_f1e0, &[this], abi_cleanup);
+    })
+}
+
+/// The pink slips' players' load states (0 to load, 1..5 errors and outcomes, 6 ready, 7 gone,
+/// 8 loading); a save going on (FEMEMCARD's); `"zHACK2"`.
+const PINK_STATES: u32 = 0x8005_24C4;
+const CARD_ACTIVE: u32 = 0x8005_1F04;
+const HACK_FILE: u32 = 0x8001_1B04;
+const REDRAW: u32 = 0x8001_3894;
+
+fn both_ready(m: &mut ps1rt::Mem) -> bool {
+    m.r32(PINK_STATES) == 6 && m.r32(PINK_STATES + 4) == 6
+}
+
+/// `tScreenPinkSlipsCarSelect::GetCar` (SCREENCARSELECT.CPP, 0x8003f1f0): with both players'
+/// cars loaded, the player's pink slips car (its colour index).
+pub fn abi_pink_get_car(c: &mut Cpu) {
+    let car = c.r[5];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = car;
+        if !both_ready(&mut c.m) {
+            c.r[2] = 0;
+            return;
+        }
+        let m = &mut c.m;
+        let p = player(m);
+        let id = b(m, FE + p + 293);
+        port(c, &r, 0x8001_71a0, 0x8003_f250, &[CAR_MANAGER, id, car, p], crate::fecars::abi_get_pink_slips_car);
+        let m = &mut c.m;
+        let k = b(m, car + 197);
+        let v = m.r8(car + k + 175);
+        m.w8(car + 197, v);
+        c.r[2] = 1;
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::DrawBackground` (SCREENCARSELECT.CPP, 0x8003f280): the cards
+/// handled, the two players', the dialog hidden once leaving.
+pub fn abi_pink_draw_background(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        port(c, &r, 0x8003_f2c4, 0x8003_f294, &[this], abi_pink_do_mem_card_stuff);
+        port(c, &r, 0x8003_e83c, 0x8003_f29c, &[this], abi_two_player_draw_background);
+        if c.m.r32(this + 1096) != 0 {
+            port(c, &r, 0x8001_8a44, 0x8003_f2b4, &[this + 928], crate::fedialog::abi_hide);
+        }
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::DoMemCardStuff` (SCREENCARSELECT.CPP, 0x8003f2c4): the player's
+/// card watched (the second's once the first's is ready) a few frames after the dialog's in:
+/// gone (to load again), or a game loaded from it (`LoadGame`, the frame redrawn twice first):
+/// its pink slips cars counted (all 32: full; enough for the race or money for the cheapest
+/// car: ready; else too few), or the load's error; ready: the car list's iterator refreshed;
+/// both ready: the card layer down, the licence plates set.
+pub fn abi_pink_do_mem_card_stuff(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 56, |c, _| {
+        let mut r = Saved::of(c);
+        let m = &mut c.m;
+        let p = player(m);
+        let card = if p != 0 { 5 } else { 1 };
+        (r.0[5], r.0[3], r.0[2], r.0[1], r.0[6]) = (0x8005_0000, this, p, card, 1);
+        if m.r32(this + 1096) != 0 {
+            return;
+        }
+        if p == 1 && m.r32(PINK_STATES) != 6 {
+            return;
+        }
+        r.0[4] = 8;
+        if m.r32(PINK_STATES) == 8 || m.r32(PINK_STATES + 4) == 8 {
+            return;
+        }
+        let mine = PINK_STATES + 4 * p;
+        (r.0[7], r.0[0]) = (p << 2, mine);
+        let state = m.r32(mine);
+        if state == 6 {
+            return;
+        }
+        if m.r32(this + 1060) ^ 1 != 0 {
+            m.w32(this + 1080, 0);
+            return;
+        }
+        let wait = m.r32(this + 1080);
+        if (wait as i32) < 5 {
+            m.w32(this + 1080, wait.wrapping_add(1));
+            return;
+        }
+        let mut s3_lui = true;
+        if state != 8 {
+            port(c, &r, 0x8005_0368, 0x8003_f3b4, &[card], crate::memcard::abi_handlecardevents);
+            let info = port(c, &r, 0x8005_072c, 0x8003_f3bc, &[card], crate::memcard::abi_getcard);
+            let m = &mut c.m;
+            m.w32(this + 1084, info);
+            if m.r32(info) == u32::MAX {
+                m.w32(mine, 0);
+            } else if m.r32(CARD_ACTIVE) != 0 || m.r32(mine) != 0 {
+                r.0[3] = 0x8005_0000;
+                s3_lui = false;
+            } else {
+                m.w32(mine, 8);
+                let app = m.r32(crate::globals::FE_APP);
+                r.call_ptr_leaving(c, REDRAW, &[app], 0x8003_f404);
+                r.0[1] = p;
+                let app = c.m.r32(crate::globals::FE_APP);
+                r.call_ptr_leaving(c, REDRAW, &[app], 0x8003_f410);
+                let v = sx(port(c, &r, 0x8003_4f70, 0x8003_f420, &[p, 1, 0], crate::fememcard::abi_load_game));
+                match v {
+                    0 => {
+                        r.0[3] = CAR_MANAGER;
+                        let n = port(c, &r, 0x8001_7568, 0x8003_f440, &[CAR_MANAGER, p], crate::fecars::abi_get_num_pink_slips_cars);
+                        r.0[4] = 0;
+                        if sx(n) == 32 {
+                            c.m.w32(mine, 5);
+                        } else {
+                            let n = port(c, &r, 0x8001_7568, 0x8003_f46c, &[CAR_MANAGER, p], crate::fecars::abi_get_num_pink_slips_cars);
+                            let mut ok = !((sx(n) as i32) < 2);
+                            if !ok {
+                                let n = port(c, &r, 0x8001_7568, 0x8003_f488, &[CAR_MANAGER, p], crate::fecars::abi_get_num_pink_slips_cars);
+                                if sx(n) == 1 {
+                                    r.0[0] = FE + (p << 2);
+                                    let price = port(c, &r, 0x8001_6434, 0x8003_f4a8, &[CAR_MANAGER], crate::fecars::abi_cheapest_car_stock_price);
+                                    let money = c.m.r32(FE + (p << 2) + 76);
+                                    ok = !((money as i32) < price as i32);
+                                }
+                            }
+                            r.0[4] = ok as u32;
+                            c.m.w32(mine, if ok { 6 } else { 4 });
+                        }
+                    }
+                    1 => c.m.w32(mine, 1),
+                    2 => c.m.w32(mine, 3),
+                    _ => c.m.w32(mine, 2),
+                }
+            }
+        }
+        if s3_lui {
+            r.0[3] = 0x8005_0000;
+        }
+        r.0[4] = PINK_STATES;
+        (r.0[1], r.0[0]) = (6, 0x8005_0000);
+        if c.m.r32(mine) == 6 {
+            let list = c.m.r32(ALL_MENUS) + 6612;
+            port(c, &r, 0x8001_81f4, 0x8003_f55c, &[list, p], crate::fecars::abi_list_iterator_car_decrement);
+            let list = c.m.r32(ALL_MENUS) + 6612;
+            port(c, &r, 0x8001_81d4, 0x8003_f56c, &[list, p], crate::fecars::abi_list_iterator_car_increment);
+        }
+        if both_ready(&mut c.m) {
+            port(c, &r, 0x8003_4938, 0x8003_f594, &[], crate::fememcard::abi_deinit_memcard);
+            port(c, &r, 0x8002_b84c, 0x8003_f59c, &[], crate::front::abi_set_license_plate);
+        }
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::DrawForeground` (SCREENCARSELECT.CPP, 0x8003f5c8): two players'.
+pub fn abi_pink_draw_foreground(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let r = Saved::of(c);
+        port(c, &r, 0x8003_ed94, 0x8003_f5d8, &[this], abi_two_player_draw_foreground);
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::Initialize` (SCREENCARSELECT.CPP, 0x8003f5e8): nothing loaded,
+/// the first card's record, the card layer started, two players' screen, its wall's images
+/// not loaded.
+pub fn abi_pink_initialize(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        let m = &mut c.m;
+        for at in [1080, 1088, 1092] {
+            m.w32(this + at, 0);
+        }
+        m.w32(PINK_STATES, 0);
+        m.w32(PINK_STATES + 4, 0);
+        let info = port(c, &r, 0x8005_072c, 0x8003_f61c, &[1], crate::memcard::abi_getcard);
+        c.m.w32(this + 1084, info);
+        port(c, &r, 0x8003_47d4, 0x8003_f62c, &[1, 1], crate::fememcard::abi_init_memcard);
+        c.m.w32(this + 1096, 0);
+        port(c, &r, 0x8003_f140, 0x8003_f638, &[this], abi_two_player_initialize);
+        let f = c.m.r16(this + 58) & 0xFFFE;
+        c.m.w16(this + 58, f);
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::Cleanup` (SCREENCARSELECT.CPP, 0x8003f658): leaving, both
+/// players gone, the dialog hidden, the card layer down, two players'.
+pub fn abi_pink_cleanup(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 24, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[0] = this;
+        let m = &mut c.m;
+        m.w32(this + 1096, 1);
+        m.w32(PINK_STATES, 7);
+        m.w32(PINK_STATES + 4, 7);
+        port(c, &r, 0x8001_8a44, 0x8003_f68c, &[this + 928], crate::fedialog::abi_hide);
+        port(c, &r, 0x8003_4938, 0x8003_f694, &[], crate::fememcard::abi_deinit_memcard);
+        port(c, &r, 0x8003_f1c0, 0x8003_f69c, &[this], abi_two_player_cleanup);
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::SetDialog` (SCREENCARSELECT.CPP, 0x8003f6ac): the player's card's
+/// state as the dialog (the second player's only once the first's ready; none when leaving):
+/// insert a card (its message, then a pause), the load's errors and outcomes, ready (waiting for
+/// the other player while either hasn't chosen), gone (hidden).
+pub fn abi_pink_set_dialog(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        let m = &mut c.m;
+        let p = player(m);
+        (r.0[2], r.0[0]) = (this, p);
+        let d = this + 928;
+        m.w16(d + 124, 0);
+        m.w16(d + 126, if p != 0 { 60 } else { 0xFFC4 });
+        m.w16(d + 100, p as u16);
+        let hide = |c: &mut Cpu, r: &Saved, ra: u32| {
+            port(c, r, 0x8001_8a44, ra, &[d], crate::fedialog::abi_hide);
+        };
+        if (m.r32(PINK_STATES) != 6 && p == 1) || m.r32(this + 1096) != 0 {
+            hide(c, &r, 0x8003_f770);
+            return;
+        }
+        let mine = PINK_STATES + 4 * p;
+        if m.r32(mine) != 0 {
+            m.w32(this + 1088, 0);
+        }
+        let show = |c: &mut Cpu, r: &mut Saved, word: u32, ras: (u32, u32)| {
+            r.0[0] = d;
+            let t = r.call_leaving(c, TEXT_WORD, &[word], ras.0);
+            c.m.w32(d + 144, t);
+            port(c, r, 0x8001_8980, ras.1, &[d], crate::fedialog::abi_display);
+        };
+        match m.r32(mine) {
+            0 => {
+                if m.r32(this + 1092) == 0 {
+                    if m.r32(this + 1088) == 0 {
+                        let t = m.r32(GAME_TICKS);
+                        m.w32(this + 1088, t);
+                    }
+                    let since = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 1088));
+                    let word = p + if (since as i32) < 800 { 684 } else { 682 };
+                    show(c, &mut r, word, (0x8003_f860, 0x8003_f86c));
+                } else {
+                    if m.r32(this + 1088) == 0 {
+                        let t = m.r32(GAME_TICKS);
+                        m.w32(this + 1088, t);
+                    }
+                    if !((m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 1088)) as i32) < 901) {
+                        m.w32(this + 1088, 0);
+                        m.w32(this + 1092, 0);
+                    }
+                }
+            }
+            k @ 1..=3 => {
+                let word = p + [686, 688, 690][k as usize - 1];
+                show(c, &mut r, word, (0x8003_f8d4, 0x8003_f8e0));
+                c.m.w32(this + 1092, 1);
+                c.m.w32(this + 1088, 0);
+            }
+            k @ (4 | 5 | 8) => {
+                let word = p + match k {
+                    4 => 814,
+                    5 => 816,
+                    _ => 641,
+                };
+                show(c, &mut r, word, (0x8003_f90c, 0x8003_f91c));
+                c.m.w32(this + 1088, 0);
+                c.m.w32(this + 1092, 0);
+            }
+            6 => {
+                let app = m.r32(crate::globals::FE_APP);
+                let chosen = m.r32(app + 560 + 4 * p) != 0;
+                if chosen || m.r32(PINK_STATES + 4 * (1 - p)) != 6 {
+                    let format = r.call_leaving(c, TEXT_WORD, &[681], 0x8003_f7c4);
+                    r.0[1] = format;
+                    let name = port(c, &r, 0x8002_ba7c, 0x8003_f7d4, &[1u32.wrapping_sub(p)], crate::front::abi_player_name);
+                    r.0[0] = WAIT_TEXT;
+                    r.call_leaving(c, SPRINTF, &[WAIT_TEXT, format, name], 0x8003_f7ec);
+                    c.m.w32(d + 144, WAIT_TEXT);
+                    port(c, &r, 0x8001_8980, 0x8003_f91c, &[d], crate::fedialog::abi_display);
+                    c.m.w32(this + 1088, 0);
+                    c.m.w32(this + 1092, 0);
+                } else {
+                    hide(c, &r, 0x8003_f800);
+                    c.m.w32(this + 1088, 0);
+                    c.m.w32(this + 1092, 0);
+                }
+            }
+            7 => hide(c, &r, 0x8003_f770),
+            _ => {}
+        }
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::ProcessInput` (SCREENCARSELECT.CPP, 0x8003f93c): until both
+/// players' cars are loaded only back works (other keys made nothing); back leaves (the
+/// dialog hidden); then the car select's.
+pub fn abi_pink_process_input(c: &mut Cpu) {
+    let (this, who, key, cmd) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+    abi::frame(c, 40, |c, _| {
+        let mut r = Saved::of(c);
+        (r.0[1], r.0[2], r.0[0], r.0[3]) = (this, who, key, cmd);
+        let m = &mut c.m;
+        let mut k = m.r32(key);
+        if k != 16 {
+            if k != 4 {
+                if !both_ready(m) {
+                    m.w32(key, 1);
+                }
+                k = m.r32(key);
+            }
+        }
+        if k == 16 && !both_ready(&mut c.m) {
+            let m = &mut c.m;
+            m.w32(this + 1096, 1);
+            m.w32(PINK_STATES, 7);
+            m.w32(PINK_STATES + 4, 7);
+            port(c, &r, 0x8001_8a44, 0x8003_f9f4, &[this + 928], crate::fedialog::abi_hide);
+        }
+        port(c, &r, 0x8003_c268, 0x8003_fa08, &[this, who, key, cmd], abi_process_input);
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::GetShapeInfo` (SCREENCARSELECT.CPP, 0x8003fa24): 52 shapes of
+/// `zcarsb`, 5 swapped from a placeholder video's file; no car shown.
+pub fn abi_pink_get_shape_info(c: &mut Cpu) {
+    let (this, count, swap, file) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+    let swap_file = abi::arg(c, 4);
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        let m = &mut c.m;
+        m.w16(count, 52);
+        m.w16(swap, 5);
+        for at in [286, 288, 290] {
+            m.w16(this + at, 0xFFFF);
+        }
+        m.w32(file, TWO_PLAYER_FILE);
+        (r.0[1], r.0[0]) = (swap_file, VIDEO_FILE);
+        r.call_leaving(c, SPRINTF, &[VIDEO_FILE, VIDEO_FORMAT, HACK_FILE], 0x8003_fa84);
+        c.m.w32(swap_file, VIDEO_FILE);
+    })
+}
+
+/// A two-player screen's destructor: its dialog's, then the car select's.
+fn two_player_destructor(c: &mut Cpu, ras: (u32, u32)) {
+    let (this, flags) = (c.r[4], c.r[5]);
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        (r.0[0], r.0[1]) = (this, flags);
+        port(c, &r, 0x8002_6098, ras.0, &[this + 928, 2], crate::fescreen::abi_screen_destructor);
+        port(c, &r, 0x8003_af68, ras.1, &[this, flags], abi_screen_car_select_destructor);
+    })
+}
+
+/// `tScreenPinkSlipsCarSelect::~tScreenPinkSlipsCarSelect` (SCREENCARSELECT.CPP, 0x8003fa9c).
+pub fn abi_pink_destructor(c: &mut Cpu) {
+    two_player_destructor(c, (0x8003_fac0, 0x8003_facc));
+}
+
+/// `tScreenCarSelectTwoPlayer::~tScreenCarSelectTwoPlayer` (SCREENCARSELECT.CPP, 0x8003fae0).
+pub fn abi_two_player_destructor(c: &mut Cpu) {
+    two_player_destructor(c, (0x8003_fb04, 0x8003_fb10));
+}
+
+/// `tScreenCarSelectDuel::~tScreenCarSelectDuel` (SCREENCARSELECT.CPP, 0x8003fb24).
+pub fn abi_duel_destructor(c: &mut Cpu) {
+    let (this, flags) = (c.r[4], c.r[5]);
+    abi::frame(c, 24, |c, _| {
+        let r = Saved::of(c);
+        port(c, &r, 0x8003_af68, 0x8003_fb34, &[this, flags], abi_screen_car_select_destructor);
+    })
+}
+
+#[cfg(test)]
+mod variant_tests {
+    use super::*;
+    use crate::femenu::tests::{self as base, ADDR, Case, TOP, pick, via_abi};
+    use crate::test_util::{Rng, against_original_in, fe_ram, same_stack_in};
+
+    /// The game's duel, two players' and pink slips' car selects (the RAM image's); the outputs
+    /// of `GetShapeInfo`, a key.
+    const DUEL: u32 = 0x8017_E3E0;
+    const TWO: u32 = 0x8017_E7B0;
+    const PINK: u32 = 0x8017_F020;
+    const OUTS: u32 = 0x8014_7100;
+    const INITED: u32 = 0x8005_1F08;
+
+    /// FEMENU's structures, the front end's choices and the menus' items as the single
+    /// player's tests have them; then each screen: its shape information the car select's
+    /// (the duel's opponent's too, its data there or not), its state, overlays, slots, car
+    /// shown, wall flags, brightness and clocks; the player, both players' chosen flags, the
+    /// dialog's clocks and flags, the leaving flag, both players' load states (a card's load
+    /// never started: it waits on the card's dialogs) and the card layer down.
+    fn shuffle(c: &mut Cpu, rng: &mut Rng) {
+        base::shuffle(c, rng);
+        let m = &mut c.m;
+        m.w8(FE + 4, pick(rng, 4) as u8);
+        m.w8(FE + 3, pick(rng, 3) as u8);
+        let cars = m.r32(CAR_MANAGER);
+        for at in [92, 93, 291, 292, 293, 294, 296, 297] {
+            m.w8(FE + at, [0, 1, pick(rng, cars.max(1)), cars.wrapping_sub(1)][pick(rng, 4) as usize] as u8);
+        }
+        m.w8(FE + 298, pick(rng, 2) as u8);
+        m.w8(OPPONENT_CAR, pick(rng, cars.max(1)) as u8);
+        let all = m.r32(ALL_MENUS);
+        for at in [4604, 4644, 4924, 5784, 6032, 7688, 8216, 8248, 8312, 8376] {
+            let v = m.r32(all + at) & !1;
+            m.w32(all + at, v | pick(rng, 2));
+        }
+        let app = m.r32(crate::globals::FE_APP);
+        m.w8(app + 556, pick(rng, 2) as u8);
+        m.w32(app + 560, pick(rng, 2));
+        m.w32(app + 564, pick(rng, 2));
+        let select = m.r32(app + 12);
+        let t = m.r32(GAME_TICKS);
+        for s in [DUEL, TWO, PINK] {
+            // (the walls and their TVs the single player's: these screens' were never set up)
+            for k in (292..828).step_by(4) {
+                let v = m.r32(select + k);
+                m.w32(s + k, v);
+            }
+            if s == DUEL {
+                for k in (0..56).step_by(4) {
+                    let v = m.r32(select + 772 + k);
+                    m.w32(s + 828 + k, v);
+                }
+            }
+            for k in 0..10 {
+                let v = m.r32(select + 40 + 4 * k);
+                m.w32(s + 40 + 4 * k, v);
+            }
+            let buffer = m.r32(select + 48);
+            m.w32(s + 52, 0);
+            m.w32(s + 44, [0, buffer][pick(rng, 2) as usize]);
+            m.w16(s + 284, pick(rng, 8) as u16);
+            for k in 0..7 {
+                let o = s + 100 + 24 * k;
+                m.w16(o + 16, [0, 1, 64, 127, 128][pick(rng, 5) as usize]);
+                m.w16(o + 18, [6, 0xFFFA][pick(rng, 2) as usize]);
+                m.w16(o + 20, [0, 1, 0xFFFF][pick(rng, 3) as usize]);
+            }
+            for k in 0..4 {
+                let v = if pick(rng, 3) == 0 { 0 } else { s + 100 + 24 * pick(rng, 7) };
+                m.w32(s + 268 + 4 * k, v);
+            }
+            for at in [286, 288, 290] {
+                m.w16(s + at, [0xFFFF, 0, 16, pick(rng, 30)][pick(rng, 4) as usize] as u16);
+            }
+            for at in [892, 896, 908, 912] {
+                m.w32(s + at, t.wrapping_sub([0, 128, 129, 600, 700][pick(rng, 5) as usize]));
+            }
+            for at in [900, 904] {
+                m.w32(s + at, pick(rng, 2));
+            }
+            m.w32(s + 916, 1);
+            m.w32(s + 924, pick(rng, 4096));
+            for at in [884, 886, 888, 890] {
+                m.w16(s + at, [0, 32, 128, pick(rng, 140)][pick(rng, 4) as usize] as u16);
+            }
+            m.w16(s + 92, [0, 64, 128, 200][pick(rng, 4) as usize]);
+            m.w32(s + 84, pick(rng, 2));
+            let f = m.r16(s + 58) & !1;
+            m.w16(s + 58, f | pick(rng, 2) as u16);
+            m.w16(s + 792, [0xFFFF, 0][pick(rng, 2) as usize]);
+        }
+        for k in 0..10 {
+            let v = m.r32(select + 40 + 4 * k);
+            m.w32(DUEL + 936 + 4 * k, v);
+        }
+        let buffer = m.r32(select + 48);
+        m.w32(DUEL + 948, 0);
+        m.w32(DUEL + 940, [0, buffer][pick(rng, 2) as usize]);
+        m.w16(DUEL + 928, [0xFFFF, 0, 16][pick(rng, 3) as usize]);
+        m.w32(DUEL + 932, pick(rng, 2));
+        m.w16(DUEL + 848, [0xFFFF, 0][pick(rng, 2) as usize]);
+        m.w32(PINK + 1060, pick(rng, 2));
+        m.w32(PINK + 1080, [0, 4, 5, 6][pick(rng, 4) as usize]);
+        m.w32(PINK + 1088, [0, t, t.wrapping_sub(799), t.wrapping_sub(800), t.wrapping_sub(901)][pick(rng, 5) as usize]);
+        m.w32(PINK + 1092, pick(rng, 2));
+        m.w32(PINK + 1096, (pick(rng, 4) == 0) as u32);
+        for k in 0..2 {
+            m.w32(PINK_STATES + 4 * k, [0, 1, 2, 3, 4, 5, 6, 6, 7, 8][pick(rng, 10) as usize]);
+        }
+        let any_new = m.r32(PINK_STATES) == 0 || m.r32(PINK_STATES + 4) == 0;
+        m.w32(CARD_ACTIVE, any_new as u32);
+        m.w32(INITED, 0);
+        for p in 0..2 {
+            let o = m.r32(CAR_OBJECTS + 4 * p);
+            m.w32(o + 2264, pick(rng, 2));
+        }
+    }
+
+    fn cases() -> Vec<Case> {
+        vec![
+            ("tScreenCarSelectDuel::PreLoad", 0x8003_d3bc, nfs4rc::f_8003d3bc, |_, _| vec![DUEL]),
+            ("tScreenCarSelectDuel::AllocateAsyncBuffer", 0x8003_d4e4, nfs4rc::f_8003d4e4, |_, _| vec![DUEL]),
+            ("tScreenCarSelectDuel::FreeAsyncBuffer", 0x8003_d4ec, nfs4rc::f_8003d4ec, |_, _| vec![DUEL]),
+            ("tScreenCarSelectDuel::InitializeVideoWall", 0x8003_d518, nfs4rc::f_8003d518, |_, _| vec![DUEL]),
+            ("tScreenCarSelectDuel::Initialize", 0x8003_d634, nfs4rc::f_8003d634, |_, _| vec![DUEL]),
+            ("tScreenCarSelectDuel::DrawVideoWall", 0x8003_d694, nfs4rc::f_8003d694, |_, r| vec![DUEL, [0, 105][pick(r, 2) as usize]]),
+            ("tScreenCarSelectDuel::DrawOpponentVideoWall", 0x8003_d7ec, nfs4rc::f_8003d7ec, |_, r| vec![DUEL, [0, 105][pick(r, 2) as usize]]),
+            ("tScreenCarSelectDuel::GetShapeInfo", 0x8003_d910, nfs4rc::f_8003d910, |_, _| vec![DUEL, OUTS, OUTS + 4, OUTS + 8, OUTS + 12]),
+            ("tScreenCarSelectDuel::UpdateVideoWall", 0x8003_d9cc, nfs4rc::f_8003d9cc, |c, r| car_args(c, r, DUEL)),
+            ("tScreenCarSelectDuel::UpdateOpponentVideoWall", 0x8003_da9c, nfs4rc::f_8003da9c, |c, r| car_args(c, r, DUEL)),
+            ("tScreenCarSelectDuel::DrawBackground", 0x8003_db20, nfs4rc::f_8003db20, |_, _| vec![DUEL]),
+            ("tScreenCarSelectDuel::DrawForeground", 0x8003_e198, nfs4rc::f_8003e198, |_, _| vec![DUEL]),
+            ("tScreenCarSelectTwoPlayer::GetCar", 0x8003_e370, nfs4rc::f_8003e370, |_, _| vec![TWO, OUTS + 0x40]),
+            ("tScreenCarSelectTwoPlayer::DrawVideoWall", 0x8003_e4c0, nfs4rc::f_8003e4c0, |_, r| vec![TWO, [0, 105][pick(r, 2) as usize]]),
+            ("tScreenCarSelectTwoPlayer::GetShapeInfo", 0x8003_e660, nfs4rc::f_8003e660, |_, _| vec![TWO, OUTS, OUTS + 4, OUTS + 8, OUTS + 12]),
+            ("tScreenCarSelectTwoPlayer::UpdateVideoWall", 0x8003_e748, nfs4rc::f_8003e748, |c, r| car_args(c, r, TWO)),
+            ("tScreenCarSelectTwoPlayer::TurnOffVideoWall", 0x8003_e81c, nfs4rc::f_8003e81c, |_, _| vec![TWO]),
+            ("tScreenCarSelectTwoPlayer::DrawBackground", 0x8003_e83c, nfs4rc::f_8003e83c, |_, _| vec![TWO]),
+            ("tScreenCarSelectTwoPlayer::DrawForeground", 0x8003_ed94, nfs4rc::f_8003ed94, |_, _| vec![TWO]),
+            ("tScreenCarSelectTwoPlayer::SetDialog", 0x8003_efd0, nfs4rc::f_8003efd0, |_, _| vec![TWO]),
+            ("tScreenCarSelectTwoPlayer::AllocateAsyncBuffer", 0x8003_f090, nfs4rc::f_8003f090, |_, _| vec![TWO]),
+            ("tScreenCarSelectTwoPlayer::InitializeVideoWall", 0x8003_f0c4, nfs4rc::f_8003f0c4, |_, _| vec![TWO]),
+            ("tScreenCarSelectTwoPlayer::Initialize", 0x8003_f140, nfs4rc::f_8003f140, |_, _| vec![TWO]),
+            ("tScreenPinkSlipsCarSelect::GetCar", 0x8003_f1f0, nfs4rc::f_8003f1f0, |_, _| vec![PINK, OUTS + 0x40]),
+            ("tScreenPinkSlipsCarSelect::DrawBackground", 0x8003_f280, nfs4rc::f_8003f280, |_, _| vec![PINK]),
+            ("tScreenPinkSlipsCarSelect::DoMemCardStuff", 0x8003_f2c4, nfs4rc::f_8003f2c4, |_, _| vec![PINK]),
+            ("tScreenPinkSlipsCarSelect::DrawForeground", 0x8003_f5c8, nfs4rc::f_8003f5c8, |_, _| vec![PINK]),
+            ("tScreenPinkSlipsCarSelect::SetDialog", 0x8003_f6ac, nfs4rc::f_8003f6ac, |_, _| vec![PINK]),
+            ("tScreenPinkSlipsCarSelect::ProcessInput", 0x8003_f93c, nfs4rc::f_8003f93c, |c, r| {
+                c.m.w32(OUTS, [8, 16, 4, 1][pick(r, 4) as usize]);
+                vec![PINK, 0, OUTS, OUTS + 4]
+            }),
+            ("tScreenPinkSlipsCarSelect::GetShapeInfo", 0x8003_fa24, nfs4rc::f_8003fa24, |_, _| vec![PINK, OUTS, OUTS + 4, OUTS + 8, OUTS + 12]),
+            ("~tScreenPinkSlipsCarSelect", 0x8003_fa9c, nfs4rc::f_8003fa9c, |_, r| vec![PINK, 2 * pick(r, 2)]),
+            ("~tScreenCarSelectTwoPlayer", 0x8003_fae0, nfs4rc::f_8003fae0, |_, r| vec![TWO, 2 * pick(r, 2)]),
+            ("~tScreenCarSelectDuel", 0x8003_fb24, nfs4rc::f_8003fb24, |_, r| vec![DUEL, 2 * pick(r, 2)]),
+        ]
+    }
+
+    /// A car's info for the walls' updates: its id, kind, livery, colour and video's number.
+    fn car_args(c: &mut Cpu, r: &mut Rng, s: u32) -> Vec<u32> {
+        let car = OUTS + 0x40;
+        for (at, v) in [(0, [0xFF, 0, 16][pick(r, 3) as usize]), (2, [0, 7][pick(r, 2) as usize]), (199, pick(r, 3)), (200, [16, 0, 0xFF][pick(r, 3) as usize])] {
+            c.m.w8(car + at, v as u8);
+        }
+        for k in 0..8 {
+            c.m.w8(car + 16 + k, if k < 4 { b'a' + pick(r, 26) as u8 } else { 0 });
+        }
+        vec![s, car]
+    }
+
+    #[test]
+    fn screencarselect_variants_fuzz() {
+        let Some(ram) = fe_ram() else { return };
+        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
+            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
+                continue;
+            }
+            ADDR.set(addr);
+            let args_rng = std::cell::RefCell::new(Rng(0xE0D ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
+            against_original_in(&ram, name, 150, 0xE0E + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), via_abi);
+        }
+    }
+
+    #[test]
+    fn screencarselect_variants_stack_fuzz() {
+        let Some(ram) = fe_ram() else { return };
+        for (k, (name, addr, original, args)) in cases().into_iter().enumerate() {
+            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
+                continue;
+            }
+            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 80, 0xE1E + k as u64, shuffle, &args);
         }
     }
 }
