@@ -11,6 +11,8 @@ original. Run them from this folder (they import each other: `mips`, `ds`, `reco
 | `hle_funcs.txt` | Functions replaced on the host side (`src/ps1/host/`): calls to them reach the host. |
 | `hook_funcs.txt` | Recompiled functions always called through `Cpu::call`, so the host can observe them. |
 | `decomp_funcs.txt` | Functions decompiled to Rust (`crates/nfs4`): their calls ask `Cpu::decomp` first. See [`docs/DECOMP.md`](../docs/DECOMP.md). |
+| `hookaudit.py` | Lists decompiled code calling a host-hooked function directly instead of by address (the host would miss the call). Exit status 1 when it finds any. |
+| `tourshots.py` | Runs `docs/DECOMP.md`'s tours with the decompiled code on and off and compares screenshots every 10 frames and the memory cards: catches what only the host shows. Exit status 1 on a difference. |
 | `gentypes.py` | Typed views of the game's structures for the decompiled code (`crates/nfs4/src/types.rs`), from `re/nfs4_types.h`. |
 
 ## Reading the original

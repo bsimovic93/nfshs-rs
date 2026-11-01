@@ -70,6 +70,16 @@ collisions, AI), then the front end.
   frame around it, so when a "local" makes no sense, look for a callee whose prologue saves a
   register there (a temporary write watch on the word in `ps1rt::Mem::w32` finds it; the
   backtrace's function names are unreliable in release builds).
+- **Host hooks**: the host intercepts some of the game's functions (`tools/hook_funcs.txt`, its
+  match arms in `src/ps1/host/`): the showroom's car is noted at `DrawCar`, the sliders', halos'
+  and video walls' primitives are captured, the autosave runs before a front-end frame's
+  `Redraw`. A port calls these by address (`Saved::call_ptr`, `call_ptr_leaving`): `Cpu::call`
+  runs the host first, then routes to the port if there is one. Calling the port (`port()`,
+  `Saved::enter`, an `*_entry` fn) or `nfs4rc::f_*` directly skips the host; only the picture
+  changes (every car shown as the first one, the sliders gone, no autosave), which RAM checks
+  don't see. `python tools/hookaudit.py` lists such calls. The host also reads `Cpu::stack` to
+  know what the game is doing (a save it started is `GenericMenuSaveGame` on it): the routing
+  and `Saved::enter*` push a port's address there as the original does (`abi::on_stack`).
 
 ## Porting a function
 
@@ -144,6 +154,12 @@ collisions, AI), then the front end.
   functions' names are in `re/front_syms.tsv` (`fdis.py` reads both), but its globals aren't
   matched: the development build's front-end code isn't in NFS4.CPE (zeros there), so they are
   named by hand as their functions are ported.
+- **Screenshots**: `python tools/tourshots.py` runs every tour above with the decompiled code
+  on and off, screenshots both every 10 frames and reports the frames (and memory cards) that
+  differ; with `hookaudit.py`, run it before calling a milestone done: it sees what only the
+  host draws or does. To bisect a difference, turn modules off (`NFSHS_DECOMP_OFF` with the
+  module's names), then single functions (`NFSHS_DECOMP_ONLY`: turning one off doesn't reach the
+  calls other ports make to it).
 - **Switches**: `NFSHS_DECOMP=off` runs everything recompiled; `NFSHS_DECOMP_OFF=Name,...`
   turns single functions off, for bisecting a difference.
 
