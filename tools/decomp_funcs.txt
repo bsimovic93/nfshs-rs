@@ -1403,3 +1403,8 @@
 8002a0fc Front_AppendPerpData
 8002a394 Front_AppendTrafficData
 8002a5e4 Front_AppendTrackData
+80026e78 Front_ConstructAll
+80027b38 Front_Menu
+80027dec OutputDisplaySettings
+8002bb74 tAllScreens::tAllScreens
+8002bf8c tAllScreens::~tAllScreens

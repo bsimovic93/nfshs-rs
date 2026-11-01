@@ -25,9 +25,9 @@ const CAR_MANAGER: u32 = 0x8011_552C;
 const TRACK_MANAGER: u32 = 0x8011_5D08;
 const TOURNAMENT_MANAGER: u32 = 0x8011_5D90;
 const CREDIT_MANAGER: u32 = 0x8011_6014;
-/// The screens (`tAllScreens`), the missions' object.
+/// The screens (`tAllScreens`), the menus (FEMENUDEFS').
 const ALL_SCREENS: u32 = 0x8005_1DBC;
-const MISSIONS: u32 = 0x8005_1EE0;
+const ALL_MENUS: u32 = 0x8005_1EE0;
 /// The levels: music, effects, engine, narration, ambient.
 const MUSIC_LEVEL: u32 = 0x8013_D944;
 const SFX_LEVEL: u32 = 0x8013_D948;
@@ -71,9 +71,8 @@ const MUSIC_FIND: fn(&mut Cpu) = nfs4rc::f_8007b214;
 const CARD_START: fn(&mut Cpu) = nfs4rc::f_800347d4;
 const CARD_END: fn(&mut Cpu) = nfs4rc::f_80034938;
 const CARD_CHECK: fn(&mut Cpu) = nfs4rc::f_80034f70;
-/// The screens' and the missions' destructors.
-const ALL_SCREENS_DTOR: fn(&mut Cpu) = nfs4rc::f_8002bf8c;
-const MISSIONS_DTOR: fn(&mut Cpu) = nfs4rc::f_80031720;
+/// The menus' destructor.
+const ALL_MENUS_DTOR: fn(&mut Cpu) = nfs4rc::f_80031720;
 /// The host's: `PadGetState`, `PadInfoMode`, `FILE_addbigsync`, `NFS4_LoadingIcon` (hooked).
 const PAD_GET_STATE: u32 = 0x800F_07FC;
 const PAD_INFO_MODE: u32 = 0x800F_08BC;
@@ -90,22 +89,22 @@ fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu
     })
 }
 
-/// `Front_DeleteAll` (FRONT.CPP, 0x80027008): the screens, the application and the missions'
-/// object deleted (those there).
+/// `Front_DeleteAll` (FRONT.CPP, 0x80027008): the screens, the application and the menus
+/// deleted (those there).
 pub fn abi_delete_all(c: &mut Cpu) {
     abi::frame(c, 24, |c, _| {
         let r = Saved::of(c);
         let screens = c.m.r32(ALL_SCREENS);
         if screens != 0 {
-            r.call_leaving(c, ALL_SCREENS_DTOR, &[screens, 3], 0x8002_7024);
+            port(c, &r, 0x8002_bf8c, 0x8002_7024, &[screens, 3], abi_all_screens_dtor);
         }
         let app = c.m.r32(FE_APP);
         if app != 0 {
             port(c, &r, 0x8001_331c, 0x8002_7040, &[app, 3], crate::feapp::abi_fe_application_dtor);
         }
-        let missions = c.m.r32(MISSIONS);
-        if missions != 0 {
-            r.call_leaving(c, MISSIONS_DTOR, &[missions, 3], 0x8002_705c);
+        let menus = c.m.r32(ALL_MENUS);
+        if menus != 0 {
+            r.call_leaving(c, ALL_MENUS_DTOR, &[menus, 3], 0x8002_705c);
         }
     })
 }
@@ -1407,8 +1406,6 @@ pub fn abi_init_traffic(c: &mut Cpu) {
     })
 }
 
-/// `OutputDisplaySettings` (still recompiled).
-const OUTPUT_DISPLAY_SETTINGS: fn(&mut Cpu) = nfs4rc::f_80027dec;
 
 /// The stream's words as the `Front_Append*` write them: at a cursor, one after another.
 struct Out(u32);
@@ -1489,7 +1486,7 @@ pub fn abi_append_player_car_data(c: &mut Cpu) {
                     o.set(m, stream, tag, v);
                 }
                 let i = m.r16(stream + 4) as i16 as i32 as u32;
-                o.0 = r.call_leaving(c, OUTPUT_DISPLAY_SETTINGS, &[o.0, i, k16, stream + 656], 0x8002_9ae8);
+                o.0 = port(c, &r, 0x8002_7dec, 0x8002_9ae8, &[o.0, i, k16, stream + 656], abi_output_display_settings);
                 k = k.wrapping_add(1);
                 r.0[1] = k;
                 let m = &mut c.m;
@@ -1771,6 +1768,346 @@ pub fn abi_append_track_data(c: &mut Cpu) {
     })
 }
 
+/// `OutputDisplaySettings` (FRONT.CPP, 0x80027dec): player `p`'s display settings into the
+/// stream at `out` for car `i`: the view (+800: 1 the first, 2 the second, 3 and up the third,
+/// 0 the track's default), whether it isn't the fourth, the six dashboard settings (+804..+814)
+/// and the four per player (+816..+819). The cursor after.
+pub fn abi_output_display_settings(c: &mut Cpu) {
+    let (out, i, p, track) = (c.r[4], c.r[5], c.r[6], c.r[7]);
+    let m = &mut c.m;
+    let fe = p.wrapping_add(FE);
+    let view = match m.r8(fe + 800) {
+        1 => 0,
+        0 => {
+            let k = m.r8(track + 42) as u32;
+            m.r16(TRACK_DEFAULTS + (k << 1)) as i16 as i32 as u32
+        }
+        2 => 1,
+        _ => 2,
+    };
+    let mut o = Out(out);
+    for (tag, v) in [(282, view), (283, (m.r8(fe + 800) != 3) as u32)] {
+        o.put(m, tag);
+        o.put(m, i);
+        o.put(m, v);
+    }
+    for (tag, at) in [(284, 804), (285, 806), (286, 808), (287, 812), (288, 810), (289, 814)] {
+        let v = m.r8(fe + at) as u32;
+        o.put(m, tag);
+        o.put(m, i);
+        o.put(m, v);
+    }
+    let fe4 = (p << 2).wrapping_add(FE);
+    for (tag, at) in [(294, 816), (295, 817), (296, 818), (297, 819)] {
+        let v = m.r8(fe4 + at) as u32;
+        o.put(m, tag);
+        o.put(m, i);
+        o.put(m, v);
+    }
+    c.r[2] = o.0;
+}
+
+/// `operator new`; the menus' constructor (FEMENUDEFS).
+const NEW: fn(&mut Cpu) = nfs4rc::f_800a48c0;
+const ALL_MENUS_CTOR: fn(&mut Cpu) = nfs4rc::f_8002e504;
+/// Where each screen of `tAllScreens` is reached from (and its offset in it).
+const SCREEN_POINTERS: [(u32, u32); 26] = [
+    (0x8005_22E8, 0), (0x8005_24CC, 1464), (0x8005_24D0, 2392), (0x8005_24D4, 3368), (0x8005_24D8, 4448),
+    (0x8005_24DC, 5528), (0x8005_24E0, 6628), (0x8005_2560, 7728), (0x8005_255C, 7844), (0x8005_2544, 8520),
+    (0x8005_24EC, 9192), (0x8005_22F8, 9904), (0x8005_2DD8, 10052), (0x8005_24F0, 10444), (0x8005_2518, 10788),
+    (0x8005_2D60, 10892), (0x8005_2D68, 11272), (0x8005_2D78, 11372), (0x8005_2D80, 11496), (0x8005_2E44, 12940),
+    (0x8005_2DD4, 13144), (0x8005_2300, 13536), (0x8005_22FC, 13684), (0x8005_22F4, 13832), (0x8005_2DDC, 14544),
+    (0x8005_2DE0, 14932),
+];
+
+/// `Front_ConstructAll` (FRONT.CPP, 0x80026e78): the screens made (each reached from its
+/// global), the application, the menus.
+pub fn abi_construct_all(c: &mut Cpu) {
+    abi::frame(c, 24, |c, _| {
+        let r = Saved::of(c);
+        let at = r.call_leaving(c, NEW, &[15320], 0x8002_6e88);
+        let screens = port(c, &r, 0x8002_bb74, 0x8002_6e90, &[at], abi_all_screens);
+        c.m.w32(ALL_SCREENS, screens);
+        for (global, offset) in SCREEN_POINTERS {
+            c.m.w32(global, screens.wrapping_add(offset));
+        }
+        let at = r.call_leaving(c, NEW, &[896], 0x8002_6fd4);
+        let app = port(c, &r, 0x8001_30f8, 0x8002_6fdc, &[at], crate::feapp::abi_fe_application);
+        let at = r.call_leaving(c, NEW, &[15128], 0x8002_6fec);
+        c.m.w32(FE_APP, app);
+        let menus = r.call_leaving(c, ALL_MENUS_CTOR, &[at], 0x8002_6ff4);
+        c.m.w32(ALL_MENUS, menus);
+    })
+}
+
+/// The memory left (the largest free block, at the front end's start and end); the front end
+/// in use; a post-race flag; the setup's quit flag (+0x24); the race's finishers (a word).
+const MEMORY_LEFT: u32 = 0x8005_19A0;
+const USE: u32 = 0x8013_E54C;
+const POST_RACE: u32 = 0x8013_E569;
+const FINISHERS: u32 = 0x8011_0E8C;
+const LARGEST_UNUSED: fn(&mut Cpu) = nfs4rc::f_800e5e70;
+const TO_MAIN_MENU: fn(&mut Cpu) = nfs4rc::f_8002c514;
+const RUN_POST_GAME: fn(&mut Cpu) = nfs4rc::f_80015554;
+/// The cars' sound banks freed (the car code's), the words unloaded.
+const CAR_SOUNDS_END: fn(&mut Cpu) = nfs4rc::f_800bcb04;
+const UNLOAD_WORDS: fn(&mut Cpu) = nfs4rc::f_800b9f98;
+/// `FILE_delbigsync` (the host's).
+const FILE_DEL_BIG_SYNC: u32 = 0x800E_B3CC;
+
+/// `Front_Menu` (FRONT.CPP, 0x80027b38): the front end run: the memory left noted, the
+/// commentary opened, the showroom, everything constructed; a player with no car nor money
+/// given the cheapest car's price; then the main menu (`mode` 0 or 1, from the start or a
+/// test) or, after a race (2), the tournament advanced or the pink slips' winner counted, and
+/// the post-race screens; everything deleted and shut, the big file closed, the record lap time
+/// of the first track. The application's result.
+pub fn abi_front_menu(c: &mut Cpu) {
+    let mode = c.r[4];
+    abi::frame(c, 56, |c, sp| {
+        let mut r = Saved::of(c);
+        (r.0[1], r.0[3], r.0[4]) = (mode, 0, 1);
+        c.m.w32(CARD_FIRST, 1);
+        let left = r.call_leaving(c, LARGEST_UNUSED, &[], 0x8002_7b70);
+        (r.0[0], r.0[5]) = (0, FE);
+        let language = c.m.r8(FE + 832) as u32;
+        c.m.w32(MEMORY_LEFT, left);
+        port(c, &r, 0x8001_6200, 0x8002_7b90, &[language, 0], crate::feaudio::abi_init_commentary);
+        r.enter_leaving(c, 0x8004_dd38, 0x8002_7b98, crate::psxfront::abi_initialize_spinning_cars);
+        r.enter_leaving(c, 0x8002_6e78, 0x8002_7ba0, abi_construct_all);
+        r.0[2] = CAR_MANAGER;
+        let owned = port(c, &r, 0x8001_747c, 0x8002_7bb4, &[CAR_MANAGER, 0], crate::fecars::abi_get_num_owned_cars);
+        let broke = if ((owned << 16) as i32) > 0 { 0 } else { ((c.m.r32(TOURNAMENT_MANAGER + 20) as i32) < 1) as u32 };
+        r.0[0] = broke;
+        if broke != 0 {
+            let price = port(c, &r, 0x8001_6434, 0x8002_7bdc, &[CAR_MANAGER], crate::fecars::abi_cheapest_car_stock_price);
+            let money = c.m.r32(TOURNAMENT_MANAGER + 20).wrapping_add(price.wrapping_add(1));
+            c.m.w32(TOURNAMENT_MANAGER + 20, money);
+        }
+        if mode == 0 || mode == 1 {
+            if mode == 0 {
+                r.enter_leaving(c, 0x8002_7960, 0x8002_7c2c, abi_load_config);
+            }
+            if c.m.r32(USE) != 0 {
+                r.call_leaving(c, TO_MAIN_MENU, &[sp + 16], 0x8002_7c48);
+                let app = c.m.r32(FE_APP);
+                let v = port(c, &r, 0x8001_585c, 0x8002_7c58, &[app], crate::feapp::abi_run_front_end);
+                r.0[3] = v;
+            }
+        } else if mode == 2 {
+            c.m.w8(POST_RACE, 1);
+            let m = &mut c.m;
+            if m.r8(FE + 4) == 2 && m.r32(GAME_SETUP.0 + 0x24) == 0 {
+                r.0[0] = TOURNAMENT_MANAGER;
+                port(c, &r, 0x8003_3184, 0x8002_7c94, &[TOURNAMENT_MANAGER], crate::fetourn::abi_advance_to_next_track);
+                port(c, &r, 0x8003_3a50, 0x8002_7c9c, &[TOURNAMENT_MANAGER], crate::fetourn::abi_update_award_information);
+            } else if m.r8(FE + 4) == 6 && m.r32(GAME_SETUP.0 + 0x24) == 0 {
+                let winner = m.r16(FE + 90) as i16;
+                let few = (m.r32(FINISHERS) as i32) < 2;
+                let slot = m.r8(FE + 70) as u32;
+                let pinks = (slot << 1).wrapping_add(FE) + 12;
+                if (few && winner != 0) || winner == 1 {
+                    m.w16(pinks, 0);
+                    let v = m.r8(FE + 72).wrapping_add(1);
+                    m.w8(FE + 72, v);
+                } else {
+                    m.w16(pinks, 1);
+                    let v = m.r8(FE + 73).wrapping_add(1);
+                    m.w8(FE + 73, v);
+                }
+            }
+            let app = c.m.r32(FE_APP);
+            let v = r.call_leaving(c, RUN_POST_GAME, &[app], 0x8002_7d68);
+            r.0[3] = v;
+        }
+        // (each s-register set in the delay slot of the call before which it's listed)
+        r.0[0] = 0x8014_0000;
+        r.enter_leaving(c, 0x8002_7008, 0x8002_7d74, abi_delete_all);
+        r.0[1] = 0x8011_0000;
+        r.enter_leaving(c, 0x8001_62a0, 0x8002_7d7c, crate::feaudio::abi_deinit_commentary);
+        r.0[1] = FE;
+        r.call_leaving(c, CAR_SOUNDS_END, &[], 0x8002_7d84);
+        r.call_leaving(c, UNLOAD_WORDS, &[], 0x8002_7d8c);
+        r.enter_leaving(c, 0x8002_6cb0, 0x8002_7d94, crate::fetools::abi_deinit);
+        r.enter_leaving(c, 0x8004_e158, 0x8002_7d9c, crate::psxfront::abi_psx_exit_frontend);
+        let big = c.m.r32(BIG_FILE);
+        r.call_ptr_leaving(c, FILE_DEL_BIG_SYNC, &[big, 100], 0x8002_7da8);
+        let track = c.m.r8(FE + 35) as u32;
+        c.m.w32(BIG_FILE, 0);
+        let lap = port(c, &r, 0x8004_b33c, 0x8002_7db4, &[track], crate::stattool::abi_return_record_lap_time);
+        c.m.w32(FE + 40, lap);
+        let left = r.call_leaving(c, LARGEST_UNUSED, &[], 0x8002_7dbc);
+        c.m.w32(MEMORY_LEFT, left);
+        c.r[2] = r.0[3];
+    })
+}
+
+/// The screens' constructors and destructors still recompiled: the car select's (three of
+/// them), the controller's, the memory card's; `operator delete`.
+const CAR_SELECT_CTOR: fn(&mut Cpu) = nfs4rc::f_8003ae58;
+const CAR_SELECT_DTOR: fn(&mut Cpu) = nfs4rc::f_8003af68;
+const CONTROLLER_CTOR: fn(&mut Cpu) = nfs4rc::f_80045c44;
+const MEM_CARD_CTOR: fn(&mut Cpu) = nfs4rc::f_80047fcc;
+const DELETE: fn(&mut Cpu) = nfs4rc::f_800a4910;
+/// A dialog inlined into the screens (its classes' vtables in turn: the dialog's, the
+/// message's, the box's).
+const DIALOG_VT: u32 = 0x8001_05A8;
+const MESSAGE_VT: u32 = 0x8001_04E8;
+const BOX_VT: u32 = 0x8001_0488;
+/// A screen's vtable (+96).
+const VPTR: u32 = 96;
+
+/// A dialog constructed inline at `d` (288 wide, nothing shown, for either player), through
+/// its classes' vtables.
+fn inline_dialog(m: &mut ps1rt::Mem, d: u32) {
+    m.w16(d + 128, 288);
+    m.w32(d + VPTR, DIALOG_VT);
+    m.w32(d + 112, 0);
+    for at in [110, 130, 126, 124, 108, 106, 104, 102] {
+        m.w16(d + at, 0);
+    }
+    m.w16(d + 100, 0xFFFF);
+    m.w16(d + 136, 0);
+    m.w32(d + 120, 0);
+    m.w32(d + VPTR, MESSAGE_VT);
+    m.w32(d + 148, 0);
+    m.w32(d + 132, 0);
+    m.w32(d + 120, 0);
+    m.w32(d + 140, 128);
+    m.w32(d + VPTR, BOX_VT);
+}
+
+/// `tAllScreens::tAllScreens` (FRONT.CPP, 0x8002bb74): every screen of the front end
+/// constructed in place, each given its class's vtable (three dialogs among them). `this`.
+pub fn abi_all_screens(c: &mut Cpu) {
+    let this = c.r[4];
+    abi::frame(c, 56, |c, _| {
+        let mut r = Saved::of(c);
+        r.0[1] = this;
+        let screen = |c: &mut Cpu, r: &Saved, at: u32, ra: u32| {
+            port(c, r, 0x8002_6040, ra, &[this + at], crate::fescreen::abi_screen);
+        };
+        let vt = |c: &mut Cpu, at: u32, v: u32| c.m.w32(this + at + VPTR, v);
+        screen(c, &r, 0, 0x8002_bba8);
+        vt(c, 0, 0x8001_1858);
+        r.call_leaving(c, CAR_SELECT_CTOR, &[this + 1464], 0x8002_bbbc);
+        r.0[0] = this + 2392;
+        r.call_leaving(c, CAR_SELECT_CTOR, &[this + 2392], 0x8002_bbc8);
+        r.0[2] = this + 3368;
+        vt(c, 2392, 0x8001_1C30);
+        r.call_leaving(c, CAR_SELECT_CTOR, &[this + 3368], 0x8002_bbe0);
+        r.0[0] = this + 4296;
+        vt(c, 3368, 0x8001_1BA0);
+        screen(c, &r, 4296, 0x8002_bbf8);
+        (r.0[2], r.0[7], r.0[4], r.0[8], r.0[3]) = (this + 4448, DIALOG_VT, MESSAGE_VT, 128, BOX_VT);
+        inline_dialog(&mut c.m, this + 4296);
+        r.call_leaving(c, CAR_SELECT_CTOR, &[this + 4448], 0x8002_bc78);
+        r.0[0] = this + 5376;
+        vt(c, 4448, 0x8001_1BA0);
+        screen(c, &r, 5376, 0x8002_bc90);
+        r.0[5] = this + 5528;
+        inline_dialog(&mut c.m, this + 5376);
+        r.call_leaving(c, CAR_SELECT_CTOR, &[this + 5528], 0x8002_bcf4);
+        r.0[0] = this + 6456;
+        vt(c, 5528, 0x8001_1BA0);
+        screen(c, &r, 6456, 0x8002_bd0c);
+        (r.0[6], r.0[2]) = (this + 6628, 0x8001_1B10);
+        inline_dialog(&mut c.m, this + 6456);
+        vt(c, 5528, 0x8001_1B10);
+        r.call_leaving(c, CAR_SELECT_CTOR, &[this + 6628], 0x8002_bd7c);
+        r.0[0] = this + 7556;
+        vt(c, 6628, 0x8001_1BA0);
+        screen(c, &r, 7556, 0x8002_bd94);
+        r.0[5] = this + 7728;
+        inline_dialog(&mut c.m, this + 7556);
+        vt(c, 6628, 0x8001_1B10);
+        screen(c, &r, 7728, 0x8002_bdfc);
+        r.0[2] = this + 7844;
+        vt(c, 7728, 0x8001_1FA0);
+        screen(c, &r, 7844, 0x8002_be14);
+        r.0[0] = this + 8520;
+        vt(c, 7844, 0x8001_1F28);
+        screen(c, &r, 8520, 0x8002_be2c);
+        vt(c, 8520, 0x8001_1EB8);
+        port(c, &r, 0x8003_fb48, 0x8002_be40, &[this + 9192], crate::screentournselect::abi_screen_tourn_select);
+        port(c, &r, 0x8003_9bb8, 0x8002_be48, &[this + 9904], crate::screenpost::abi_screen_tournament_standings);
+        r.0[0] = this + 10052;
+        screen(c, &r, 10052, 0x8002_be54);
+        vt(c, 10052, 0x8001_2390);
+        port(c, &r, 0x8004_0950, 0x8002_be68, &[this + 10444], crate::screentrophyroom::abi_screen_trophy_room);
+        r.0[0] = this + 10788;
+        screen(c, &r, 10788, 0x8002_be74);
+        vt(c, 10788, 0x8001_1E40);
+        r.call_leaving(c, CONTROLLER_CTOR, &[this + 10892], 0x8002_be88);
+        r.0[0] = this + 11272;
+        screen(c, &r, 11272, 0x8002_be94);
+        vt(c, 11272, 0x8001_2080);
+        port(c, &r, 0x8004_654c, 0x8002_bea8, &[this + 11372], crate::screenaudio::abi_screen_audio);
+        r.call_leaving(c, MEM_CARD_CTOR, &[this + 11496], 0x8002_beb0);
+        r.0[0] = this + 12940;
+        screen(c, &r, 12940, 0x8002_bebc);
+        r.0[2] = this + 13144;
+        vt(c, 12940, 0x8001_2698);
+        screen(c, &r, 13144, 0x8002_bed4);
+        r.0[0] = this + 13536;
+        vt(c, 13144, 0x8001_2328);
+        port(c, &r, 0x8003_9bb8, 0x8002_beec, &[this + 13536], crate::screenpost::abi_screen_tournament_standings);
+        r.0[3] = this + 13684;
+        vt(c, 13536, 0x8001_1950);
+        r.0[0] = 0x8001_19A0;
+        port(c, &r, 0x8003_9bb8, 0x8002_bf0c, &[this + 13684], crate::screenpost::abi_screen_tournament_standings);
+        r.0[2] = this + 13832;
+        vt(c, 13684, 0x8001_19A0);
+        screen(c, &r, 13832, 0x8002_bf1c);
+        r.0[3] = this + 14544;
+        vt(c, 13832, 0x8001_18D8);
+        screen(c, &r, 14544, 0x8002_bf34);
+        r.0[0] = this + 14932;
+        vt(c, 14544, 0x8001_22C0);
+        screen(c, &r, 14932, 0x8002_bf4c);
+        vt(c, 14932, 0x8001_2258);
+        c.r[2] = this;
+    })
+}
+
+/// `tAllScreens::~tAllScreens` (FRONT.CPP, 0x8002bf8c): every screen destroyed, last first
+/// (`2`: in place); the object freed when `flags` asks.
+pub fn abi_all_screens_dtor(c: &mut Cpu) {
+    let (this, flags) = (c.r[4], c.r[5]);
+    abi::frame(c, 32, |c, _| {
+        let mut r = Saved::of(c);
+        (r.0[2], r.0[1]) = (this, flags);
+        let screen = |c: &mut Cpu, r: &Saved, at: u32, ra: u32| {
+            port(c, r, 0x8002_6098, ra, &[this + at, 2], crate::fescreen::abi_screen_destructor);
+        };
+        for (at, ra) in [(14932, 0x8002_bfb4), (14544, 0x8002_bfc0), (13832, 0x8002_bfcc), (13684, 0x8002_bfd8), (13536, 0x8002_bfe4), (13144, 0x8002_bff0), (12940, 0x8002_bffc), (11496, 0x8002_c008), (11372, 0x8002_c014), (11272, 0x8002_c020)] {
+            screen(c, &r, at, ra);
+        }
+        r.0[0] = this + 10892;
+        screen(c, &r, 11076, 0x8002_c030);
+        screen(c, &r, 10892, 0x8002_c03c);
+        screen(c, &r, 10788, 0x8002_c048);
+        port(c, &r, 0x8004_0990, 0x8002_c054, &[this + 10444, 2], crate::screentrophyroom::abi_destructor);
+        screen(c, &r, 10052, 0x8002_c060);
+        screen(c, &r, 9904, 0x8002_c06c);
+        port(c, &r, 0x8003_fb7c, 0x8002_c078, &[this + 9192, 2], crate::screentournselect::abi_destructor);
+        for (at, ra) in [(8520, 0x8002_c084), (7844, 0x8002_c090), (7728, 0x8002_c09c)] {
+            screen(c, &r, at, ra);
+        }
+        for (dialog, select, ra1, ra2) in [(7556, 6628, 0x8002_c0ac, 0x8002_c0b8), (6456, 5528, 0x8002_c0c8, 0x8002_c0d4), (5376, 4448, 0x8002_c0e4, 0x8002_c0f0), (4296, 3368, 0x8002_c100, 0x8002_c10c)] {
+            r.0[0] = this + select;
+            screen(c, &r, dialog, ra1);
+            r.call_leaving(c, CAR_SELECT_DTOR, &[this + select, 2], ra2);
+        }
+        r.call_leaving(c, CAR_SELECT_DTOR, &[this + 2392, 2], 0x8002_c118);
+        r.call_leaving(c, CAR_SELECT_DTOR, &[this + 1464, 2], 0x8002_c124);
+        screen(c, &r, 0, 0x8002_c130);
+        r.0[1] = flags & 1;
+        if flags & 1 != 0 {
+            r.call_leaving(c, DELETE, &[this], 0x8002_c144);
+        }
+    })
+}
+
 /// FRONT.CPP's ports entered as the original's callers `jal` them.
 macro_rules! entries {
     ($($entry:ident = $addr:expr, $f:ident;)*) => {
@@ -1969,7 +2306,13 @@ mod tests {
         m.w8(FE + 93, pick(rng, 20) as u8);
         m.w8(FE + 797, pick(rng, 20) as u8);
         m.w8(FE + 798, pick(rng, 3) as u8);
+        // the players' display settings (+800..+831)
+        for k in 800..832 {
+            m.w8(FE + k, rng.next() as u8);
+        }
         m.w8(FE + 800, pick(rng, 4) as u8);
+        m.w8(FE + 801, pick(rng, 5) as u8);
+        m.w8(STREAM + 656 + 42, pick(rng, 8) as u8);
         for at in [290, 298, 34, 60, 61, 62, 63, 64] {
             m.w8(FE + at, pick(rng, 2) as u8);
         }
@@ -1995,6 +2338,7 @@ mod tests {
             ("Front_AppendPerpData", 0x8002_a0fc, nfs4rc::f_8002a0fc, |_, _| vec![OUT, STREAM]),
             ("Front_AppendTrafficData", 0x8002_a394, nfs4rc::f_8002a394, |_, _| vec![OUT, STREAM]),
             ("Front_AppendTrackData", 0x8002_a5e4, nfs4rc::f_8002a5e4, |_, _| vec![OUT, STREAM]),
+            ("OutputDisplaySettings", 0x8002_7dec, nfs4rc::f_80027dec, |_, r| vec![OUT, pick(r, 8), pick(r, 2), STREAM + 656]),
         ]
     }
 
@@ -2019,6 +2363,33 @@ mod tests {
                 continue;
             }
             same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 100, 0x931 + k as u64, stream_shuffle, &args);
+        }
+    }
+
+    /// The screens' object, built at 0x80144000 (15320 bytes) over FETOURN's and FEINPUT's
+    /// shuffle; for the destructor, built first by the original's constructor.
+    const SCREENS: u32 = 0x8014_4000;
+
+    fn built_shuffle(c: &mut Cpu, rng: &mut Rng) {
+        shuffle(c, rng);
+        crate::abi::call(c, nfs4rc::f_8002bb74, &[SCREENS]);
+    }
+
+    #[test]
+    fn front_screens_fuzz() {
+        let Some(ram) = fe_ram() else { return };
+        let cases: [(&str, u32, fn(&mut Cpu), fn(&mut Cpu, &mut Rng), fn(&mut Cpu, &mut Rng) -> Vec<u32>); 2] = [
+            ("tAllScreens::tAllScreens", 0x8002_bb74, nfs4rc::f_8002bb74, shuffle, |_, _| vec![SCREENS]),
+            ("tAllScreens::~tAllScreens", 0x8002_bf8c, nfs4rc::f_8002bf8c, built_shuffle, |_, r| vec![SCREENS, [0, 2][pick(r, 2) as usize]]),
+        ];
+        for (k, (name, addr, original, shuffle, args)) in cases.into_iter().enumerate() {
+            if std::env::var("FEMENU_ONLY").is_ok_and(|v| v != name) {
+                continue;
+            }
+            ADDR.set(addr);
+            let args_rng = std::cell::RefCell::new(Rng(0x940 ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
+            against_original_in(&ram, name, 50, 0x941 + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), via_abi);
+            same_stack_in(&ram, name, addr, original, 0x8001_3000, TOP, 30, 0x951 + k as u64, shuffle, &args);
         }
     }
 }
