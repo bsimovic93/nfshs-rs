@@ -705,10 +705,10 @@ const QUIT: u32 = 0x8001_54A0;
 const RACE_TYPE: u32 = FRONT_END + 4;
 const PINK_SLIPS: u32 = 6;
 const CAR_MANAGER: u32 = 0x8011_552C;
-const SAVE_PINK_SLIPS: fn(&mut Cpu) = nfs4rc::f_80035930;
+const SAVE_PINK_SLIPS: fn(&mut Cpu) = crate::fememcard::save_pink_slips_with_dialogs_entry;
 const PLAYER_NAME: fn(&mut Cpu) = crate::front::player_name_entry;
-const CARD_START: fn(&mut Cpu) = nfs4rc::f_800347d4;
-const CARD_END: fn(&mut Cpu) = nfs4rc::f_80034938;
+const CARD_START: fn(&mut Cpu) = crate::fememcard::init_memcard_entry;
+const CARD_END: fn(&mut Cpu) = crate::fememcard::deinit_memcard_entry;
 const RUN_DEMO_VIDEO: fn(&mut Cpu) = nfs4rc::f_800140e8;
 /// The front end idle this long (ticks) runs the demo video.
 const IDLE: i32 = 3840;

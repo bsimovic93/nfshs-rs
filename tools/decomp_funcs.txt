@@ -1431,3 +1431,23 @@
 80050bd0 iMCRD_DefaultCBProc1
 80050bd8 ascii2sjis
 80050cf8 sjis2ascii
+
+# FEMEMCARD.CPP
+800343d0 ChecksumData
+80034448 VerifySuccessfulRead
+80034520 MakeWayForMemoryCard
+80034544 BringThatBeatBack
+80034568 Confirm
+8003471c OverwriteConfirm
+80034748 OverwriteAlwaysYes
+80034750 FormatConfirm
+8003477c LoadingProc
+80034784 LoadingRedrawProc
+800347ac SavingProc
+800347d4 Init_Memcard
+80034938 DeInit_Memcard
+800349e0 Init_MemcardFile
+80034ac8 SaveGame
+80034f70 LoadGame
+80035580 SavePinkSlipsCars
+80035930 SavePinkSlipsCarsWithErrorDialogs

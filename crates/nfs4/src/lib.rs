@@ -58,6 +58,7 @@ pub mod fedialog;
 pub mod fefades;
 pub mod feinput;
 pub mod felines;
+pub mod fememcard;
 pub mod femenu;
 pub mod femenuextended;
 pub mod femenuoptions;
@@ -613,6 +614,24 @@ pub static FUNCS: &[Func] = &[
     func(0x8003_42e8, "tMissionManager::ReleaseDescription", femission::abi_release_description),
     func_ret(0x8003_4324, "tMissionManager::GetMissionStages", femission::abi_get_mission_stages),
     func(0x8003_438c, "tMissionManager::GetMissionToRace", femission::abi_get_mission_to_race),
+    func(0x8003_43d0, "ChecksumData", fememcard::abi_checksum_data),
+    func_ret(0x8003_4448, "VerifySuccessfulRead", fememcard::abi_verify_successful_read),
+    func(0x8003_4520, "MakeWayForMemoryCard", fememcard::abi_make_way),
+    func(0x8003_4544, "BringThatBeatBack", fememcard::abi_bring_back),
+    func_ret(0x8003_4568, "Confirm", fememcard::abi_confirm),
+    func_ret(0x8003_471c, "OverwriteConfirm", fememcard::abi_overwrite_confirm),
+    func_ret(0x8003_4748, "OverwriteAlwaysYes", fememcard::abi_overwrite_always_yes),
+    func_ret(0x8003_4750, "FormatConfirm", fememcard::abi_format_confirm),
+    func(0x8003_477c, "LoadingProc", fememcard::abi_loading_proc),
+    func(0x8003_4784, "LoadingRedrawProc", fememcard::abi_loading_redraw_proc),
+    func(0x8003_47ac, "SavingProc", fememcard::abi_saving_proc),
+    func(0x8003_47d4, "Init_Memcard", fememcard::abi_init_memcard),
+    func(0x8003_4938, "DeInit_Memcard", fememcard::abi_deinit_memcard),
+    func(0x8003_49e0, "Init_MemcardFile", fememcard::abi_init_memcard_file),
+    func_ret(0x8003_4ac8, "SaveGame", fememcard::abi_save_game),
+    func_ret(0x8003_4f70, "LoadGame", fememcard::abi_load_game),
+    func_ret(0x8003_5580, "SavePinkSlipsCars", fememcard::abi_save_pink_slips_cars),
+    func_ret(0x8003_5930, "SavePinkSlipsCarsWithErrorDialogs", fememcard::abi_save_pink_slips_with_dialogs),
     func(0x8003_5ca0, "tCreditManager::Setup", fecredits::abi_setup),
     func(0x8003_5cb0, "tCreditManager::Init", fecredits::abi_init),
     func(0x8003_5d90, "tCreditManager::DeInit", fecredits::abi_de_init),

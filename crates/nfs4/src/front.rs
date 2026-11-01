@@ -68,9 +68,9 @@ const MUSIC_START_UP: fn(&mut Cpu) = nfs4rc::f_8007b5ac;
 /// The songs matching a name (a count, then 64 bytes each: +36 the song's number).
 const MUSIC_FIND: fn(&mut Cpu) = nfs4rc::f_8007b214;
 /// The memory card's: its start, its end, a card's check (FEMEMCARD.CPP).
-const CARD_START: fn(&mut Cpu) = nfs4rc::f_800347d4;
-const CARD_END: fn(&mut Cpu) = nfs4rc::f_80034938;
-const CARD_CHECK: fn(&mut Cpu) = nfs4rc::f_80034f70;
+const CARD_START: fn(&mut Cpu) = crate::fememcard::init_memcard_entry;
+const CARD_END: fn(&mut Cpu) = crate::fememcard::deinit_memcard_entry;
+const CARD_CHECK: fn(&mut Cpu) = crate::fememcard::load_game_entry;
 /// The menus' destructor.
 const ALL_MENUS_DTOR: fn(&mut Cpu) = nfs4rc::f_80031720;
 /// The host's: `PadGetState`, `PadInfoMode`, `FILE_addbigsync`, `NFS4_LoadingIcon` (hooked).

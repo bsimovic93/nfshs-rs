@@ -16,6 +16,7 @@ use crate::abi::{self, Saved};
 use ps1rt::Cpu;
 
 const S: u32 = 0x8005_31F8;
+pub(crate) const STATE: u32 = S;
 const R: u32 = S + 608;
 const CARDS: u32 = S + 1180;
 const CARD_SIZE: u32 = 616;
