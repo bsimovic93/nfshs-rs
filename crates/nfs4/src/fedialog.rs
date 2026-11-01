@@ -152,7 +152,7 @@ pub fn abi_draw_all_dialogs(c: &mut Cpu) {
             r.0[0] = at;
             let dialog = c.m.r32(at);
             if should_time_out(&mut c.m, dialog) != 0 {
-                r.enter(c, 0x8001_8a44, 0x8001_88c4, |c| hide(c, dialog));
+                r.call_ptr(c, 0x8001_8a44, &[dialog], 0x8001_88c4);
                 if c.m.r32(at) == 0 {
                     return;
                 }
@@ -297,7 +297,7 @@ pub fn abi_process_input(c: &mut Cpu) {
         r.0[1] = key;
         r.0[0] = 1;
         if c.m.r32(key) != KEY_NONE {
-            r.enter(c, 0x8001_8a44, 0x8001_8c34, |c| hide(c, this));
+            r.call_ptr(c, 0x8001_8a44, &[this], 0x8001_8c34);
             c.m.w32(key, KEY_NONE);
         }
     })
@@ -707,7 +707,9 @@ pub fn abi_process_input_back_up_only(c: &mut Cpu) {
             return;
         }
         match c.m.r32(key) {
-            KEY_START => Saved::of(c).enter(c, 0x8001_8a44, 0x8001_9918, |c| hide(c, this)),
+            KEY_START => {
+                Saved::of(c).call_ptr(c, 0x8001_8a44, &[this], 0x8001_9918);
+            }
             KEY_HELP => {}
             _ => c.m.w32(key, KEY_NONE),
         }
@@ -723,7 +725,7 @@ pub fn run(c: &mut Cpu, this: u32) -> u32 {
         let mut r = Saved::of(c);
         r.0[3] = this;
         c.m.w32(this + 156, 1);
-        r.enter(c, 0x8001_8980, 0x8001_9960, |c| display(c, this));
+        r.call_ptr(c, 0x8001_8980, &[this], 0x8001_9960);
         let keys = sp + 16;
         let command = sp + 24;
         r.0[7] = keys;
@@ -757,7 +759,7 @@ pub fn run(c: &mut Cpu, this: u32) -> u32 {
                 if c.m.r32(key) != KEY_NONE {
                     let help = c.m.r32(FE_APP).wrapping_add(APP_HELP);
                     if c.m.r32(help + SHOWN) != 0 {
-                        r.enter(c, 0x8001_8a44, 0x8001_9a68, |c| hide(c, help));
+                        r.call_ptr(c, 0x8001_8a44, &[help], 0x8001_9a68);
                         c.m.w32(key, KEY_NONE);
                     }
                 }
@@ -773,7 +775,7 @@ pub fn run(c: &mut Cpu, this: u32) -> u32 {
             r.call_ptr_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ab8);
         }
         r.call_leaving(c, PLAY_FE_SFX, &[0], 0x8001_9ac8);
-        r.enter(c, 0x8001_8a44, 0x8001_9ad0, |c| hide(c, this));
+        r.call_ptr(c, 0x8001_8a44, &[this], 0x8001_9ad0);
         let app = c.m.r32(FE_APP);
         r.call_ptr_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ae0);
         let answer = lh(&mut c.m, this + ANSWER);
@@ -918,7 +920,7 @@ pub fn process_input_yes_no(c: &mut Cpu, this: u32, player: u32, key: u32) {
             KEY_ACCEPT | KEY_BACK => {
                 r.call_leaving(c, PLAY_FE_SFX, &[0], 0x8001_9eb8);
                 c.m.w32(this + ANSWERED, 1);
-                r.enter(c, 0x8001_8a44, 0x8001_9ec8, |c| hide(c, this));
+                r.call_ptr(c, 0x8001_8a44, &[this], 0x8001_9ec8);
             }
             _ => {}
         }

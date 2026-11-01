@@ -60,3 +60,5 @@
 800c9930 ObjectClipped (not clipped while the objects are recorded: the host's view is wider)
 8002c49c AskTheUserToSaveTheGame (autosave: the host saves instead of asking)
 80013894 tFEApplication frame (autosave: the host saves between front-end frames)
+80018980 tDialog::Display (the host notes the dialog: the saving message's sounds while it autosaves)
+80018a44 tDialog::Hide (the host notes the dialog, as for Display)

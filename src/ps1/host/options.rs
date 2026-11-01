@@ -224,9 +224,10 @@ const SAVE_TOLD: u32 = 0x8005_1F00;
 /// once it has opened fully, which the save waits for; +0x90 its text).
 pub(super) const MESSAGE_DRAW: u32 = 0x8001_976C;
 /// tDialogBase::Display / Hide(dialog), which play the front end's sounds of a dialog
-/// opening and closing (AudioCmn_PlayFESFX, then AudioCmn_PlayFESFXVol, hooked).
-const DIALOG_DISPLAY: u32 = 0x8001_8980;
-const DIALOG_HIDE: u32 = 0x8001_8A44;
+/// opening and closing (AudioCmn_PlayFESFX, then AudioCmn_PlayFESFXVol, hooked). Hooked too:
+/// the host notes each one's dialog (see `note_dialog`).
+pub(super) const DIALOG_DISPLAY: u32 = 0x8001_8980;
+pub(super) const DIALOG_HIDE: u32 = 0x8001_8A44;
 const PLAY_FE_SFX: u32 = 0x8007_A08C;
 pub(super) const PLAY_FE_SFX_VOL: u32 = 0x8007_A0AC;
 /// ZTEXT's "HELP", at the front end's bottom left: the autosave notice is in its font and
@@ -266,6 +267,8 @@ pub struct Options {
     help: Option<(super::overlay::FeFont, i32, i32)>,
     /// The frames the autosave notice has been shown.
     notice_frames: Option<u32>,
+    /// The dialog of each `Display` or `Hide` running, by its depth in `Cpu::stack`.
+    dialogs: Vec<u32>,
 }
 
 impl GameHost {
@@ -507,16 +510,23 @@ impl GameHost {
         true
     }
 
-    /// A front-end sound: not the save's messages opening and closing while the host saves
-    /// (Display has the dialog in s1, Hide in s2). Whether it was skipped.
+    /// `Display` or `Hide` called for `dialog`, at `depth` in `Cpu::stack` (where it is about to
+    /// be pushed): noted for the sound it plays.
+    pub(super) fn note_dialog(&mut self, depth: usize, dialog: u32) {
+        if self.options.dialogs.len() <= depth {
+            self.options.dialogs.resize(depth + 1, 0);
+        }
+        self.options.dialogs[depth] = dialog;
+    }
+
+    /// A front-end sound: not the save's messages opening and closing while the host saves.
+    /// The dialog is the one noted when its `Display` or `Hide` was called (not a register:
+    /// the decompiled code doesn't keep the original's). Whether it was skipped.
     pub(super) fn skip_saving_sound(&mut self, c: &mut Cpu) -> bool {
-        let dialog = if c.stack.ends_with(&[DIALOG_DISPLAY, PLAY_FE_SFX]) {
-            c.r[17]
-        } else if c.stack.ends_with(&[DIALOG_HIDE, PLAY_FE_SFX]) {
-            c.r[18]
-        } else {
+        if !(c.stack.ends_with(&[DIALOG_DISPLAY, PLAY_FE_SFX]) || c.stack.ends_with(&[DIALOG_HIDE, PLAY_FE_SFX])) {
             return false;
-        };
+        }
+        let Some(&dialog) = self.options.dialogs.get(c.stack.len() - 2) else { return false };
         self.saving_message(c, dialog)
     }
 

@@ -214,6 +214,11 @@ impl GameHost {
                 0
             }
             options::MESSAGE_DRAW if self.mode == Mode::FrontEnd && self.skip_saving_message(c, a0) => 0,
+            options::DIALOG_DISPLAY | options::DIALOG_HIDE if self.mode == Mode::FrontEnd => {
+                // the dialog whose sound it plays (see skip_saving_sound); it runs as usual
+                self.note_dialog(c.stack.len(), a0);
+                return None;
+            }
             options::PLAY_FE_SFX_VOL if self.mode == Mode::FrontEnd && self.skip_saving_sound(c) => 0,
             0x8001_3894 if self.mode == Mode::FrontEnd => {
                 // the front end's frame (tFEApplication): a save due is made before it

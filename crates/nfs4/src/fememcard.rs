@@ -214,7 +214,7 @@ pub fn abi_confirm(c: &mut Cpu) {
         r.0[3] = 0;
         if c.m.r32(app + 720 + 112) != 0 {
             r.0[3] = 1;
-            port(c, &r, 0x8001_8a44, 0x8003_45cc, &[app + 720], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_45cc);
         }
         let text = r.call_leaving(c, TEXT_WORD, &[word], 0x8003_45d4);
         let m = &mut c.m;
@@ -236,7 +236,7 @@ pub fn abi_confirm(c: &mut Cpu) {
             let text = r.call_leaving(c, TEXT_WORD, &[player.wrapping_add(812)], 0x8003_4634);
             let app2 = c.m.r32(FE_APP);
             c.m.w32(app + 568 + 144, text);
-            port(c, &r, 0x8001_8980, 0x8003_4644, &[app2 + 568], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[app2 + 568], 0x8003_4644);
             wait_shown(c, &r, |c| app_word(c, 700), 0x8003_4668, 0x8003_4678);
             c.m.w32(CARD_DONE, 1);
         } else if v == 0 {
@@ -244,7 +244,7 @@ pub fn abi_confirm(c: &mut Cpu) {
         } else if shown != 0 {
             r.0[0] = 0x8005_0000;
             let app = c.m.r32(FE_APP);
-            port(c, &r, 0x8001_8980, 0x8003_46a8, &[app + 720], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[app + 720], 0x8003_46a8);
             while app_word(c, 852) != 1 {
                 redraw(c, &r, 0x8003_46cc);
             }
@@ -409,7 +409,7 @@ fn tell(c: &mut Cpu, r: &mut Saved, word: u32, ras: [u32; 4]) {
     let text = r.call_leaving(c, TEXT_WORD, &[word], ras[0]);
     let app2 = c.m.r32(FE_APP);
     c.m.w32(app + 568 + 144, text);
-    port(c, r, 0x8001_8980, ras[1], &[app2 + 568], crate::fedialog::abi_display);
+    r.call_ptr_leaving(c, 0x8001_8980, &[app2 + 568], ras[1]);
     wait_shown(c, r, |c| app_word(c, 700), ras[2], ras[3]);
 }
 
@@ -446,7 +446,7 @@ pub fn abi_save_game(c: &mut Cpu) {
         m.w32(d + 144, text);
         m.w16(d + 124, 0);
         m.w16(d + 126, 50);
-        port(c, &r, 0x8001_8980, 0x8003_4c0c, &[d], crate::fedialog::abi_display);
+        r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8003_4c0c);
         r.0[0] = 0x8005_0000;
         r.0[3] = 0;
         while c.m.r32(d + 132) != 1 {
@@ -515,14 +515,14 @@ pub fn abi_save_game(c: &mut Cpu) {
         if c.m.r32(CARD_DONE) == 0 {
             r.0[1] = 0x8005_0000;
             let app = c.m.r32(FE_APP);
-            port(c, &r, 0x8001_8a44, 0x8003_4ea0, &[app + 720], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_4ea0);
             let word = r.0[2].wrapping_add(p16);
             tell(c, &mut r, word, [0x8003_4eb8, 0x8003_4ec8, 0x8003_4eec, 0x8003_4efc]);
         }
         r.0[0] = d;
         let screen = c.m.r32(MEMCARD_SCREEN);
         c.m.w32(screen + 1440, 1);
-        port(c, &r, 0x8001_8a44, 0x8003_4f18, &[d], crate::fedialog::abi_hide);
+        r.call_ptr_leaving(c, 0x8001_8a44, &[d], 0x8003_4f18);
         redraw(c, &r, 0x8003_4f28);
         c.m.w32(CARD_ACTIVE, 0);
         port(c, &r, 0x8002_6098, 0x8003_4f3c, &[d, 2], crate::fescreen::abi_screen_destructor);
@@ -559,7 +559,7 @@ pub fn abi_load_game(c: &mut Cpu) {
                 c.m.w16(d + 124, 0);
                 c.m.w16(d + 126, 50);
             }
-            port(c, &r, 0x8001_8980, 0x8003_50a0, &[d], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8003_50a0);
             r.0[0] = 0x8005_0000;
             while c.m.r32(d + 132) != 1 {
                 redraw(c, &r, 0x8003_50c4);
@@ -591,7 +591,7 @@ pub fn abi_load_game(c: &mut Cpu) {
                     let at = port(c, r, 0x8005_072c, ras[0], &[s6.wrapping_add(1)], crate::memcard::abi_getcard);
                     r.0[0] = at;
                     let app = c.m.r32(FE_APP);
-                    port(c, r, 0x8001_8a44, ras[1], &[app + 720], crate::fedialog::abi_hide);
+                    r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], ras[1]);
                     let state = c.m.r32(at);
                     r.0[0] = state;
                     let (s2, s3) = match state as i32 {
@@ -649,9 +649,9 @@ pub fn abi_load_game(c: &mut Cpu) {
         if pinks != 0 && c.m.r32(CARD_DONE) == 0 {
             r.0[1] = 0x8005_0000;
             let app = c.m.r32(FE_APP);
-            port(c, &r, 0x8001_8a44, 0x8003_5408, &[app + 720], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_5408);
             let app = c.m.r32(FE_APP);
-            port(c, &r, 0x8001_8a44, 0x8003_5414, &[app + 568], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 568], 0x8003_5414);
             let word = r.0[2].wrapping_add(p16);
             tell(c, &mut r, word, [0x8003_5430, 0x8003_5440, 0x8003_5464, 0x8003_5474]);
         }
@@ -666,7 +666,7 @@ pub fn abi_load_game(c: &mut Cpu) {
             c.m.w32(SFX_LEVEL, sfx);
         }
         if pinks != 0 || quiet != 0 {
-            port(c, &r, 0x8001_8a44, 0x8003_54f0, &[d], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[d], 0x8003_54f0);
         }
         if pinks != 0 {
             redraw(c, &r, 0x8003_550c);
@@ -767,7 +767,7 @@ pub fn abi_save_pink_slips_cars(c: &mut Cpu) {
                             }
                             2 | 3 | 7 | 10 | 11 | 13 | 23 => {
                                 let app = c.m.r32(FE_APP);
-                                port(c, &r, 0x8001_8a44, 0x8003_5844, &[app + 720], crate::fedialog::abi_hide);
+                                r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_5844);
                                 let at = port(c, &r, 0x8005_072c, 0x8003_584c, &[s4.wrapping_add(1)], crate::memcard::abi_getcard);
                                 r.0[2] = match c.m.r32(at) as i32 {
                                     -3 => 6,
@@ -819,7 +819,7 @@ pub fn abi_save_pink_slips_with_dialogs(c: &mut Cpu) {
         m.w16(ask + 100, p as u16);
         loop {
             let app = c.m.r32(FE_APP);
-            port(c, &r, 0x8001_8980, 0x8003_5a34, &[app + 720], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[app + 720], 0x8003_5a34);
             while app_word(c, 852) != 1 {
                 redraw(c, &r, 0x8003_5a58);
             }
@@ -832,7 +832,7 @@ pub fn abi_save_pink_slips_with_dialogs(c: &mut Cpu) {
             m.w32(saving + 144, text);
             m.w16(saving + 124, 0);
             m.w16(saving + 126, 50);
-            port(c, &r, 0x8001_8980, 0x8003_5b04, &[saving], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[saving], 0x8003_5b04);
             while c.m.r32(saving + 132) != 1 {
                 redraw(c, &r, 0x8003_5b24);
             }
@@ -856,11 +856,11 @@ pub fn abi_save_pink_slips_with_dialogs(c: &mut Cpu) {
                     break;
                 }
             }
-            port(c, &r, 0x8001_8a44, 0x8003_5b74, &[saving], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[saving], 0x8003_5b74);
             redraw(c, &r, 0x8003_5b80);
             if result != 0 {
                 let app = c.m.r32(FE_APP);
-                port(c, &r, 0x8001_8a44, 0x8003_5b94, &[app + 720], crate::fedialog::abi_hide);
+                r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_5b94);
                 let word = c.m.r32(ERROR_WORDS + (result << 2)).wrapping_add(p16);
                 let text = r.call_leaving(c, TEXT_WORD, &[word], 0x8003_5bb0);
                 r.call_leaving(c, SPRINTF, &[sp + 336, text], 0x8003_5bbc);
@@ -876,12 +876,12 @@ pub fn abi_save_pink_slips_with_dialogs(c: &mut Cpu) {
                     m.w32(note + 144, sp + 840);
                     m.w16(sp + 308, 0);
                     m.w16(sp + 310, (-60i16) as u16);
-                    port(c, &r, 0x8001_8980, 0x8003_5c18, &[note], crate::fedialog::abi_display);
+                    r.call_ptr_leaving(c, 0x8001_8980, &[note], 0x8003_5c18);
                 }
                 c.m.w32(ask + 144, sp + 336);
                 let answer = port(c, &r, 0x8001_9928, 0x8003_5c28, &[ask], crate::fedialog::abi_run) as u16 as i16 as i32 as u32;
                 r.0[6] = answer;
-                port(c, &r, 0x8001_8a44, 0x8003_5c38, &[note], crate::fedialog::abi_hide);
+                r.call_ptr_leaving(c, 0x8001_8a44, &[note], 0x8003_5c38);
             }
             port(c, &r, 0x8002_6098, 0x8003_5c44, &[saving, 2], crate::fescreen::abi_screen_destructor);
             if result == 0 || r.0[6] == 0 {

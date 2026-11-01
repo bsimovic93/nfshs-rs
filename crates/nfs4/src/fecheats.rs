@@ -163,7 +163,7 @@ pub fn activate_cheat(c: &mut Cpu, name: u32) -> u32 {
         let word = r.call_leaving(c, TEXT_WORD, &[CHEAT_TEXT], 0x8002_36d4);
         let dialog2 = c.m.r32(FE_APP).wrapping_add(APP_MESSAGE);
         c.m.w32(dialog + MESSAGE_TEXT, word);
-        r.enter(c, DISPLAY, 0x8002_36e4, |c| crate::fedialog::display(c, dialog2));
+        r.call_ptr(c, DISPLAY, &[dialog2], 0x8002_36e4);
         let entry = CHEATS + ENTRY_SIZE * k;
         r.0[0] = entry;
         r.0[1] = 1;

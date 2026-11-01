@@ -282,7 +282,7 @@ pub fn abi_go_to_car_select(c: &mut Cpu) {
         if c.m.r8(sp + 19) == 0 {
             let t = r.call_leaving(c, TEXT_WORD, &[236], 0x8002_c5dc);
             c.m.w32(dialog + 144, t);
-            port(c, &r, 0x8001_8980, 0x8002_c5e8, &[dialog], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[dialog], 0x8002_c5e8);
             return;
         }
         let m = &mut c.m;
@@ -398,7 +398,7 @@ pub fn abi_generic_menu_save_game(c: &mut Cpu) {
             r.0[0] = d;
             let t = r.call_leaving(c, TEXT_WORD, &[643], 0x8002_ca80);
             c.m.w32(d + 144, t);
-            port(c, &r, 0x8001_8980, 0x8002_ca90, &[d], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8002_ca90);
             loop {
                 let a = app(&mut c.m);
                 if c.m.r32(a + 852) ^ 1 == 0 {
@@ -421,7 +421,7 @@ pub fn abi_generic_menu_save_game(c: &mut Cpu) {
             port(c, &r, 0x8003_4938, 0x8002_cb10, &[], crate::fememcard::abi_deinit_memcard);
         }
         let d = app(&mut c.m) + 720;
-        port(c, &r, 0x8001_8a44, 0x8002_cb20, &[d], crate::fedialog::abi_hide);
+        r.call_ptr_leaving(c, 0x8001_8a44, &[d], 0x8002_cb20);
         c.r[2] = v;
     })
 }
@@ -497,7 +497,7 @@ pub fn abi_go_to_best_of_five(c: &mut Cpu) {
 fn refuse(c: &mut Cpu, r: &Saved, dialog: u32, word: u32, cmd: u32, ras: (u32, u32)) {
     let t = r.call_leaving(c, TEXT_WORD, &[word], ras.0);
     c.m.w32(dialog + 144, t);
-    port(c, r, 0x8001_8980, ras.1, &[dialog], crate::fedialog::abi_display);
+    r.call_ptr_leaving(c, 0x8001_8980, &[dialog], ras.1);
     c.m.w32(cmd, 0);
 }
 
@@ -617,7 +617,7 @@ fn go_to_track_info(c: &mut Cpu, special: u32, choice: u32, tier: u32, ras: [u32
                 r.0[0] = d;
                 let t = r.call_leaving(c, TEXT_WORD, &[247], ras[0]);
                 c.m.w32(d + 144, t);
-                port(c, &r, 0x8001_8980, ras[1], &[d], crate::fedialog::abi_display);
+                r.call_ptr_leaving(c, 0x8001_8980, &[d], ras[1]);
                 return;
             }
             let d = sp + 16;
@@ -739,7 +739,7 @@ fn message(c: &mut Cpu, r: &mut Saved, reg: usize, word: u32, ras: (u32, u32)) {
     r.0[reg] = d;
     let t = r.call_leaving(c, TEXT_WORD, &[word], ras.0);
     c.m.w32(d + 144, t);
-    port(c, r, 0x8001_8980, ras.1, &[d], crate::fedialog::abi_display);
+    r.call_ptr_leaving(c, 0x8001_8980, &[d], ras.1);
 }
 
 /// `MenuExtended_SellCar` (FEMENUDEFS.CPP, 0x8002d420): (the last car sold only with the money
@@ -802,7 +802,7 @@ pub fn abi_buy_car(c: &mut Cpu) {
         if !((sx(n) as i32) < 32) {
             let t = r.call_leaving(c, TEXT_WORD, &[76], 0x8002_d6a0);
             c.m.w32(d + 144, t);
-            port(c, &r, 0x8001_8980, 0x8002_d6b0, &[d], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8002_d6b0);
             return;
         }
         r.0[1] = TOURNAMENT_MANAGER;
@@ -810,7 +810,7 @@ pub fn abi_buy_car(c: &mut Cpu) {
             r.call_leaving(c, PLAY_SFX, &[10], 0x8002_d684);
             let t = r.call_leaving(c, TEXT_WORD, &[168], 0x8002_d68c);
             c.m.w32(d + 144, t);
-            port(c, &r, 0x8001_8980, 0x8002_d6b0, &[d], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8002_d6b0);
             return;
         }
         let yn = sp + 224;
@@ -933,10 +933,10 @@ pub fn abi_generic_menu_load_game(c: &mut Cpu) {
             let d = app(m) + 720;
             let screen = m.r32(MEMCARD_SCREEN);
             m.w32(screen + 1412, u32::MAX);
-            port(c, &r, 0x8001_8a44, 0x8002_d928, &[d], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[d], 0x8002_d928);
         }
         let d = app(&mut c.m) + 720;
-        port(c, &r, 0x8001_8a44, 0x8002_d938, &[d], crate::fedialog::abi_hide);
+        r.call_ptr_leaving(c, 0x8001_8a44, &[d], 0x8002_d938);
     })
 }
 
@@ -970,7 +970,7 @@ pub fn abi_load_game(c: &mut Cpu) {
             port(c, &r, 0x8002_d8bc, 0x8002_d9f4, &[p], abi_generic_menu_load_game);
         } else {
             let h = app(&mut c.m) + 568;
-            port(c, &r, 0x8001_8a44, 0x8002_da08, &[h], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[h], 0x8002_da08);
         }
         port(c, &r, 0x8002_6098, 0x8002_da14, &[d, 2], crate::fescreen::abi_screen_destructor);
     })
@@ -1200,7 +1200,7 @@ pub fn abi_award_pink_slips_car(c: &mut Cpu) {
         r.0[4] = 0x8005_0000;
         let dialog = app(&mut c.m) + 720;
         c.m.w32(dialog + 144, sp + 24);
-        port(c, &r, 0x8001_8980, 0x8002_dfcc, &[dialog], crate::fedialog::abi_display);
+        r.call_ptr_leaving(c, 0x8001_8980, &[dialog], 0x8002_dfcc);
         show_and_wait(c, &mut r, (0x8002_dff0, 0x8002_e000), Some((2, 0x8011_0000)));
         port(c, &r, 0x8003_47d4, 0x8002_e00c, &[0, 1], crate::fememcard::abi_init_memcard);
         (r.0[2], r.0[1]) = (CAR_MANAGER, FE);
@@ -1217,7 +1217,7 @@ pub fn abi_award_pink_slips_car(c: &mut Cpu) {
         port(c, &r, 0x8001_6ac4, 0x8002_e06c, &[CAR_MANAGER, id, upgrades, winner], crate::fecars::abi_add_upgrades_to_pink_slips_list);
         port(c, &r, 0x8003_5930, 0x8002_e07c, &[winner, 2, u32::MAX], crate::fememcard::abi_save_pink_slips_with_dialogs);
         let dialog = app(&mut c.m) + 720;
-        port(c, &r, 0x8001_8a44, 0x8002_e088, &[dialog], crate::fedialog::abi_hide);
+        r.call_ptr_leaving(c, 0x8001_8a44, &[dialog], 0x8002_e088);
         let dialog = app(&mut c.m) + 720;
         r.0[0] = dialog;
         command(&mut c.m, cmd, 2, 176);
@@ -1225,12 +1225,12 @@ pub fn abi_award_pink_slips_car(c: &mut Cpu) {
         r.0[1] = 0x8005_0000;
         c.m.w32(dialog + 144, t);
         let dialog = app(&mut c.m) + 720;
-        port(c, &r, 0x8001_8980, 0x8002_e0c4, &[dialog], crate::fedialog::abi_display);
+        r.call_ptr_leaving(c, 0x8001_8980, &[dialog], 0x8002_e0c4);
         show_and_wait(c, &mut r, (0x8002_e0e8, 0x8002_e0f8), None);
         port(c, &r, 0x8002_d8bc, 0x8002_e100, &[0], abi_generic_menu_load_game);
         port(c, &r, 0x8003_4938, 0x8002_e108, &[], crate::fememcard::abi_deinit_memcard);
         let dialog = app(&mut c.m) + 720;
-        port(c, &r, 0x8001_8a44, 0x8002_e114, &[dialog], crate::fedialog::abi_hide);
+        r.call_ptr_leaving(c, 0x8001_8a44, &[dialog], 0x8002_e114);
         loop {
             let b = r.call_leaving(c, nfs4rc::f_8007aa48, &[], 0x8002_e11c);
             r.0[0] = b;
@@ -1353,7 +1353,7 @@ pub fn abi_exit_pink_slips_early(c: &mut Cpu) {
             }
             port(c, &r, 0x8003_4938, 0x8002_e440, &[], crate::fememcard::abi_deinit_memcard);
             let dialog = app(&mut c.m) + 720;
-            port(c, &r, 0x8001_8a44, 0x8002_e450, &[dialog], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[dialog], 0x8002_e450);
             command(&mut c.m, cmd, 2, 176);
             c.m.w8(FE + 4, 0);
         }

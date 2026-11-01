@@ -2303,7 +2303,7 @@ pub fn abi_two_player_set_dialog(c: &mut Cpu) {
         r.0[0] = p;
         let dialog = this + 928;
         if m.r32(app + 560 + 4 * p) == 0 {
-            port(c, &r, 0x8001_8a44, 0x8003_f078, &[dialog], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[dialog], 0x8003_f078);
             return;
         }
         let side = if p != 0 { 60 } else { (-60i32) as u32 };
@@ -2317,7 +2317,7 @@ pub fn abi_two_player_set_dialog(c: &mut Cpu) {
         r.0[0] = WAIT_TEXT;
         r.call_leaving(c, SPRINTF, &[WAIT_TEXT, format, name], 0x8003_f05c);
         c.m.w32(dialog + 144, WAIT_TEXT);
-        port(c, &r, 0x8001_8980, 0x8003_f068, &[dialog], crate::fedialog::abi_display);
+        r.call_ptr_leaving(c, 0x8001_8980, &[dialog], 0x8003_f068);
     })
 }
 
@@ -2381,7 +2381,7 @@ pub fn abi_two_player_cleanup(c: &mut Cpu) {
     abi::frame(c, 24, |c, _| {
         let mut r = Saved::of(c);
         r.0[0] = this;
-        port(c, &r, 0x8001_8a44, 0x8003_f1d8, &[this + 928], crate::fedialog::abi_hide);
+        r.call_ptr_leaving(c, 0x8001_8a44, &[this + 928], 0x8003_f1d8);
         port(c, &r, 0x8003_af90, 0x8003_f1e0, &[this], abi_cleanup);
     })
 }
@@ -2430,7 +2430,7 @@ pub fn abi_pink_draw_background(c: &mut Cpu) {
         port(c, &r, 0x8003_f2c4, 0x8003_f294, &[this], abi_pink_do_mem_card_stuff);
         port(c, &r, 0x8003_e83c, 0x8003_f29c, &[this], abi_two_player_draw_background);
         if c.m.r32(this + 1096) != 0 {
-            port(c, &r, 0x8001_8a44, 0x8003_f2b4, &[this + 928], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[this + 928], 0x8003_f2b4);
         }
     })
 }
@@ -2584,7 +2584,7 @@ pub fn abi_pink_cleanup(c: &mut Cpu) {
         m.w32(this + 1096, 1);
         m.w32(PINK_STATES, 7);
         m.w32(PINK_STATES + 4, 7);
-        port(c, &r, 0x8001_8a44, 0x8003_f68c, &[this + 928], crate::fedialog::abi_hide);
+        r.call_ptr_leaving(c, 0x8001_8a44, &[this + 928], 0x8003_f68c);
         port(c, &r, 0x8003_4938, 0x8003_f694, &[], crate::fememcard::abi_deinit_memcard);
         port(c, &r, 0x8003_f1c0, 0x8003_f69c, &[this], abi_two_player_cleanup);
     })
@@ -2606,7 +2606,7 @@ pub fn abi_pink_set_dialog(c: &mut Cpu) {
         m.w16(d + 126, if p != 0 { 60 } else { 0xFFC4 });
         m.w16(d + 100, p as u16);
         let hide = |c: &mut Cpu, r: &Saved, ra: u32| {
-            port(c, r, 0x8001_8a44, ra, &[d], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[d], ra);
         };
         if (m.r32(PINK_STATES) != 6 && p == 1) || m.r32(this + 1096) != 0 {
             hide(c, &r, 0x8003_f770);
@@ -2620,7 +2620,7 @@ pub fn abi_pink_set_dialog(c: &mut Cpu) {
             r.0[0] = d;
             let t = r.call_leaving(c, TEXT_WORD, &[word], ras.0);
             c.m.w32(d + 144, t);
-            port(c, r, 0x8001_8980, ras.1, &[d], crate::fedialog::abi_display);
+            r.call_ptr_leaving(c, 0x8001_8980, &[d], ras.1);
         };
         match m.r32(mine) {
             0 => {
@@ -2669,7 +2669,7 @@ pub fn abi_pink_set_dialog(c: &mut Cpu) {
                     r.0[0] = WAIT_TEXT;
                     r.call_leaving(c, SPRINTF, &[WAIT_TEXT, format, name], 0x8003_f7ec);
                     c.m.w32(d + 144, WAIT_TEXT);
-                    port(c, &r, 0x8001_8980, 0x8003_f91c, &[d], crate::fedialog::abi_display);
+                    r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8003_f91c);
                     c.m.w32(this + 1088, 0);
                     c.m.w32(this + 1092, 0);
                 } else {
@@ -2707,7 +2707,7 @@ pub fn abi_pink_process_input(c: &mut Cpu) {
             m.w32(this + 1096, 1);
             m.w32(PINK_STATES, 7);
             m.w32(PINK_STATES + 4, 7);
-            port(c, &r, 0x8001_8a44, 0x8003_f9f4, &[this + 928], crate::fedialog::abi_hide);
+            r.call_ptr_leaving(c, 0x8001_8a44, &[this + 928], 0x8003_f9f4);
         }
         port(c, &r, 0x8003_c268, 0x8003_fa08, &[this, who, key, cmd], abi_process_input);
     })

@@ -632,7 +632,7 @@ pub fn abi_display_help(c: &mut Cpu) {
     abi::frame(c, 24, |c, _| {
         let help = this + HELP;
         c.m.w16(help + 144, page as u16);
-        Saved::of(c).enter_leaving(c, 0x8001_8980, 0x8001_405c, |c| crate::fedialog::display(c, help));
+        Saved::of(c).call_ptr_leaving(c, 0x8001_8980, &[help], 0x8001_405c);
     })
 }
 
@@ -975,7 +975,7 @@ fn run_keys(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> Option<u32> {
             let help = this + HELP;
             if c.m.r32(key_at) == 4 && c.m.r32(help + 112) != 0 {
                 c.m.w32(key_at, 1);
-                r.enter_leaving(c, 0x8001_8a44, 0x8001_4c30, |c| crate::fedialog::hide(c, help));
+                r.call_ptr_leaving(c, 0x8001_8a44, &[help], 0x8001_4c30);
             }
             let k = sx(r.0[6]);
             let (key, cmd) = (c.m.r32(keys_at).wrapping_add(k << 2), commands.wrapping_add(k << 3));
@@ -1165,7 +1165,7 @@ fn save_pink_slips(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> bool {
         let word = r.call_leaving(c, TEXT_WORD, &[k + 662], 0x8001_528c);
         let dialog = c.m.r32(FE_APP).wrapping_add(NO_INPUT_MESSAGE);
         c.m.w32(r.0[0] + 144, word);
-        r.enter_leaving(c, 0x8001_8980, 0x8001_529c, |c| crate::fedialog::display(c, dialog));
+        r.call_ptr_leaving(c, 0x8001_8980, &[dialog], 0x8001_529c);
         loop {
             let app = c.m.r32(FE_APP);
             if c.m.r32(app + 852) == 1 {
@@ -1186,7 +1186,7 @@ fn save_pink_slips(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> bool {
         }
         r.0[1] = k + 1;
         let dialog = c.m.r32(FE_APP).wrapping_add(NO_INPUT_MESSAGE);
-        r.enter_leaving(c, 0x8001_8a44, 0x8001_5348, |c| crate::fedialog::hide(c, dialog));
+        r.call_ptr_leaving(c, 0x8001_8a44, &[dialog], 0x8001_5348);
     }
     r.call_leaving(c, CARD_END, &[], 0x8001_5358);
     if r.0[3] == 0 {
