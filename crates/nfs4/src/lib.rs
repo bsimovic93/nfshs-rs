@@ -83,6 +83,7 @@ pub mod psxfront;
 pub mod schedule;
 pub mod screenaudio;
 pub mod screencongrats;
+pub mod screencontroller;
 pub mod screendisplay;
 pub mod screenmain;
 pub mod screenmemcard;
@@ -728,6 +729,28 @@ pub static FUNCS: &[Func] = &[
     func(0x8004_2d50, "tScreenTrackRecords::DrawRecords", screentrackrecords::abi_draw_records),
     func(0x8004_2f30, "tScreenTrackRecords::DrawBackground", screentrackrecords::abi_draw_background),
     func(0x8004_34e0, "~tScreenTrackRecords", screentrackrecords::abi_destructor),
+    func(0x8004_3500, "tScreenControllerConfig::ClearActuators", screencontroller::abi_clear_actuators),
+    func(0x8004_350c, "tScreenControllerConfig::SetActuators", screencontroller::abi_set_actuators),
+    func(0x8004_3594, "tScreenControllerConfig::TurnOffShakers", screencontroller::abi_turn_off_shakers),
+    func(0x8004_359c, "tScreenControllerConfig::ShakeIt", screencontroller::abi_shake_it),
+    func(0x8004_3638, "Controller_SetRamp", screencontroller::abi_controller_set_ramp),
+    func_ret(0x8004_3784, "tScreenControllerConfig::AnimKeyPoints", screencontroller::abi_anim_key_points),
+    func(0x8004_37e8, "tScreenControllerConfig::CheckConfigs", screencontroller::abi_check_configs),
+    func(0x8004_3ad4, "tScreenControllerConfig::SwapInController", screencontroller::abi_swap_in_controller),
+    func(0x8004_3b60, "tScreenControllerConfig::SetCurrentController", screencontroller::abi_set_current_controller),
+    func_ret(0x8004_3ed8, "tScreenControllerConfig::CalcAnimFrame", screencontroller::abi_calc_anim_frame),
+    func(0x8004_3f64, "tScreenControllerConfig::ActualDrawController", screencontroller::abi_actual_draw_controller),
+    func(0x8004_41cc, "tScreenControllerConfig::DrawController", screencontroller::abi_draw_controller),
+    func(0x8004_4edc, "tScreenControllerConfig::HorzVertLine", screencontroller::abi_horz_vert_line),
+    func(0x8004_5128, "tScreenControllerConfig::DrawArrow", screencontroller::abi_draw_arrow),
+    func(0x8004_5228, "tScreenControllerConfig::DrawBackground", screencontroller::abi_draw_background),
+    func(0x8004_544c, "tScreenControllerConfig::DrawForeground", screencontroller::abi_draw_foreground),
+    func(0x8004_5ab4, "tScreenControllerConfig::GetShapeInfo", screencontroller::abi_get_shape_info),
+    func(0x8004_5ae4, "tScreenControllerConfig::Initialize", screencontroller::abi_initialize),
+    func(0x8004_5c08, "tScreenControllerConfig::Cleanup", screencontroller::abi_cleanup),
+    func_ret(0x8004_5c44, "tScreenControllerConfig::tScreenControllerConfig", screencontroller::abi_screen_controller),
+    func_ret(0x8004_5c94, "tScreenControllerConfig::GetHelpText", screencontroller::abi_get_help_text),
+    func(0x8004_5cf4, "~tScreenControllerConfig", screencontroller::abi_screen_controller_destructor),
     func(0x8004_5d38, "tScreenDisplay::DrawBackground", screendisplay::abi_draw_background),
     func(0x8004_5dc4, "tScreenDisplay::GetShapeInfo", screendisplay::abi_get_shape_info),
     func(0x8004_5dec, "~tScreenDisplay", screendisplay::abi_destructor),

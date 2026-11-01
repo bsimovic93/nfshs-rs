@@ -1468,3 +1468,27 @@
 80048088 tScreenMemcard::Initialize
 80048230 tScreenMemcard::Cleanup
 800482c0 ~tScreenMemcard
+
+# SCREENCONTROLLER.CPP
+80043500 tScreenControllerConfig::ClearActuators
+8004350c tScreenControllerConfig::SetActuators
+80043594 tScreenControllerConfig::TurnOffShakers
+8004359c tScreenControllerConfig::ShakeIt
+80043638 Controller_SetRamp
+80043784 tScreenControllerConfig::AnimKeyPoints
+800437e8 tScreenControllerConfig::CheckConfigs
+80043ad4 tScreenControllerConfig::SwapInController
+80043b60 tScreenControllerConfig::SetCurrentController
+80043ed8 tScreenControllerConfig::CalcAnimFrame
+80043f64 tScreenControllerConfig::ActualDrawController
+800441cc tScreenControllerConfig::DrawController
+80044edc tScreenControllerConfig::HorzVertLine
+80045128 tScreenControllerConfig::DrawArrow
+80045228 tScreenControllerConfig::DrawBackground
+8004544c tScreenControllerConfig::DrawForeground
+80045ab4 tScreenControllerConfig::GetShapeInfo
+80045ae4 tScreenControllerConfig::Initialize
+80045c08 tScreenControllerConfig::Cleanup
+80045c44 tScreenControllerConfig::tScreenControllerConfig
+80045c94 tScreenControllerConfig::GetHelpText
+80045cf4 ~tScreenControllerConfig
