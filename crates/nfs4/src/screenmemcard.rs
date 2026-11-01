@@ -1062,6 +1062,13 @@ mod tests {
             m.w32(STREAM, 0);
         }
         m.w32(CARD_ANSWERS, u32::MAX);
+        // (an icon's read's sync: its result fine mostly, so the reads end well too)
+        m.w32(CARD_ANSWERS + 4, pick(rng, 4));
+        m.w32(CARD_ANSWERS + 8, [0, 0, 0, 1, 3][pick(rng, 5) as usize]);
+        for k in 0..32 {
+            let v = [0x4F82u16, 0x6082, 0x8182, 0x4081, 0][pick(rng, 5) as usize];
+            m.w16(S + 608 + 48 + 2 * k, if k == 31 { 0 } else { v });
+        }
         for k in 3..11 {
             m.w32(CARD_ANSWERS + 4 * k, [0, 1, 2, 3, 4, 5, pick(rng, 10)][pick(rng, 7) as usize]);
         }
