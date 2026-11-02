@@ -1385,11 +1385,6 @@ pub fn abi_run_post_game(c: &mut Cpu) {
     c.r[2] = run_post_game(c, FEApplication(c.r[4]));
 }
 
-/// `tFEApplication::RunPostGame` called as the original's callers call it.
-pub(crate) fn run_post_game_entry(c: &mut Cpu) {
-    abi_run_post_game(c);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

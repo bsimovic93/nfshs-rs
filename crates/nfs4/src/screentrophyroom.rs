@@ -128,10 +128,13 @@ pub fn abi_screen_trophy_room(c: &mut Cpu) {
 }
 
 /// `tScreenTrophyRoom::~tScreenTrophyRoom` (SCREENTROPHYROOM.CPP, 0x80040990): the screen's.
-pub fn abi_destructor(c: &mut Cpu) {
-    let this = Screen(c.r[4]);
+pub fn destructor(c: &mut Cpu, this: Screen, flags: u32) {
     this.set_vtable(&mut c.m, TROPHY_ROOM_VT);
-    fescreen::screen_destructor(c, this, c.r[5]);
+    fescreen::screen_destructor(c, this, flags);
+}
+
+pub fn abi_destructor(c: &mut Cpu) {
+    destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 /// `tScreenTrophyRoom::GetShapeInfo` (SCREENTROPHYROOM.CPP, 0x800409b8): 38 shapes of

@@ -177,10 +177,13 @@ pub fn abi_screen_tourn_select(c: &mut Cpu) {
 }
 
 /// `tScreenTournSelect::~tScreenTournSelect` (SCREENTOURNSELECT.CPP, 0x8003fb7c).
-pub fn abi_destructor(c: &mut Cpu) {
-    let this = Screen(c.r[4]);
+pub fn destructor(c: &mut Cpu, this: Screen, flags: u32) {
     this.set_vtable(&mut c.m, TOURN_SELECT_VT);
-    fescreen::screen_destructor(c, this, c.r[5]);
+    fescreen::screen_destructor(c, this, flags);
+}
+
+pub fn abi_destructor(c: &mut Cpu) {
+    destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 /// `tScreenTournSelect::GetShapeInfo` (SCREENTOURNSELECT.CPP, 0x8003fba4): 64 shapes of
