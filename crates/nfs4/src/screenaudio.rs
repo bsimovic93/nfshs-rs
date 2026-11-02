@@ -1,20 +1,22 @@
-//! SCREENAUDIO.CPP: the audio options' screen (`tScreenAudio`): the chosen song played, the
-//! music's level and the narration's set, the stereo mode switched; on each level's slider a
-//! test sound (a sound effect, the engine, the narration, the ambience) played again whenever
-//! the last ends, panned about for the stereo test; the slider's percentage faded in beside it;
-//! 32 pictures.
+//! SCREENAUDIO.CPP: the audio options' screen (`tScreenAudio`). It plays the chosen song, sets
+//! the music's and the narration's levels, and switches the stereo mode. On each level's slider
+//! a test sound (a sound effect, the engine, the narration, the ambience) is played again
+//! whenever the last ends, panned about for the stereo test, and the slider's percentage is
+//! faded in beside it. It also draws 32 pictures.
 //!
-//! `AudioMus_PlaySong`, `PSXDrawSquare`: the host's (called by address).
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
+//! `AudioMus_PlaySong` and `PSXDrawSquare` are the host's (called by address).
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr, with_buffer};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SPRINTF, TEXT_PIXELS, TEXT_WORD};
 use crate::globals::{FRONT_END, SONGS_SCREEN};
+use crate::types::{MenuItemLeftRightAudioSlider, MenuItemSlidingMenu, OptionsMenu, Screen};
 use crate::{fefades, femenuoptions, fescreen, fetextrender};
 use ps1rt::{Cpu, Mem};
 
-// The screen: a `tScreen`, then +102 the stereo mode set, +104 the test sound (0 none; 1..4 its
-// pan's step), +108 its handle, +112 the song playing (-1: none), +114 the audio mode, +116 the
-// song chosen, +120 the songs (64 bytes each, +8 the file).
+/// The screen: a `tScreen`, then +102 the stereo mode set, +104 the test sound (0 none; 1..4 its
+/// pan's step), +108 its handle, +112 the song playing (-1: none), +114 the audio mode, +116 the
+/// song chosen, +120 the songs (64 bytes each, +8 the file).
 const MODE_SET: u32 = 102;
 const TEST: u32 = 104;
 const HANDLE: u32 = 108;
@@ -22,6 +24,8 @@ const PLAYING: u32 = 112;
 const AUDIO_MODE: u32 = 114;
 const CHOSEN: u32 = 116;
 const SONGS: u32 = 120;
+const SONG_SIZE: u32 = 64;
+const SONG_FILE: u32 = 8;
 
 /// In the menus' block (`SONGS_SCREEN`'s): the songs' menu on (`+10068`), the sliding menu and
 /// its inside (`+10000`, `+10072`), the options menu (`+10208`: +8 its item, +116 its fade),
@@ -30,13 +34,22 @@ const SONGS_ON: u32 = 10068;
 const SLIDING_MENU: u32 = 10000;
 const INSIDE_MENU: u32 = 10072;
 const OPTIONS_MENU: u32 = 10208;
+const OPTIONS_ITEM: u32 = 8;
+const OPTIONS_FADE: u32 = 116;
 const SLIDERS: u32 = 9676;
 const SLIDER_SIZE: u32 = 56;
 const FOREGROUND_FADE: u32 = 10324;
 /// The levels set in the options (`frontEnd + 0x341`: music, sound effects, narration, engine,
-/// ambience), the stereo mode (`+0x346`: 1 mono, 2 the stereo test).
+/// ambience), the stereo mode (`+0x346`: 0 stereo, 1 mono, 2 the stereo test).
 const LEVELS: u32 = FRONT_END + 0x341;
+const MUSIC: u32 = 0;
+const EFFECTS: u32 = 1;
+const NARRATION: u32 = 2;
+const ENGINE: u32 = 3;
+const AMBIENCE: u32 = 4;
 const STEREO: u32 = FRONT_END + 0x346;
+const MONO: u8 = 1;
+const STEREO_TEST: u8 = 2;
 /// The levels in use: music, sound effects, engine, narration, ambience; the stereo flag,
 /// the 3D sound's.
 const MUSIC_LEVEL: u32 = 0x8013_D944;
@@ -46,17 +59,29 @@ const NARRATION_LEVEL: u32 = 0x8013_D950;
 const AMBIENT_LEVEL: u32 = 0x8013_D954;
 const STEREO_MODE: u32 = 0x8013_D968;
 const DIRECT_3D: u32 = 0x8013_E7E4;
+/// The sound system's options (`SNDSYS_getopts`' 64 bytes: +16 the output, 1 mono or 2 stereo).
+const OPTS_SIZE: u32 = 64;
+const OPTS_OUTPUT: u32 = 16;
 /// The narration's still speaking (`FeAudio`'s +16), the sound banks (`gSndBnk`).
 const SPEAKING: u32 = 0x8005_19E0;
 const SOUND_BANKS: u32 = 0x8010_FB6C;
+/// The test sounds: a sound effect's, the ambience's, the engine's (one of 6 from 41), the
+/// narration (none: speech instead).
+const EFFECT_SOUND: u32 = 31;
+const AMBIENCE_SOUND: u32 = 30;
+const ENGINE_SOUNDS: i32 = 41;
+const SPEECH: u32 = u32::MAX;
 /// The last percentage shown and its text's fade (0 shown .. 128 gone).
 const PERCENTAGE: u32 = 0x8005_2D70;
 const PERCENTAGE_FADE: u32 = 0x8005_2D74;
-/// The colours' table and the percentage's colour's index; "%d%%", "zAudio", "LOADING".
+/// The colours' table and the percentage's colour's index; "%d%%" and where it goes (text 477's
+/// place); "zAudio" (52 shapes), "LOADING".
 const COLORS: u32 = 0x8005_1B50;
 const PERCENTAGE_COLOR: u32 = 0x8005_1AC9;
 const PERCENTAGE_FORMAT: u32 = 0x8001_20DC;
+const PERCENTAGE_PLACE: u32 = 477;
 const AUDIO_NAME: u32 = 0x8001_20FC;
+const SHAPES: u16 = 52;
 const LOADING_TEXT: u32 = 638;
 /// The screen's vtable.
 const AUDIO_VT: u32 = 0x8001_2108;
@@ -88,313 +113,292 @@ fn lh(m: &mut Mem, at: u32) -> i32 {
     m.r16(at) as i16 as i32
 }
 
-/// A call to a function that is ported too, as FEAPP's.
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
+/// A level set in the options.
+fn level(m: &mut Mem, k: u32) -> u32 {
+    m.r8(LEVELS + k) as u32
 }
 
-/// The music's level from the options' (0..255 to 0..127 or so: `* 35 / 64`).
+/// The music's level from the options' (`* 35 / 64`).
 fn music_level(m: &mut Mem) -> u32 {
-    (m.r8(LEVELS) as u32 * 35) >> 6
+    (level(m, MUSIC) * 35) >> 6
 }
 
-/// `tScreenAudio::PlaySound` (SCREENAUDIO.CPP, 0x80045e10): the chosen song played (when the
-/// songs' menu is on and it changed); the music's and the narration's levels; a new stereo mode
-/// set in the sound system; on a level's slider (items 1..5) its test sound played again once
-/// the last is over (and the narration quiet), panned left, centre, right in turn for the
-/// stereo test, at the slider's level; elsewhere the test sound stopped.
-pub fn play_sound(c: &mut Cpu, this: u32) {
-    abi::frame(c, 112, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let menus = c.m.r32(SONGS_SCREEN);
-        if c.m.r32(menus + SONGS_ON) != 0 && lh(&mut c.m, this + PLAYING) != lh(&mut c.m, this + CHOSEN) {
-            r.call_leaving(c, STOP_SONG, &[10], 0x8004_5e60);
+/// The options menu.
+fn options_menu(m: &mut Mem) -> u32 {
+    m.r32(SONGS_SCREEN) + OPTIONS_MENU
+}
+
+/// `tScreenAudio::PlaySound` (SCREENAUDIO.CPP, 0x80045e10). The chosen song is played (when the
+/// songs' menu is on and it changed); the music's and the narration's levels are set; a new
+/// stereo mode is set in the sound system. On a level's slider (items 1..5) its test sound is
+/// played again once the last is over (and the narration quiet), panned left, centre, right in
+/// turn for the stereo test, at the slider's level. Elsewhere the test sound is stopped.
+pub fn play_sound(c: &mut Cpu, this: Screen) {
+    let this = this.0;
+    let menus = c.m.r32(SONGS_SCREEN);
+    if c.m.r32(menus + SONGS_ON) != 0 && lh(&mut c.m, this + PLAYING) != lh(&mut c.m, this + CHOSEN) {
+        call(c, STOP_SONG, &[10]);
+        let m = &mut c.m;
+        let song = m.r32(this + SONGS).wrapping_add((lh(m, this + CHOSEN) as u32).wrapping_mul(SONG_SIZE));
+        let file = m.r32(song + SONG_FILE);
+        call_addr(c, PLAY_SONG, &[file]);
+        let v = c.m.r16(this + CHOSEN);
+        c.m.w16(this + PLAYING, v);
+    }
+    let volume = music_level(&mut c.m);
+    call(c, MUSIC_VOLUME, &[volume]);
+    let m = &mut c.m;
+    let v = level(m, NARRATION);
+    m.w32(NARRATION_LEVEL, v);
+    if m.r8(STEREO) != m.r8(this + MODE_SET) {
+        set_stereo_mode(c, this);
+    }
+    let m = &mut c.m;
+    let options = options_menu(m);
+    let item = lh(m, options + OPTIONS_ITEM);
+    if !(1..6).contains(&item) {
+        if lh(&mut c.m, this + TEST) != 0 {
             let m = &mut c.m;
-            let song = m.r32(this + SONGS).wrapping_add((lh(m, this + CHOSEN) as u32) << 6);
-            let file = m.r32(song + 8);
-            r.call_ptr_leaving(c, PLAY_SONG, &[file], 0x8004_5e7c);
-            let v = c.m.r16(this + CHOSEN);
-            c.m.w16(this + PLAYING, v);
-        }
-        r.0[2] = FRONT_END;
-        let level = music_level(&mut c.m);
-        r.call_leaving(c, MUSIC_VOLUME, &[level], 0x8004_5eb0);
-        let m = &mut c.m;
-        let v = m.r8(LEVELS + 2) as u32;
-        m.w32(NARRATION_LEVEL, v);
-        r.0[4] = 0x8014_0000;
-        if m.r8(STEREO) != m.r8(this + MODE_SET) {
-            let opts = sp + 24;
-            r.0[0] = 1;
-            r.0[3] = 0x8014_0000;
-            m.w32(STEREO_MODE, 1);
-            m.w32(DIRECT_3D, 0);
-            m.w16(this + TEST, 1);
-            r.call_leaving(c, GET_OPTS, &[opts], 0x8004_5eec);
-            let m = &mut c.m;
-            match m.r8(STEREO) {
-                1 => {
-                    m.w8(sp + 40, 1);
-                    m.w32(STEREO_MODE, 0);
-                    m.w16(this + TEST, 2);
-                }
-                0 => m.w8(sp + 40, 2),
-                _ => {
-                    m.w8(sp + 40, 2);
-                    m.w32(DIRECT_3D, 1);
-                }
-            }
-            r.call_leaving(c, SET_OPTS, &[opts], 0x8004_5f3c);
-            let v = c.m.r8(STEREO);
-            c.m.w8(this + MODE_SET, v);
-        }
-        let item = lh(&mut c.m, menus + OPTIONS_MENU + 8);
-        if !(item > 0 && item < 6) {
-            if lh(&mut c.m, this + TEST) != 0 {
-                let m = &mut c.m;
-                let handle = m.r32(this + HANDLE);
-                let v = m.r8(LEVELS + 1) as u32;
-                m.w32(SFX_LEVEL, v);
-                r.call_leaving(c, SND_STOP, &[handle], 0x8004_618c);
-                c.m.w16(this + TEST, 0);
-            }
-            return;
-        }
-        // the slider's test sound: its level (and the sound effects' level meanwhile) and sound
-        r.0[3] = 1;
-        let m = &mut c.m;
-        let (level_at, sound) = match item {
-            1 => (LEVELS + 1, Some(31)),
-            2 => (LEVELS + 3, None),
-            3 => (LEVELS + 2, Some(u32::MAX)),
-            4 => (LEVELS + 4, Some(30)),
-            _ => (LEVELS + 1, None),
-        };
-        r.0[2] = m.r8(level_at) as u32;
-        r.0[0] = match sound {
-            Some(s) => s,
-            None => {
-                let v = r.call_leaving(c, RAND, &[], 0x8004_5ff8) as i32;
-                (v.wrapping_rem(6) + 41) as u32
-            }
-        };
-        let m = &mut c.m;
-        m.w32(SFX_LEVEL, r.0[2]);
-        if lh(m, this + TEST) == 0 {
-            let step = if m.r8(STEREO) == 1 { 2 } else { 1 };
-            m.w16(this + TEST, step);
-        } else {
             let handle = m.r32(this + HANDLE);
-            r.0[3] = r.call_leaving(c, SND_OVER, &[handle], 0x8004_6060);
+            let v = level(m, EFFECTS);
+            m.w32(SFX_LEVEL, v);
+            call(c, SND_STOP, &[handle]);
+            c.m.w16(this + TEST, 0);
         }
+        return;
+    }
+    // the slider's test sound, at its level (the sound effects' level meanwhile)
+    let (which, sound) = match item {
+        1 => (EFFECTS, Some(EFFECT_SOUND)),
+        2 => (ENGINE, None),
+        3 => (NARRATION, Some(SPEECH)),
+        4 => (AMBIENCE, Some(AMBIENCE_SOUND)),
+        _ => (EFFECTS, None),
+    };
+    let volume = level(&mut c.m, which);
+    let sound = match sound {
+        Some(s) => s,
+        None => (ENGINE_SOUNDS + (call(c, RAND, &[]) as i32).wrapping_rem(6)) as u32,
+    };
+    let m = &mut c.m;
+    m.w32(SFX_LEVEL, volume);
+    let over = if lh(m, this + TEST) == 0 {
+        let step = if m.r8(STEREO) == MONO { 2 } else { 1 };
+        m.w16(this + TEST, step);
+        true
+    } else {
+        let handle = m.r32(this + HANDLE);
+        call(c, SND_OVER, &[handle]) != 0
+    };
+    let m = &mut c.m;
+    if over && m.r16(SPEAKING) == 0 && sound != 0 {
+        // the pan (left, centre, right, behind), and the stereo test's next step
+        let stereo = m.r8(STEREO);
+        let (pan, next) = match lh(m, this + TEST) {
+            1 => (0xC000, Some(if stereo == STEREO_TEST { 2 } else { 3 })),
+            2 => (0, Some(if stereo == MONO { 2 } else { 3 })),
+            3 => (16383, Some(if stereo == STEREO_TEST { 4 } else { 1 })),
+            4 => (0x8000, Some(1)),
+            _ => (0, None),
+        };
+        if let Some(next) = next {
+            m.w16(this + TEST, next);
+        }
+        if sound == SPEECH {
+            call(c, PLAY_SPEECH, &[2, 3]);
+            c.m.w32(this + HANDLE, 0);
+        } else {
+            let bank = m.r32(SOUND_BANKS);
+            let handle = call(c, PLAY_SOUND, &[bank, sound, pan, volume, 64]);
+            c.m.w32(this + HANDLE, handle);
+        }
+    }
+    let v = level(&mut c.m, EFFECTS);
+    c.m.w32(SFX_LEVEL, v);
+}
+
+/// The options' stereo mode set in the sound system (mono, stereo, or the stereo test's 3D
+/// sound), the test sound's pan started over.
+fn set_stereo_mode(c: &mut Cpu, this: u32) {
+    let m = &mut c.m;
+    m.w32(STEREO_MODE, 1);
+    m.w32(DIRECT_3D, 0);
+    m.w16(this + TEST, 1);
+    with_buffer(c, OPTS_SIZE, |c, opts| {
+        call(c, GET_OPTS, &[opts]);
         let m = &mut c.m;
-        if r.0[3] != 0 && m.r16(SPEAKING) == 0 && r.0[0] != 0 {
-            // the pan, and the stereo test's next step
-            let stereo = m.r8(STEREO);
-            let (pan, next) = match lh(m, this + TEST) {
-                1 => (0xC000, Some(if stereo == 2 { 2 } else { 3 })),
-                2 => (0, Some(if stereo == 1 { 2 } else { 3 })),
-                3 => (16383, Some(if stereo == 2 { 4 } else { 1 })),
-                4 => (0x8000, Some(1)),
-                _ => (0, None),
-            };
-            if let Some(next) = next {
-                m.w16(this + TEST, next);
+        match m.r8(STEREO) {
+            MONO => {
+                m.w8(opts + OPTS_OUTPUT, 1);
+                m.w32(STEREO_MODE, 0);
+                m.w16(this + TEST, 2);
             }
-            if r.0[0] == u32::MAX {
-                r.call_leaving(c, PLAY_SPEECH, &[2, 3], 0x8004_6130);
-                c.m.w32(this + HANDLE, 0);
-            } else {
-                let bank = m.r32(SOUND_BANKS);
-                let handle = r.call_leaving(c, PLAY_SOUND, &[bank, r.0[0], pan, r.0[2], 64], 0x8004_6150);
-                c.m.w32(this + HANDLE, handle);
+            0 => m.w8(opts + OPTS_OUTPUT, 2),
+            _ => {
+                m.w8(opts + OPTS_OUTPUT, 2);
+                m.w32(DIRECT_3D, 1);
             }
         }
-        let v = c.m.r8(LEVELS + 1) as u32;
-        c.m.w32(SFX_LEVEL, v);
-    })
+        call(c, SET_OPTS, &[opts]);
+    });
+    let v = c.m.r8(STEREO);
+    c.m.w8(this + MODE_SET, v);
 }
 
 pub fn abi_play_sound(c: &mut Cpu) {
-    play_sound(c, c.r[4]);
+    play_sound(c, Screen(c.r[4]));
 }
 
 /// `tScreenAudio::DrawForeground` (SCREENAUDIO.CPP, 0x800461b0): shapes 48 to 51 at half the
-/// foreground's fade; "LOADING" while it is 100 or more.
+/// foreground's fade (0..128); "LOADING" over a bar while it is 100 or more.
+pub fn draw_foreground(c: &mut Cpu) {
+    let menus = c.m.r32(SONGS_SCREEN);
+    let bright = ((c.m.r32(menus + FOREGROUND_FADE) as i32 >> 1) as i16).clamp(0, 128) as u32;
+    for k in 0..4 {
+        call(c, DRAW_SHAPE_EXTENDED, &[k + 48, 1, 0, 0, bright, 0, 0]);
+    }
+    if bright >= 100 {
+        fetextrender::menu_text_positioned_justify(c, LOADING_TEXT, 480, 220, 1, 1, 4);
+        let w = call(c, TEXT_WORD, &[LOADING_TEXT]);
+        let px = call(c, TEXT_PIXELS, &[w]);
+        call_addr(c, DRAW_SQUARE, &[0, 480, 220, 0u32.wrapping_sub(px).wrapping_sub(5), 7]);
+    }
+}
+
 pub fn abi_draw_foreground(c: &mut Cpu) {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        let menus = c.m.r32(SONGS_SCREEN);
-        let half = (c.m.r32(menus + FOREGROUND_FADE) as i32 >> 1) as u32;
-        let bright = match half as i16 {
-            v if v < 128 && v <= 0 => 0,
-            v if v >= 129 => 128,
-            _ => half,
-        };
-        r.0[2] = bright;
-        r.0[1] = sx(bright);
-        for k in 0..4 {
-            r.0[0] = k;
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k + 48, 1, 0, 0, sx(bright), 0, 0], 0x8004_6234);
-        }
-        r.0[0] = 4;
-        if (sx(bright) as i32) >= 100 {
-            r.call_leaving(c, fetextrender::menu_text_positioned_justify_entry, &[LOADING_TEXT, 480, 220, 1, 1, 4], 0x8004_6278);
-            let w = r.call_leaving(c, TEXT_WORD, &[LOADING_TEXT], 0x8004_6280);
-            let px = r.call_leaving(c, TEXT_PIXELS, &[w], 0x8004_6288);
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[0, 480, 220, 0u32.wrapping_sub(px).wrapping_sub(5), 7], 0x8004_62a8);
-        }
-    })
+    draw_foreground(c);
 }
 
 /// `tScreenAudio::DrawBackground` (SCREENAUDIO.CPP, 0x800462c0): the sounds; on a level's
 /// slider its percentage (kept once off them) faded in beside it, out elsewhere or while the
 /// options menu moves; 32 pictures at half the options menu's fade.
-pub fn abi_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 312, |c, sp| {
-        let mut r = Saved::of(c);
-        port(c, &r, 0x8004_5e10, 0x8004_62dc, &[this], abi_play_sound);
-        let menus = c.m.r32(SONGS_SCREEN);
-        let options = menus + OPTIONS_MENU;
-        let v = (c.m.r32(options + 116) as i32 >> 1) as u32;
-        r.0[3] = if (v as i16) >= 129 { 128 } else { v };
-        let item = c.m.r16(options + 8) as i16 as i32 as u32;
-        r.0[0] = u32::MAX;
-        if item < 5 {
-            let slider = c.m.r32(SONGS_SCREEN) + SLIDERS + SLIDER_SIZE * item;
-            r.0[0] = port(c, &r, 0x8001_e8dc, 0x8004_63a0, &[slider], femenuoptions::abi_audio_slider_percentage);
-        }
-        let shown = r.0[0];
-        if (shown as i32) >= 0 {
-            c.m.w32(PERCENTAGE, shown);
-        }
-        if (shown as i32) >= 0 || (c.m.r32(PERCENTAGE) as i32) >= 0 {
-            let out = shown == u32::MAX || {
-                let menus = c.m.r32(SONGS_SCREEN);
-                port(c, &r, 0x8001_c86c, 0x8004_63e0, &[menus + OPTIONS_MENU], femenuoptions::abi_options_menu_transition_is_finished) ^ 1 != 0
-            };
-            let m = &mut c.m;
-            let fade = m.r32(PERCENTAGE_FADE).wrapping_add(if out { 4 } else { (-4i32) as u32 });
-            m.w32(PERCENTAGE_FADE, fade);
-            r.0[1] = 0x8005_0000;
-            let fade = (m.r32(PERCENTAGE_FADE) as i32).min(128).max(0) as u32;
-            let k = m.r8(PERCENTAGE_COLOR) as u32;
-            let base = m.r32(COLORS + (k << 2));
-            m.w32(PERCENTAGE_FADE, fade);
-            let color = port(c, &r, 0x8004_bd8c, 0x8004_6460, &[base, 0, sx(r.0[3]), fade], fefades::abi_fade_faded);
-            r.0[2] = color;
-            let value = if (shown as i32) < 0 { c.m.r32(PERCENTAGE) } else { shown };
-            let text = sp + 32;
-            r.call_leaving(c, SPRINTF, &[text, PERCENTAGE_FORMAT, value], 0x8004_6484);
+pub fn draw_background(c: &mut Cpu, this: Screen) {
+    play_sound(c, this);
+    let m = &mut c.m;
+    let options = options_menu(m);
+    let bright = ((m.r32(options + OPTIONS_FADE) as i32 >> 1) as i16).min(128) as i32 as u32;
+    let item = lh(m, options + OPTIONS_ITEM) as u32;
+    let shown = if item < 5 {
+        let slider = m.r32(SONGS_SCREEN) + SLIDERS + SLIDER_SIZE * item;
+        femenuoptions::audio_slider_percentage(c, MenuItemLeftRightAudioSlider(slider))
+    } else {
+        u32::MAX
+    };
+    if (shown as i32) >= 0 {
+        c.m.w32(PERCENTAGE, shown);
+    }
+    if (shown as i32) >= 0 || (c.m.r32(PERCENTAGE) as i32) >= 0 {
+        // out when off the sliders or while the options menu moves, else in
+        let out = shown == u32::MAX || {
+            let options = options_menu(&mut c.m);
+            femenuoptions::options_menu_transition_is_finished(c, OptionsMenu(options)) != 1
+        };
+        let m = &mut c.m;
+        let fade = m.r32(PERCENTAGE_FADE).wrapping_add(if out { 4 } else { (-4i32) as u32 });
+        let fade = (fade as i32).clamp(0, 128) as u32;
+        let k = m.r8(PERCENTAGE_COLOR) as u32;
+        let base = m.r32(COLORS + 4 * k);
+        m.w32(PERCENTAGE_FADE, fade);
+        let color = fefades::fade(fefades::fade(base, 0, bright), 0, fade);
+        let value = if (shown as i32) < 0 { m.r32(PERCENTAGE) } else { shown };
+        with_buffer(c, 32, |c, text| {
+            call(c, SPRINTF, &[text, PERCENTAGE_FORMAT, value]);
             if c.m.r32(PERCENTAGE_FADE) != 128 {
-                let x = r.call_leaving(c, WORD_X, &[477], 0x8004_649c);
-                r.0[0] = sx(x);
-                let y = r.call_leaving(c, WORD_Y, &[477], 0x8004_64ac);
-                r.call_leaving(c, fetextrender::full_text_rgb_entry, &[text, sx(x), sx(y), color, 0, 1], 0x8004_64d0);
+                let x = sx(call(c, WORD_X, &[PERCENTAGE_PLACE]));
+                let y = sx(call(c, WORD_Y, &[PERCENTAGE_PLACE]));
+                fetextrender::full_text_rgb(c, text, x, y, color, 0, 1);
             }
-        }
-        // the pictures
-        let bright = sx(r.0[3]);
-        r.0[1] = bright;
-        for k in 0..32 {
-            r.0[0] = k;
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k + 6, 1, 0, 0, bright, 0, 0], 0x8004_64fc);
-        }
-    })
+        });
+    }
+    // the pictures
+    for k in 0..32 {
+        call(c, DRAW_SHAPE_EXTENDED, &[k + 6, 1, 0, 0, bright, 0, 0]);
+    }
+}
+
+pub fn abi_draw_background(c: &mut Cpu) {
+    draw_background(c, Screen(c.r[4]));
 }
 
 /// `tScreenAudio::GetShapeInfo` (SCREENAUDIO.CPP, 0x80046528): 52 shapes of "zAudio", none
 /// swapped.
-pub fn abi_get_shape_info(c: &mut Cpu) {
-    let swap_name = abi::arg(c, 4);
-    let (permanent, swap, name) = (c.r[5], c.r[6], c.r[7]);
-    let m = &mut c.m;
+pub fn get_shape_info(m: &mut Mem, permanent: u32, swap: u32, name: u32, swap_name: u32) {
     m.w16(swap, 0);
     m.w32(swap_name, 0);
-    m.w16(permanent, 52);
+    m.w16(permanent, SHAPES);
     m.w32(name, AUDIO_NAME);
 }
 
+pub fn abi_get_shape_info(c: &mut Cpu) {
+    let swap_name = crate::abi::arg(c, 4);
+    get_shape_info(&mut c.m, c.r[5], c.r[6], c.r[7], swap_name);
+}
+
 /// `tScreenAudio::tScreenAudio` (SCREENAUDIO.CPP, 0x8004654c): a screen with the audio
-/// screen's vtable, no song chosen, mode 0, no songs.
+/// screen's vtable, the first song chosen, mode 0, no songs.
+pub fn screen_audio(c: &mut Cpu, this: Screen) -> Screen {
+    fescreen::screen(c, this);
+    let m = &mut c.m;
+    this.set_vtable(m, AUDIO_VT);
+    m.w16(this.0 + CHOSEN, 0);
+    m.w8(this.0 + AUDIO_MODE, 0);
+    m.w32(this.0 + SONGS, 0);
+    this
+}
+
 pub fn abi_screen_audio(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        port(c, &r, 0x8002_6040, 0x8004_6560, &[this], fescreen::abi_screen);
-        let m = &mut c.m;
-        m.w32(this + 96, AUDIO_VT);
-        m.w16(this + CHOSEN, 0);
-        m.w8(this + AUDIO_MODE, 0);
-        m.w32(this + SONGS, 0);
-        c.r[2] = this;
-    })
+    c.r[2] = screen_audio(c, Screen(c.r[4])).0;
 }
 
 /// `tScreenAudio::Initialize` (SCREENAUDIO.CPP, 0x8004658c): no song playing; the sliding
 /// menu's inside set; the screen's files read; no test sound; the stereo mode the options'.
+pub fn initialize(c: &mut Cpu, this: Screen) {
+    let menus = c.m.r32(SONGS_SCREEN);
+    c.m.w16(this.0 + PLAYING, 0xFFFF);
+    femenuoptions::sliding_menu_set_menu(&mut c.m, MenuItemSlidingMenu(menus + SLIDING_MENU), 1, menus + INSIDE_MENU);
+    fescreen::initialize(c, this);
+    let m = &mut c.m;
+    let v = m.r8(STEREO);
+    m.w16(this.0 + TEST, 0);
+    m.w32(this.0 + HANDLE, 0);
+    m.w32(this.0 + SONGS, 0);
+    m.w8(this.0 + MODE_SET, v);
+}
+
 pub fn abi_initialize(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let menus = c.m.r32(SONGS_SCREEN);
-        c.m.w16(this + PLAYING, 0xFFFF);
-        port(c, &r, 0x8001_de88, 0x8004_65bc, &[menus + SLIDING_MENU, 1, menus + INSIDE_MENU], femenuoptions::abi_sliding_menu_set_menu);
-        port(c, &r, 0x8002_60cc, 0x8004_65c4, &[this], fescreen::abi_initialize);
-        let m = &mut c.m;
-        let v = m.r8(STEREO);
-        m.w16(this + TEST, 0);
-        m.w32(this + HANDLE, 0);
-        m.w32(this + SONGS, 0);
-        m.w8(this + MODE_SET, v);
-    })
+    initialize(c, Screen(c.r[4]));
 }
 
 /// `tScreenAudio::Cleanup` (SCREENAUDIO.CPP, 0x800465ec): the test sound stopped; the levels
 /// in use the options'; the screen's; the narration waited out.
+pub fn cleanup(c: &mut Cpu, this: Screen) {
+    if lh(&mut c.m, this.0 + TEST) != 0 {
+        let handle = c.m.r32(this.0 + HANDLE);
+        call(c, SND_STOP, &[handle]);
+        c.m.w16(this.0 + TEST, 0);
+    }
+    let volume = music_level(&mut c.m);
+    call(c, MUSIC_VOLUME, &[volume]);
+    let m = &mut c.m;
+    let volume = music_level(m);
+    for (k, at) in [(MUSIC, MUSIC_LEVEL), (EFFECTS, SFX_LEVEL), (NARRATION, NARRATION_LEVEL), (ENGINE, ENGINE_LEVEL), (AMBIENCE, AMBIENT_LEVEL)] {
+        let v = level(m, k);
+        m.w32(at, v);
+    }
+    call(c, MUSIC_VOLUME, &[volume]);
+    fescreen::cleanup(c, this);
+    while c.m.r16(SPEAKING) != 0 {
+        call(c, SYSTEM_TASK, &[0]);
+    }
+}
+
 pub fn abi_cleanup(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[0] = 0x8011_0000;
-        if lh(&mut c.m, this + TEST) != 0 {
-            let handle = c.m.r32(this + HANDLE);
-            r.call_leaving(c, SND_STOP, &[handle], 0x8004_661c);
-            c.m.w16(this + TEST, 0);
-        }
-        r.0[0] = FRONT_END;
-        let level = music_level(&mut c.m);
-        r.call_leaving(c, MUSIC_VOLUME, &[level], 0x8004_6644);
-        let m = &mut c.m;
-        let level = music_level(m);
-        for (k, at) in [MUSIC_LEVEL, SFX_LEVEL, NARRATION_LEVEL, ENGINE_LEVEL, AMBIENT_LEVEL].into_iter().enumerate() {
-            let v = m.r8(LEVELS + k as u32) as u32;
-            m.w32(at, v);
-        }
-        r.call_leaving(c, MUSIC_VOLUME, &[level], 0x8004_66a0);
-        port(c, &r, 0x8002_61c0, 0x8004_66a8, &[this], fescreen::abi_cleanup);
-        r.0[0] = 0x8005_19D0;
-        while c.m.r16(SPEAKING) != 0 {
-            r.call_leaving(c, SYSTEM_TASK, &[0], 0x8004_66c8);
-        }
-    })
+    cleanup(c, Screen(c.r[4]));
 }
 
 /// `tScreenAudio::~tScreenAudio` (SCREENAUDIO.H, 0x800466e4): the screen's.
 pub fn abi_destructor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        port(c, &Saved::of(c), 0x8002_6098, 0x8004_66f4, &[this, flags], fescreen::abi_screen_destructor);
-    })
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 #[cfg(test)]
