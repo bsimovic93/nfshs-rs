@@ -11,15 +11,73 @@
 //! the CLUT, +172/+300/+428 the icons), +556 the data, +560 the icons out. The cards (`S`
 //! +1180, 616 bytes): +0 the state, +4 the event, +8, +12 the free blocks, +16 the directory
 //! (15 entries of 40 bytes: +0 the name, +24 the size).
+//!
+//! Written as FEMENU.CPP is (see there). libmcrd is the host's (called by address).
 
-use crate::abi::{self, Saved};
-use ps1rt::Cpu;
+use crate::call::{call, call_addr, with_buffer};
+use ps1rt::{Cpu, Mem};
 
 const S: u32 = 0x8005_31F8;
 pub(crate) const STATE: u32 = S;
 const R: u32 = S + 608;
 const CARDS: u32 = S + 1180;
 const CARD_SIZE: u32 = 616;
+const CARD_COUNT: u32 = 8;
+const STATE_SIZE: u32 = 6108;
+// The state: the region, the file prefix, the format and overwrite callbacks, the wait
+// callbacks, the operation pending, done, the card's port, the cards' timers.
+const REGION: u32 = 0;
+const PREFIX: u32 = 4;
+const FORMAT_CB: u32 = 32;
+const OVERWRITE_CB: u32 = 36;
+const WAIT_CB1: u32 = 40;
+const WAIT_CB2: u32 = 44;
+const PENDING: u32 = 48;
+const DONE: u32 = 52;
+const PORT: u32 = 60;
+const TIMERS: u32 = 64;
+/// The operations pending: the card loaded, a write, a read, a delete; the library's
+/// operations (for `HandleError`): the directory, a write, a read.
+const PENDING_LOAD_CARD: u32 = 1;
+const PENDING_WRITE: u32 = 2;
+const PENDING_READ: u32 = 3;
+const PENDING_DELETE: u32 = 4;
+const OP_DIRECTORY: u32 = 1;
+const OP_WRITE: u32 = 2;
+const OP_READ: u32 = 3;
+// The request: the card, the file name, the title out, the data's size and offset, the flags
+// (0x200 a new file), the file header (+2 the icon's frames, +3 the blocks, +4 the title, +96
+// the CLUT, +128 the three icons: 512 bytes), the data, the icons out.
+const R_CARD: u32 = 0;
+const R_NAME: u32 = 4;
+const R_TITLE: u32 = 28;
+const R_DATA_SIZE: u32 = 32;
+const R_OFFSET: u32 = 36;
+const R_FLAGS: u32 = 40;
+const HEADER: u32 = 44;
+const HEADER_FRAMES: u32 = 46;
+const HEADER_BLOCKS: u32 = 47;
+const HEADER_TITLE: u32 = 48;
+const HEADER_CLUT: u32 = 140;
+const HEADER_ICONS: u32 = 172;
+const HEADER_SIZE: u32 = 512;
+const R_DATA: u32 = 556;
+const R_ICONS: u32 = 560;
+const R_SIZE: u32 = 572;
+const NEW_FILE: u32 = 0x200;
+// A card: its state (-1 none, -2 unformatted, -3 full, -4 bad), its event, its free blocks, its
+// directory (15 entries of 40 bytes: +24 the size).
+const CARD_STATE: u32 = 0;
+const CARD_EVENT: u32 = 4;
+const CARD_FREE: u32 = 12;
+const DIRECTORY: u32 = 16;
+const ENTRY_SIZE: u32 = 40;
+const ENTRY_BYTES: u32 = 24;
+const DIRECTORY_ENTRIES: u32 = 15;
+const NO_CARD: u32 = u32::MAX;
+const UNFORMATTED: u32 = (-2i32) as u32;
+const FULL: u32 = (-3i32) as u32;
+const BAD_CARD: u32 = (-4i32) as u32;
 /// The vertical blank's count (the cards' timers start from it); the timer's handler.
 const VSYNC_COUNT: u32 = 0x8013_EFA4;
 const TIMER_SUB: u32 = 0x8005_0774;
@@ -63,278 +121,266 @@ const MC_FORMAT: u32 = 0x800F_C988;
 const MC_DIRENTRY: u32 = 0x800F_C234;
 const VSYNC: u32 = 0x800F_2C78;
 
-/// A port called from a port, as feaudio's and front's.
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
-}
-
-/// A block size in 8 KB blocks, rounded toward zero (`+8191` first when negative).
+/// A block size in 8 KB blocks, rounded toward zero.
 fn blocks(v: u32) -> u32 {
     ((v as i32) / 8192) as u32
 }
 
+/// The card port of the card the last `getcard` gave.
+fn card_port(m: &mut Mem) -> u32 {
+    m.r32(S + PORT)
+}
+
 /// `MCRD_init` (MEMCARD.C, 0x8004f8c8): the state cleared, the callbacks the defaults, the
 /// library started, the eight cards set up (a moment waited before each), the timer added.
+pub fn init(c: &mut Cpu, arg: u32) {
+    call(c, BLOCKCLEAR, &[S, STATE_SIZE]);
+    let m = &mut c.m;
+    m.w32(S + FORMAT_CB, DEFAULT_CB);
+    m.w32(S + OVERWRITE_CB, DEFAULT_CB);
+    m.w32(S + PENDING, 0);
+    m.w32(S + 56, arg);
+    m.w32(S + WAIT_CB2, WAIT_CB);
+    m.w32(S + WAIT_CB1, WAIT_CB);
+    call_addr(c, MC_INIT, &[1]);
+    for card in 1..=CARD_COUNT {
+        call(c, TIMED_WAIT, &[10]);
+        init_card(c, card);
+    }
+    call(c, ADD_TIMER, &[TIMER_SUB]);
+    call_addr(c, MC_START, &[]);
+}
+
 pub fn abi_init(c: &mut Cpu) {
-    let arg = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[1], r.0[0]) = (arg, S);
-        r.call_leaving(c, BLOCKCLEAR, &[S, 6108], 0x8004_f8f0);
-        let m = &mut c.m;
-        m.w32(S + 36, DEFAULT_CB);
-        m.w32(S + 32, DEFAULT_CB);
-        m.w32(S + 48, 0);
-        m.w32(S + 56, arg);
-        m.w32(S + 44, WAIT_CB);
-        m.w32(S + 40, WAIT_CB);
-        r.call_ptr_leaving(c, MC_INIT, &[1], 0x8004_f920);
-        for card in 1..9 {
-            r.0[0] = card;
-            r.call_leaving(c, TIMED_WAIT, &[10], 0x8004_f92c);
-            port(c, &r, 0x8004_f968, 0x8004_f934, &[card], abi_init_card);
-        }
-        r.0[0] = 9;
-        r.call_leaving(c, ADD_TIMER, &[TIMER_SUB], 0x8004_f94c);
-        r.call_ptr_leaving(c, MC_START, &[], 0x8004_f954);
-    })
+    init(c, c.r[4]);
 }
 
 /// `iMCRD_InitCard` (MEMCARD.C, 0x8004f968): card `card` unknown (-1), its event none, 15
 /// blocks free, its directory cleared. 0, or -1 for no card.
+pub fn init_card(c: &mut Cpu, card: u32) -> u32 {
+    let at = getcard(&mut c.m, card);
+    if at == 0 {
+        return u32::MAX;
+    }
+    let m = &mut c.m;
+    m.w32(at + CARD_STATE, NO_CARD);
+    m.w32(at + CARD_EVENT, 0);
+    m.w32(at + 8, 0);
+    m.w32(at + CARD_FREE, 15);
+    call(c, BLOCKCLEAR, &[at + DIRECTORY, 600]);
+    0
+}
+
 pub fn abi_init_card(c: &mut Cpu) {
-    let card = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let r = Saved::of(c);
-        let at = port(c, &r, 0x8005_072c, 0x8004_f978, &[card], abi_getcard);
-        if at == 0 {
-            c.r[2] = u32::MAX;
-            return;
-        }
-        let m = &mut c.m;
-        m.w32(at, u32::MAX);
-        m.w32(at + 4, 0);
-        m.w32(at + 8, 0);
-        m.w32(at + 12, 15);
-        r.call_leaving(c, BLOCKCLEAR, &[at + 16, 600], 0x8004_f9ac);
-        c.r[2] = 0;
-    })
+    c.r[2] = init_card(c, c.r[4]);
 }
 
 /// `MCRD_restore` (MEMCARD.C, 0x8004f9c0): the timer removed, the library synced, stopped and
 /// ended.
+pub fn restore(c: &mut Cpu) {
+    call(c, DEL_TIMER, &[TIMER_SUB]);
+    call_addr(c, MC_SYNC, &[0, 0, 0]);
+    call_addr(c, MC_STOP, &[]);
+    call_addr(c, MC_END, &[]);
+}
+
 pub fn abi_restore(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| {
-        let r = Saved::of(c);
-        r.call_leaving(c, DEL_TIMER, &[TIMER_SUB], 0x8004_f9d4);
-        r.call_ptr_leaving(c, MC_SYNC, &[0, 0, 0], 0x8004_f9e4);
-        r.call_ptr_leaving(c, MC_STOP, &[], 0x8004_f9ec);
-        r.call_ptr_leaving(c, MC_END, &[], 0x8004_f9f4);
-    })
+    restore(c);
 }
 
 /// Eight bytes copied (the original's unaligned word pair).
-fn copy8(m: &mut ps1rt::Mem, from: u32, to: u32) {
+fn copy8(m: &mut Mem, from: u32, to: u32) {
     let v: Vec<u8> = (0..8).map(|k| m.r8(from + k)).collect();
     for (k, b) in v.into_iter().enumerate() {
         m.w8(to + k as u32, b);
     }
 }
 
+/// The options' callbacks and their places in the state (`MCRD_OPTS` +20.. against `S` +32..,
+/// and +8 against +20).
+const OPTION_WORDS: [(u32, u32); 5] = [(20, 32), (24, 36), (28, 40), (32, 44), (8, 20)];
+
 /// `MCRD_getopts` (MEMCARD.C, 0x8004fa04): the options into `o` (the region, no prefix, the
 /// callbacks, +8, the 8 bytes at +12).
-pub fn abi_getopts(c: &mut Cpu) {
-    let o = c.r[4];
-    let m = &mut c.m;
-    let region = m.r32(S);
+pub fn getopts(m: &mut Mem, o: u32) {
+    let region = m.r32(S + REGION);
     m.w32(o + 4, 0);
     m.w32(o, region);
-    for (to, from) in [(20, 32), (24, 36), (28, 40), (32, 44), (8, 20)] {
+    for (to, from) in OPTION_WORDS {
         let v = m.r32(S + from);
         m.w32(o + to, v);
     }
     copy8(m, S + 24, o + 12);
 }
 
+pub fn abi_getopts(c: &mut Cpu) {
+    getopts(&mut c.m, c.r[4]);
+}
+
 /// `MCRD_setopts` (MEMCARD.C, 0x8004fa7c): the options from `o`: with a prefix, `B` and the
 /// region's letter (`I` 1, `E` 2, else `A`) and the prefix (10 letters), and the region; else
 /// none; the callbacks, +20, the 8 bytes at +24.
-pub fn abi_setopts(c: &mut Cpu) {
-    let o = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = o;
-        if c.m.r32(o + 4) != 0 {
-            let m = &mut c.m;
-            m.w8(S + 4, 66);
-            let letter = match m.r32(o) {
-                1 => 73,
-                2 => 69,
-                _ => 65,
-            };
-            m.w8(S + 5, letter);
-            r.0[0] = S + 6;
-            let prefix = m.r32(o + 4);
-            r.call_leaving(c, STRNCPY, &[S + 6, prefix, 10], 0x8004_fb0c);
-            let m = &mut c.m;
-            m.w8(S + 16, 0);
-            let region = m.r32(o);
-            m.w32(S, region);
-        } else {
-            c.m.w8(S + 4, 0);
-            c.m.w32(S, 0);
-        }
+pub fn setopts(c: &mut Cpu, o: u32) {
+    if c.m.r32(o + 4) != 0 {
         let m = &mut c.m;
-        for (from, to) in [(20, 32), (24, 36), (28, 40), (32, 44), (8, 20)] {
-            let v = m.r32(o + from);
-            m.w32(S + to, v);
-        }
-        copy8(m, o + 12, S + 24);
-    })
+        m.w8(S + PREFIX, b'B');
+        let letter = match m.r32(o) {
+            1 => b'I',
+            2 => b'E',
+            _ => b'A',
+        };
+        m.w8(S + PREFIX + 1, letter);
+        let prefix = m.r32(o + 4);
+        call(c, STRNCPY, &[S + PREFIX + 2, prefix, 10]);
+        let m = &mut c.m;
+        m.w8(S + PREFIX + 12, 0);
+        let region = m.r32(o);
+        m.w32(S + REGION, region);
+    } else {
+        c.m.w8(S + PREFIX, 0);
+        c.m.w32(S + REGION, 0);
+    }
+    let m = &mut c.m;
+    for (from, to) in OPTION_WORDS {
+        let v = m.r32(o + from);
+        m.w32(S + to, v);
+    }
+    copy8(m, o + 12, S + 24);
+}
+
+pub fn abi_setopts(c: &mut Cpu) {
+    setopts(c, c.r[4]);
+}
+
+/// The request's file name: the prefix (unless `bare`) and `name`.
+fn request_name(c: &mut Cpu, name: u32, bare: bool) {
+    if !bare {
+        call(c, STRCPY, &[R + R_NAME, S + PREFIX]);
+    }
+    call(c, STRCAT, &[R + R_NAME, name]);
 }
 
 /// `MCRD_loadfile` (MEMCARD.C, 0x8004fba0): a read of `info`'s file (+0 its name, the prefix
 /// first unless `bare`) from card `card` asked for: the title, the data and the icons'
 /// destinations noted, the frames' and blocks' bytes pointed to; the read pending.
-pub fn abi_loadfile(c: &mut Cpu) {
-    let (card, info, bare) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[4], r.0[1], r.0[0], r.0[3]) = (card, info, bare, 0x8005_0000, R);
-        r.call_leaving(c, BLOCKCLEAR, &[R, 572], 0x8004_fbdc);
-        c.m.w32(R, card);
-        if bare == 0 {
-            r.call_leaving(c, STRCPY, &[R + 4, S + 4], 0x8004_fbf0);
-        }
-        let name = c.m.r32(info);
-        r.call_leaving(c, STRCAT, &[R + 4, name], 0x8004_fbfc);
-        let m = &mut c.m;
-        for (from, to) in [(4, 28), (8, 32), (12, 36), (24, 560), (28, 564), (32, 568), (20, 556)] {
-            let v = m.r32(info + from);
-            m.w32(R + to, v);
-        }
-        m.w32(info + 36, R + 46);
-        m.w32(info + 40, R + 47);
-        m.w32(S + 48, 3);
-        m.w32(S + 52, 0);
-    })
+pub fn loadfile(c: &mut Cpu, card: u32, info: u32, bare: bool) {
+    call(c, BLOCKCLEAR, &[R, R_SIZE]);
+    c.m.w32(R + R_CARD, card);
+    let name = c.m.r32(info);
+    if !bare {
+        call(c, STRCPY, &[R + R_NAME, S + PREFIX]);
+    }
+    call(c, STRCAT, &[R + R_NAME, name]);
+    let m = &mut c.m;
+    for (from, to) in [(4, R_TITLE), (8, R_DATA_SIZE), (12, R_OFFSET), (24, R_ICONS), (28, R_ICONS + 4), (32, R_ICONS + 8), (20, R_DATA)] {
+        let v = m.r32(info + from);
+        m.w32(R + to, v);
+    }
+    m.w32(info + 36, R + HEADER_FRAMES);
+    m.w32(info + 40, R + HEADER_BLOCKS);
+    m.w32(S + PENDING, PENDING_READ);
+    m.w32(S + DONE, 0);
 }
 
-/// Waits for the library's operation (`MemCardSync` with `mode`), calling `wait` (the state's
-/// wait callback, with a0 3) and a vertical blank between tries when given. The result.
-fn sync(c: &mut Cpu, r: &Saved, sp: u32, mode: u32, ra: u32, wait: Option<(u32, u32)>) -> u32 {
-    loop {
-        if r.call_ptr_leaving(c, MC_SYNC, &[mode, sp + 24, sp + 28], ra) != 0 {
-            return c.m.r32(sp + 28);
+pub fn abi_loadfile(c: &mut Cpu) {
+    loadfile(c, c.r[4], c.r[5], c.r[6] != 0);
+}
+
+/// Waits for the library's operation (`MemCardSync` with `mode`), calling the state's wait
+/// callback (with 3) and a vertical blank between tries when `wait`. The result.
+fn sync(c: &mut Cpu, mode: u32, wait: bool) -> u32 {
+    with_buffer(c, 8, |c, out| loop {
+        if call_addr(c, MC_SYNC, &[mode, out, out + 4]) != 0 {
+            return c.m.r32(out + 4);
         }
-        if let Some((wait_ra, vsync_ra)) = wait {
-            let cb = c.m.r32(S + 40);
-            r.call_ptr_leaving(c, cb, &[3], wait_ra);
-            r.call_ptr_leaving(c, VSYNC, &[0], vsync_ra);
+        if wait {
+            let cb = c.m.r32(S + WAIT_CB1);
+            call_addr(c, cb, &[3]);
+            call_addr(c, VSYNC, &[0]);
         }
-    }
+    })
 }
 
 /// `iMCRD_DoFileLoad` (MEMCARD.C, 0x8004fc8c): the pending read done on card `card`: the
 /// header (title or icons wanted) read and checked, the title back in ASCII, each icon made a
 /// shape (its CLUT and 16x16 picture, then its palette); the data read. 15 done, 16 a read
 /// refused, or the error's code.
-pub fn abi_do_file_load(c: &mut Cpu) {
-    let card = c.r[4];
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[7]) = (R, card);
-        let m = &mut c.m;
-        if m.r32(R + 28) != 0 || m.r32(R + 560) != 0 {
-            r.0[0] = S;
-            c.m.w32(sp + 16, 512);
-            let port_id = c.m.r32(S + 60);
-            let v = r.call_ptr_leaving(c, MC_READ, &[port_id, R + 4, R + 44, 0, 512], 0x8004_fd00);
-            c.m.w32(sp + 28, v);
-            let result = sync(c, &r, sp, 1, 0x8004_fd14, Some((0x8004_fd2c, 0x8004_fd34)));
-            let e = port(c, &r, 0x8005_09b4, 0x8004_fd48, &[3, result, card], abi_handle_error);
-            if e != 0 {
-                c.r[2] = e;
-                return;
-            }
-            if c.m.r32(R + 28) != 0 {
-                let mut k = 0u32;
-                loop {
-                    r.0[0] = R + 2 * k;
-                    r.0[1] = k;
-                    let code = c.m.r16(R + 48 + 2 * k) as i16 as i32 as u32;
-                    let v = port(c, &r, 0x8005_0cf8, 0x8004_fd70, &[code], abi_sjis2ascii);
-                    let title = c.m.r32(R + 28);
-                    c.m.w8(title.wrapping_add(k), v as u8);
-                    if v & 0xFF == 0 {
-                        break;
-                    }
-                    k += 1;
-                }
-            }
-            (r.0[1], r.0[6], r.0[4], r.0[3], r.0[5]) = (0, 1, 16, 0xF000_FFFF, 0xFFFF_F000);
-            for k in 0..3u32 {
-                let mut shape = c.m.r32(R + 560 + 4 * k);
-                r.0[0] = shape;
-                if shape == 0 {
+pub fn do_file_load(c: &mut Cpu, card: u32) -> u32 {
+    let m = &mut c.m;
+    if m.r32(R + R_TITLE) != 0 || m.r32(R + R_ICONS) != 0 {
+        let port = card_port(&mut c.m);
+        call_addr(c, MC_READ, &[port, R + R_NAME, R + HEADER, 0, HEADER_SIZE]);
+        let result = sync(c, 1, true);
+        let e = handle_error(c, OP_READ, result, card);
+        if e != 0 {
+            return e;
+        }
+        // the title back in ASCII
+        if c.m.r32(R + R_TITLE) != 0 {
+            let mut k = 0u32;
+            loop {
+                let code = c.m.r16(R + HEADER_TITLE + 2 * k) as i16 as i32 as u32;
+                let v = sjis2ascii(&mut c.m, code);
+                let title = c.m.r32(R + R_TITLE);
+                c.m.w8(title.wrapping_add(k), v as u8);
+                if v & 0xFF == 0 {
                     break;
                 }
-                let icon = [R + 172, R + 300, R + 428][k as usize];
-                r.call_leaving(c, BLOCKMOVE, &[icon, shape + 16, 128], 0x8004_fdec);
-                let v = r.call_leaving(c, ICON_CLUT, &[4], 0x8004_fdf4);
-                let m = &mut c.m;
-                m.w8(shape, v as u8);
-                let head = (v & 0xFF) | 0x9000;
-                let place = m.r32(shape + 12);
-                m.w32(shape, head);
-                m.w16(shape + 6, 16);
-                m.w16(shape + 4, 16);
-                m.w16(shape + 10, 0);
-                m.w16(shape + 8, 0);
-                m.w32(shape + 12, place & 0xF000_FFFF & 0xFFFF_F000);
-                shape = shape.wrapping_add((head as i32 >> 8) as u32);
-                r.0[0] = shape;
-                r.call_leaving(c, BLOCKMOVE, &[R + 140, shape + 16, 32], 0x8004_fe3c);
-                let v = r.call_leaving(c, ICON_TPAGE, &[16], 0x8004_fe44);
-                let m = &mut c.m;
-                m.w8(shape, v as u8);
-                let place = m.r32(shape + 12);
-                r.0[1] = k + 1;
-                m.w16(shape + 4, 16);
-                m.w16(shape + 6, 1);
-                m.w16(shape + 10, 0);
-                m.w16(shape + 8, 0);
-                m.w32(shape, v & 0xFF);
-                m.w32(shape + 12, place & 0xF000_FFFF & 0xFFFF_F000);
+                k += 1;
             }
         }
-        let size = c.m.r32(R + 32);
-        if size != 0 {
-            r.0[0] = S;
+        // each icon a 16-colour shape of 16 by 16 and its palette after it
+        for k in 0..3u32 {
+            let shape = c.m.r32(R + R_ICONS + 4 * k);
+            if shape == 0 {
+                break;
+            }
+            call(c, BLOCKMOVE, &[R + HEADER_ICONS + 128 * k, shape + 16, 128]);
+            let v = call(c, ICON_CLUT, &[4]);
             let m = &mut c.m;
-            let (port_id, data, offset) = (m.r32(S + 60), m.r32(R + 556), m.r32(R + 36).wrapping_add(512));
-            m.w32(sp + 16, size);
-            let v = r.call_ptr_leaving(c, MC_READ, &[port_id, R + 4, data, offset, size], 0x8004_feb0);
-            c.m.w32(sp + 28, v);
-            if v == 0 {
-                c.m.w32(S + 52, 1);
-                c.r[2] = 16;
-                return;
-            }
-            let result = sync(c, &r, sp, 0, 0x8004_fed8, None);
-            let e = port(c, &r, 0x8005_09b4, 0x8004_fef0, &[3, result, card], abi_handle_error);
-            if e != 0 {
-                c.r[2] = e;
-                return;
-            }
+            m.w8(shape, v as u8);
+            let head = (v & 0xFF) | 0x9000;
+            let place = m.r32(shape + 12);
+            m.w32(shape, head);
+            m.w16(shape + 6, 16);
+            m.w16(shape + 4, 16);
+            m.w16(shape + 10, 0);
+            m.w16(shape + 8, 0);
+            m.w32(shape + 12, place & 0xF000_F000);
+            let palette = shape.wrapping_add((head as i32 >> 8) as u32);
+            call(c, BLOCKMOVE, &[R + HEADER_CLUT, palette + 16, 32]);
+            let v = call(c, ICON_TPAGE, &[16]);
+            let m = &mut c.m;
+            m.w8(palette, v as u8);
+            let place = m.r32(palette + 12);
+            m.w16(palette + 4, 16);
+            m.w16(palette + 6, 1);
+            m.w16(palette + 10, 0);
+            m.w16(palette + 8, 0);
+            m.w32(palette, v & 0xFF);
+            m.w32(palette + 12, place & 0xF000_F000);
         }
-        c.m.w32(S + 52, 1);
-        c.r[2] = 15;
-    })
+    }
+    let size = c.m.r32(R + R_DATA_SIZE);
+    if size != 0 {
+        let m = &mut c.m;
+        let (port, data, offset) = (card_port(m), m.r32(R + R_DATA), m.r32(R + R_OFFSET).wrapping_add(HEADER_SIZE));
+        if call_addr(c, MC_READ, &[port, R + R_NAME, data, offset, size]) == 0 {
+            c.m.w32(S + DONE, 1);
+            return 16;
+        }
+        let result = sync(c, 0, false);
+        let e = handle_error(c, OP_READ, result, card);
+        if e != 0 {
+            return e;
+        }
+    }
+    c.m.w32(S + DONE, 1);
+    15
+}
+
+pub fn abi_do_file_load(c: &mut Cpu) {
+    c.r[2] = do_file_load(c, c.r[4]);
 }
 
 /// `MCRD_savefile` (MEMCARD.C, 0x8004ff34): a write of `info` (+0 the name, +4 the title, +8
@@ -342,170 +388,130 @@ pub fn abi_do_file_load(c: &mut Cpu) {
 /// header, +20 the data, +24.. up to three icons) to card `card` asked for: the header made
 /// (`SC`, the icon's frames, the blocks, the title in Shift-JIS, the first icon's CLUT, the
 /// icons). 0, or -1 (a size not of whole frames, no icons, no title or one past 32 letters).
-pub fn abi_savefile(c: &mut Cpu) {
-    let (card, info) = (c.r[4], c.r[5]);
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[3], r.0[1]) = (card, info, 0x8005_0000);
-        r.0[4] = R;
-        c.r[2] = u32::MAX;
-        if c.m.r32(info + 8) & 0x7F != 0 {
-            return;
+pub fn savefile(c: &mut Cpu, card: u32, info: u32) -> u32 {
+    if c.m.r32(info + 8) & 0x7F != 0 {
+        return u32::MAX;
+    }
+    call(c, BLOCKCLEAR, &[R, R_SIZE]);
+    c.m.w8(R + HEADER, b'S');
+    c.m.w8(R + HEADER + 1, b'C');
+    let name = c.m.r32(info);
+    request_name(c, name, false);
+    let m = &mut c.m;
+    m.w32(R + R_CARD, card);
+    for (from, to) in [(8, R_DATA_SIZE), (16, R_FLAGS), (12, R_OFFSET), (20, R_DATA)] {
+        let v = m.r32(info + from);
+        m.w32(R + to, v);
+    }
+    if m.r32(info + 16) & NEW_FILE != 0 {
+        let icons = (0..3).filter(|k| m.r32(info + 24 + 4 * k) != 0).count() as u32;
+        if icons == 0 {
+            return u32::MAX;
         }
-        r.call_leaving(c, BLOCKCLEAR, &[R, 572], 0x8004_ff7c);
-        r.0[0] = R + 4;
-        c.m.w8(R + 44, 83);
-        c.m.w8(R + 45, 67);
-        r.call_leaving(c, STRCPY, &[R + 4, S + 4], 0x8004_ff9c);
-        let name = c.m.r32(info);
-        r.call_leaving(c, STRCAT, &[R + 4, name], 0x8004_ffa8);
-        let m = &mut c.m;
-        m.w32(R, card);
-        for (from, to) in [(8, 32), (16, 40), (12, 36), (20, 556)] {
-            let v = m.r32(info + from);
-            m.w32(R + to, v);
+        m.w8(R + HEADER_FRAMES, (icons + 16) as u8);
+        let size = m.r32(info + 8);
+        m.w8(R + HEADER_BLOCKS, blocks(size.wrapping_add(8192)) as u8);
+        let title = m.r32(info + 4);
+        if title == 0 || call(c, STRLEN, &[title]) == 0 {
+            return u32::MAX;
         }
-        r.0[0] = 0;
-        if m.r32(info + 16) & 0x200 != 0 {
-            let icons = (0..3).filter(|k| m.r32(info + 24 + 4 * k) != 0).count() as u32;
-            (r.0[2], r.0[0]) = (icons, 3);
-            c.r[2] = u32::MAX;
-            if icons == 0 {
-                return;
-            }
-            m.w8(R + 46, (icons + 16) as u8);
-            let size = m.r32(info + 8);
-            m.w8(R + 47, blocks(size.wrapping_add(8192)) as u8);
-            let title = m.r32(info + 4);
-            if title == 0 {
-                return;
-            }
-            if r.call_leaving(c, STRLEN, &[title], 0x8005_0064) == 0 {
-                c.r[2] = u32::MAX;
-                return;
-            }
+        let title = c.m.r32(info + 4);
+        if call(c, STRLEN, &[title]) >= 33 {
+            return u32::MAX;
+        }
+        // the title in Shift-JIS (to its end, 32 letters at most)
+        for k in 0..32u32 {
             let title = c.m.r32(info + 4);
-            r.0[0] = 0;
-            if r.call_leaving(c, STRLEN, &[title], 0x8005_0078) >= 33 {
-                c.r[2] = u32::MAX;
-                return;
-            }
-            r.0[1] = R;
-            let mut k = 0u32;
-            loop {
-                let title = c.m.r32(info + 4);
-                let ch = c.m.r8(title.wrapping_add(k)) as u32;
-                let v = port(c, &r, 0x8005_0bd8, 0x8005_00a8, &[ch], abi_ascii2sjis);
-                c.m.w16(R + 48 + 2 * k, v as u16);
-                if v & 0xFFFF == 0 {
-                    break;
-                }
-                k += 1;
-                r.0[0] = k;
-                r.0[1] = R + 2 * k;
-                if k >= 32 {
-                    break;
-                }
-            }
-            let first = c.m.r32(info + 24);
-            let clut = r.call_leaving(c, SHAPE_CLUT, &[first], 0x8005_00d4);
-            r.call_leaving(c, BLOCKMOVE, &[clut.wrapping_add(16), R + 140, 32], 0x8005_00e4);
-            let first = c.m.r32(info + 24);
-            r.call_leaving(c, BLOCKMOVE, &[first.wrapping_add(16), R + 172, 128], 0x8005_00f8);
-            if icons >= 2 {
-                let second = c.m.r32(info + 28);
-                r.call_leaving(c, BLOCKMOVE, &[second.wrapping_add(16), R + 300, 128], 0x8005_0118);
-                if icons == 3 {
-                    let third = c.m.r32(info + 32);
-                    r.call_leaving(c, BLOCKMOVE, &[third.wrapping_add(16), R + 428, 128], 0x8005_0138);
-                }
+            let ch = c.m.r8(title.wrapping_add(k)) as u32;
+            let v = ascii2sjis(&mut c.m, ch);
+            c.m.w16(R + HEADER_TITLE + 2 * k, v as u16);
+            if v & 0xFFFF == 0 {
+                break;
             }
         }
-        c.m.w32(S + 48, 2);
-        c.m.w32(S + 52, 0);
-        c.r[2] = 0;
-    })
+        let first = c.m.r32(info + 24);
+        let clut = call(c, SHAPE_CLUT, &[first]);
+        call(c, BLOCKMOVE, &[clut.wrapping_add(16), R + HEADER_CLUT, 32]);
+        for k in 0..icons {
+            let icon = c.m.r32(info + 24 + 4 * k);
+            call(c, BLOCKMOVE, &[icon.wrapping_add(16), R + HEADER_ICONS + 128 * k, 128]);
+        }
+    }
+    c.m.w32(S + PENDING, PENDING_WRITE);
+    c.m.w32(S + DONE, 0);
+    0
+}
+
+pub fn abi_savefile(c: &mut Cpu) {
+    c.r[2] = savefile(c, c.r[4], c.r[5]);
 }
 
 /// `iMCRD_DoFileWrite` (MEMCARD.C, 0x80050170): the pending write done on card `card`: a new
 /// file created and its header written first; then the data. 12 done, 13 a write refused, or
 /// the error's code.
-pub fn abi_do_file_write(c: &mut Cpu) {
-    let card = c.r[4];
-    abi::frame(c, 56, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[0], r.0[3]) = (R, card);
-        let refused = |c: &mut Cpu| {
-            c.m.w32(S + 52, 1);
-            c.r[2] = 13;
-        };
-        if c.m.r32(R + 40) & 0x200 != 0 {
-            (r.0[1], r.0[2]) = (S, R + 4);
-            let (port_id, blocks) = (c.m.r32(S + 60), c.m.r8(R + 47) as u32);
-            let v = r.call_ptr_leaving(c, MC_CREATE, &[port_id, R + 4, blocks], 0x8005_01bc);
-            c.m.w32(sp + 28, v);
-            let e = port(c, &r, 0x8005_09b4, 0x8005_01d0, &[2, v, card], abi_handle_error);
-            if e != 0 {
-                c.r[2] = e;
-                return;
-            }
-            r.call_leaving(c, TIMED_WAIT, &[64], 0x8005_01e0);
-            c.m.w32(sp + 16, 512);
-            let port_id = c.m.r32(S + 60);
-            let v = r.call_ptr_leaving(c, MC_WRITE, &[port_id, R + 4, R + 44, 0, 512], 0x8005_01fc);
-            c.m.w32(sp + 28, v);
-            if v == 0 {
-                refused(c);
-                return;
-            }
-            let result = sync(c, &r, sp, 0, 0x8005_0214, None);
-            let e = port(c, &r, 0x8005_09b4, 0x8005_022c, &[2, result, card], abi_handle_error);
-            if e != 0 {
-                c.r[2] = e;
-                return;
-            }
-        }
-        r.0[1] = S;
-        let m = &mut c.m;
-        let (port_id, data, offset, size) = (m.r32(S + 60), m.r32(R + 556), m.r32(R + 36).wrapping_add(512), m.r32(R + 32));
-        m.w32(sp + 16, size);
-        let v = r.call_ptr_leaving(c, MC_WRITE, &[port_id, R + 4, data, offset, size], 0x8005_025c);
-        c.m.w32(sp + 28, v);
-        if v == 0 {
-            refused(c);
-            return;
-        }
-        let result = sync(c, &r, sp, 0, 0x8005_0284, None);
-        let e = port(c, &r, 0x8005_09b4, 0x8005_029c, &[2, result, card], abi_handle_error);
+pub fn do_file_write(c: &mut Cpu, card: u32) -> u32 {
+    let refused = |c: &mut Cpu| {
+        c.m.w32(S + DONE, 1);
+        13
+    };
+    if c.m.r32(R + R_FLAGS) & NEW_FILE != 0 {
+        let (port, blocks) = (card_port(&mut c.m), c.m.r8(R + HEADER_BLOCKS) as u32);
+        let v = call_addr(c, MC_CREATE, &[port, R + R_NAME, blocks]);
+        let e = handle_error(c, OP_WRITE, v, card);
         if e != 0 {
-            c.r[2] = e;
-            return;
+            return e;
         }
-        c.m.w32(S + 52, 0);
-        c.m.w32(S + 48, 1);
-        c.r[2] = 12;
-    })
+        call(c, TIMED_WAIT, &[64]);
+        let port = card_port(&mut c.m);
+        if call_addr(c, MC_WRITE, &[port, R + R_NAME, R + HEADER, 0, HEADER_SIZE]) == 0 {
+            return refused(c);
+        }
+        let result = sync(c, 0, false);
+        let e = handle_error(c, OP_WRITE, result, card);
+        if e != 0 {
+            return e;
+        }
+    }
+    let m = &mut c.m;
+    let (port, data, offset, size) = (card_port(m), m.r32(R + R_DATA), m.r32(R + R_OFFSET).wrapping_add(HEADER_SIZE), m.r32(R + R_DATA_SIZE));
+    if call_addr(c, MC_WRITE, &[port, R + R_NAME, data, offset, size]) == 0 {
+        return refused(c);
+    }
+    let result = sync(c, 0, false);
+    let e = handle_error(c, OP_WRITE, result, card);
+    if e != 0 {
+        return e;
+    }
+    c.m.w32(S + DONE, 0);
+    c.m.w32(S + PENDING, PENDING_LOAD_CARD);
+    12
+}
+
+pub fn abi_do_file_write(c: &mut Cpu) {
+    c.r[2] = do_file_write(c, c.r[4]);
 }
 
 /// `iMCRD_DoFileDelete` (MEMCARD.C, 0x800502d4): the request's file deleted from card `card`:
 /// 17 (the card to be reloaded), or 18 when there's no such file (the card's event 19).
-pub fn abi_do_file_delete(c: &mut Cpu) {
-    let card = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[1], r.0[0]) = (card, 17, S);
-        let port_id = c.m.r32(S + 60);
-        let v = r.call_ptr_leaving(c, MC_DELETE, &[port_id, R + 4], 0x8005_0308);
-        c.r[2] = 17;
-        if v == 0 {
-            c.m.w32(S + 48, 1);
-        } else if v == 5 {
-            let at = port(c, &r, 0x8005_072c, 0x8005_0338, &[card], abi_getcard);
-            c.m.w32(at + 4, 19);
-            c.m.w32(S + 52, 1);
-            c.r[2] = 18;
+pub fn do_file_delete(c: &mut Cpu, card: u32) -> u32 {
+    let port = card_port(&mut c.m);
+    match call_addr(c, MC_DELETE, &[port, R + R_NAME]) {
+        0 => {
+            c.m.w32(S + PENDING, PENDING_LOAD_CARD);
+            17
         }
-    })
+        5 => {
+            let at = getcard(&mut c.m, card);
+            c.m.w32(at + CARD_EVENT, 19);
+            c.m.w32(S + DONE, 1);
+            18
+        }
+        _ => 17,
+    }
+}
+
+pub fn abi_do_file_delete(c: &mut Cpu) {
+    c.r[2] = do_file_delete(c, c.r[4]);
 }
 
 /// `MCRD_handlecardevents` (MEMCARD.C, 0x80050368): card `card`'s events: the library's last
@@ -513,231 +519,224 @@ pub fn abi_do_file_delete(c: &mut Cpu) {
 /// or, with none pending, the pending operation started for the request's card (a card's
 /// existence checked once its timer is out, its directory loaded, a write, a read, a delete).
 /// The event: 2..5 the card's state, 21 busy, 22 waiting, 23 nothing, or the operation's.
-pub fn abi_handlecardevents(c: &mut Cpu) {
-    let card = c.r[4];
-    abi::frame(c, 40, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[1], r.0[0]) = (card, 23);
-        let info = port(c, &r, 0x8005_072c, 0x8005_0388, &[card], abi_getcard);
-        r.0[2] = info;
-        let state = r.call_ptr_leaving(c, MC_SYNC, &[0, sp + 16, sp + 20], 0x8005_039c);
-        let timer = S + 64 + 4 * card.wrapping_sub(1);
-        let v = match state as i32 {
-            0 => 21,
-            1 => {
-                let (cmd, result) = (c.m.r32(sp + 16), c.m.r32(sp + 20));
-                match (cmd, result) {
-                    (1, 1) => {
-                        let now = c.m.r32(VSYNC_COUNT);
-                        c.m.w32(S + 52, 1);
-                        c.m.w32(timer, now);
-                        c.m.w32(info, u32::MAX);
-                        2
-                    }
-                    (1, 0) => {
-                        let now = c.m.r32(VSYNC_COUNT);
-                        c.m.w32(S + 52, 1);
-                        c.m.w32(timer, now);
-                        r.0[0] = 22;
-                        if c.m.r32(info) == u32::MAX {
-                            let port_id = c.m.r32(S + 60);
-                            r.call_ptr_leaving(c, MC_ACCEPT, &[port_id], 0x8005_045c);
-                        }
-                        22
-                    }
-                    (1, 2) => {
-                        c.m.w32(S + 52, 1);
-                        c.m.w32(info, (-4i32) as u32);
-                        3
-                    }
-                    (1, 3) => {
-                        let port_id = c.m.r32(S + 60);
-                        r.0[0] = 21;
-                        r.call_ptr_leaving(c, MC_ACCEPT, &[port_id], 0x8005_04bc);
-                        21
-                    }
-                    (1, _) => 23,
-                    (2, 0 | 3) => {
-                        c.m.w32(R, card);
-                        c.m.w32(S + 48, 1);
-                        4
-                    }
-                    (2, 1) => {
-                        r.0[0] = 4;
-                        port(c, &r, 0x8004_f968, 0x8005_0518, &[card], abi_init_card);
-                        c.m.w32(info, u32::MAX);
-                        2
-                    }
-                    (2, 2) => {
-                        r.0[0] = 4;
-                        port(c, &r, 0x8004_f968, 0x8005_0530, &[card], abi_init_card);
-                        3
-                    }
-                    (2, 4) => {
-                        c.m.w32(info, (-2i32) as u32);
-                        5
-                    }
-                    _ => 23,
-                }
+pub fn handlecardevents(c: &mut Cpu, card: u32) -> u32 {
+    let info = getcard(&mut c.m, card);
+    let (state, cmd, result) = with_buffer(c, 8, |c, out| {
+        let state = call_addr(c, MC_SYNC, &[0, out, out + 4]);
+        (state, c.m.r32(out), c.m.r32(out + 4))
+    });
+    let timer = S + TIMERS + 4 * card.wrapping_sub(1);
+    match state as i32 {
+        0 => 21,
+        1 => match (cmd, result) {
+            // a card checked: there, new, gone, unformatted
+            (1, 1) => {
+                let now = c.m.r32(VSYNC_COUNT);
+                c.m.w32(S + DONE, 1);
+                c.m.w32(timer, now);
+                c.m.w32(info + CARD_STATE, NO_CARD);
+                2
             }
-            -1 => {
-                let pending = c.m.r32(S + 48);
-                let start = |c: &mut Cpu, r: &Saved, f: fn(&mut Cpu), addr: u32, ra: u32| -> u32 {
-                    if card != c.m.r32(R) {
-                        return 23;
-                    }
-                    c.m.w32(info + 4, 0);
-                    c.m.w32(S + 52, 0);
-                    c.m.w32(S + 48, 0);
-                    port(c, r, addr, ra, &[card], f)
-                };
-                match pending {
-                    0 => {
-                        if (c.m.r32(timer) as i32) >= 0 {
-                            22
-                        } else {
-                            let port_id = c.m.r32(S + 60);
-                            c.m.w32(S + 52, 0);
-                            r.0[0] = 23;
-                            if r.call_ptr_leaving(c, MC_EXIST, &[port_id], 0x8005_05b0) == 0 { 23 } else { 21 }
-                        }
-                    }
-                    1 => start(c, &r, abi_load_card, 0x8005_082c, 0x8005_05f4),
-                    2 => start(c, &r, abi_do_file_write, 0x8005_0170, 0x8005_0628),
-                    3 => start(c, &r, abi_do_file_load, 0x8004_fc8c, 0x8005_065c),
-                    4 => start(c, &r, abi_do_file_delete, 0x8005_02d4, 0x8005_0690),
-                    _ => 23,
+            (1, 0) => {
+                let now = c.m.r32(VSYNC_COUNT);
+                c.m.w32(S + DONE, 1);
+                c.m.w32(timer, now);
+                if c.m.r32(info + CARD_STATE) == NO_CARD {
+                    let port = card_port(&mut c.m);
+                    call_addr(c, MC_ACCEPT, &[port]);
                 }
+                22
+            }
+            (1, 2) => {
+                c.m.w32(S + DONE, 1);
+                c.m.w32(info + CARD_STATE, BAD_CARD);
+                3
+            }
+            (1, 3) => {
+                let port = card_port(&mut c.m);
+                call_addr(c, MC_ACCEPT, &[port]);
+                21
+            }
+            (1, _) => 23,
+            // a card accepted: to be loaded, gone, bad, unformatted
+            (2, 0 | 3) => {
+                c.m.w32(R + R_CARD, card);
+                c.m.w32(S + PENDING, PENDING_LOAD_CARD);
+                4
+            }
+            (2, 1) => {
+                init_card(c, card);
+                c.m.w32(info + CARD_STATE, NO_CARD);
+                2
+            }
+            (2, 2) => {
+                init_card(c, card);
+                3
+            }
+            (2, 4) => {
+                c.m.w32(info + CARD_STATE, UNFORMATTED);
+                5
             }
             _ => 23,
-        };
-        c.r[2] = v;
-    })
+        },
+        -1 => {
+            let pending = c.m.r32(S + PENDING);
+            let start = |c: &mut Cpu, f: fn(&mut Cpu, u32) -> u32| -> u32 {
+                if card != c.m.r32(R + R_CARD) {
+                    return 23;
+                }
+                c.m.w32(info + CARD_EVENT, 0);
+                c.m.w32(S + DONE, 0);
+                c.m.w32(S + PENDING, 0);
+                f(c, card)
+            };
+            match pending {
+                0 => {
+                    if (c.m.r32(timer) as i32) >= 0 {
+                        22
+                    } else {
+                        let port = card_port(&mut c.m);
+                        c.m.w32(S + DONE, 0);
+                        if call_addr(c, MC_EXIST, &[port]) == 0 { 23 } else { 21 }
+                    }
+                }
+                PENDING_LOAD_CARD => start(c, load_card),
+                PENDING_WRITE => start(c, do_file_write),
+                PENDING_READ => start(c, do_file_load),
+                PENDING_DELETE => start(c, do_file_delete),
+                _ => 23,
+            }
+        }
+        _ => 23,
+    }
+}
+
+pub fn abi_handlecardevents(c: &mut Cpu) {
+    c.r[2] = handlecardevents(c, c.r[4]);
+}
+
+/// For callers not rewritten yet.
+pub(crate) fn handlecardevents_entry(c: &mut Cpu) {
+    abi_handlecardevents(c);
 }
 
 /// `MCRD_fileexists` (MEMCARD.C, 0x800506b4): the directory entry of card `card` named the
 /// prefix and `name`, or -1.
-pub fn abi_fileexists(c: &mut Cpu) {
-    let (card, name) = (c.r[4], c.r[5]);
-    abi::frame(c, 56, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = name;
-        let at = port(c, &r, 0x8005_072c, 0x8005_06cc, &[card], abi_getcard);
-        r.0[1] = at + 16;
-        r.call_leaving(c, STRCPY, &[sp + 16, S + 4], 0x8005_06e0);
-        r.call_leaving(c, STRCAT, &[sp + 16, name], 0x8005_06ec);
-        for k in 0..15u32 {
-            r.0[0] = k;
-            r.0[1] = at + 16 + 40 * k;
-            if r.call_leaving(c, STRCMP, &[at + 16 + 40 * k, sp + 16], 0x8005_06fc) == 0 {
-                c.r[2] = k;
-                return;
-            }
-        }
-        c.r[2] = u32::MAX;
+pub fn fileexists(c: &mut Cpu, card: u32, name: u32) -> u32 {
+    let at = getcard(&mut c.m, card);
+    with_buffer(c, 40, |c, full| {
+        call(c, STRCPY, &[full, S + PREFIX]);
+        call(c, STRCAT, &[full, name]);
+        (0..DIRECTORY_ENTRIES).find(|&k| call(c, STRCMP, &[at + DIRECTORY + ENTRY_SIZE * k, full]) == 0).unwrap_or(u32::MAX)
     })
 }
 
+pub fn abi_fileexists(c: &mut Cpu) {
+    c.r[2] = fileexists(c, c.r[4], c.r[5]);
+}
+
 /// `MCRD_getcard` (MEMCARD.C, 0x8005072c): card `card`'s record (1..8), its port noted.
+pub fn getcard(m: &mut Mem, card: u32) -> u32 {
+    let k = card.wrapping_sub(1);
+    m.w32(S + PORT, ((k & 4) << 2) | (k & 3));
+    k.wrapping_mul(CARD_SIZE).wrapping_add(CARDS)
+}
+
 pub fn abi_getcard(c: &mut Cpu) {
-    let k = c.r[4].wrapping_sub(1);
-    c.m.w32(S + 60, ((k & 4) << 2) | (k & 3));
-    (c.r[4], c.r[5], c.r[3]) = (k, S + 1180, k & 3);
-    c.r[2] = k.wrapping_mul(CARD_SIZE).wrapping_add(CARDS);
+    c.r[2] = getcard(&mut c.m, c.r[4]);
+}
+
+/// For callers not rewritten yet.
+pub(crate) fn getcard_entry(c: &mut Cpu) {
+    abi_getcard(c);
 }
 
 /// `iMCRD_timersub` (MEMCARD.C, 0x80050774): every card's timer counted down (the timer's
 /// handler).
-pub fn abi_timersub(c: &mut Cpu) {
-    for k in 0..8 {
-        let v = c.m.r32(S + 64 + 4 * k).wrapping_sub(1);
-        c.m.w32(S + 64 + 4 * k, v);
+pub fn timersub(m: &mut Mem) {
+    for k in 0..CARD_COUNT {
+        let v = m.r32(S + TIMERS + 4 * k).wrapping_sub(1);
+        m.w32(S + TIMERS + 4 * k, v);
     }
-    (c.r[4], c.r[3]) = (8, S + 32);
+}
+
+pub fn abi_timersub(c: &mut Cpu) {
+    timersub(&mut c.m);
+}
+
+/// Card `at`'s directory read from the library.
+fn read_directory(c: &mut Cpu, at: u32) -> u32 {
+    let port = card_port(&mut c.m);
+    call_addr(c, MC_DIRENTRY, &[port, ALL_FILES, at + DIRECTORY, at + 8, 0, DIRECTORY_ENTRIES])
 }
 
 /// `garyMemCardGrabBlocks` (MEMCARD.C, 0x800507a4): card `card`'s directory read, entry `k`'s
 /// size in blocks.
+pub fn grab_blocks(c: &mut Cpu, card: u32, k: u32) -> u32 {
+    let at = getcard(&mut c.m, card);
+    read_directory(c, at);
+    let entry = if (k as i32) > 0 { at + DIRECTORY + ENTRY_SIZE * k } else { at + DIRECTORY };
+    blocks(c.m.r32(entry + ENTRY_BYTES))
+}
+
 pub fn abi_grab_blocks(c: &mut Cpu) {
-    let (card, k) = (c.r[4], c.r[5]);
-    abi::frame(c, 40, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = k;
-        let at = port(c, &r, 0x8005_072c, 0x8005_07bc, &[card], abi_getcard);
-        r.0[0] = at + 16;
-        c.m.w32(sp + 16, 0);
-        c.m.w32(sp + 20, 15);
-        let port_id = c.m.r32(S + 60);
-        r.call_ptr_leaving(c, MC_DIRENTRY, &[port_id, ALL_FILES, at + 16, at + 8, 0, 15], 0x8005_07e8);
-        let entry = if (k as i32) > 0 { at + 16 + 40 * k } else { at + 16 };
-        c.r[2] = blocks(c.m.r32(entry + 24));
-    })
+    c.r[2] = grab_blocks(c, c.r[4], c.r[5]);
 }
 
 /// `iMCRD_LoadCard` (MEMCARD.C, 0x8005082c): card `card` set up and its directory read; its
 /// free blocks counted (none: -3, the card full). 9, 11 no card, or the error's code.
+pub fn load_card(c: &mut Cpu, card: u32) -> u32 {
+    let at = getcard(&mut c.m, card);
+    if init_card(c, card) != 0 {
+        return 11;
+    }
+    let v = read_directory(c, at);
+    let e = handle_error(c, OP_DIRECTORY, v, card);
+    if e != 0 {
+        return e;
+    }
+    let m = &mut c.m;
+    for k in 0..DIRECTORY_ENTRIES {
+        let entry = at + DIRECTORY + ENTRY_SIZE * k;
+        if m.r8(entry) != 0 {
+            let used = blocks(m.r32(entry + ENTRY_BYTES));
+            let free = m.r32(at + CARD_FREE).wrapping_sub(used);
+            m.w32(at + CARD_FREE, free);
+        }
+    }
+    let state = if m.r32(at + CARD_FREE) == 0 { FULL } else { 0 };
+    m.w32(at + CARD_STATE, state);
+    m.w32(S + DONE, 1);
+    9
+}
+
 pub fn abi_load_card(c: &mut Cpu) {
-    let card = c.r[4];
-    abi::frame(c, 40, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = card;
-        let at = port(c, &r, 0x8005_072c, 0x8005_0848, &[card], abi_getcard);
-        (r.0[1], r.0[0]) = (at, at + 16);
-        if port(c, &r, 0x8004_f968, 0x8005_0858, &[card], abi_init_card) != 0 {
-            c.r[2] = 11;
-            return;
-        }
-        c.m.w32(sp + 16, 0);
-        c.m.w32(sp + 20, 15);
-        let port_id = c.m.r32(S + 60);
-        let v = r.call_ptr_leaving(c, MC_DIRENTRY, &[port_id, ALL_FILES, at + 16, at + 8, 0, 15], 0x8005_0888);
-        let e = port(c, &r, 0x8005_09b4, 0x8005_0898, &[1, v, card], abi_handle_error);
-        if e != 0 {
-            c.r[2] = e;
-            return;
-        }
-        let m = &mut c.m;
-        for k in 0..15 {
-            let entry = at + 16 + 40 * k;
-            if m.r8(entry) != 0 {
-                let used = blocks(m.r32(entry + 24));
-                let free = m.r32(at + 12).wrapping_sub(used);
-                m.w32(at + 12, free);
-            }
-        }
-        let state = if m.r32(at + 12) == 0 { (-3i32) as u32 } else { 0 };
-        m.w32(at, state);
-        m.w32(S + 52, 1);
-        c.r[2] = 9;
-    })
+    c.r[2] = load_card(c, c.r[4]);
 }
 
 /// `iMCRD_FormatCard` (MEMCARD.C, 0x80050928): card `card` formatted: 15 blocks free, its
 /// state cleared. 0, or -1 (the library's 1 or 2: no card, a bad one).
+pub fn format_card(c: &mut Cpu, card: u32) -> u32 {
+    let at = getcard(&mut c.m, card);
+    let port = card_port(&mut c.m);
+    let result = match call_addr(c, MC_FORMAT, &[port]) as i32 {
+        1 => {
+            c.m.w32(at + CARD_STATE, NO_CARD);
+            u32::MAX
+        }
+        2 => {
+            c.m.w32(at + CARD_STATE, BAD_CARD);
+            u32::MAX
+        }
+        _ => 0,
+    };
+    c.m.w32(at + CARD_STATE, 0);
+    c.m.w32(at + CARD_FREE, 15);
+    result
+}
+
 pub fn abi_format_card(c: &mut Cpu) {
-    let card = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = 0;
-        let at = port(c, &r, 0x8005_072c, 0x8005_0940, &[card], abi_getcard);
-        r.0[0] = at;
-        let port_id = c.m.r32(S + 60);
-        let v = r.call_ptr_leaving(c, MC_FORMAT, &[port_id], 0x8005_0950);
-        let result = match v as i32 {
-            1 => {
-                c.m.w32(at, u32::MAX);
-                u32::MAX
-            }
-            2 => {
-                c.m.w32(at, (-4i32) as u32);
-                u32::MAX
-            }
-            _ => 0,
-        };
-        c.m.w32(at, 0);
-        c.m.w32(at + 12, 15);
-        c.r[2] = result;
-    })
+    c.r[2] = format_card(c, c.r[4]);
 }
 
 /// `iMCRD_HandleError` (MEMCARD.C, 0x800509b4): the library's error `err` of operation `op`
@@ -745,96 +744,79 @@ pub fn abi_format_card(c: &mut Cpu) {
 /// card, a new one accepted, unformatted: formatted when the format callback agrees, a full
 /// card, an existing file: deleted when the overwrite callback agrees). The operation's code
 /// (10, 13, 16) when it failed, 0 when fine; 6 formatted, 21 an old file deleted.
-pub fn abi_handle_error(c: &mut Cpu) {
-    let (op, err, card) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[0], r.0[2], r.0[3], r.0[4]) = (op, err, card, 0);
-        let at = port(c, &r, 0x8005_072c, 0x8005_09e8, &[card], abi_getcard);
-        r.0[1] = at;
-        let code = if err == 0 {
-            0
-        } else {
-            match op {
-                1 => 10,
-                2 => 13,
-                3 => 16,
-                _ => 0,
-            }
-        };
-        r.0[4] = code;
-        let event = |c: &mut Cpu, e: u32| {
-            c.m.w32(at + 4, e);
-            c.m.w32(S + 52, 1);
-            c.r[2] = code;
-        };
-        match err {
-            0 => c.r[2] = code,
-            1 => {
-                c.m.w32(at, u32::MAX);
-                event(c, 2);
-            }
-            2 => {
-                c.m.w32(at, (-4i32) as u32);
-                event(c, 3);
-            }
-            3 => {
-                r.0[0] = S;
-                let port_id = c.m.r32(S + 60);
-                if r.call_ptr_leaving(c, MC_ACCEPT, &[port_id], 0x8005_0a98) == 0 {
-                    event(c, 23);
-                } else {
-                    c.m.w32(S + 48, 1);
-                    c.m.w32(S + 52, 0);
-                    c.r[2] = code;
-                }
-            }
-            4 => {
-                if op != 2 {
-                    c.m.w32(at, (-2i32) as u32);
-                    event(c, 5);
-                    return;
-                }
-                let cb = c.m.r32(S + 32);
-                if r.call_ptr_leaving(c, cb, &[], 0x8005_0ad4) == 0 {
-                    c.m.w32(at, (-2i32) as u32);
-                    event(c, 5);
-                    return;
-                }
-                (r.0[0], r.0[2]) = (0, u32::MAX);
-                let mut v = u32::MAX;
-                for k in 0..3 {
-                    v = port(c, &r, 0x8005_0928, 0x8005_0ae8, &[card], abi_format_card);
-                    r.0[0] = k + 1;
-                    if v != u32::MAX {
-                        break;
-                    }
-                }
-                if v == u32::MAX {
-                    c.m.w32(at, (-2i32) as u32);
-                    event(c, 7);
-                } else {
-                    c.m.w32(S + 48, 2);
-                    c.r[2] = 6;
-                }
-            }
-            5 => event(c, 19),
-            6 => {
-                r.0[0] = S;
-                let cb = c.m.r32(S + 36);
-                if r.call_ptr_leaving(c, cb, &[], 0x8005_0b5c) == 0 {
-                    event(c, 14);
-                } else {
-                    let port_id = c.m.r32(S + 60);
-                    r.call_ptr_leaving(c, MC_DELETE, &[port_id, R + 4], 0x8005_0b70);
-                    c.m.w32(S + 48, 2);
-                    c.r[2] = 21;
-                }
-            }
-            7 => event(c, 20),
-            _ => event(c, 23),
+pub fn handle_error(c: &mut Cpu, op: u32, err: u32, card: u32) -> u32 {
+    let at = getcard(&mut c.m, card);
+    let code = if err == 0 {
+        0
+    } else {
+        match op {
+            OP_DIRECTORY => 10,
+            OP_WRITE => 13,
+            OP_READ => 16,
+            _ => 0,
         }
-    })
+    };
+    let event = |c: &mut Cpu, e: u32| {
+        c.m.w32(at + CARD_EVENT, e);
+        c.m.w32(S + DONE, 1);
+        code
+    };
+    match err {
+        0 => code,
+        1 => {
+            c.m.w32(at + CARD_STATE, NO_CARD);
+            event(c, 2)
+        }
+        2 => {
+            c.m.w32(at + CARD_STATE, BAD_CARD);
+            event(c, 3)
+        }
+        3 => {
+            let port = card_port(&mut c.m);
+            if call_addr(c, MC_ACCEPT, &[port]) == 0 {
+                event(c, 23)
+            } else {
+                c.m.w32(S + PENDING, PENDING_LOAD_CARD);
+                c.m.w32(S + DONE, 0);
+                code
+            }
+        }
+        4 => {
+            // unformatted: formatted for a write when the callback agrees (three tries)
+            let cb = c.m.r32(S + FORMAT_CB);
+            if op != OP_WRITE || call_addr(c, cb, &[]) == 0 {
+                c.m.w32(at + CARD_STATE, UNFORMATTED);
+                return event(c, 5);
+            }
+            let formatted = (0..3).any(|_| format_card(c, card) != u32::MAX);
+            if formatted {
+                c.m.w32(S + PENDING, PENDING_WRITE);
+                6
+            } else {
+                c.m.w32(at + CARD_STATE, UNFORMATTED);
+                event(c, 7)
+            }
+        }
+        5 => event(c, 19),
+        6 => {
+            // the file there: deleted (and the write again) when the callback agrees
+            let cb = c.m.r32(S + OVERWRITE_CB);
+            if call_addr(c, cb, &[]) == 0 {
+                event(c, 14)
+            } else {
+                let port = card_port(&mut c.m);
+                call_addr(c, MC_DELETE, &[port, R + R_NAME]);
+                c.m.w32(S + PENDING, PENDING_WRITE);
+                21
+            }
+        }
+        7 => event(c, 20),
+        _ => event(c, 23),
+    }
+}
+
+pub fn abi_handle_error(c: &mut Cpu) {
+    c.r[2] = handle_error(c, c.r[4], c.r[5], c.r[6]);
 }
 
 /// `iMCRD_DefaultCBProc1` (MEMCARD.C, 0x80050bd0): yes.
@@ -849,9 +831,9 @@ fn swapped(v: u32) -> u32 {
 
 /// `ascii2sjis` (MEMCARD.C, 0x80050bd8): ASCII `ch` in Shift-JIS (full width: punctuation from
 /// a table, digits and letters from their ranges), its bytes swapped; 0 for others.
-pub fn abi_ascii2sjis(c: &mut Cpu) {
-    let ch = c.r[4];
+pub fn ascii2sjis(m: &mut Mem, ch: u32) -> u32 {
     let b = |v: u32| v & 0xFF;
+    // (a range of the ranges' table, or a place in the punctuation's)
     let (range, punctuation) = if b(ch.wrapping_sub(32)) < 16 {
         (0, 1)
     } else if b(ch.wrapping_sub(48)) < 10 {
@@ -867,27 +849,26 @@ pub fn abi_ascii2sjis(c: &mut Cpu) {
     } else if b(ch.wrapping_sub(123)) < 4 {
         (0, 63)
     } else {
-        c.r[2] = 0;
-        return;
+        return 0;
     };
-    let m = &mut c.m;
     let code = if punctuation != 0 {
-        let at = (b(ch).wrapping_sub(punctuation + 31) << 1).wrapping_add(SJIS_PUNCTUATION);
-        m.r16(at) as u32
+        m.r16((b(ch).wrapping_sub(punctuation + 31) << 1).wrapping_add(SJIS_PUNCTUATION)) as u32
     } else {
         let at = SJIS_RANGES + (range << 2);
         (m.r16(at) as u32).wrapping_add(b(ch)).wrapping_sub(m.r16(at + 2) as u32)
     };
-    c.r[2] = swapped(code);
+    swapped(code)
+}
+
+pub fn abi_ascii2sjis(c: &mut Cpu) {
+    c.r[2] = ascii2sjis(&mut c.m, c.r[4]);
 }
 
 /// `sjis2ascii` (MEMCARD.C, 0x80050cf8): a header's Shift-JIS code (bytes swapped) in ASCII:
 /// punctuation (0x81) from a table, digits and letters (0x82) from their ranges; 0 for others.
-pub fn abi_sjis2ascii(c: &mut Cpu) {
-    let code = c.r[4];
+pub fn sjis2ascii(m: &mut Mem, code: u32) -> u32 {
     let low = ((code << 16) as i32 >> 24) as u32;
-    let m = &mut c.m;
-    c.r[2] = match code & 0xFF {
+    match code & 0xFF {
         0x81 => m.r8((low & 0xFF).wrapping_add(ASCII_PUNCTUATION).wrapping_sub(64)) as u32,
         0x82 => {
             let range = if low.wrapping_sub(79) < 10 {
@@ -904,24 +885,18 @@ pub fn abi_sjis2ascii(c: &mut Cpu) {
             to.wrapping_add(low.wrapping_sub(from)) & 0xFF
         }
         _ => 0,
-    };
+    }
 }
 
-/// `MCRD_handlecardevents` and `MCRD_getcard` entered as the original's callers `jal` them.
-pub(crate) fn handlecardevents_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8005_0368, None, &[]);
-    abi_handlecardevents(c);
-}
-
-pub(crate) fn getcard_entry(c: &mut Cpu) {
-    abi_getcard(c);
+pub fn abi_sjis2ascii(c: &mut Cpu) {
+    c.r[2] = sjis2ascii(&mut c.m, c.r[4]);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::femenu::tests::{ADDR, Case, pick, via_abi};
-    use crate::test_util::{CARD_ANSWERS, Rng, against_original_in, fe_ram};
+    use crate::test_util::{CARD_ANSWERS, DIRECTORY as ANSWER_DIRECTORY, DIRECTORY_MARK, Rng, against_original_in, fe_ram};
 
     /// A request's info, options, a name, buffers for the title and three icons, three icon
     /// shapes (a picture and a palette after it).
@@ -991,6 +966,13 @@ mod tests {
                 put(m, entry, name);
                 m.w32(entry + 24, [0, 8192, 8191, 16384, 0x6000, pick(rng, 0x20000)][pick(rng, 6) as usize]);
             }
+        }
+        // the directory the card answers with (now and then none): names or none, sizes
+        m.w32(ANSWER_DIRECTORY, if pick(rng, 4) == 0 { 0 } else { DIRECTORY_MARK });
+        for e in 0..15 {
+            let entry = ANSWER_DIRECTORY + 4 + 40 * e;
+            m.w8(entry, [0, b'B', b'X'][pick(rng, 3) as usize]);
+            m.w32(entry + 24, [0, 8192, 8191, 16384, 0x6000, pick(rng, 0x20000)][pick(rng, 6) as usize]);
         }
         put(m, NAME, [&b"NFS4"[..], b"NFS4P", b"X"][pick(rng, 3) as usize]);
         let title: &[u8] = [&b"Need for Speed"[..], b"", b"a{|}~ !09AZaz[`", b"0123456789012345678901234567890123"][pick(rng, 4) as usize];
