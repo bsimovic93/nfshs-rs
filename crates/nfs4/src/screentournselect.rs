@@ -1,26 +1,24 @@
-//! SCREENTOURNSELECT.CPP: the tournament select's screen (`tScreenTournSelect`): the money, the
-//! entry fee and the three prizes; the chosen tournament's name and description; its trophy over
-//! four TVs (swapped in when the tournament changes, the TVs turned off and on again one by one);
-//! the tournaments' video across eight more; the lines and the turning trophy.
+//! SCREENTOURNSELECT.CPP: the tournament select's screen (`tScreenTournSelect`). It shows the
+//! money, the entry fee and the three prizes; the chosen tournament's name and description; its
+//! trophy over four TVs (swapped in when the tournament changes, the TVs turned off and on again
+//! one by one); the tournaments' video across eight more; and the lines and the turning trophy.
 //!
-//! The videos, `ClearImage`, `DrawSync`, `DrawTV`, `DrawTVLines` and the squares are the
-//! host's (called by address).
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`. The videos,
+//! `ClearImage`, `DrawSync`, `DrawTV`, `DrawTVLines` and the squares are the host's (called by
+//! address).
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr, with_buffer};
 use crate::femenuextended::{SET_ABR_MODE, SPRINTF, TEXT_WORD};
 use crate::globals::{FRONT_END, GAME_TICKS, PATHS, SONGS_SCREEN, TOURNAMENT_MANAGER};
-use crate::{fefades, felines, fescreen, fetextrender, fetourn, fetv, screenpost};
+use crate::types::{DrawShapeExtended, RECT, Screen, TVConfig};
+use crate::{fefades, fescreen, fetextrender, fetourn};
 use ps1rt::{Cpu, Mem};
 
-// The screen: a `tScreen` (+0 its permanent shapes' table, +40 its swapped ones (the trophy's):
-// +40 their table, +44 the file read; +92 its fade), then +100 the video, +104 its frames shown,
-// +108 the video's 8 TVs and +492 the trophy's 4 (FETV's, 48 bytes each), +684 and +686 the
-// movies (cleared), +692 the tick the trophy's TVs last turned, +696 turning on (1), off (-1) or
-// not, +698 the trophy swapped in, +700 cleared when a trophy is asked for, +704 the description's
-// top (-1: to measure), +708 its text.
-const SWAP_TABLE: u32 = 40;
-const SWAP_DATA: u32 = 44;
-const FADE: u32 = 92;
+/// The screen: a `tScreen` (its swapped shapes the trophy's), then +100 the video, +104 its
+/// frames shown, +108 the video's 8 TVs and +492 the trophy's 4 (`tTVConfig`s, 48 bytes each),
+/// +684 and +686 the movies (cleared), +692 the tick the trophy's TVs last turned, +696 turning
+/// on (1), off (-1) or not, +698 the trophy swapped in, +700 cleared when a trophy is asked
+/// for, +704 the description's top (-1: to measure), +708 its text.
 const VIDEO: u32 = 100;
 const FRAMES: u32 = 104;
 const VIDEO_TVS: u32 = 108;
@@ -33,10 +31,10 @@ const TROPHY: u32 = 698;
 const TVS_SET: u32 = 700;
 const TEXT_TOP: u32 = 704;
 const TEXT_ID: u32 = 708;
-
-// A TV (FETV's): +0 its state (0 off, 1 on), +4 and +6 its brightnesses, +8 its flags, +16 its
-// colour, +20 its place and size, +28 its texture's corner and size, +34 its CLUT, +36 its page.
-const TV_SIZE: u32 = 48;
+/// A TV's state on; the trophy's TVs' flags (added), the video's.
+const TV_ON: i32 = 1;
+const TROPHY_TV_FLAGS: u16 = 0x30;
+const VIDEO_TV_FLAGS: u16 = 34;
 
 /// The front end's tier and its kind's tournament for a tier or none (`frontEnd + 0x122`,
 /// `+0x121`, `+0x120`); the main screen's number (`+0x340`).
@@ -55,14 +53,34 @@ const ENTRY_FEE: u32 = 48;
 /// In the menus' block: the tournaments' iterators (a tier's, the others').
 const TIER_ITERATOR: u32 = 1932;
 const ITERATOR: u32 = 1704;
-/// The screen's vtable; the trophy's file's name; "ztourn", "%szzzTRN.dct"; the videos'
-/// directory; the order the trophy's TVs turn in.
+/// The screen's vtable; the trophy's file's name; "ztourn" (64 shapes; the trophy's 32),
+/// "%szzzTRN.dct"; the videos' directory; the order the trophy's TVs turn in.
 const TOURN_SELECT_VT: u32 = 0x8001_1D60;
 const TROPHY_NAME: u32 = 0x8005_3120;
 const TOURN_NAME: u32 = 0x8001_1D44;
+const SHAPES: u16 = 64;
+const TROPHY_SHAPES: u32 = 32;
 const VIDEO_FORMAT: u32 = 0x8001_1D4C;
 const VIDEO_PATH: u32 = PATHS + 0xA4;
 const TV_ORDER: u32 = 0x8005_24E8;
+/// The texts: the money's, the entry fee's and the prizes' headings (124, 154, 155), the
+/// places (725 on); a tournament's description (its name's id + 38), its first paragraph (from
+/// 891, as the descriptions from 872) and that paragraph's heading (988).
+const MONEY_TEXT: u32 = 124;
+const FEE_TEXT: u32 = 154;
+const PRIZES_TEXT: u32 = 155;
+const PLACES: u32 = 725;
+const DESCRIPTIONS: u32 = 38;
+const FIRST_DESCRIPTION: u32 = 872;
+const FIRST_PARAGRAPH: u32 = 891;
+const PARAGRAPH_HEADING: u32 = 988;
+/// The money's kind (`DrawMoney`'s), the colours (gold, shade, grey) faded by the screen.
+const MONEY_KIND: u32 = 6;
+const GOLD: u32 = 0xBEBE;
+const SHADE: u32 = 0x0023_2323;
+const GREY: u32 = 0x0050_5050;
+/// The trophy's shapes' flags (its own table, from its top left).
+const TROPHY_FLAGS: u32 = 0x600;
 
 /// The host's.
 const VIDEO_CREATE: u32 = 0x8005_11B0;
@@ -76,8 +94,8 @@ const DRAW_SYNC: u32 = 0x800E_E1D8;
 const DRAW_TV: u32 = 0x8002_24AC;
 const DRAW_TV_LINES: u32 = 0x8002_2158;
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
-/// `GetTrophyName`, `tListIteratorTournament::TextValue` (FETOURN.CPP's ports);
-/// `GetTPage`, `ScaleShapeExtended`, `purgememadr`, `TextSys_WordX`, `TextSys_WordY`.
+/// `GetTrophyName`, `tListIteratorTournament::TextValue` (FETOURN.CPP's ports); `GetTPage`,
+/// `ScaleShapeExtended`, `purgememadr`, `TextSys_WordX`, `TextSys_WordY`.
 const GET_TROPHY_NAME: fn(&mut Cpu) = fetourn::get_trophy_name_entry;
 const TOURNAMENT_TEXT: fn(&mut Cpu) = fetourn::text_value_entry;
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
@@ -85,6 +103,13 @@ const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
+/// Ports called by address: FETV's `InitTV`, `TurnOnTV`, `TurnOffTV`; FELINES'
+/// `DrawBrightEndLine`; SCREENPOST's `DrawMoney`.
+const INIT_TV: u32 = 0x8002_3168;
+const TURN_ON_TV: u32 = 0x8002_3388;
+const TURN_OFF_TV: u32 = 0x8002_3378;
+const DRAW_BRIGHT_END_LINE: u32 = 0x8004_C018;
+const DRAW_MONEY: u32 = 0x8003_9A80;
 
 fn lh(m: &mut Mem, at: u32) -> i32 {
     m.r16(at) as i16 as i32
@@ -94,13 +119,12 @@ fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
 }
 
-/// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
+fn word_x(c: &mut Cpu, k: u32) -> u32 {
+    call(c, WORD_X, &[k])
+}
+
+fn word_y(c: &mut Cpu, k: u32) -> u32 {
+    call(c, WORD_Y, &[k])
 }
 
 /// The chosen tournament (`tTourneyInfo *`): the tier's, or the others'.
@@ -118,152 +142,151 @@ fn iterator(m: &mut Mem) -> u32 {
     menus + if m.r8(FE_TIER) != 0 { TIER_ITERATOR } else { ITERATOR }
 }
 
-/// `tScreenTournSelect::tScreenTournSelect` (SCREENTOURNSELECT.CPP, 0x8003fb48).
-pub fn abi_screen_tourn_select(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        port(c, &r, 0x8002_6040, 0x8003_fb5c, &[this], fescreen::abi_screen);
-        c.m.w32(this + 96, TOURN_SELECT_VT);
-        c.r[2] = this;
+/// The video's TV `k` and the trophy's.
+fn video_tv(this: u32, k: u32) -> TVConfig {
+    TVConfig(this + VIDEO_TVS).at(k)
+}
+
+fn trophy_tv(this: u32, k: u32) -> TVConfig {
+    TVConfig(this + TROPHY_TVS).at(k)
+}
+
+/// The screen's fade.
+fn fade(m: &mut Mem, this: u32) -> u32 {
+    Screen(this).screen_fade_val(m) as i32 as u32
+}
+
+/// The video's file name for `f`.
+fn with_video_file<R>(c: &mut Cpu, f: impl FnOnce(&mut Cpu, u32) -> R) -> R {
+    with_buffer(c, 128, |c, file| {
+        let path = c.m.r32(VIDEO_PATH);
+        call(c, SPRINTF, &[file, VIDEO_FORMAT, path]);
+        f(c, file)
     })
+}
+
+/// `tScreenTournSelect::tScreenTournSelect` (SCREENTOURNSELECT.CPP, 0x8003fb48).
+pub fn screen_tourn_select(c: &mut Cpu, this: Screen) -> Screen {
+    fescreen::screen(c, this);
+    this.set_vtable(&mut c.m, TOURN_SELECT_VT);
+    this
+}
+
+pub fn abi_screen_tourn_select(c: &mut Cpu) {
+    c.r[2] = screen_tourn_select(c, Screen(c.r[4])).0;
 }
 
 /// `tScreenTournSelect::~tScreenTournSelect` (SCREENTOURNSELECT.CPP, 0x8003fb7c).
 pub fn abi_destructor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        c.m.w32(this + 96, TOURN_SELECT_VT);
-        port(c, &Saved::of(c), 0x8002_6098, 0x8003_fb94, &[this, flags], fescreen::abi_screen_destructor);
-    })
+    let this = Screen(c.r[4]);
+    this.set_vtable(&mut c.m, TOURN_SELECT_VT);
+    fescreen::screen_destructor(c, this, c.r[5]);
 }
 
 /// `tScreenTournSelect::GetShapeInfo` (SCREENTOURNSELECT.CPP, 0x8003fba4): 64 shapes of
 /// "ztourn", 32 of the chosen tournament's trophy.
+pub fn get_shape_info(c: &mut Cpu, permanent: u32, swap: u32, name: u32, swap_name: u32) {
+    let m = &mut c.m;
+    let t = tournament(m);
+    m.w16(permanent, SHAPES);
+    m.w16(swap, TROPHY_SHAPES as u16);
+    m.w32(name, TOURN_NAME);
+    call(c, GET_TROPHY_NAME, &[TOURNAMENT_MANAGER, t, 1, TROPHY_NAME, u32::MAX]);
+    c.m.w32(swap_name, TROPHY_NAME);
+}
+
 pub fn abi_get_shape_info(c: &mut Cpu) {
-    let (permanent, swap, name) = (c.r[5], c.r[6], c.r[7]);
-    let swap_name = abi::arg(c, 4);
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = TROPHY_NAME;
-        let m = &mut c.m;
-        let t = tournament(m);
-        m.w16(permanent, 64);
-        m.w16(swap, 32);
-        m.w32(name, TOURN_NAME);
-        r.call_leaving(c, GET_TROPHY_NAME, &[TOURNAMENT_MANAGER, t, 1, TROPHY_NAME, u32::MAX], 0x8003_fc54);
-        c.m.w32(swap_name, TROPHY_NAME);
-    })
+    let swap_name = crate::abi::arg(c, 4);
+    get_shape_info(c, c.r[5], c.r[6], c.r[7], swap_name);
 }
 
 /// `tScreenTournSelect::Initialize` (SCREENTOURNSELECT.CPP, 0x8003fc70): the description to
 /// measure; the video's place cleared; the screen's files; the tournaments' video made and
 /// played; the trophy's four TVs set (two by two); the chosen tournament's trophy swapped in,
 /// its TVs turning on from now.
-pub fn abi_initialize(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 144, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[3] = this;
-        c.m.w32(this + TEXT_TOP, u32::MAX);
-        c.m.w32(this + TEXT_ID, u32::MAX);
-        let rect = sp + 24;
-        for (k, v) in [512u16, 0, 80, 160].into_iter().enumerate() {
-            c.m.w16(rect + 2 * k as u32, v);
-        }
-        r.call_ptr_leaving(c, CLEAR_IMAGE, &[rect, 0, 0, 0], 0x8003_fcd4);
-        r.call_ptr_leaving(c, DRAW_SYNC, &[0], 0x8003_fcdc);
-        port(c, &r, 0x8002_60cc, 0x8003_fce4, &[this], fescreen::abi_initialize);
-        let file = sp + 32;
-        r.0[0] = file;
-        c.m.w16(this + CURRENT_MOVIE, 0);
-        c.m.w16(this + PREVIOUS_MOVIE, 0);
-        let path = c.m.r32(VIDEO_PATH);
-        r.call_leaving(c, SPRINTF, &[file, VIDEO_FORMAT, path], 0x8003_fd08);
-        let video = r.call_ptr_leaving(c, VIDEO_CREATE, &[80, 80, 0xF_0000, 0x2_5800, 16], 0x8003_fd28);
+pub fn initialize(c: &mut Cpu, this: Screen) {
+    let this = this.0;
+    c.m.w32(this + TEXT_TOP, u32::MAX);
+    c.m.w32(this + TEXT_ID, u32::MAX);
+    with_buffer(c, 8, |c, at| {
+        let (rect, m) = (RECT(at), &mut c.m);
+        rect.set_x(m, 512);
+        rect.set_y(m, 0);
+        rect.set_w(m, 80);
+        rect.set_h(m, 160);
+        call_addr(c, CLEAR_IMAGE, &[at, 0, 0, 0]);
+        call_addr(c, DRAW_SYNC, &[0]);
+    });
+    fescreen::initialize(c, Screen(this));
+    c.m.w16(this + CURRENT_MOVIE, 0);
+    c.m.w16(this + PREVIOUS_MOVIE, 0);
+    with_video_file(c, |c, file| {
+        let video = call_addr(c, VIDEO_CREATE, &[80, 80, 0xF_0000, 0x2_5800, 16]);
         c.m.w32(this + VIDEO, video);
-        r.call_ptr_leaving(c, VIDEO_SPOOL, &[video, file], 0x8003_fd38);
-        r.0[5] = 0;
+        call_addr(c, VIDEO_SPOOL, &[video, file]);
         let video = c.m.r32(this + VIDEO);
-        r.call_ptr_leaving(c, VIDEO_START, &[video], 0x8003_fd44);
-        c.m.w32(this + FRAMES, 0);
-        r.0[2] = 0;
-        // the trophy's TVs
-        for row in 0..2u32 {
-            r.0[5] = row;
-            r.0[6] = row << 1;
-            r.0[4] = 76 * row + 165;
-            for col in 0..2u32 {
-                r.0[1] = col;
-                let k = 2 * row + col;
-                r.0[0] = TV_SIZE * k;
-                let t = this + TROPHY_TVS + TV_SIZE * k;
-                let table = c.m.r32(this);
-                port(c, &r, 0x8002_3168, 0x8003_fd9c, &[t, table, 0], fetv::abi_init_tv);
-                r.0[2] = col + 1;
-                r.0[0] = this + TV_SIZE * k;
-                let m = &mut c.m;
-                m.w16(t + 22, (37 * col + 142) as u16);
-                m.w16(t + 24, 76);
-                let flags = m.r16(t + 8);
-                m.w16(t + 20, r.0[4] as u16);
-                m.w16(t + 26, 37);
-                m.w16(t + 8, flags | 0x30);
-            }
-            r.0[2] = 0;
+        call_addr(c, VIDEO_START, &[video]);
+    });
+    c.m.w32(this + FRAMES, 0);
+    // the trophy's TVs: two columns of two
+    for row in 0..2u32 {
+        for col in 0..2u32 {
+            let tv = trophy_tv(this, 2 * row + col);
+            let table = Screen(this).perm_shapes().shapes(&mut c.m);
+            call_addr(c, INIT_TV, &[tv.0, table.0, 0]);
+            let m = &mut c.m;
+            tv.set_x(m, (76 * row + 165) as i16);
+            tv.set_y(m, (37 * col + 142) as i16);
+            tv.set_w(m, 76);
+            tv.set_h(m, 37);
+            tv.update_flags(m, |f| f | TROPHY_TV_FLAGS);
         }
-        let m = &mut c.m;
-        let t = tournament(m);
-        let trophy = m.r8(t + TROPHY_ID);
-        m.w8(this + TROPHY, trophy);
-        let ticks = m.r32(GAME_TICKS);
-        m.w16(this + TURNING, 1);
-        m.w32(this + TURNED_AT, ticks);
-    })
+    }
+    let m = &mut c.m;
+    let t = tournament(m);
+    let trophy = m.r8(t + TROPHY_ID);
+    m.w8(this + TROPHY, trophy);
+    let ticks = m.r32(GAME_TICKS);
+    m.w16(this + TURNING, 1);
+    m.w32(this + TURNED_AT, ticks);
+}
+
+pub fn abi_initialize(c: &mut Cpu) {
+    initialize(c, Screen(c.r[4]));
 }
 
 /// `tScreenTournSelect::Cleanup` (SCREENTOURNSELECT.CPP, 0x8003feb8): the video destroyed and
 /// freed; the screen's.
+pub fn cleanup(c: &mut Cpu, this: Screen) {
+    let video = c.m.r32(this.0 + VIDEO);
+    call_addr(c, VIDEO_DESTROY, &[video]);
+    let video = c.m.r32(this.0 + VIDEO);
+    call(c, PURGE, &[video]);
+    fescreen::cleanup(c, this);
+}
+
 pub fn abi_cleanup(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let video = c.m.r32(this + VIDEO);
-        r.call_ptr_leaving(c, VIDEO_DESTROY, &[video], 0x8003_fed4);
-        let video = c.m.r32(this + VIDEO);
-        r.call_leaving(c, PURGE, &[video], 0x8003_fee0);
-        port(c, &r, 0x8002_61c0, 0x8003_fee8, &[this], fescreen::abi_cleanup);
-    })
+    cleanup(c, Screen(c.r[4]));
 }
 
 /// `tScreenTournSelect::UpdateVideoWall` (SCREENTOURNSELECT.CPP, 0x8003fef8): a tournament whose
 /// trophy isn't the one swapped in: its trophy read, its TVs turning off from now (unless they
 /// are).
 pub fn update_video_wall(c: &mut Cpu, this: u32, t: u32) {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[2] = t;
-        if c.m.r8(t + TROPHY_ID) as u32 == c.m.r8(this + TROPHY) as i8 as i32 as u32 {
-            return;
-        }
-        r.0[3] = u32::MAX;
-        r.0[0] = TROPHY_NAME;
-        r.call_leaving(c, GET_TROPHY_NAME, &[TOURNAMENT_MANAGER, t, 1, TROPHY_NAME, u32::MAX], 0x8003_ff4c);
-        port(c, &r, 0x8002_5dd8, 0x8003_ff58, &[this, TROPHY_NAME], fescreen::abi_async_load_swap_shape_file);
-        let m = &mut c.m;
-        m.w32(this + TVS_SET, 0);
-        let trophy = m.r8(t + TROPHY_ID);
-        let turning = lh(m, this + TURNING);
-        m.w8(this + TROPHY, trophy);
-        if turning >= 0 {
-            let ticks = m.r32(GAME_TICKS);
-            m.w16(this + TURNING, 0xFFFF);
-            m.w32(this + TURNED_AT, ticks);
-        }
-    })
+    if c.m.r8(t + TROPHY_ID) as u32 == c.m.r8(this + TROPHY) as i8 as i32 as u32 {
+        return;
+    }
+    call(c, GET_TROPHY_NAME, &[TOURNAMENT_MANAGER, t, 1, TROPHY_NAME, u32::MAX]);
+    fescreen::async_load_swap_shape_file(c, Screen(this), TROPHY_NAME);
+    let m = &mut c.m;
+    m.w32(this + TVS_SET, 0);
+    let trophy = m.r8(t + TROPHY_ID);
+    m.w8(this + TROPHY, trophy);
+    if lh(m, this + TURNING) >= 0 {
+        let ticks = m.r32(GAME_TICKS);
+        m.w16(this + TURNING, 0xFFFF);
+        m.w32(this + TURNED_AT, ticks);
+    }
 }
 
 pub fn abi_update_video_wall(c: &mut Cpu) {
@@ -274,292 +297,203 @@ pub fn abi_update_video_wall(c: &mut Cpu) {
 /// lines between the video's TVs; the trophy's TVs turned on in order, one more every 4 ticks (or
 /// off, done after 16 ticks); their frame; the TVs; the trophy turning.
 pub fn draw_video_wall(c: &mut Cpu, this: u32) {
-    abi::frame(c, 80, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        r.0[1] = 244;
-        r.0[3] = 97;
-        r.0[0] = 1;
-        let m = &mut c.m;
-        let swap = m.r32(this + SWAP_TABLE);
-        m.w32(sp + 52, swap);
-        m.w32(sp + 16, 0);
-        let table = m.r32(this);
-        port(c, &r, 0x8002_5ce8, 0x8003_ffe4, &[this, 0, 34, table], fescreen::abi_draw_background_image);
-        for x in (244..485).step_by(80) {
-            r.0[1] = x;
-            r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0x0020_2020, x, 41, 2, 97, 1], 0x8004_0004);
+    let screen = Screen(this);
+    let table = screen.perm_shapes().shapes(&mut c.m);
+    fescreen::draw_background_image(c, screen, 0, 34, table, 0);
+    for x in (244..485).step_by(80) {
+        call_addr(c, DRAW_TRANS_SQUARE, &[0x0020_2020, x, 41, 2, 97, 1]);
+    }
+    call_addr(c, DRAW_TRANS_SQUARE, &[0x0014_1414, 165, 89, 321, 1, 1]);
+    call(c, SET_ABR_MODE, &[2]);
+    // the trophy's TVs turning, one more every 4 ticks: on (while turning on), else off
+    let m = &mut c.m;
+    let n = (m.r32(GAME_TICKS).wrapping_sub(m.r32(this + TURNED_AT)) >> 2) as i32;
+    let turning = lh(m, this + TURNING);
+    // (each in turn: the ones off turned on, or the ones on turned off)
+    let (from, turn) = if turning > 0 { (0, TURN_ON_TV) } else { (TV_ON, TURN_OFF_TV) };
+    for k in 0..n.clamp(0, 4) as u32 {
+        let tv = trophy_tv(this, c.m.r8(TV_ORDER + k) as u32);
+        if tv.state(&mut c.m) == from {
+            call_addr(c, turn, &[tv.0]);
         }
-        r.0[1] = 89;
-        r.0[0] = 1;
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0x0014_1414, 165, 89, 321, 1, 1], 0x8004_003c);
-        r.0[1] = 137;
-        r.call_leaving(c, SET_ABR_MODE, &[2], 0x8004_0054);
-        // the trophy's TVs turning
-        let m = &mut c.m;
-        let n = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + TURNED_AT)) >> 2;
-        r.0[1] = n;
-        let tv = |m: &mut Mem, k: u32| this + TROPHY_TVS + TV_SIZE * m.r8(TV_ORDER + k) as u32;
-        r.0[0] = 0;
-        if lh(m, this + TURNING) > 0 {
-            if n != 0 {
-                r.0[3] = TV_ORDER;
-                while (r.0[0] as i32) < 4 {
-                    let t = tv(&mut c.m, r.0[0]);
-                    if c.m.r32(t) == 0 {
-                        port(c, &r, 0x8002_3388, 0x8004_00c8, &[t], fetv::abi_turn_on_tv);
-                    }
-                    r.0[0] += 1;
-                    if (r.0[0] as i32) >= n as i32 {
-                        break;
-                    }
-                }
-            }
-        } else {
-            if (n as i32) > 0 {
-                r.0[4] = TV_ORDER;
-                r.0[3] = 1;
-                while (r.0[0] as i32) < 4 {
-                    let t = tv(&mut c.m, r.0[0]);
-                    if c.m.r32(t) == 1 {
-                        port(c, &r, 0x8002_3378, 0x8004_0134, &[t], fetv::abi_turn_off_tv);
-                    }
-                    r.0[0] += 1;
-                    if (r.0[0] as i32) >= n as i32 {
-                        break;
-                    }
-                }
-            }
-            if (n as i32) >= 4 {
-                c.m.w16(this + TURNING, 0);
-            }
-        }
-        // the frame, the TVs, the trophy
-        r.0[0] = 1;
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0x0030_3030, 241, 142, 2, 74, 1], 0x8004_017c);
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0x0020_2020, 165, 179, 152, 1, 1], 0x8004_019c);
-        r.call_leaving(c, SET_ABR_MODE, &[2], 0x8004_01a4);
-        for k in 0..4 {
-            r.0[1] = k;
-            r.0[0] = TROPHY_TVS + TV_SIZE * k;
-            r.call_ptr_leaving(c, DRAW_TV, &[this + TROPHY_TVS + TV_SIZE * k], 0x8004_01b4);
-        }
-        r.0[1] = 4;
-        r.0[0] = TROPHY_TVS + TV_SIZE * 4;
-        let frame = ((c.m.r32(GAME_TICKS) as i32 >> 4) % 32) as u32;
-        r.call_leaving(c, SCALE_SHAPE_EXTENDED, &[frame, 1536, 182, 147, 0, 0, sp + 32], 0x8004_020c);
-    })
+    }
+    if turning <= 0 && n >= 4 {
+        c.m.w16(this + TURNING, 0);
+    }
+    // the frame, the TVs, the trophy
+    call_addr(c, DRAW_TRANS_SQUARE, &[0x0030_3030, 241, 142, 2, 74, 1]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0x0020_2020, 165, 179, 152, 1, 1]);
+    call(c, SET_ABR_MODE, &[2]);
+    for k in 0..4 {
+        call_addr(c, DRAW_TV, &[trophy_tv(this, k).0]);
+    }
+    let frame = ((c.m.r32(GAME_TICKS) as i32 >> 4) % 32) as u32;
+    with_buffer(c, DrawShapeExtended::SIZE, |c, options| {
+        let table = screen.swap_shapes().shapes(&mut c.m);
+        DrawShapeExtended(options).set_custom_shapes(&mut c.m, table);
+        call(c, SCALE_SHAPE_EXTENDED, &[frame, TROPHY_FLAGS, 182, 147, 0, 0, options]);
+    });
 }
 
 pub fn abi_draw_video_wall(c: &mut Cpu) {
     draw_video_wall(c, c.r[4]);
 }
 
-/// `tScreenTournSelect::DrawBackground` (SCREENTOURNSELECT.CPP, 0x8004022c): the money, the
-/// entry fee and the three prizes (their headings and amounts); the trophy swapped in and its
-/// TVs; the video's next frame over its eight TVs (or played again); the tournament's name and
-/// description (its top measured when it changes), the headings; the TVs.
-pub fn abi_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 240, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[4] = this;
-        r.0[2] = 0;
-        r.0[0] = TOURNAMENT_MANAGER;
-        let t = tournament(&mut c.m);
-        r.0[7] = t;
-        let fade = |c: &mut Cpu, r: &Saved, color: u32, ra: u32| {
-            let f = lh(&mut c.m, this + FADE) as u32;
-            port(c, r, 0x8004_bd68, ra, &[color, f], fefades::abi_fade_out)
-        };
-        let gold = fade(c, &r, 0xBEBE, 0x8004_02d4);
-        r.0[6] = gold;
-        let shade = fade(c, &r, 0x0023_2323, 0x8004_02e8);
-        r.0[5] = shade;
-        let grey = fade(c, &r, 0x0050_5050, 0x8004_02fc);
-        r.0[8] = grey;
-        r.0[1] = c.m.r32(TOURNAMENT_MANAGER + MONEY);
-        let money = |c: &mut Cpu, r: &Saved, x: u32, y: u32, amount: u32, ra: u32| {
-            c.m.w32(sp + 16, r.0[6]);
-            c.m.w32(sp + 20, r.0[5]);
-            port(c, r, 0x8003_9a80, ra, &[x, y, 6, amount], screenpost::abi_draw_money);
-        };
-        // the money, the entry fee
-        let f = lh(&mut c.m, this + FADE) as u32;
-        port(c, &r, 0x8002_1214, 0x8004_0318, &[f, 124, 1, 4], fetextrender::abi_menu_text_fade);
-        let x = r.call_leaving(c, WORD_X, &[124], 0x8004_0320);
-        r.0[0] = x.wrapping_add(140);
-        let y = r.call_leaving(c, WORD_Y, &[124], 0x8004_032c);
-        money(c, &r, r.0[0], y.wrapping_add(9), r.0[1], 0x8004_0348);
-        let f = lh(&mut c.m, this + FADE) as u32;
-        port(c, &r, 0x8002_1214, 0x8004_035c, &[f, 154, 1, 14], fetextrender::abi_menu_text_fade);
-        let x = r.call_leaving(c, WORD_X, &[154], 0x8004_0364);
-        r.0[0] = x.wrapping_add(140);
-        let y = r.call_leaving(c, WORD_Y, &[154], 0x8004_0370);
-        let fee = c.m.r32(t + ENTRY_FEE);
-        money(c, &r, r.0[0], y.wrapping_add(9), fee, 0x8004_038c);
-        // the prizes
-        let f = lh(&mut c.m, this + FADE) as u32;
-        port(c, &r, 0x8002_1214, 0x8004_03a0, &[f, 155, 1, 14], fetextrender::abi_menu_text_fade);
-        let y = r.call_leaving(c, WORD_Y, &[155], 0x8004_03a8);
-        r.0[3] = y.wrapping_add(9);
-        for k in 0..3u32 {
-            r.0[1] = k;
-            let w = r.call_leaving(c, TEXT_WORD, &[k + 725], 0x8004_03bc);
-            r.0[0] = w;
-            let x = r.call_leaving(c, WORD_X, &[155], 0x8004_03c8);
-            let y = sx(r.0[3]);
-            r.0[0] = y;
-            r.call_leaving(c, fetextrender::full_text_rgb_entry, &[w, sx(x), y, r.0[8], 0, 0], 0x8004_03f0);
-            let x = r.call_leaving(c, WORD_X, &[154], 0x8004_03f8);
-            r.0[1] = t.wrapping_add(k << 2);
-            let prize = c.m.r32(r.0[1] + PRIZES);
-            r.0[3] = r.0[3].wrapping_add(9);
-            money(c, &r, x.wrapping_add(140), y, prize, 0x8004_0420);
-            r.0[2] = k + 1;
+/// An amount of money at x, y in gold with its shade.
+fn money(c: &mut Cpu, (gold, shade): (u32, u32), x: u32, y: u32, amount: u32) {
+    call_addr(c, DRAW_MONEY, &[x, y, MONEY_KIND, amount, gold, shade]);
+}
+
+/// `tScreenTournSelect::DrawBackground` (SCREENTOURNSELECT.CPP, 0x8004022c). It draws the
+/// money, the entry fee and the three prizes (their headings and amounts); the trophy swapped
+/// in and its TVs; the video's next frame over its eight TVs (or the video played again); the
+/// tournament's name and description (its top measured when it changes), the headings; the TVs.
+pub fn draw_background(c: &mut Cpu, this: Screen) {
+    let this = this.0;
+    let m = &mut c.m;
+    let t = tournament(m);
+    let f = fade(m, this);
+    let colours = (fefades::fade(GOLD, 0, f), fefades::fade(SHADE, 0, f));
+    let grey = fefades::fade(GREY, 0, f);
+    // the money, the entry fee
+    let amount = m.r32(TOURNAMENT_MANAGER + MONEY);
+    fetextrender::menu_text_fade(c, f, MONEY_TEXT, 1, 4);
+    let x = word_x(c, MONEY_TEXT).wrapping_add(140);
+    let y = word_y(c, MONEY_TEXT).wrapping_add(9);
+    money(c, colours, x, y, amount);
+    let f = fade(&mut c.m, this);
+    fetextrender::menu_text_fade(c, f, FEE_TEXT, 1, 14);
+    let x = word_x(c, FEE_TEXT).wrapping_add(140);
+    let y = word_y(c, FEE_TEXT).wrapping_add(9);
+    let fee = c.m.r32(t + ENTRY_FEE);
+    money(c, colours, x, y, fee);
+    // the prizes: each place and its amount
+    let f = fade(&mut c.m, this);
+    fetextrender::menu_text_fade(c, f, PRIZES_TEXT, 1, 14);
+    let mut y = word_y(c, PRIZES_TEXT).wrapping_add(9);
+    for k in 0..3u32 {
+        let w = call(c, TEXT_WORD, &[k + PLACES]);
+        let x = word_x(c, PRIZES_TEXT);
+        fetextrender::full_text_rgb(c, w, sx(x), sx(y), grey, 0, 0);
+        let x = word_x(c, FEE_TEXT).wrapping_add(140);
+        let prize = c.m.r32(t.wrapping_add(4 * k) + PRIZES);
+        money(c, colours, x, sx(y), prize);
+        y = y.wrapping_add(9);
+    }
+    // the trophy
+    update_video_wall(c, this, t);
+    let screen = Screen(this);
+    fescreen::is_shape_file_loaded(c, screen, screen.swap_shapes());
+    if screen.swap_shapes().file(&mut c.m) != 0 && lh(&mut c.m, this + TURNING) >= 0 {
+        fescreen::upload_swap_shapes(c, screen, TROPHY_SHAPES);
+        let ticks = c.m.r32(GAME_TICKS);
+        c.m.w16(this + TURNING, 1);
+        c.m.w32(this + TURNED_AT, ticks);
+    }
+    draw_video_wall(c, this);
+    // the video's TVs: two rows of four, each a fifth of the frame (the odd frames' at 0, the
+    // even at 80)
+    let page_y = if c.m.r32(this + FRAMES) & 1 != 0 { 0 } else { 80 };
+    for row in 0..2u32 {
+        for col in 0..4u32 {
+            let tv = video_tv(this, col + 4 * row);
+            let m = &mut c.m;
+            tv.set_x(m, (80 * col + 165) as i16);
+            tv.set_w(m, 80);
+            tv.set_h(m, 48);
+            tv.set_uw(m, 20);
+            tv.set_y(m, (48 * row + 41) as i16);
+            tv.set_u(m, (20 * col) as u8);
+            tv.set_v(m, (40 * row) as u8);
+            tv.set_vh(m, 40);
+            let page = call(c, GET_TPAGE, &[2, 0, 512, page_y]);
+            let m = &mut c.m;
+            tv.set_tpage(m, page as u16);
+            tv.set_state(m, TV_ON);
+            tv.set_clut(m, 0);
+            tv.set_flags(m, VIDEO_TV_FLAGS);
+            tv.set_tint(m, 0x002C_1E1E);
+            tv.set_dest_brightness(m, 128);
+            tv.set_transition(m, 128);
         }
-        // the trophy
-        port(c, &r, 0x8003_fef8, 0x8004_0448, &[this, t], abi_update_video_wall);
-        port(c, &r, 0x8002_5e2c, 0x8004_0454, &[this, this + SWAP_TABLE], fescreen::abi_is_shape_file_loaded);
-        if c.m.r32(this + SWAP_DATA) != 0 && lh(&mut c.m, this + TURNING) >= 0 {
-            port(c, &r, 0x8002_5ff0, 0x8004_047c, &[this, 32], fescreen::abi_upload_swap_shapes);
-            let ticks = c.m.r32(GAME_TICKS);
-            c.m.w16(this + TURNING, 1);
-            c.m.w32(this + TURNED_AT, ticks);
-        }
-        port(c, &r, 0x8003_ff9c, 0x8004_0498, &[this], abi_draw_video_wall);
-        // the video's TVs
-        let y = if c.m.r32(this + FRAMES) & 1 != 0 { 0 } else { 80 };
-        c.m.w32(sp + 184, 0x002C_1E1E);
-        r.0[2] = 0;
-        for row in 0..2u32 {
-            r.0[2] = row;
-            r.0[1] = 0;
-            r.0[8] = 48 * row + 41;
-            r.0[3] = row << 2;
-            r.0[7] = 40 * row;
-            for col in 0..4u32 {
-                r.0[6] = 512 << 16;
-                r.0[5] = y << 16;
-                let k = col + 4 * row;
-                let t = this + VIDEO_TVS + TV_SIZE * k;
-                r.0[0] = this + TV_SIZE * k;
-                let m = &mut c.m;
-                m.w16(t + 20, (80 * col + 165) as u16);
-                m.w16(t + 24, 80);
-                m.w16(t + 26, 48);
-                m.w8(t + 30, 20);
-                m.w16(t + 22, r.0[8] as u16);
-                m.w8(t + 28, (20 * col) as u8);
-                m.w8(t + 29, r.0[7] as u8);
-                m.w8(t + 31, 40);
-                m.w32(sp + 192, y);
-                m.w32(sp + 196, 128);
-                let page = r.call_leaving(c, GET_TPAGE, &[2, 0, 512, y], 0x8004_057c);
-                r.0[1] = col + 1;
-                let m = &mut c.m;
-                m.w16(t + 36, page as u16);
-                m.w32(t, 1);
-                m.w16(t + 34, 0);
-                m.w16(t + 8, 34);
-                m.w32(t + 16, 0x002C_1E1E);
-                m.w16(t + 6, 128);
-                m.w16(t + 4, 128);
-            }
-            r.0[2] = row + 1;
-        }
+    }
+    let video = c.m.r32(this + VIDEO);
+    if call_addr(c, VIDEO_STATE, &[video]) != 0 {
         let video = c.m.r32(this + VIDEO);
-        if r.call_ptr_leaving(c, VIDEO_STATE, &[video], 0x8004_05f0) != 0 {
-            let video = c.m.r32(this + VIDEO);
-            let next = r.call_ptr_leaving(c, VIDEO_UPDATE, &[video, 512, y], 0x8004_0608);
-            r.0[2] = 0;
-            if next != 0 {
-                let n = c.m.r32(this + FRAMES).wrapping_add(1);
-                c.m.w32(this + FRAMES, n);
-            }
-        } else {
-            let file = sp + 104;
-            r.0[0] = file;
-            c.m.w16(this + CURRENT_MOVIE, 0);
-            let path = c.m.r32(VIDEO_PATH);
-            r.call_leaving(c, SPRINTF, &[file, VIDEO_FORMAT, path], 0x8004_0640);
-            let video = c.m.r32(this + VIDEO);
-            r.call_ptr_leaving(c, VIDEO_SPOOL, &[video, file], 0x8004_064c);
-            r.0[2] = 0;
-            let video = c.m.r32(this + VIDEO);
-            r.call_ptr_leaving(c, VIDEO_START, &[video], 0x8004_0658);
+        if call_addr(c, VIDEO_UPDATE, &[video, 512, page_y]) != 0 {
+            let n = c.m.r32(this + FRAMES).wrapping_add(1);
+            c.m.w32(this + FRAMES, n);
         }
-        for k in 0..8 {
-            r.0[2] = k;
-            r.call_ptr_leaving(c, DRAW_TV_LINES, &[this + VIDEO_TVS + TV_SIZE * k], 0x8004_0678);
-        }
-        r.0[2] = 8;
-        // the tournament's name and description
-        let rect = sp + 96;
-        for (k, v) in [325u16, 43, 314, 10].into_iter().enumerate() {
-            c.m.w16(rect + 2 * k as u32, v);
-        }
-        let it = iterator(&mut c.m);
-        let name = r.call_leaving(c, TOURNAMENT_TEXT, &[it, u32::MAX], 0x8004_06ec);
-        let f = lh(&mut c.m, this + FADE) as u32;
-        c.m.w32(sp + 16, 13);
-        port(c, &r, 0x8002_1984, 0x8004_070c, &[f, sx(name), rect, 2], fetextrender::abi_word_wrap_fade);
-        c.m.w16(rect, 170);
-        let w = c.m.r16(rect + 4).wrapping_sub(10);
-        c.m.w16(rect + 4, w);
-        let it = iterator(&mut c.m);
-        let v = r.call_leaving(c, TOURNAMENT_TEXT, &[it, u32::MAX], 0x8004_0758);
-        r.0[2] = v.wrapping_add(38);
-        let id = sx(r.0[2]);
+    } else {
+        c.m.w16(this + CURRENT_MOVIE, 0);
+        with_video_file(c, |c, file| {
+            let video = c.m.r32(this + VIDEO);
+            call_addr(c, VIDEO_SPOOL, &[video, file]);
+            let video = c.m.r32(this + VIDEO);
+            call_addr(c, VIDEO_START, &[video]);
+        });
+    }
+    for k in 0..8 {
+        call_addr(c, DRAW_TV_LINES, &[video_tv(this, k).0]);
+    }
+    // the tournament's name and description (its top measured when it changes), the heading
+    with_buffer(c, 8, |c, at| {
+        let (rect, m) = (RECT(at), &mut c.m);
+        rect.set_x(m, 325);
+        rect.set_y(m, 43);
+        rect.set_w(m, 314);
+        rect.set_h(m, 10);
+        let it = iterator(m);
+        let name = call(c, TOURNAMENT_TEXT, &[it, u32::MAX]);
+        let f = fade(&mut c.m, this);
+        fetextrender::word_wrap_fade(c, f, sx(name), at, 2, 13);
+        let m = &mut c.m;
+        rect.set_x(m, 170);
+        rect.update_w(m, |w| w.wrapping_sub(10));
+        let it = iterator(m);
+        let description = call(c, TOURNAMENT_TEXT, &[it, u32::MAX]).wrapping_add(DESCRIPTIONS);
+        let id = sx(description);
         if id != c.m.r32(this + TEXT_ID) || c.m.r32(this + TEXT_TOP) == u32::MAX {
             c.m.w32(this + TEXT_ID, id);
-            let w = r.call_leaving(c, TEXT_WORD, &[id], 0x8004_078c);
-            let width = lh(&mut c.m, rect + 4) as u32;
-            let h = r.call_leaving(c, fetextrender::word_wrap_height_entry, &[width, w], 0x8004_079c);
+            let w = call(c, TEXT_WORD, &[id]);
+            let width = rect.w(&mut c.m) as i32 as u32;
+            let h = fetextrender::word_wrap_height(c, width, w);
             c.m.w32(this + TEXT_TOP, 117u32.wrapping_sub(h));
         }
-        r.0[1] = r.0[2].wrapping_sub(872);
-        let top = c.m.r16(this + TEXT_TOP);
-        r.0[2] = 0;
-        c.m.w16(rect + 2, top);
-        let w = r.call_leaving(c, TEXT_WORD, &[id], 0x8004_07c4);
-        r.0[0] = w;
-        let color = fade(c, &r, 0x0050_5050, 0x8004_07d8);
-        r.call_leaving(c, fetextrender::word_wrap_text_rgb_entry, &[w, rect, color], 0x8004_07e8);
-        let f = lh(&mut c.m, this + FADE) as u32;
-        r.0[0] = 4;
-        r.call_leaving(c, fetextrender::menu_text_positioned_justify_fade_entry, &[f, 988, 170, 117, 0, 1, 4], 0x8004_0810);
-        r.0[1] = sx(r.0[1].wrapping_add(891)) << 16;
-        let f = lh(&mut c.m, this + FADE) as u32;
-        let heading = ((r.0[1] as i32) >> 16) as u32;
-        r.call_leaving(c, fetextrender::menu_text_positioned_justify_fade_entry, &[f, heading, 170, 125, 0, 2, 4], 0x8004_083c);
-        for k in 0..8 {
-            r.0[2] = k;
-            r.call_ptr_leaving(c, DRAW_TV, &[this + VIDEO_TVS + TV_SIZE * k], 0x8004_085c);
-        }
-    })
+        let top = c.m.r16(this + TEXT_TOP) as i16;
+        rect.set_y(&mut c.m, top);
+        let w = call(c, TEXT_WORD, &[id]);
+        let grey = fefades::fade(GREY, 0, fade(&mut c.m, this));
+        fetextrender::word_wrap_text_rgb(c, w, at, grey);
+        let f = fade(&mut c.m, this);
+        fetextrender::menu_text_positioned_justify_fade(c, f, PARAGRAPH_HEADING, 170, 117, 0, 1, 4);
+        let paragraph = sx(description.wrapping_sub(FIRST_DESCRIPTION).wrapping_add(FIRST_PARAGRAPH));
+        let f = fade(&mut c.m, this);
+        fetextrender::menu_text_positioned_justify_fade(c, f, paragraph, 170, 125, 0, 2, 4);
+    });
+    for k in 0..8 {
+        call_addr(c, DRAW_TV, &[video_tv(this, k).0]);
+    }
+}
+
+pub fn abi_draw_background(c: &mut Cpu) {
+    draw_background(c, Screen(c.r[4]));
 }
 
 /// `tScreenTournSelect::DrawForeground` (SCREENTOURNSELECT.CPP, 0x800408a8): two lines along the
 /// money's box (not on the fifth main screen).
+pub fn draw_foreground(c: &mut Cpu, this: Screen) {
+    if c.m.r8(MAIN_NUMBER) == 5 {
+        return;
+    }
+    for (y, glow) in [(41, 3), (74, 2)] {
+        let f = fade(&mut c.m, this.0);
+        call_addr(c, DRAW_BRIGHT_END_LINE, &[SHADE, 167, y, 316, 1, glow, f, 20]);
+    }
+}
+
 pub fn abi_draw_foreground(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 48, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        if c.m.r8(MAIN_NUMBER) == 5 {
-            return;
-        }
-        r.0[0] = 1;
-        r.0[1] = 20;
-        for (y, glow, ra) in [(41, 3, 0x8004_0908), (74, 2, 0x8004_0938)] {
-            let fade = lh(&mut c.m, this + FADE) as u32;
-            for (k, v) in [1, glow, fade, 20].into_iter().enumerate() {
-                c.m.w32(sp + 16 + 4 * k as u32, v);
-            }
-            port(c, &r, 0x8004_c018, ra, &[0x0023_2323, 167, y, 316], felines::abi_draw_bright_end_line);
-        }
-    })
+    draw_foreground(c, Screen(c.r[4]));
 }
 
 #[cfg(test)]
@@ -568,6 +502,12 @@ mod tests {
     use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
     use crate::globals::FE_APP;
     use crate::test_util::{Rng, VIDEO_ANSWERS, against_original_in, fe_ram};
+
+    /// The screen's swapped shapes (their table, the file read), its fade; a TV's size.
+    const SWAP_TABLE: u32 = 40;
+    const SWAP_DATA: u32 = 44;
+    const FADE: u32 = 92;
+    const TV_SIZE: u32 = 48;
 
     /// The game's tournament select screen; the outputs of `GetShapeInfo`.
     const SCREEN: u32 = 0x8017_FE70;
