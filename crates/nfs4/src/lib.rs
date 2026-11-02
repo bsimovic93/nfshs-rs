@@ -1853,6 +1853,9 @@ pub(crate) mod test_util {
     /// blending.
     pub const SHAPES_EMITTED: u32 = 0x8014_8800;
     const SHAPE_EMITTER: u32 = 0x8004_E74C;
+    /// `systemtask` and the ticks `timedwait` reads.
+    const SYSTEMTASK: u32 = 0x800E_77F0;
+    const TICKS: u32 = 0x8013_EF8C;
 
     fn emit_shape(c: &mut Cpu) {
         let sp = c.r[29];
@@ -1884,6 +1887,11 @@ pub(crate) mod test_util {
     /// `VIDEO_updateframexy` and `VIDEO_create` answer what the tests put at [`VIDEO_ANSWERS`],
     /// the others 0. The front end's shape emitter is the host's as well (see [`SHAPES_EMITTED`]).
     fn no_host(c: &mut Cpu, addr: u32) -> bool {
+        // `systemtask` lets a tick go by (`timedwait` waits for them, ticking it)
+        if addr == SYSTEMTASK {
+            let t = c.m.r32(TICKS).wrapping_add(1);
+            c.m.w32(TICKS, t);
+        }
         if addr == SHAPE_EMITTER {
             emit_shape(c);
             return true;
@@ -1928,7 +1936,16 @@ pub(crate) mod test_util {
             0x800F_C5C4 => c.m.r32(CARD_ANSWERS + 28),
             0x800F_C7CC => c.m.r32(CARD_ANSWERS + 32),
             0x800F_C988 => c.m.r32(CARD_ANSWERS + 36),
-            0x800F_C234 => c.m.r32(CARD_ANSWERS + 40),
+            // `GetDirentry`: the directory (a2) filled from DIRECTORY when it is marked
+            0x800F_C234 => {
+                if c.m.r32(DIRECTORY) == DIRECTORY_MARK {
+                    for k in 0..600 {
+                        let v = c.m.r8(DIRECTORY + 4 + k);
+                        c.m.w8(c.r[6] + k, v);
+                    }
+                }
+                c.m.r32(CARD_ANSWERS + 40)
+            }
             _ => 0,
         };
         true
@@ -1938,6 +1955,10 @@ pub(crate) mod test_util {
     /// then `MemCardAccept`, `Exist`, `ReadFile`, `WriteFile`, `CreateFile`, `DeleteFile`,
     /// `Format`, `GetDirentry`.
     pub const CARD_ANSWERS: u32 = 0x8014_8A90;
+
+    /// A directory `GetDirentry` answers with (600 bytes after the mark), when marked.
+    pub const DIRECTORY: u32 = 0x8014_8C00;
+    pub const DIRECTORY_MARK: u32 = 0x00D1_2E57;
 
     /// Where the test CPUs answer `PadInfoMode` from: the count, then seven modes.
     pub const PAD_MODES: u32 = 0x8014_8AD0;
@@ -2116,6 +2137,10 @@ pub(crate) mod test_util {
     /// Print the first differing words of a failed case.
     pub fn report(name: &str, case: u32, want: &[u8], got: &[u8], diff: &[usize]) {
         eprintln!("{name} case {case}: {} words differ", diff.len());
+        if let Ok(dir) = std::env::var("FUZZ_DUMP") {
+            let _ = std::fs::write(format!("{dir}/{case}_want.bin"), want);
+            let _ = std::fs::write(format!("{dir}/{case}_got.bin"), got);
+        }
         for &a in diff.iter().take(10) {
             let w = |r: &[u8]| u32::from_le_bytes(r[a..a + 4].try_into().unwrap());
             let addr = 0x8000_0000 | a as u32;
