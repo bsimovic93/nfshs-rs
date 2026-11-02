@@ -11,10 +11,15 @@
 //! +1412 a word to show instead, +1416 the highlight's frame and +1418 its time, +1420 the
 //! icon's place in the grid, +1424 the time a card went missing, +1428 the icons to release,
 //! +1432 the screen's start, +1436 the player, +1440 the icons fading out.
+//!
+//! Written as FEMENU.CPP is (see there).
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr, with_buffer};
+use crate::felines::{self, Line};
 use crate::globals::{FE_APP, GAME_TICKS, TEXT_COLORS};
-use ps1rt::Cpu;
+use crate::memcard;
+use crate::types::{DrawShapeExtended, RECT, Screen};
+use ps1rt::{Cpu, Mem};
 
 const FADE: u32 = 92;
 const SAVE: u32 = 100;
@@ -40,6 +45,46 @@ const RELEASE: u32 = 1428;
 const START: u32 = 1432;
 const PLAYER: u32 = 1436;
 const FADING_OUT: u32 = 1440;
+const VPTR: u32 = 96;
+/// The saves (15 at most), a loadfile info's size, an icon's frames' room (3 of 192 bytes); an
+/// icon's fade when gone; a `POLY_FT4`'s size; the screen's shapes.
+const SAVES: u32 = 15;
+const FILE_INFO_SIZE: u32 = 44;
+const ICON_SIZE: u32 = 192;
+const ICON_SET: u32 = 576;
+const FADED_OUT: u16 = 128;
+const POLY_FT4_SIZE: u32 = 40;
+const SHAPE_COUNT: u16 = 60;
+/// The words: the card's saves (also the screen's help line), checking the card, no card,
+/// insert a card, no save, unformatted, the card full, the player's title (660 on).
+const SAVES_WORD: u32 = 638;
+const CHECKING_CARD: u32 = 637;
+const NO_CARD: u32 = 636;
+const INSERT_CARD: u32 = 640;
+const NO_SAVE: u32 = 645;
+const UNFORMATTED: u32 = 649;
+const CARD_FULL: u32 = 704;
+const TITLE: u32 = 660;
+const CHECKING: u32 = SAVES_WORD;
+/// The colours: the grid's lines, the highlight, the shading; the highlight's flags (coloured,
+/// by its top-left corner).
+const LINE_COLOR: u32 = 0x78_5A5A;
+const HIGHLIGHT: i32 = 0xB5_5623;
+const SHADE: u32 = 0x50_5050;
+const COLOURED_TOP_LEFT: u32 = 0x410;
+/// The menus' load and save items' flags (bit 0 off) and the save item's word; the
+/// application's player (+557).
+const LOAD_ITEM: u32 = 12372;
+const SAVE_ITEM: u32 = 12416;
+const SAVE_ITEM_WORD: u32 = 12420;
+const APP_PLAYER: u32 = 557;
+
+/// A card's states (MEMCARD.C's).
+mod memcard_state {
+    pub const NONE: u32 = u32::MAX;
+    pub const UNFORMATTED: u32 = (-2i32) as u32;
+    pub const FULL: u32 = (-3i32) as u32;
+}
 
 /// The grid's layout (Initialize's): its corner, a cell's size, the lines' and margins'
 /// sizes, the message's box; the icons' buffer (15 saves of 3 frames of 192 bytes).
@@ -90,216 +135,193 @@ const SYSTEM_TASK: u32 = 0x800E_77F0;
 const DRAW_SQUARE: u32 = 0x8004_F12C;
 const SUBTRACTIVE_BOX: u32 = 0x8001_C25C;
 
-/// A port called from a port with `args` in a0.. (stack ones written by the caller first).
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len().min(4)].copy_from_slice(&args[..args.len().min(4)]);
-        let sp = c.r[29];
-        for (k, &v) in args.iter().enumerate().skip(4) {
-            c.m.w32(sp + 4 * k as u32, v);
-        }
-        f(c);
-        c.r[2]
-    })
-}
-
 fn sx(v: u32) -> u32 {
     v as u16 as i16 as i32 as u32
 }
 
-fn h(m: &mut ps1rt::Mem, at: u32) -> u32 {
+fn h(m: &mut Mem, at: u32) -> u32 {
     m.r16(at) as u32
 }
 
 /// `tScreenMemcard::GetShapeInfo` (SCREENMEMCARD.CPP, 0x80046708): 60 shapes of `zmemcrd`,
 /// none swapped.
+pub fn get_shape_info(m: &mut Mem, count: u32, swap: u32, file: u32, swap_file: u32) {
+    m.w16(swap, 0);
+    m.w32(swap_file, 0);
+    m.w16(count, SHAPE_COUNT);
+    m.w32(file, SHAPE_FILE);
+}
+
 pub fn abi_get_shape_info(c: &mut Cpu) {
-    let (count, swap, file) = (c.r[5], c.r[6], c.r[7]);
-    let swap_file = abi::arg(c, 4);
-    c.m.w16(swap, 0);
-    c.m.w32(swap_file, 0);
-    c.m.w16(count, 60);
-    c.m.w32(file, SHAPE_FILE);
-    c.r[2] = SHAPE_FILE;
+    let swap_file = crate::abi::arg(c, 4);
+    get_shape_info(&mut c.m, c.r[5], c.r[6], c.r[7], swap_file);
 }
 
 /// `tScreenMemcard::DrawIcon` (SCREENMEMCARD.CPP, 0x8004672c): an icon's shape drawn as a
-/// semi-transparent `POLY_FT4` at `x`, `y`, `w` by `h`, faded by `fade`.
+/// semi-transparent `POLY_FT4` (40 bytes) at `x`, `y`, `w` by `h`, darkened by `fade`.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_icon(c: &mut Cpu, shape: u32, x: u32, y: u32, w: u32, hgt: u32, fade: u32) {
+    let fade = fade & 0xFFFF;
+    let m = &mut c.m;
+    let place = m.r32(shape + 12);
+    let mode = m.r8(shape) as u32;
+    let width = m.r16(shape + 4) as i16 as i32 as u32;
+    let height = m.r16(shape + 6) as i16 as i32 as u32;
+    // its texture's place: y and x (12-bit fields), u by its 4-bit depth
+    let ty = ((place << 4) as i32 >> 20) as u32;
+    let tx = ((place << 20) as i32 >> 20) as u32;
+    let u = (((tx & 0x3F) << 4) as i32 / 4) as u32;
+    let v = ty.wrapping_sub((((ty as i32) / 256) as u32) << 8);
+    let prim = crate::mmeffect::add_prim(m, POLY_FT4_SIZE);
+    m.w8(prim.wrapping_add(7), 46);
+    m.w8(prim.wrapping_add(3), 9);
+    let grey = (-128i32 as u32).wrapping_sub(fade) as u8;
+    for at in [4, 5, 6] {
+        m.w8(prim.wrapping_add(at), grey);
+    }
+    let clut = call(c, SHAPE_TO_CLUT, &[shape]);
+    let m = &mut c.m;
+    let page = ((mode & 3) << 7) | (((ty & 0x100) as i32 >> 4) as u32) | (((tx & 0x3FF) as i32 >> 6) as u32) | ((ty & 0x200) << 2);
+    m.w16(prim.wrapping_add(14), clut as u16);
+    m.w16(prim.wrapping_add(22), page as u16);
+    let u1 = u.wrapping_add(width);
+    let v1 = v.wrapping_add(height);
+    for (at, b) in [(12, u), (13, v), (20, u1), (21, v), (28, u), (29, v1), (36, u1), (37, v1)] {
+        m.w8(prim.wrapping_add(at), b as u8);
+    }
+    let (x1, y1) = (x.wrapping_add(w), y.wrapping_add(hgt));
+    for (at, hw) in [(8, x), (10, y), (18, y), (24, x), (16, x1), (32, x1), (26, y1), (34, y1)] {
+        m.w16(prim.wrapping_add(at), hw as u16);
+    }
+}
+
 pub fn abi_draw_icon(c: &mut Cpu) {
-    let (shape, x, y) = (c.r[5], c.r[6], c.r[7]);
-    let (w, hgt, fade) = (abi::arg(c, 4), abi::arg(c, 5), abi::arg(c, 6) & 0xFFFF);
-    abi::frame(c, 64, |c, sp| {
-        let mut r = Saved::of(c);
-        let m = &mut c.m;
-        let place = m.r32(shape + 12);
-        let mode = m.r8(shape) as u32;
-        let width = m.r16(shape + 4) as i16 as i32 as u32;
-        let height = m.r16(shape + 6) as i16 as i32 as u32;
-        let ty = ((place << 4) as i32 >> 20) as u32;
-        let tx = ((place << 20) as i32 >> 20) as u32;
-        let u = (((tx & 0x3F) << 4) as i32 / 4) as u32;
-        m.w32(sp + 16, height);
-        let v = ty.wrapping_sub((((ty as i32) / 256) as u32) << 8);
-        (r.0[1], r.0[4], r.0[3], r.0[2], r.0[5], r.0[7], r.0[6], r.0[8]) = (ty, tx, u, v, x, y, mode, width);
-        let ot = m.r32(0x1F80_0000);
-        let prim = crate::mmeffect::add_prim(m, 40);
-        r.0[0] = prim;
-        m.w8(prim.wrapping_add(7), 46);
-        m.w8(prim.wrapping_add(3), 9);
-        let grey = (-128i32 as u32).wrapping_sub(fade) as u8;
-        for at in [4, 5, 6] {
-            m.w8(prim.wrapping_add(at), grey);
-        }
-        // (the OT's linking leaves a1..a3, which the callee keeps)
-        (c.r[5], c.r[6], c.r[7]) = (ot, 0xFF00_0000, 0x1F80_0004);
-        let clut = r.call_leaving(c, SHAPE_TO_CLUT, &[shape], 0x8004_6860);
-        let m = &mut c.m;
-        let page = ((mode & 3) << 7) | (((ty & 0x100) as i32 >> 4) as u32) | (((tx & 0x3FF) as i32 >> 6) as u32) | ((ty & 0x200) << 2);
-        m.w16(prim.wrapping_add(14), clut as u16);
-        m.w16(prim.wrapping_add(22), page as u16);
-        let u1 = u.wrapping_add(width);
-        let v1 = v.wrapping_add(m.r32(sp + 16));
-        for (at, b) in [(12, u), (13, v), (20, u1), (21, v), (28, u), (29, v1), (36, u1), (37, v1)] {
-            m.w8(prim.wrapping_add(at), b as u8);
-        }
-        let (x1, y1) = (x.wrapping_add(w), y.wrapping_add(hgt));
-        for (at, hw) in [(8, x), (10, y), (18, y), (24, x), (16, x1), (32, x1), (26, y1), (34, y1)] {
-            m.w16(prim.wrapping_add(at), hw as u16);
-        }
-    })
+    let (w, hgt, fade) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
+    draw_icon(c, c.r[5], c.r[6], c.r[7], w, hgt, fade);
+}
+
+/// Whether the music's buffer is full enough for the CD to read something else.
+fn music_buffered(c: &mut Cpu) -> bool {
+    let buffered = call(c, MUSIC_BUFFERED, &[]);
+    let threshold = call(c, MUSIC_THRESHOLD, &[]);
+    (buffered as i32) >= threshold as i32
 }
 
 /// `tScreenMemcard::LoadIcon` (SCREENMEMCARD.CPP, 0x80046924): (with the music's buffer full
 /// enough) save `k`'s header read from the card: its frames (at most 3) and blocks, its icon's
 /// frames put in VRAM with a CLUT of their own, faded in from nothing; a card gone or a bad
 /// read noted (the icons released).
-pub fn abi_load_icon(c: &mut Cpu) {
-    let (this, k) = (c.r[4], c.r[5]);
-    abi::frame(c, 80, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[6], r.0[5]) = (this, k);
-        let buffered = r.call_leaving(c, MUSIC_BUFFERED, &[], 0x8004_695c);
-        r.0[0] = buffered;
-        let threshold = r.call_leaving(c, MUSIC_THRESHOLD, &[], 0x8004_6964);
-        r.0[0] = ((buffered as i32) < threshold as i32) as u32;
-        if r.0[0] != 0 {
-            return;
-        }
-        c.m.w32(CARD_ACTIVE, 1);
-        c.m.w8(this + k + FRAMES, 0);
-        c.m.w8(this + k + BLOCKS, 0);
-        let record = c.m.r32(this + RECORD);
-        if (k as i32) >= c.m.r32(record + 8) as i32 {
-            c.m.w32(CARD_ACTIVE, 0);
-            return;
-        }
-        let file = this.wrapping_add(k.wrapping_mul(44)).wrapping_add(FILES);
-        r.0[0] = k.wrapping_mul(44);
-        r.call_leaving(c, BLOCKCLEAR, &[file, 44], 0x8004_69c0);
-        r.0[1] = 22;
-        r.0[0] = this.wrapping_add(k.wrapping_mul(44));
-        let m = &mut c.m;
-        m.w32(file + 4, this.wrapping_add(k << 5).wrapping_add(NAMES));
-        let record = m.r32(this + RECORD);
-        m.w32(file, record.wrapping_add(k.wrapping_mul(40)).wrapping_add(16));
-        let icons = m.r32(ICONS).wrapping_add(k.wrapping_mul(576));
-        m.w32(file + 24, icons);
-        m.w32(file + 28, icons + 192);
-        m.w32(file + 32, icons + 384);
-        loop {
-            let card = c.m.r32(this + CARD);
-            let e = port(c, &r, 0x8005_0368, 0x8004_6a2c, &[card], crate::memcard::abi_handlecardevents);
-            r.0[0] = k << 1;
-            if e == 22 {
-                break;
-            }
-            c.tick();
-        }
-        r.0[7] = 0;
+pub fn load_icon(c: &mut Cpu, this: u32, k: u32) {
+    if !music_buffered(c) {
+        return;
+    }
+    c.m.w32(CARD_ACTIVE, 1);
+    c.m.w8(this + k + FRAMES, 0);
+    c.m.w8(this + k + BLOCKS, 0);
+    let record = c.m.r32(this + RECORD);
+    if (k as i32) >= c.m.r32(record + 8) as i32 {
+        c.m.w32(CARD_ACTIVE, 0);
+        return;
+    }
+    // the save's file: its name in the card's directory, its title, its icons' places
+    let file = this.wrapping_add(k.wrapping_mul(FILE_INFO_SIZE)).wrapping_add(FILES);
+    call(c, BLOCKCLEAR, &[file, FILE_INFO_SIZE]);
+    let m = &mut c.m;
+    m.w32(file + 4, this.wrapping_add(k << 5).wrapping_add(NAMES));
+    let record = m.r32(this + RECORD);
+    m.w32(file, record.wrapping_add(k.wrapping_mul(40)).wrapping_add(16));
+    let icons = m.r32(ICONS).wrapping_add(k.wrapping_mul(ICON_SET));
+    for j in 0..3 {
+        m.w32(file + 24 + 4 * j, icons + ICON_SIZE * j);
+    }
+    // the card idle, then the header read
+    loop {
         let card = c.m.r32(this + CARD);
-        port(c, &r, 0x8004_fba0, 0x8004_6a5c, &[card, file, 1], crate::memcard::abi_loadfile);
-        let s3 = this.wrapping_add(k);
-        let fp = this.wrapping_add(k << 1);
-        c.m.w32(sp + 32, k << 1);
-        c.m.w32(sp + 36, k << 3);
-        (r.0[3], r.0[8]) = (s3, fp);
-        while r.0[7] == 0 {
-            let card = c.m.r32(this + CARD);
-            let at = port(c, &r, 0x8005_072c, 0x8004_6a84, &[card], crate::memcard::abi_getcard);
-            if c.m.r32(at) == u32::MAX {
-                c.m.w32(this + RELEASE, 1);
-            }
-            let card = c.m.r32(this + CARD);
-            let e = port(c, &r, 0x8005_0368, 0x8004_6aa4, &[card], crate::memcard::abi_handlecardevents);
-            match e {
-                15 => {
-                    r.0[7] = 1;
-                    if c.m.r32(this + RELEASE) != 0 {
-                        port(c, &r, 0x8004_8010, 0x8004_6ae8, &[this], abi_release_icons);
-                        break;
-                    }
+        if memcard::handlecardevents(c, card) == 22 {
+            break;
+        }
+        c.tick();
+    }
+    let card = c.m.r32(this + CARD);
+    memcard::loadfile(c, card, file, true);
+    let s3 = this.wrapping_add(k);
+    let fp = this.wrapping_add(k << 1);
+    loop {
+        let card = c.m.r32(this + CARD);
+        let at = memcard::getcard(&mut c.m, card);
+        if c.m.r32(at) == u32::MAX {
+            c.m.w32(this + RELEASE, 1);
+        }
+        let card = c.m.r32(this + CARD);
+        match memcard::handlecardevents(c, card) {
+            15 => {
+                if c.m.r32(this + RELEASE) != 0 {
+                    release_icons(c, this);
+                    break;
+                }
+                let m = &mut c.m;
+                let frames_at = m.r32(file + 36);
+                let frames = (m.r8(frames_at) as u32).wrapping_sub(16);
+                m.w8(s3 + FRAMES, frames as u8);
+                let card = m.r32(this + CARD);
+                let blocks = memcard::grab_blocks(c, card, k);
+                let m = &mut c.m;
+                m.w8(s3 + BLOCKS, blocks as u8);
+                if m.r8(s3 + FRAMES) >= 4 {
+                    m.w8(s3 + FRAMES, 3);
+                }
+                if m.r8(s3 + FRAMES) == 0 {
+                    m.w8(s3 + FRAMES, 1);
+                }
+                let old = m.r16(fp + CLUTS);
+                if old != 0 {
+                    call(c, RELEASE_CLUT, &[old as i16 as i32 as u32]);
+                }
+                // a CLUT of its own, each frame put in VRAM (17 apart, by the save)
+                with_buffer(c, 8, |c, clut| {
+                    call(c, GET_CLUT_ID, &[0, clut, clut + 4]);
                     let m = &mut c.m;
-                    let frames_at = m.r32(this.wrapping_add(k.wrapping_mul(44)) + 676);
-                    let frames = (m.r8(frames_at) as u32).wrapping_sub(16);
-                    m.w8(s3 + FRAMES, frames as u8);
-                    let card = m.r32(this + CARD);
-                    let blocks = port(c, &r, 0x8005_07a4, 0x8004_6b30, &[card, k], crate::memcard::abi_grab_blocks);
-                    let m = &mut c.m;
-                    m.w8(s3 + BLOCKS, blocks as u8);
-                    if m.r8(s3 + FRAMES) >= 4 {
-                        m.w8(s3 + FRAMES, 3);
-                    }
-                    if m.r8(s3 + FRAMES) == 0 {
-                        m.w8(s3 + FRAMES, 1);
-                    }
-                    let old = m.r16(fp + CLUTS);
-                    if old != 0 {
-                        r.call_leaving(c, RELEASE_CLUT, &[old as i16 as i32 as u32], 0x8004_6b78);
-                    }
-                    r.call_leaving(c, GET_CLUT_ID, &[0, sp + 24, sp + 28], 0x8004_6b88);
-                    let m = &mut c.m;
-                    let v = (h(m, sp + 28) << 6) | ((m.r32(sp + 24) as i32 >> 4) as u32 & 0x3F);
+                    let v = (h(m, clut + 4) << 6) | ((m.r32(clut) as i32 >> 4) as u32 & 0x3F);
                     m.w16(fp + CLUTS, v as u16);
-                    r.0[1] = 0;
                     if m.r8(s3 + FRAMES) != 0 {
-                        let s4 = (c.m.r32(sp + 36).wrapping_add(k)) << 6;
-                        (r.0[2], r.0[0], r.0[4]) = (900, 0, s4);
                         let mut j = 0u32;
                         loop {
-                            let shape = c.m.r32(ICONS).wrapping_add(s4).wrapping_add(j * 192);
+                            let shape = c.m.r32(ICONS).wrapping_add(k.wrapping_mul(ICON_SET)).wrapping_add(j * ICON_SIZE);
                             if c.m.r8(shape) & 0xF7 == 64 {
-                                let (cx, cy) = (c.m.r32(sp + 24), c.m.r32(sp + 28));
-                                r.call_leaving(c, UPLOAD_SHAPE, &[shape, r.0[2], (k << 4).wrapping_add(k), cx, cy], 0x8004_6c08);
+                                let (cx, cy) = (c.m.r32(clut), c.m.r32(clut + 4));
+                                call(c, UPLOAD_SHAPE, &[shape, 900 + 17 * j, (k << 4).wrapping_add(k), cx, cy]);
                             }
-                            r.0[2] += 17;
                             j += 1;
-                            r.0[1] = j;
-                            r.0[0] = j * 192;
                             if (j as i32) >= c.m.r8(s3 + FRAMES) as i32 {
                                 break;
                             }
                         }
                     }
-                    c.m.w16(fp + FADES, 128);
-                    c.m.w8(s3 + LOADED, 1);
-                }
-                2 | 3 | 7 | 10 | 11 | 16 | 19 | 23 => {
-                    r.0[7] = 1;
-                    c.m.w32(this + RELEASE, 1);
-                    c.m.w8(s3 + LOADED, 0);
-                }
-                _ => c.tick(),
+                });
+                c.m.w16(fp + FADES, FADED_OUT);
+                c.m.w8(s3 + LOADED, 1);
+                break;
             }
+            2 | 3 | 7 | 10 | 11 | 16 | 19 | 23 => {
+                c.m.w32(this + RELEASE, 1);
+                c.m.w8(s3 + LOADED, 0);
+                break;
+            }
+            _ => c.tick(),
         }
-        c.m.w32(CARD_ACTIVE, 0);
-    })
+    }
+    c.m.w32(CARD_ACTIVE, 0);
+}
+
+pub fn abi_load_icon(c: &mut Cpu) {
+    load_icon(c, c.r[4], c.r[5]);
 }
 
 /// The lines' clamp of their fade: 0..64 (a halfword's).
 fn line_fade(v: u32) -> u32 {
     let f = v as u16 as i16 as i32;
-    if f <= 0 {
-        if f >= 0 { v } else { 0 }
+    if f < 0 {
+        0
     } else if f < 64 {
         v
     } else {
@@ -324,36 +346,41 @@ fn parity(x: u32) -> u32 {
     sx(((x as u16 as i16 as i32) % 2) as u32)
 }
 
+/// A grid line: solid, its fade doubled.
+fn grid_line(c: &mut Cpu, x: u32, y: u32, w: u32, h: u32, mode: u32, fade: u32, glow: u32) {
+    let fade = ((fade << 16) as i32 >> 15) as u32;
+    felines::draw(c, Line { color: LINE_COLOR, x: sx(x), y: sx(y), w, h, mode, fade, glow, trans: false });
+}
+
 /// `tScreenMemcard::DrawVerticalLine` (SCREENMEMCARD.CPP, 0x80046c80): one of the grid's
-/// vertical lines at `x`, `y`, faded by `fade` (0..64), its brighter end up or down.
+/// vertical lines at `x`, `y`, faded by `fade` (0..64), filled from its top or bottom.
+pub fn draw_vertical_line(c: &mut Cpu, x: u32, y: u32, fade: u32, up: u32) {
+    let fade = line_fade(fade);
+    let m = &mut c.m;
+    let len = sx(h(m, LINE_T).wrapping_add(h(m, GRID_H).wrapping_add(h(m, LINE_H) << 1)));
+    grid_line(c, x, y, 2, len, ((up & 0xFFFF) << 16 == 0) as u32, fade, 0);
+}
+
 pub fn abi_draw_vertical_line(c: &mut Cpu) {
-    let (x, y, fade) = (c.r[5], c.r[6], c.r[7]);
-    let up = abi::arg(c, 4) & 0xFFFF;
-    abi::frame(c, 40, |c, _| {
-        let r = Saved::of(c);
-        let fade = line_fade(fade);
-        let m = &mut c.m;
-        let len = sx(h(m, LINE_T).wrapping_add(h(m, GRID_H).wrapping_add(h(m, LINE_H) << 1)));
-        let args = [0x78_5A5A, sx(x), sx(y), 2, len, (up << 16 == 0) as u32, ((fade << 16) as i32 >> 15) as u32, 0];
-        port(c, &r, 0x8004_c018, 0x8004_6d24, &args, crate::felines::abi_draw_bright_end_line);
-    })
+    let up = crate::abi::arg(c, 4);
+    draw_vertical_line(c, c.r[5], c.r[6], c.r[7], up);
 }
 
 /// `tScreenMemcard::DrawHorizontalLine` (SCREENMEMCARD.CPP, 0x80046d34): one of the grid's
-/// horizontal lines at `x`, `y`, faded by `fade` (0..64), its glow below or above.
+/// horizontal lines at `x`, `y`, faded by `fade` (0..64), filled from its left or right, its
+/// ends glowing.
+pub fn draw_horizontal_line(c: &mut Cpu, x: u32, y: u32, fade: u32, top: u32) {
+    let fade = line_fade(fade);
+    let m = &mut c.m;
+    let len = sx(h(m, GRID_W).wrapping_add((h(m, LINE_W) << 1) + 2));
+    let mode = if (top & 0xFFFF) << 16 != 0 { 3 } else { 2 };
+    let glow = m.r32(LINE_W);
+    grid_line(c, x, y, len, 1, mode, fade, glow);
+}
+
 pub fn abi_draw_horizontal_line(c: &mut Cpu) {
-    let (x, y, fade) = (c.r[5], c.r[6], c.r[7]);
-    let top = abi::arg(c, 4) & 0xFFFF;
-    abi::frame(c, 40, |c, _| {
-        let r = Saved::of(c);
-        let fade = line_fade(fade);
-        let m = &mut c.m;
-        let len = sx(h(m, GRID_W).wrapping_add((h(m, LINE_W) << 1) + 2));
-        let kind = if top << 16 != 0 { 3 } else { 2 };
-        let line_w = m.r32(LINE_W);
-        let args = [0x78_5A5A, sx(x), sx(y), len, 1, kind, ((fade << 16) as i32 >> 15) as u32, line_w];
-        port(c, &r, 0x8004_c018, 0x8004_6de4, &args, crate::felines::abi_draw_bright_end_line);
-    })
+    let top = crate::abi::arg(c, 4);
+    draw_horizontal_line(c, c.r[5], c.r[6], c.r[7], top);
 }
 
 /// A halfword's third (toward zero), sign-extended.
@@ -365,88 +392,84 @@ fn third(v: u32) -> u32 {
 /// the grid's cells its blocks take (three a row from the bottom, the odd rows right to
 /// left), its frame by the clock, faded by its own fade and `fade`; this game's save a
 /// highlight instead, with a box round its cell when nothing fades.
-pub fn abi_place_icons(c: &mut Cpu) {
-    let (this, k, fade) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 96, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[3], r.0[4], r.0[5], r.0[6], r.0[8]) = (this, k, 0, 0x8005_0000, 0x8005_0000, 0x8005_0000);
-        r.0[7] = this.wrapping_add(k << 1);
-        c.m.w32(sp + 104, fade);
-        let mut n = 0u32;
-        while (n as i32) < c.m.r8(this.wrapping_add(k) + BLOCKS) as i32 {
-            let m = &mut c.m;
-            let place = h(m, this + PLACE);
-            let row = third(place);
-            let col = sx(place.wrapping_sub(row.wrapping_mul(3)));
-            let col = if row & 1 == 0 { col } else { 2u32.wrapping_sub(col) };
-            let cx = h(m, ICON_X).wrapping_add(h(m, GRID_X)).wrapping_add(m.r32(CELL_W).wrapping_mul(col));
-            let cy = h(m, GRID_Y).wrapping_add(h(m, ICON_Y)).wrapping_add(4u32.wrapping_sub(third(place)).wrapping_mul(m.r32(CELL_H)));
-            (r.0[1], r.0[0]) = (cx, cy);
-            let tick = (m.r32(GAME_TICKS) as i32 >> 4) as u32;
-            let frames = m.r8(this.wrapping_add(k) + FRAMES) as i32;
-            let frame = (tick as i32).wrapping_rem(frames) as u32;
-            let my_fade = sx(h(m, r.0[7] + FADES)).wrapping_add(fade);
-            let f = if (my_fade as i32) < 129 { my_fade } else { 128 };
-            if k == m.r32(this + SAVE) {
-                m.w32(sp + 36, 0xB5_5623);
-                let flash = sx(h(m, this + FLASH));
-                let args = [flash, 1040, sx(cx).wrapping_sub(242), sx(cy).wrapping_sub(112), f, 1, sp + 32];
-                r.call_leaving(c, DRAW_SHAPE_EXTENDED, &args, 0x8004_6fe4);
-            } else {
-                let shape = m.r32(ICONS).wrapping_add(k.wrapping_mul(576)).wrapping_add(frame.wrapping_mul(192));
-                port(c, &r, 0x8004_672c, 0x8004_7060, &[this, shape, sx(cx), sx(cy), 31, 16, sx(f)], abi_draw_icon);
-            }
-            let m = &mut c.m;
-            if m.r32(this + SAVE) == k && m.r32(sp + 104) == 0 && m.r32(this + FADING_OUT) == 0 {
-                let (x, y) = (sx(cx), sx(cy));
-                (r.0[1], r.0[0]) = (x, y);
-                let (ix, iy, w, hh) = (m.r32(ICON_X), m.r32(ICON_Y), m.r32(CELL_W), m.r32(CELL_H));
-                let args = [0, x.wrapping_sub(ix).wrapping_add(2), y.wrapping_sub(iy).wrapping_add(1), w.wrapping_sub(2), hh.wrapping_sub(1)];
-                r.call_ptr_leaving(c, DRAW_SQUARE, &args, 0x8004_70d4);
-                let m = &mut c.m;
-                let (ix, iy, w, hh) = (m.r32(ICON_X), m.r32(ICON_Y), m.r32(CELL_W), m.r32(CELL_H));
-                let args = [0xBEBE, x.wrapping_sub(ix), y.wrapping_sub(iy), w.wrapping_add(2), hh.wrapping_add(1)];
-                r.call_ptr_leaving(c, DRAW_SQUARE, &args, 0x8004_7104);
-            }
-            let p = c.m.r16(this + PLACE).wrapping_add(1);
-            c.m.w16(this + PLACE, p);
-            n += 1;
-            r.0[4] = n;
+pub fn place_icons(c: &mut Cpu, this: u32, k: u32, fade: u32) {
+    let mut n = 0u32;
+    while (n as i32) < c.m.r8(this.wrapping_add(k) + BLOCKS) as i32 {
+        let m = &mut c.m;
+        let place = h(m, this + PLACE);
+        let row = third(place);
+        let col = sx(place.wrapping_sub(row.wrapping_mul(3)));
+        let col = if row & 1 == 0 { col } else { 2u32.wrapping_sub(col) };
+        let cx = h(m, ICON_X).wrapping_add(h(m, GRID_X)).wrapping_add(m.r32(CELL_W).wrapping_mul(col));
+        let cy = h(m, GRID_Y).wrapping_add(h(m, ICON_Y)).wrapping_add(4u32.wrapping_sub(third(place)).wrapping_mul(m.r32(CELL_H)));
+        let tick = (m.r32(GAME_TICKS) as i32 >> 4) as u32;
+        let frames = m.r8(this.wrapping_add(k) + FRAMES) as i32;
+        let frame = (tick as i32).wrapping_rem(frames) as u32;
+        let own = sx(h(m, this.wrapping_add(k << 1) + FADES)).wrapping_add(fade);
+        let f = if (own as i32) < 129 { own } else { 128 };
+        if k == m.r32(this + SAVE) {
+            let flash = sx(h(m, this + FLASH));
+            with_buffer(c, DrawShapeExtended::SIZE, |c, options| {
+                DrawShapeExtended(options).set_tint(&mut c.m, 0, HIGHLIGHT);
+                call(c, DRAW_SHAPE_EXTENDED, &[flash, COLOURED_TOP_LEFT, sx(cx).wrapping_sub(242), sx(cy).wrapping_sub(112), f, 1, options]);
+            });
+        } else {
+            let shape = m.r32(ICONS).wrapping_add(k.wrapping_mul(ICON_SET)).wrapping_add(frame.wrapping_mul(ICON_SIZE));
+            draw_icon(c, shape, sx(cx), sx(cy), 31, 16, sx(f));
         }
-    })
+        let m = &mut c.m;
+        if m.r32(this + SAVE) == k && fade == 0 && m.r32(this + FADING_OUT) == 0 {
+            // a box round the cell: black inside white
+            let (x, y) = (sx(cx), sx(cy));
+            let (ix, iy, w, hh) = (m.r32(ICON_X), m.r32(ICON_Y), m.r32(CELL_W), m.r32(CELL_H));
+            call_addr(c, DRAW_SQUARE, &[0, x.wrapping_sub(ix).wrapping_add(2), y.wrapping_sub(iy).wrapping_add(1), w.wrapping_sub(2), hh.wrapping_sub(1)]);
+            let m = &mut c.m;
+            let (ix, iy, w, hh) = (m.r32(ICON_X), m.r32(ICON_Y), m.r32(CELL_W), m.r32(CELL_H));
+            call_addr(c, DRAW_SQUARE, &[0xBEBE, x.wrapping_sub(ix), y.wrapping_sub(iy), w.wrapping_add(2), hh.wrapping_add(1)]);
+        }
+        let p = c.m.r16(this + PLACE).wrapping_add(1);
+        c.m.w16(this + PLACE, p);
+        n += 1;
+    }
 }
 
-/// An icon faded out a step (8): at nothing (128) it's gone, its CLUT released; whether it
-/// went.
-fn fade_out_icon(c: &mut Cpu, r: &Saved, this: u32, k: u32, ra: u32) -> bool {
+pub fn abi_place_icons(c: &mut Cpu) {
+    place_icons(c, c.r[4], c.r[5], c.r[6]);
+}
+
+/// Save `k`'s icon gone: not loaded, no frames or blocks.
+fn icon_gone(m: &mut Mem, this: u32, k: u32) {
+    let s = this.wrapping_add(k);
+    for f in [LOADED, FRAMES, BLOCKS] {
+        m.w8(s + f, 0);
+    }
+}
+
+/// Icon `k` faded out a step (8): at nothing (128) it's gone (before or after its CLUT is
+/// released, as the two callers have it); whether it went.
+fn fade_out_icon(c: &mut Cpu, this: u32, k: u32, gone_first: bool) -> bool {
     let at = this.wrapping_add(k << 1);
     let f = c.m.r16(at + FADES).wrapping_add(8);
     c.m.w16(at + FADES, f);
-    if (f as i16) < 129 {
+    if (f as i16) <= FADED_OUT as i16 {
         return false;
     }
-    c.m.w16(at + FADES, 128);
-    let gone = |c: &mut Cpu| {
-        let s = this.wrapping_add(k);
-        for f in [LOADED, FRAMES, BLOCKS] {
-            c.m.w8(s + f, 0);
-        }
-    };
-    let first = ra == 0x8004_72c4;
-    if first {
-        gone(c);
+    c.m.w16(at + FADES, FADED_OUT);
+    if gone_first {
+        icon_gone(&mut c.m, this, k);
     }
     let clut = c.m.r16(at + CLUTS);
     if clut != 0 {
-        r.call_leaving(c, RELEASE_CLUT, &[clut as i16 as i32 as u32], ra);
+        call(c, RELEASE_CLUT, &[clut as i16 as i32 as u32]);
         c.m.w16(at + CLUTS, 0);
     }
-    if !first {
-        gone(c);
+    if !gone_first {
+        icon_gone(&mut c.m, this, k);
     }
     true
 }
 
+/// How many saves the card has.
 fn count(c: &mut Cpu, this: u32) -> i32 {
     let rec = c.m.r32(this + RECORD);
     c.m.r32(rec + 8) as i32
@@ -457,532 +480,459 @@ fn count(c: &mut Cpu, this: u32) -> i32 {
 /// formatted, empty, or its saves' icons loaded one at a time (none while a save goes on or
 /// the icons fade out), faded in and placed, this game's save found (its name the message);
 /// the highlight's frame stepped; the card layer's events run.
-pub fn abi_draw_mem_card_stuff(c: &mut Cpu) {
-    let (this, fade) = (c.r[4], c.r[5]);
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[1], r.0[5]) = (this, fade);
-        let card = c.m.r32(this + CARD);
-        let rec = port(c, &r, 0x8005_072c, 0x8004_7178, &[card], crate::memcard::abi_getcard);
-        let m = &mut c.m;
-        m.w32(this + RECORD, rec);
-        m.w16(this + PLACE, 0);
-        if m.r32(this + SAVE) != u32::MAX {
-            let t = m.r16(this + FLASH_TIME).wrapping_add(1);
-            m.w16(this + FLASH_TIME, t);
-        } else {
+pub fn draw_mem_card_stuff(c: &mut Cpu, this: u32, fade: u32) {
+    let card = c.m.r32(this + CARD);
+    let rec = memcard::getcard(&mut c.m, card);
+    let m = &mut c.m;
+    m.w32(this + RECORD, rec);
+    m.w16(this + PLACE, 0);
+    // the highlight's frame: one more every 4 frames, of 30
+    if m.r32(this + SAVE) != u32::MAX {
+        let t = m.r16(this + FLASH_TIME).wrapping_add(1);
+        m.w16(this + FLASH_TIME, t);
+    } else {
+        m.w16(this + FLASH, 0);
+        m.w16(this + FLASH_TIME, 0);
+    }
+    if m.r16(this + FLASH_TIME) as i16 == 4 {
+        m.w16(this + FLASH_TIME, 0);
+        let f = m.r16(this + FLASH).wrapping_add(1);
+        m.w16(this + FLASH, f);
+        if f as i16 >= 30 {
             m.w16(this + FLASH, 0);
-            m.w16(this + FLASH_TIME, 0);
         }
-        if m.r16(this + FLASH_TIME) as i16 == 4 {
-            m.w16(this + FLASH_TIME, 0);
-            let f = m.r16(this + FLASH).wrapping_add(1);
-            m.w16(this + FLASH, f);
-            if f as i16 >= 30 {
-                m.w16(this + FLASH, 0);
-            }
+    }
+    let state = m.r32(rec);
+    let place = |c: &mut Cpu, k: u32| place_icons(c, this, sx(k), sx(fade));
+    if state == memcard_state::NONE {
+        // the card gone: its icons faded out; "no card", later "insert a card"
+        m.w32(this + RELEASE, 1);
+        if m.r32(this + GONE_AT) == 0 {
+            let t = m.r32(GAME_TICKS);
+            m.w32(this + GONE_AT, t);
         }
-        let rec = m.r32(this + RECORD);
-        let state = m.r32(rec);
+        let since = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + GONE_AT));
+        m.w32(this + WORD, if (since as i32) < 801 { NO_CARD } else { INSERT_CARD });
         let mut k = 0u32;
-        let place = |c: &mut Cpu, r: &Saved, k: u32, ra: u32| {
-            port(c, r, 0x8004_6df4, ra, &[this, sx(k), sx(fade)], abi_place_icons);
-        };
-        if state == u32::MAX {
-            m.w32(this + RELEASE, 1);
-            if m.r32(this + GONE_AT) == 0 {
-                let t = m.r32(GAME_TICKS);
-                m.w32(this + GONE_AT, t);
+        while (k as u16 as i16 as i32) < count(c, this) {
+            let j = sx(k);
+            if c.m.r8(this.wrapping_add(j) + LOADED) != 0 && !fade_out_icon(c, this, j, true) {
+                place(c, k);
             }
-            let since = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + GONE_AT));
-            m.w32(this + WORD, if (since as i32) < 801 { 636 } else { 640 });
-            r.0[3] = 0;
-            while (k as u16 as i16 as i32) < count(c, this) {
-                let j = sx(k);
-                if c.m.r8(this.wrapping_add(j) + LOADED) != 0 {
-                    r.0[0] = this.wrapping_add(j << 1);
-                    if !fade_out_icon(c, &r, this, j, 0x8004_72c4) {
-                        place(c, &r, k, 0x8004_72d8);
-                    }
-                }
-                k = k.wrapping_add(1);
-                r.0[3] = k;
+            k = k.wrapping_add(1);
+        }
+    } else if state == memcard_state::UNFORMATTED {
+        m.w32(this + GONE_AT, 0);
+        m.w32(this + WORD, UNFORMATTED);
+    } else {
+        m.w32(this + GONE_AT, 0);
+        let n = m.r32(rec + 8);
+        m.w32(this + WORD, if n != 0 { SAVES_WORD } else { NO_SAVE });
+        icons(c, this, fade);
+        let m = &mut c.m;
+        if m.r32(this + FADING_OUT) != 0 && m.r32(this + ALL_IN) != 0 {
+            m.w32(this + FADING_OUT, 0);
+        }
+    }
+    let m = &mut c.m;
+    let rec = m.r32(this + RECORD);
+    if m.r32(rec) == memcard_state::FULL && m.r32(this + SAVE) == u32::MAX {
+        m.w32(this + WORD, CARD_FULL);
+    }
+    if m.r32(CARD_ACTIVE) == 0 {
+        let card = m.r32(this + CARD);
+        memcard::handlecardevents(c, card);
+    }
+}
+
+/// The saves' icons (a card there): when fading out, whether all are out; each loaded (one a
+/// frame, none during a save or a fade-out), faded in (or out) and placed; this game's save
+/// looked for once an icon is in.
+fn icons(c: &mut Cpu, this: u32, fade: u32) {
+    let m = &mut c.m;
+    let rec = m.r32(this + RECORD);
+    if m.r32(this + FADING_OUT) != 0 {
+        m.w32(this + ALL_IN, 1);
+        if (m.r32(rec + 8) as i32) <= 0 {
+            return;
+        }
+        let mut k = 0u32;
+        while (k as u16 as i16 as i32) < m.r32(rec + 8) as i32 {
+            if (m.r16(this.wrapping_add(sx(k) << 1) + FADES) as i16) < FADED_OUT as i16 {
+                m.w32(this + ALL_IN, 0);
             }
-        } else if state == (-2i32) as u32 {
-            m.w32(this + GONE_AT, 0);
-            m.w32(this + WORD, 649);
-        } else {
-            m.w32(this + GONE_AT, 0);
-            let n = m.r32(rec + 8);
-            m.w32(this + WORD, if n != 0 { 638 } else { 645 });
-            'icons: {
-                if m.r32(this + FADING_OUT) != 0 {
-                    m.w32(this + ALL_IN, 1);
-                    if (m.r32(rec + 8) as i32) <= 0 {
-                        break 'icons;
-                    }
-                    r.0[3] = 0;
-                    while (k as u16 as i16 as i32) < m.r32(rec + 8) as i32 {
-                        if (m.r16(this.wrapping_add(sx(k) << 1) + FADES) as i16) < 128 {
-                            m.w32(this + ALL_IN, 0);
-                        }
-                        k = k.wrapping_add(1);
-                        r.0[3] = k;
-                    }
-                } else {
-                    m.w32(this + ALL_IN, 0);
-                }
-                if count(c, this) <= 0 {
-                    break 'icons;
-                }
-                (k, r.0[3], r.0[4]) = (0, 0, u32::MAX);
-                loop {
-                    if c.m.r32(this + RELEASE) != 0 {
-                        port(c, &r, 0x8004_8010, 0x8004_7358, &[this], abi_release_icons);
-                        c.m.w32(this + RELEASE, 0);
-                        c.m.w32(this + FADING_OUT, 0);
-                        break 'icons;
-                    }
-                    let j = sx(k);
-                    let at = this.wrapping_add(j);
-                    if c.m.r8(at + LOADED) == 0 && c.m.r32(CARD_ACTIVE) == 0 && c.m.r32(this + FADING_OUT) == 0 {
-                        port(c, &r, 0x8004_6924, 0x8004_742c, &[this, j], abi_load_icon);
-                    }
-                    let m = &mut c.m;
-                    if m.r32(this + FADING_OUT) != 0 && m.r32(this + ALL_IN) != 0 {
-                        m.w8(at + LOADED, 0);
-                    }
-                    let mut next = false;
-                    if m.r32(CARD_ACTIVE) == 0 {
-                        if m.r8(at + LOADED) == 0 {
-                            next = true;
-                        } else if m.r16(this.wrapping_add(j << 1) + FADES) == 0 {
-                            let card = m.r32(this + CARD);
-                            let save = port(c, &r, 0x8005_06b4, 0x8004_74a8, &[card, FILE_NAME], crate::memcard::abi_fileexists);
-                            let m = &mut c.m;
-                            let word = m.r32(this + WORD);
-                            m.w32(this + SAVE, save);
-                            if word != 640 && word != 636 {
-                                m.w32(this + GONE_AT, 0);
-                            }
-                            let save = m.r32(this + SAVE);
-                            if save != u32::MAX && m.r8(this.wrapping_add(save) + LOADED) != 0 {
-                                m.w32(this + WORD, u32::MAX);
-                                let name = this.wrapping_add((save << 5) + NAMES);
-                                r.call_leaving(c, SPRINTF, &[this + MESSAGE, name], 0x8004_7500);
-                            } else {
-                                m.w32(this + WORD, 645);
-                            }
-                        }
-                    }
-                    if !next && c.m.r8(at + LOADED) != 0 {
-                        r.0[2] = at;
-                        if c.m.r32(this + FADING_OUT) != 0 && c.m.r32(this + ALL_IN) == 0 {
-                            r.0[0] = this.wrapping_add(j << 1);
-                            fade_out_icon(c, &r, this, j, 0x8004_7594);
-                        } else {
-                            let f = this.wrapping_add(j << 1) + FADES;
-                            let v = c.m.r16(f).wrapping_sub(8);
-                            c.m.w16(f, v);
-                            if (v as i16) < 0 {
-                                c.m.w16(f, 0);
-                            }
-                        }
-                        place(c, &r, k, 0x8004_75e8);
-                    } else if !next {
-                        r.0[2] = at;
-                    }
-                    k = k.wrapping_add(1);
-                    r.0[3] = k;
-                    if (k as u16 as i16 as i32) >= count(c, this) {
-                        break;
-                    }
-                }
-            }
-            let m = &mut c.m;
-            if m.r32(this + FADING_OUT) != 0 && m.r32(this + ALL_IN) != 0 {
-                m.w32(this + FADING_OUT, 0);
-            }
+            k = k.wrapping_add(1);
+        }
+    } else {
+        m.w32(this + ALL_IN, 0);
+    }
+    if count(c, this) <= 0 {
+        return;
+    }
+    let mut k = 0u32;
+    loop {
+        if c.m.r32(this + RELEASE) != 0 {
+            release_icons(c, this);
+            c.m.w32(this + RELEASE, 0);
+            c.m.w32(this + FADING_OUT, 0);
+            return;
+        }
+        let j = sx(k);
+        let at = this.wrapping_add(j);
+        if c.m.r8(at + LOADED) == 0 && c.m.r32(CARD_ACTIVE) == 0 && c.m.r32(this + FADING_OUT) == 0 {
+            load_icon(c, this, j);
         }
         let m = &mut c.m;
-        let rec = m.r32(this + RECORD);
-        if m.r32(rec) == (-3i32) as u32 && m.r32(this + SAVE) == u32::MAX {
-            m.w32(this + WORD, 704);
+        if m.r32(this + FADING_OUT) != 0 && m.r32(this + ALL_IN) != 0 {
+            m.w8(at + LOADED, 0);
         }
+        let mut next = false;
         if m.r32(CARD_ACTIVE) == 0 {
-            let card = m.r32(this + CARD);
-            port(c, &r, 0x8005_0368, 0x8004_7680, &[card], crate::memcard::abi_handlecardevents);
+            if m.r8(at + LOADED) == 0 {
+                next = true;
+            } else if m.r16(this.wrapping_add(j << 1) + FADES) == 0 {
+                // this game's save: its name the message
+                let card = m.r32(this + CARD);
+                let save = memcard::fileexists(c, card, FILE_NAME);
+                let m = &mut c.m;
+                let word = m.r32(this + WORD);
+                m.w32(this + SAVE, save);
+                if word != INSERT_CARD && word != NO_CARD {
+                    m.w32(this + GONE_AT, 0);
+                }
+                let save = m.r32(this + SAVE);
+                if save != u32::MAX && m.r8(this.wrapping_add(save) + LOADED) != 0 {
+                    m.w32(this + WORD, u32::MAX);
+                    let name = this.wrapping_add((save << 5) + NAMES);
+                    call(c, SPRINTF, &[this + MESSAGE, name]);
+                } else {
+                    m.w32(this + WORD, NO_SAVE);
+                }
+            }
         }
-    })
+        if !next && c.m.r8(at + LOADED) != 0 {
+            if c.m.r32(this + FADING_OUT) != 0 && c.m.r32(this + ALL_IN) == 0 {
+                fade_out_icon(c, this, j, false);
+            } else {
+                let f = this.wrapping_add(j << 1) + FADES;
+                let v = c.m.r16(f).wrapping_sub(8);
+                c.m.w16(f, v);
+                if (v as i16) < 0 {
+                    c.m.w16(f, 0);
+                }
+            }
+            place_icons(c, this, sx(k), sx(fade));
+        }
+        k = k.wrapping_add(1);
+        if (k as u16 as i16 as i32) >= count(c, this) {
+            return;
+        }
+    }
+}
+
+pub fn abi_draw_mem_card_stuff(c: &mut Cpu) {
+    draw_mem_card_stuff(c, c.r[4], c.r[5]);
+}
+
+/// A menu item's flags (bit 0: off) in the menus.
+fn set_off(m: &mut Mem, item: u32, off: bool) {
+    let menus = m.r32(ALL_MENUS);
+    let v = m.r32(menus + item);
+    m.w32(menus + item, if off { v | 1 } else { v & !1 });
 }
 
 /// `tScreenMemcard::SetEnablings` (SCREENMEMCARD.CPP, 0x800476a4): with the card settled (no
 /// icon loading or fading, no save going on): saving on with this game's save there or
 /// room, loading on with a save there (for the first player only); loading off for a cheater.
-pub fn abi_set_enablings(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let card = c.m.r32(this + CARD);
-        let rec = port(c, &r, 0x8005_072c, 0x8004_76c0, &[card], crate::memcard::abi_getcard);
-        let m = &mut c.m;
-        m.w32(this + RECORD, rec);
-        let n = m.r32(rec + 8) as i32;
-        let mut busy = false;
-        for k in 0..n.max(0) as u32 {
-            if m.r8(this + k + LOADED) == 0 || m.r16(this + 2 * k + FADES) as i16 > 0 {
-                let rec = m.r32(this + RECORD);
-                let st = m.r32(rec);
-                if st != u32::MAX && st != (-2i32) as u32 {
-                    busy = true;
-                }
-            }
-        }
-        if m.r32(CARD_ACTIVE) != 0 {
-            busy = true;
-        }
-        if !busy {
-            let menus = m.r32(ALL_MENUS);
-            let v = m.r32(menus + 12416);
-            let none = m.r32(this + SAVE) == u32::MAX;
-            m.w32(menus + 12416, if none { v | 1 } else { v & !1 });
+pub fn set_enablings(c: &mut Cpu, this: u32) {
+    let card = c.m.r32(this + CARD);
+    let rec = memcard::getcard(&mut c.m, card);
+    let m = &mut c.m;
+    m.w32(this + RECORD, rec);
+    let n = m.r32(rec + 8) as i32;
+    let mut busy = false;
+    for k in 0..n.max(0) as u32 {
+        if m.r8(this + k + LOADED) == 0 || m.r16(this + 2 * k + FADES) as i16 > 0 {
             let rec = m.r32(this + RECORD);
             let st = m.r32(rec);
-            let there = st == 0 || st == (-2i32) as u32 || (st == (-3i32) as u32 && m.r32(this + SAVE) != u32::MAX);
-            let on = there && m.r16(this + PLAYER) == 0;
-            let menus = m.r32(ALL_MENUS);
-            let v = m.r32(menus + 12372);
-            m.w32(menus + 12372, if on { v & !1 } else { v | 1 });
+            if st != memcard_state::NONE && st != memcard_state::UNFORMATTED {
+                busy = true;
+            }
         }
-        if port(c, &r, 0x8002_37f0, 0x8004_7828, &[], crate::fecheats::abi_is_the_user_a_cry_baby_cheater) != 0 {
-            let menus = c.m.r32(ALL_MENUS);
-            let v = c.m.r32(menus + 12372);
-            c.m.w32(menus + 12372, v | 1);
-        }
-    })
+    }
+    if m.r32(CARD_ACTIVE) != 0 {
+        busy = true;
+    }
+    if !busy {
+        let none = m.r32(this + SAVE) == u32::MAX;
+        set_off(m, SAVE_ITEM, none);
+        let rec = m.r32(this + RECORD);
+        let st = m.r32(rec);
+        let there = st == 0 || st == memcard_state::UNFORMATTED || (st == memcard_state::FULL && m.r32(this + SAVE) != u32::MAX);
+        let on = there && m.r16(this + PLAYER) == 0;
+        set_off(m, LOAD_ITEM, !on);
+    }
+    if crate::fecheats::is_the_user_a_cry_baby_cheater(&mut c.m) {
+        set_off(&mut c.m, LOAD_ITEM, true);
+    }
+}
+
+pub fn abi_set_enablings(c: &mut Cpu) {
+    set_enablings(c, c.r[4]);
 }
 
 /// `tScreenMemcard::DrawBackground` (SCREENMEMCARD.CPP, 0x80047858): (the card layer up a
 /// couple of seconds into the screen, its icons cleared) the card's grid, its saves, the
 /// message (the card's state or this game's save's name), the player's title, the grid's
 /// shading, boxes and lines and the screen's shapes, faded in; the menu's enablings.
-pub fn abi_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 96, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[7] = this;
-        let m = &mut c.m;
-        m.w32(this + WORD, u32::MAX);
-        let save = m.r32(this + SAVE);
-        if m.r8(this.wrapping_add(save) + LOADED) == 0 {
-            m.w32(this + SAVE, u32::MAX);
-        }
-        r.call_ptr_leaving(c, SYSTEM_TASK, &[0], 0x8004_78b4);
-        let m = &mut c.m;
-        let twice = h(m, this + FADE) << 1;
-        m.w16(sp + 40, fade_clamp(twice.wrapping_sub(128)) as u16);
-        m.w16(sp + 48, fade_clamp(((twice << 16) as i32 >> 17) as u32) as u16);
-        let mut s0 = ((twice << 16) as i32 >> 15) as u32;
-        if (s0 as i32) >= 129 {
-            s0 = 128;
-        }
-        if (s0 as i32) < 0 {
-            s0 = 0;
-        }
-        r.0[0] = s0;
-        if m.r32(this + UP) == 0 {
-            let fading = m.r16(this + FADE);
-            m.w32(this + WORD, 637);
-            if fading == 0 && (m.r32(GAME_TICKS).wrapping_sub(m.r32(this + START)) as i32) >= 129 {
-                port(c, &r, 0x8003_47d4, 0x8004_79a0, &[1, 0], crate::fememcard::abi_init_memcard);
-                let m = &mut c.m;
-                for k in 0..15 {
-                    for f in [LOADED, FRAMES, BLOCKS] {
-                        m.w8(this + k + f, 0);
-                    }
-                    m.w16(this + 2 * k + FADES, 128);
-                }
-                m.w32(this + UP, 1);
-            } else if m.r32(this + START) == 0 {
-                let t = m.r32(GAME_TICKS);
-                m.w32(this + START, t);
+pub fn draw_background(c: &mut Cpu, this: u32) {
+    let m = &mut c.m;
+    m.w32(this + WORD, u32::MAX);
+    let save = m.r32(this + SAVE);
+    if m.r8(this.wrapping_add(save) + LOADED) == 0 {
+        m.w32(this + SAVE, u32::MAX);
+    }
+    call_addr(c, SYSTEM_TASK, &[0]);
+    // the fades: the shapes' (the second half of the screen's), the lines' (half), the
+    // texts' (double)
+    let m = &mut c.m;
+    let twice = h(m, this + FADE) << 1;
+    let shapes_fade = fade_clamp(twice.wrapping_sub(128)) as u16;
+    let lines_fade = fade_clamp(((twice << 16) as i32 >> 17) as u32) as u16;
+    let mut texts_fade = ((twice << 16) as i32 >> 15) as u32;
+    if (texts_fade as i32) >= 129 {
+        texts_fade = 128;
+    }
+    if (texts_fade as i32) < 0 {
+        texts_fade = 0;
+    }
+    if m.r32(this + UP) == 0 {
+        let fading = m.r16(this + FADE);
+        m.w32(this + WORD, CHECKING_CARD);
+        if fading == 0 && (m.r32(GAME_TICKS).wrapping_sub(m.r32(this + START)) as i32) >= 129 {
+            crate::fememcard::init_memcard(c, true, false);
+            let m = &mut c.m;
+            for k in 0..SAVES {
+                icon_gone(m, this, k);
+                m.w16(this + 2 * k + FADES, FADED_OUT);
             }
+            m.w32(this + UP, 1);
+        } else if m.r32(this + START) == 0 {
+            let t = m.r32(GAME_TICKS);
+            m.w32(this + START, t);
         }
-        if c.m.r32(this + UP) != 0 && c.m.r16(sp + 40) as i16 != 128 {
-            port(c, &r, 0x8004_7148, 0x8004_7a2c, &[this, sx(s0)], abi_draw_mem_card_stuff);
-        }
-        let kind = c.m.r8(FADE_KIND) as u32;
-        let colours = c.m.r32(TEXT_COLORS + 4 * kind);
-        let s0 = port(c, &r, 0x8004_bd68, 0x8004_7a54, &[colours, sx(s0)], crate::fefades::abi_fade_out);
-        r.0[0] = s0;
-        let m = &mut c.m;
-        let over = m.r32(this + WORD_OVER);
-        if over != u32::MAX {
-            m.w32(this + WORD, over);
-        }
-        let word = m.r32(this + WORD);
-        if word != u32::MAX {
-            let text = r.call_leaving(c, TEXT_WORD, &[word], 0x8004_7a84);
-            r.call_leaving(c, SPRINTF, &[this + MESSAGE, text], 0x8004_7a90);
-        }
-        let s6 = 0x50_5050;
-        r.0[6] = s6;
+    }
+    if c.m.r32(this + UP) != 0 && shapes_fade as i16 != 128 {
+        draw_mem_card_stuff(c, this, sx(texts_fade));
+    }
+    let kind = c.m.r8(FADE_KIND) as u32;
+    let colours = c.m.r32(TEXT_COLORS + 4 * kind);
+    let colour = crate::fefades::fade_out(colours, sx(texts_fade));
+    // the message
+    let m = &mut c.m;
+    let over = m.r32(this + WORD_OVER);
+    if over != u32::MAX {
+        m.w32(this + WORD, over);
+    }
+    let word = m.r32(this + WORD);
+    if word != u32::MAX {
+        let text = call(c, TEXT_WORD, &[word]);
+        call(c, SPRINTF, &[this + MESSAGE, text]);
+    }
+    with_buffer(c, 8, |c, rect| {
         let m = &mut c.m;
         let (bx, by) = (m.r16(BOX_X), m.r16(BOX_Y));
-        m.w16(sp + 36, 190);
-        m.w16(sp + 38, 0);
-        m.w16(sp + 32, bx);
-        m.w16(sp + 34, by);
-        port(c, &r, 0x8002_1404, 0x8004_7ad8, &[this + MESSAGE, sp + 32, s0, 2, 0, 0], crate::fetextrender::abi_word_wrap_text_rgb_justify);
-        let player = sx(h(&mut c.m, this + PLAYER));
-        let title = r.call_leaving(c, TEXT_WORD, &[player.wrapping_add(660)], 0x8004_7ae8);
-        let (tx, ty) = (sx(h(&mut c.m, TEXT_X)), sx(h(&mut c.m, TEXT_Y)));
-        port(c, &r, 0x8002_0eac, 0x8004_7b10, &[title, tx, ty, s0, 0, 2], crate::fetextrender::abi_full_text_rgb);
-        // the grid's shading: a box faded to its middle from above and below
-        (r.0[5], r.0[4]) = (0x8005_0000, 0x8005_0000);
+        m.w16(rect + 4, 190);
+        m.w16(rect + 6, 0);
+        m.w16(rect, bx);
+        m.w16(rect + 2, by);
+        crate::fetextrender::word_wrap_text_rgb_justify(c, this + MESSAGE, RECT(rect), colour, 2, 0, 0);
+    });
+    let player = sx(h(&mut c.m, this + PLAYER));
+    let title = call(c, TEXT_WORD, &[player.wrapping_add(TITLE)]);
+    let (tx, ty) = (sx(h(&mut c.m, TEXT_X)), sx(h(&mut c.m, TEXT_Y)));
+    crate::fetextrender::full_text_rgb(c, title, tx, ty, colour, 0, 2);
+    // the grid's shading: a box darkened to its middle from above and below; the margins black
+    let m = &mut c.m;
+    let (lw, gx, gy, lh, lt, gw) = (h(m, LINE_W), h(m, GRID_X), h(m, GRID_Y), h(m, LINE_H), h(m, LINE_T), h(m, GRID_W));
+    let x = sx(gx.wrapping_sub(lw));
+    let y = sx(gy.wrapping_sub(lh).wrapping_sub(lt + 4));
+    let w = sx(gw.wrapping_add(lw << 1).wrapping_add(2));
+    let tall = sx(h(m, GRID_H).wrapping_add(lh << 1).wrapping_add(lt + 6));
+    let half = ((tall as i32) / 2) as u32;
+    call_addr(c, SUBTRACTIVE_BOX, &[x, y, w, half, SHADE, SHADE, 0, 0]);
+    call_addr(c, SUBTRACTIVE_BOX, &[x, y.wrapping_add(half), w, half, 0, 0, SHADE, SHADE]);
+    let m = &mut c.m;
+    let (gx, ty, gw, mt) = (m.r32(GRID_X), m.r32(TEXT_Y), m.r32(GRID_W), m.r32(MARGIN_T));
+    call_addr(c, DRAW_SQUARE, &[0, gx + 2, ty.wrapping_sub(2), gw.wrapping_sub(4), mt.wrapping_sub(1)]);
+    let m = &mut c.m;
+    let (gx, ch, gy, gw, mb) = (m.r32(GRID_X), m.r32(CELL_H), m.r32(GRID_Y), m.r32(GRID_W), m.r32(MARGIN_B));
+    let y = gy.wrapping_add(ch.wrapping_mul(5)).wrapping_add(1);
+    call_addr(c, DRAW_SQUARE, &[0, gx + 2, y, gw.wrapping_sub(4), mb.wrapping_sub(1)]);
+    // the columns' lines, the rows' (one over the top when there's room)
+    let lines_fade = sx(lines_fade as u32);
+    let mut x = h(&mut c.m, GRID_X);
+    for k in 0..4u32 {
         let m = &mut c.m;
-        let (lw, gx, gy, lh, lt, gw) = (h(m, LINE_W), h(m, GRID_X), h(m, GRID_Y), h(m, LINE_H), h(m, LINE_T), h(m, GRID_W));
-        r.0[8] = 0;
-        let s3 = sx(gx.wrapping_sub(lw));
-        let s2 = sx(gy.wrapping_sub(lh).wrapping_sub(lt + 4));
-        let s1 = sx(gw.wrapping_add(lw << 1).wrapping_add(2));
-        let tall = sx(h(m, GRID_H).wrapping_add(lh << 1).wrapping_add(lt + 6));
-        let s0 = ((tall as i32) / 2) as u32;
-        (r.0[3], r.0[2], r.0[1], r.0[0]) = (s3, s2, s1, s0);
-        r.call_ptr_leaving(c, SUBTRACTIVE_BOX, &[s3, s2, s1, s0, s6, s6, 0, 0], 0x8004_7bc8);
-        r.call_ptr_leaving(c, SUBTRACTIVE_BOX, &[s3, s2.wrapping_add(s0), s1, s0, 0, 0, s6, s6], 0x8004_7bec);
-        let m = &mut c.m;
-        let (gx, ty, gw, mt) = (m.r32(GRID_X), m.r32(TEXT_Y), m.r32(GRID_W), m.r32(MARGIN_T));
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, gx + 2, ty.wrapping_sub(2), gw.wrapping_sub(4), mt.wrapping_sub(1)], 0x8004_7c20);
-        let m = &mut c.m;
-        let (gx, ch, gy, gw, mb) = (m.r32(GRID_X), m.r32(CELL_H), m.r32(GRID_Y), m.r32(GRID_W), m.r32(MARGIN_B));
-        let y = gy.wrapping_add(ch.wrapping_mul(5)).wrapping_add(1);
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, gx + 2, y, gw.wrapping_sub(4), mb.wrapping_sub(1)], 0x8004_7c68);
-        // the columns' lines
-        let mut s0 = h(&mut c.m, GRID_X);
-        let mut fp = 0u32;
-        let mut s1;
-        loop {
-            (r.0[0], r.0[8], r.0[2]) = (s0, fp, 0x8005_0000);
-            let m = &mut c.m;
-            let t2 = h(m, sp + 48);
-            s1 = t2 << 16;
-            r.0[1] = s1;
-            let y = sx(h(m, GRID_Y).wrapping_sub(h(m, LINE_H)).wrapping_sub(h(m, LINE_T)));
-            port(c, &r, 0x8004_6c80, 0x8004_7cd8, &[this, sx(s0), y, sx(t2), parity(fp)], abi_draw_vertical_line);
-            fp = fp.wrapping_add(1);
-            s0 = s0.wrapping_add(h(&mut c.m, CELL_W));
-            if (fp as u16 as i16) >= 4 {
-                break;
-            }
-        }
-        // the rows' lines
-        let m = &mut c.m;
-        let lt = m.r32(LINE_T);
-        let mut s0 = h(m, GRID_Y);
-        (r.0[0], r.0[8]) = (s0, fp);
-        let fade = (s1 as i32 >> 16) as u32;
-        if lt != 0 {
-            let x = sx(h(m, GRID_X).wrapping_sub(h(m, LINE_W)));
-            let y = sx(s0.wrapping_sub(h(m, LINE_T)));
-            port(c, &r, 0x8004_6d34, 0x8004_7d4c, &[this, x, y, fade, 1], abi_draw_horizontal_line);
-        }
-        let mut fp = 0u32;
-        let (mut t0, mut t1);
-        (r.0[3], r.0[2]) = (0x8005_0000, 0x8005_0000);
-        loop {
-            r.0[8] = fp;
-            let m = &mut c.m;
-            let t2 = h(m, sp + 48);
-            r.0[1] = t2 << 16;
-            let x = sx(h(m, GRID_X).wrapping_sub(h(m, LINE_W)));
-            port(c, &r, 0x8004_6d34, 0x8004_7db0, &[this, x, sx(s0), sx(t2), parity(fp)], abi_draw_horizontal_line);
-            fp = fp.wrapping_add(1);
-            t1 = h(&mut c.m, CELL_H);
-            t0 = s0.wrapping_add(t1);
-            s0 = t0;
-            r.0[0] = s0;
-            if (fp as u16 as i16) >= 6 {
-                break;
-            }
-        }
-        r.0[8] = fp;
-        let m = &mut c.m;
-        let fade = sx(h(m, sp + 48));
+        let y = sx(h(m, GRID_Y).wrapping_sub(h(m, LINE_H)).wrapping_sub(h(m, LINE_T)));
+        draw_vertical_line(c, sx(x), y, lines_fade, parity(k));
+        x = x.wrapping_add(h(&mut c.m, CELL_W));
+    }
+    let m = &mut c.m;
+    let mut y = h(m, GRID_Y);
+    if m.r32(LINE_T) != 0 {
         let x = sx(h(m, GRID_X).wrapping_sub(h(m, LINE_W)));
-        let y = sx(t0.wrapping_add(h(m, MARGIN_B).wrapping_sub(t1)));
-        port(c, &r, 0x8004_6d34, 0x8004_7e38, &[this, x, y, fade, parity(fp)], abi_draw_horizontal_line);
-        // the screen's shapes
-        let fade = sx(h(&mut c.m, sp + 40));
-        r.0[1] = fade;
-        for k in 0..16 {
-            r.0[0] = k;
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k + 30, 0, 0, 0, fade, 0, 0], 0x8004_7e68);
-        }
-        r.0[0] = 16;
-        if c.m.r32(this + UP) != 0 {
-            port(c, &r, 0x8004_76a4, 0x8004_7e90, &[this], abi_set_enablings);
-        }
-    })
+        let top = sx(y.wrapping_sub(h(m, LINE_T)));
+        draw_horizontal_line(c, x, top, lines_fade, 1);
+    }
+    let mut cell = 0;
+    for k in 0..6u32 {
+        let m = &mut c.m;
+        let x = sx(h(m, GRID_X).wrapping_sub(h(m, LINE_W)));
+        draw_horizontal_line(c, x, sx(y), lines_fade, parity(k));
+        cell = h(&mut c.m, CELL_H);
+        y = y.wrapping_add(cell);
+    }
+    let m = &mut c.m;
+    let x = sx(h(m, GRID_X).wrapping_sub(h(m, LINE_W)));
+    let bottom = sx(y.wrapping_add(h(m, MARGIN_B).wrapping_sub(cell)));
+    draw_horizontal_line(c, x, bottom, lines_fade, parity(6));
+    // the screen's shapes
+    let fade = sx(shapes_fade as u32);
+    for k in 0..16 {
+        call(c, DRAW_SHAPE_EXTENDED, &[k + 30, 0, 0, 0, fade, 0, 0]);
+    }
+    if c.m.r32(this + UP) != 0 {
+        set_enablings(c, this);
+    }
+}
+
+pub fn abi_draw_background(c: &mut Cpu) {
+    draw_background(c, c.r[4]);
 }
 
 /// `tScreenMemcard::DrawForeground` (SCREENMEMCARD.CPP, 0x80047ec0): (once faded in far
 /// enough) the screen's help line and its box; the screen's front shapes, faded in.
+pub fn draw_foreground(c: &mut Cpu, this: u32) {
+    let twice = h(&mut c.m, this + FADE) << 1;
+    let fade = fade_clamp(twice.wrapping_sub(128));
+    if (twice as u16 as i16) >= 100 {
+        crate::fetextrender::menu_text_positioned_justify(c, CHECKING, 480, 220, 1, 1, 4);
+        let text = call(c, TEXT_WORD, &[CHECKING]);
+        let width = call(c, TEXT_PIXELS, &[text]);
+        call_addr(c, DRAW_SQUARE, &[0, 480, 220, 0u32.wrapping_sub(width).wrapping_sub(5), 7]);
+    }
+    let fade = sx(fade);
+    for k in 0..4 {
+        call(c, DRAW_SHAPE_EXTENDED, &[k + 56, 0, 0, 0, fade, 0, 0]);
+    }
+}
+
 pub fn abi_draw_foreground(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        let twice = h(&mut c.m, this + FADE) << 1;
-        let fade = fade_clamp(twice.wrapping_sub(128));
-        r.0[1] = fade;
-        if (twice as u16 as i16) >= 100 {
-            port(c, &r, 0x8002_12e0, 0x8004_7f4c, &[638, 480, 220, 1, 1, 4], crate::fetextrender::abi_menu_text_positioned_justify);
-            let text = r.call_leaving(c, TEXT_WORD, &[638], 0x8004_7f54);
-            let width = r.call_leaving(c, TEXT_PIXELS, &[text], 0x8004_7f5c);
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[0, 480, 220, 0u32.wrapping_sub(width).wrapping_sub(5), 7], 0x8004_7f7c);
-        }
-        let fade = sx(fade);
-        r.0[1] = fade;
-        for k in 0..4 {
-            r.0[0] = k;
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k + 56, 0, 0, 0, fade, 0, 0], 0x8004_7fa8);
-        }
-    })
+    draw_foreground(c, c.r[4]);
 }
 
 /// `tScreenMemcard::tScreenMemcard` (SCREENMEMCARD.CPP, 0x80047fcc): a screen of the first
 /// card, no word over its message.
+pub fn screen_memcard(c: &mut Cpu, this: u32) -> u32 {
+    crate::fescreen::screen(c, Screen(this));
+    c.m.w32(this + VPTR, VTABLE);
+    c.m.w32(this + WORD_OVER, u32::MAX);
+    c.m.w32(this + CARD, 1);
+    this
+}
+
 pub fn abi_screen_memcard(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        port(c, &r, 0x8002_6040, 0x8004_7fe0, &[this], crate::fescreen::abi_screen);
-        c.m.w32(this + 96, VTABLE);
-        c.m.w32(this + WORD_OVER, u32::MAX);
-        c.m.w32(this + CARD, 1);
-        c.r[2] = this;
-    })
+    c.r[2] = screen_memcard(c, c.r[4]);
 }
 
 /// `tScreenMemcard::ReleaseIcons` (SCREENMEMCARD.CPP, 0x80048010): every icon gone, its CLUT
 /// released.
-pub fn abi_release_icons(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        for k in 0..15 {
-            (r.0[1], r.0[0]) = (k, this + 2 * k);
-            for f in [LOADED, FRAMES, BLOCKS] {
-                c.m.w8(this + k + f, 0);
-            }
-            let clut = c.m.r16(this + 2 * k + CLUTS);
-            if clut != 0 {
-                r.call_leaving(c, RELEASE_CLUT, &[clut as i16 as i32 as u32], 0x8004_805c);
-                c.m.w16(this + 2 * k + CLUTS, 0);
-            }
+pub fn release_icons(c: &mut Cpu, this: u32) {
+    for k in 0..SAVES {
+        icon_gone(&mut c.m, this, k);
+        let clut = c.m.r16(this + 2 * k + CLUTS);
+        if clut != 0 {
+            call(c, RELEASE_CLUT, &[clut as i16 as i32 as u32]);
+            c.m.w16(this + 2 * k + CLUTS, 0);
         }
-    })
+    }
+}
+
+pub fn abi_release_icons(c: &mut Cpu) {
+    release_icons(c, c.r[4]);
 }
 
 /// `tScreenMemcard::Initialize` (SCREENMEMCARD.CPP, 0x80048088): the grid's layout, the
 /// icons' buffer, the player's card (1 or 5) and title, the menu's load and save off (its
 /// save item saying the player's), no icons, no save found.
+pub fn initialize(c: &mut Cpu, this: u32) {
+    let m = &mut c.m;
+    for (at, v) in [
+        (GRID_X, 246), (GRID_Y, 60), (CELL_W, 59), (CELL_H, 27), (MARGIN_T, 12), (MARGIN_B, 12), (LINE_T, 12),
+        (GRID_W, 177), (GRID_H, 147), (LINE_W, 12), (LINE_H, 6), (ICON_X, 15), (ICON_Y, 6), (TEXT_Y, 51),
+        (BOX_X, 336), (TEXT_X, 336),
+    ] {
+        m.w32(at, v);
+    }
+    m.w32(this + START, 0);
+    m.w32(BOX_Y, 198);
+    let icons = call(c, RESERVE, &[RECORDS_NAME, SAVES * ICON_SET, 0]);
+    let m = &mut c.m;
+    let app = m.r32(FE_APP);
+    m.w32(ICONS, icons);
+    m.w32(this + GONE_AT, 0);
+    m.w16(this + FLASH, 0);
+    m.w16(this + FLASH_TIME, 0);
+    let player = m.r8(app + APP_PLAYER) as u32;
+    m.w16(this + PLAYER, player as u16);
+    m.w32(this + CARD, (player << 2) + 1);
+    let item = if m.r16(this + PLAYER) != 0 { 650 } else { 648 };
+    let menus = m.r32(ALL_MENUS);
+    let (load, save) = (m.r32(menus + LOAD_ITEM), m.r32(menus + SAVE_ITEM));
+    m.w32(menus + SAVE_ITEM_WORD, item);
+    m.w32(menus + LOAD_ITEM, load | 1);
+    m.w32(menus + SAVE_ITEM, save | 1);
+    for k in 0..SAVES {
+        icon_gone(m, this, k);
+        m.w16(this + 2 * k + FADES, FADED_OUT);
+        m.w16(this + 2 * k + CLUTS, 0);
+    }
+    for (at, v) in [(UP, 0), (FADING_OUT, 0), (ALL_IN, 0), (SAVE, u32::MAX), (RELEASE, 0)] {
+        m.w32(this + at, v);
+    }
+    crate::fescreen::initialize(c, Screen(this));
+}
+
 pub fn abi_initialize(c: &mut Cpu) {
-    let (this, ra) = (c.r[4], c.r[31]);
-    abi::frame(c, 24, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        // (its return address saved past where the prologue's scan looks)
-        c.m.w32(sp + 20, ra);
-        let m = &mut c.m;
-        for (at, v) in [
-            (GRID_X, 246), (GRID_Y, 60), (CELL_W, 59), (CELL_H, 27), (MARGIN_T, 12), (MARGIN_B, 12), (LINE_T, 12),
-            (GRID_W, 177), (GRID_H, 147), (LINE_W, 12), (LINE_H, 6), (ICON_X, 15), (ICON_Y, 6), (TEXT_Y, 51),
-            (BOX_X, 336), (TEXT_X, 336),
-        ] {
-            m.w32(at, v);
-        }
-        m.w32(this + START, 0);
-        m.w32(BOX_Y, 198);
-        let icons = r.call_leaving(c, RESERVE, &[RECORDS_NAME, 8640, 0], 0x8004_8168);
-        let m = &mut c.m;
-        let app = m.r32(FE_APP);
-        m.w32(ICONS, icons);
-        m.w32(this + GONE_AT, 0);
-        m.w16(this + FLASH, 0);
-        m.w16(this + FLASH_TIME, 0);
-        let player = m.r8(app + 557) as u32;
-        m.w16(this + PLAYER, player as u16);
-        m.w32(this + CARD, (player << 2) + 1);
-        let item = if m.r16(this + PLAYER) != 0 { 650 } else { 648 };
-        let menus = m.r32(ALL_MENUS);
-        let (load, save) = (m.r32(menus + 12372), m.r32(menus + 12416));
-        m.w32(menus + 12420, item);
-        m.w32(menus + 12372, load | 1);
-        m.w32(menus + 12416, save | 1);
-        for k in 0..15 {
-            for f in [LOADED, FRAMES, BLOCKS] {
-                m.w8(this + k + f, 0);
-            }
-            m.w16(this + 2 * k + FADES, 128);
-            m.w16(this + 2 * k + CLUTS, 0);
-        }
-        for (at, v) in [(UP, 0), (FADING_OUT, 0), (ALL_IN, 0), (SAVE, u32::MAX), (RELEASE, 0)] {
-            m.w32(this + at, v);
-        }
-        c.r[8] = 128;
-        port(c, &r, 0x8002_60cc, 0x8004_8220, &[this, this + 30, 15, item], crate::fescreen::abi_initialize);
-    })
+    initialize(c, c.r[4]);
 }
 
 /// `tScreenMemcard::Cleanup` (SCREENMEMCARD.CPP, 0x80048230): the icons released, the card
 /// layer stopped, the menu's load and save back on, the icons' buffer freed; then a wait for
 /// the music's buffer.
+pub fn cleanup(c: &mut Cpu, this: u32) {
+    release_icons(c, this);
+    crate::fememcard::deinit_memcard(c);
+    let m = &mut c.m;
+    let icons = m.r32(ICONS);
+    set_off(m, LOAD_ITEM, false);
+    set_off(m, SAVE_ITEM, false);
+    call(c, PURGE, &[icons]);
+    crate::fescreen::cleanup(c, Screen(this));
+    while !music_buffered(c) {
+        crate::feaudio::systemtask(c);
+        c.tick();
+    }
+}
+
 pub fn abi_cleanup(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        port(c, &r, 0x8004_8010, 0x8004_8244, &[this], abi_release_icons);
-        port(c, &r, 0x8003_4938, 0x8004_824c, &[], crate::fememcard::abi_deinit_memcard);
-        let m = &mut c.m;
-        let icons = m.r32(ICONS);
-        let menus = m.r32(ALL_MENUS);
-        let (load, save) = (m.r32(menus + 12372), m.r32(menus + 12416));
-        m.w32(menus + 12372, load & !1);
-        m.w32(menus + 12416, save & !1);
-        r.call_leaving(c, PURGE, &[icons], 0x8004_827c);
-        port(c, &r, 0x8002_61c0, 0x8004_8284, &[this], crate::fescreen::abi_cleanup);
-        loop {
-            let buffered = r.call_leaving(c, MUSIC_BUFFERED, &[], 0x8004_828c);
-            r.0[0] = buffered;
-            let threshold = r.call_leaving(c, MUSIC_THRESHOLD, &[], 0x8004_8294);
-            r.0[0] = ((buffered as i32) < threshold as i32) as u32;
-            if r.0[0] == 0 {
-                break;
-            }
-            port(c, &r, 0x8001_5a70, 0x8004_82a8, &[0], crate::feaudio::abi_systemtask);
-            c.tick();
-        }
-    })
+    cleanup(c, c.r[4]);
 }
 
 /// `tScreenMemcard::~tScreenMemcard` (SCREENMEMCARD.CPP, 0x800482c0): the screen's.
 pub fn abi_screen_memcard_destructor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        let r = Saved::of(c);
-        port(c, &r, 0x8002_6098, 0x8004_82d0, &[this, flags], crate::fescreen::abi_screen_destructor);
-    })
-}
-
-/// `tScreenMemcard::tScreenMemcard` entered as the original's callers `jal` it.
-pub(crate) fn screen_memcard_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8004_7fcc, None, &[]);
-    abi_screen_memcard(c);
+    crate::fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 #[cfg(test)]
@@ -1122,7 +1072,9 @@ mod tests {
         let now = m.r32(GAME_TICKS);
         m.w32(s + GONE_AT, [0, now, now.wrapping_sub(800), now.wrapping_sub(801), now.wrapping_sub(5000)][pick(rng, 5) as usize]);
         m.w32(s + START, [0, now, now.wrapping_sub(128), now.wrapping_sub(129)][pick(rng, 4) as usize]);
-        if m.r32(s + UP) == 0 && m.r16(s + FADE) == 0 && (now.wrapping_sub(m.r32(s + START)) as i32) >= 129 {
+        // (never the card layer's start, which waits on a dialog the test CPUs don't draw:
+        // `DrawBackground`'s `systemtask` lets a tick go by first)
+        if m.r32(s + UP) == 0 && m.r16(s + FADE) == 0 && (now.wrapping_sub(m.r32(s + START)) as i32) >= 128 {
             m.w32(s + START, now);
         }
         m.w16(s + PLAYER, (pick(rng, 3) == 0) as u16);
