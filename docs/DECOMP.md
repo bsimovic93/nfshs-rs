@@ -122,7 +122,7 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
   (pictures; cards that differ must load the same) and `tools/hookaudit.py`. The front end's
   stack tests are gone: they checked the fidelity this drops.
 
-Rewritten so far: FEMENU.CPP.
+Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP.
 
 ## Checking
 

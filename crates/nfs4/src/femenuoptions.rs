@@ -332,7 +332,7 @@ pub fn abi_options_menu(c: &mut Cpu) {
 
 /// `tOptionsMenu::~tOptionsMenu` (FEMENUOPTIONS.CPP, 0x8001c6a4).
 pub fn abi_options_menu_dtor(c: &mut Cpu) {
-    femenuextended::destroy(c, c.r[4], Some((MENU_VPTR, OPTIONS_MENU_VT)), 0x8002_54d0, 0x8001_c6bc, femenu::abi_menu_dtor);
+    femenuextended::destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, OPTIONS_MENU_VT)), femenu::abi_menu_dtor);
 }
 
 /// `tOptionsMenu::DebounceKeys` (FEMENUOPTIONS.CPP, 0x8001c6cc): the current item's (none when
@@ -678,7 +678,7 @@ pub fn abi_inside_box_menu(c: &mut Cpu) {
 
 /// `tInsideBoxMenu::~tInsideBoxMenu` (FEMENUOPTIONS.CPP, 0x8001cf64).
 pub fn abi_inside_box_menu_dtor(c: &mut Cpu) {
-    femenuextended::destroy(c, c.r[4], Some((MENU_VPTR, INSIDE_BOX_MENU_VT)), 0x8002_54d0, 0x8001_cf7c, femenu::abi_menu_dtor);
+    femenuextended::destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, INSIDE_BOX_MENU_VT)), femenu::abi_menu_dtor);
 }
 
 /// `tInsideBoxMenu::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001cf8c): up and down used up while
@@ -819,7 +819,7 @@ pub fn abi_sliding_menu(c: &mut Cpu) {
 
 /// `tMenuItemSlidingMenu::~tMenuItemSlidingMenu` (FEMENUOPTIONS.CPP, 0x8001d368).
 pub fn abi_sliding_menu_dtor(c: &mut Cpu) {
-    femenuextended::destroy(c, c.r[4], Some((ITEM_VPTR, SLIDING_MENU_VT)), 0x8002_4784, 0x8001_d380, femenu::abi_menu_item_dtor);
+    femenuextended::destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, SLIDING_MENU_VT)), femenu::abi_menu_item_dtor);
 }
 
 /// `tMenuItemSlidingMenu::TransitionOff` (FEMENUOPTIONS.CPP, 0x8001d390): transitioning out;
@@ -1463,7 +1463,7 @@ pub fn abi_audio_slider(c: &mut Cpu) {
 /// `tMenuItemLeftRightAudioSlider::~tMenuItemLeftRightAudioSlider` (FEMENUOPTIONS.CPP,
 /// 0x8001e6a8).
 pub fn abi_audio_slider_dtor(c: &mut Cpu) {
-    femenuextended::destroy(c, c.r[4], Some((ITEM_VPTR, AUDIO_SLIDER_VT)), 0x8002_4b74, 0x8001_e6c0, femenu::abi_left_right_slider_dtor);
+    femenuextended::destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, AUDIO_SLIDER_VT)), femenu::abi_left_right_slider_dtor);
 }
 
 /// `tMenuItemLeftRightAudioSlider::Draw` (FEMENUOPTIONS.CPP, 0x8001e6d0): the slider placed at
@@ -1643,7 +1643,7 @@ pub fn abi_song_menu(c: &mut Cpu) {
 
 /// `tInsideBoxSongMenu::~tInsideBoxSongMenu` (FEMENUOPTIONS.CPP, 0x8001eb10).
 pub fn abi_song_menu_dtor(c: &mut Cpu) {
-    femenuextended::destroy(c, c.r[4], Some((MENU_VPTR, SONG_MENU_VT)), 0x8001_cf64, 0x8001_eb28, abi_inside_box_menu_dtor);
+    femenuextended::destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, SONG_MENU_VT)), abi_inside_box_menu_dtor);
 }
 
 /// `tInsideBoxSongMenu::Draw` (FEMENUOPTIONS.CPP, 0x8001eb38): with songs loaded, the songs'
@@ -1941,7 +1941,7 @@ pub fn abi_inside_slider(c: &mut Cpu) {
 
 /// `tInsideBoxLeftRightSlider::~tInsideBoxLeftRightSlider` (FEMENUOPTIONS.CPP, 0x8001f428).
 pub fn abi_inside_slider_dtor(c: &mut Cpu) {
-    femenuextended::destroy(c, c.r[4], Some((ITEM_VPTR, INSIDE_SLIDER_VT)), 0x8002_4b74, 0x8001_f440, femenu::abi_left_right_slider_dtor);
+    femenuextended::destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, INSIDE_SLIDER_VT)), femenu::abi_left_right_slider_dtor);
 }
 
 /// A slider's value and its iterator's range; `r` the registers at the call.
@@ -2020,7 +2020,7 @@ pub fn abi_two_way_slider(c: &mut Cpu) {
 
 /// `tInsideBoxTwoWaySlider::~tInsideBoxTwoWaySlider` (FEMENUOPTIONS.CPP, 0x8001f628).
 pub fn abi_two_way_slider_dtor(c: &mut Cpu) {
-    femenuextended::destroy(c, c.r[4], Some((ITEM_VPTR, TWO_WAY_SLIDER_VT)), 0x8002_4b74, 0x8001_f640, femenu::abi_left_right_slider_dtor);
+    femenuextended::destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, TWO_WAY_SLIDER_VT)), femenu::abi_left_right_slider_dtor);
 }
 
 /// `tInsideBoxTwoWaySlider::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001f650): accept starts the
@@ -2785,55 +2785,54 @@ pub fn abi_controller_slider_process_input(c: &mut Cpu) {
     controller_slider_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
 }
 
-/// The destructors of the classes without one of their own: the base's (at `base_addr`),
-/// the vtable left; `ra` its return.
-fn destroy_as_base(c: &mut Cpu, base_addr: u32, ra: u32, base: fn(&mut Cpu)) {
-    femenuextended::destroy(c, c.r[4], None, base_addr, ra, base);
+/// The destructors of the classes without one of their own: the base's, the vtable left.
+fn destroy_as_base(c: &mut Cpu, base: fn(&mut Cpu)) {
+    femenuextended::destroy(c, c.r[4], c.r[5], None, base);
 }
 
 /// `tInsideBoxControllerLeftRightSlider::~...` (FEMENUOPTIONS.CPP, 0x80020d18).
 pub fn abi_controller_slider_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8001_f428, 0x8002_0d28, abi_inside_slider_dtor);
+    destroy_as_base(c, abi_inside_slider_dtor);
 }
 
 /// `tMemoryCardMenuItem::~...` (FEMENUOPTIONS.CPP, 0x80020d38).
 pub fn abi_memory_card_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8002_539c, 0x8002_0d48, femenu::abi_go_to_menu_button_dtor);
+    destroy_as_base(c, femenu::abi_go_to_menu_button_dtor);
 }
 
 /// `tMenuItemGoToMenuButtonFade::~...` (FEMENUOPTIONS.CPP, 0x80020d58).
 pub fn abi_button_fade_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8002_539c, 0x8002_0d68, femenu::abi_go_to_menu_button_dtor);
+    destroy_as_base(c, femenu::abi_go_to_menu_button_dtor);
 }
 
 /// `tUserNameMenuItem::~...` (FEMENUOPTIONS.CPP, 0x80020d78).
 pub fn abi_user_name_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8002_4784, 0x8002_0d88, femenu::abi_menu_item_dtor);
+    destroy_as_base(c, femenu::abi_menu_item_dtor);
 }
 
 /// `tMenuItemControllerLeftRightChoice::~...` (FEMENUOPTIONS.CPP, 0x80020d98).
 pub fn abi_controller_choice_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8002_4974, 0x8002_0da8, femenu::abi_left_right_choice_dtor);
+    destroy_as_base(c, femenu::abi_left_right_choice_dtor);
 }
 
 /// `tMenuItemOnOffLeftRightChoice::~...` (FEMENUOPTIONS.CPP, 0x80020db8).
 pub fn abi_on_off_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8002_4974, 0x8002_0dc8, femenu::abi_left_right_choice_dtor);
+    destroy_as_base(c, femenu::abi_left_right_choice_dtor);
 }
 
 /// `tMenuItemDisplayLeftRightChoice::~...` (FEMENUOPTIONS.CPP, 0x80020dd8).
 pub fn abi_display_choice_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8002_4974, 0x8002_0de8, femenu::abi_left_right_choice_dtor);
+    destroy_as_base(c, femenu::abi_left_right_choice_dtor);
 }
 
 /// `tMenuItemSlidingActivated::~...` (FEMENUOPTIONS.CPP, 0x80020df8).
 pub fn abi_sliding_activated_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8001_d368, 0x8002_0e08, abi_sliding_menu_dtor);
+    destroy_as_base(c, abi_sliding_menu_dtor);
 }
 
 /// `tMenuItemLeftRightFade::~...` (FEMENUOPTIONS.CPP, 0x80020e18).
 pub fn abi_left_right_fade_dtor(c: &mut Cpu) {
-    destroy_as_base(c, 0x8002_4974, 0x8002_0e28, femenu::abi_left_right_choice_dtor);
+    destroy_as_base(c, femenu::abi_left_right_choice_dtor);
 }
 
 #[cfg(test)]

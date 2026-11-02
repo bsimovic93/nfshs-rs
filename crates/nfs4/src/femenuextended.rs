@@ -1,17 +1,21 @@
-//! FEMENUEXTENDED.CPP: the front end's NFS4-style menus: the text box an item is drawn in
-//! (its text twice, the second copy offset, between arrows, in a rounded box), the buttons and
-//! left-right choices that slide in and fade between enabled and disabled, the options
-//! screen's choices (a list's value, or one of two), and the menus that hold them (the NFS4
-//! menu with its animated button image, the two-player, bottom, blank and options menus,
-//! their transitions on and off).
+//! FEMENUEXTENDED.CPP: the front end's NFS4-style menus.
+//! - The text box an item is drawn in (`MenuNFS4_DrawTextBox`): its text twice, the second copy
+//!   further left, between arrows, in a rounded box.
+//! - Items that slide in and fade between enabled and disabled: the NFS4 button and left-right
+//!   choice. The options screen's choices: a list's value, or one of two.
+//! - The menus holding them: the NFS4 menu with its animated button image; the two-player,
+//!   bottom, blank and options menus; their transitions on and off.
 //!
-//! Like FEMENU.CPP's, the classes call each other through their vtables (`method`), the
-//! registers each call gets as the original has them at its `jal` or `jalr`.
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr, call_virtual, with_buffer};
+use crate::femenu::{self, ITEM_DISABLED, ITEM_VPTR, ITERATOR_VPTR, KEY_NONE, PLAY_FE_SFX, TEXT_VALUE, TITLE, VALUE};
 use crate::fetextrender;
-use crate::femenu::{self, ITEM_DISABLED, ITEM_VPTR, ITERATOR_VPTR, KEY_NONE, PLAY_FE_SFX, TEXT_VALUE, TITLE, VALUE, method};
 use crate::globals::{FE_APP, FLIP, GAME_TICKS, HELP_POS, PLAYER1_VIEW, SCREEN_WIDTH, SHAPES};
+use crate::types::{
+    DRAWENV, FEApplication, ListIterator, Menu, MenuBlank, MenuCommand, MenuItem, MenuItemGoToMenuNFS4Button,
+    MenuItemLeftRightChoice, MenuItemNFS4LeftRightChoice, MenuItemOptionsTwoItemChoice, MenuNFS4, MenuOptions, RECT,
+};
 use ps1rt::{Cpu, Mem};
 
 /// The vtables.
@@ -35,6 +39,8 @@ pub(crate) const ITEM_TRANSITION_OFF: u32 = 56;
 pub(crate) const ITEM_TRANSITION_ON: u32 = 64;
 pub(crate) const ITEM_TRANSITION_IS_FINISHED: u32 = 72;
 pub(crate) const ITEM_UPDATE_TRANSITION: u32 = 80;
+/// An item's or a menu's flag: drawn with its reflection below (a menu's: each of its items).
+const REFLECTED: u32 = 0x200;
 
 /// The drawing library: `Draw_GetDRAWENV`, `CalcFadeVal`, `CalcTextFadeSelToHi`,
 /// `CalcOnOffFade`, `FETextRender_SetFont`, `TextSys_Word`, `sprintf`, `s_upper`,
@@ -71,18 +77,43 @@ const TEXT_FORMAT: u32 = 0x8001_0614;
 /// The scratchpad's drawing state: the ordering table's entry, the next primitive.
 pub(crate) const OT: u32 = 0x1F80_0000;
 pub(crate) const NEXT_PRIM: u32 = 0x1F80_0004;
+/// A front-end shape's entry (32 bytes, PSXFRONT.CPP's): its width and height.
+const SHAPE_WIDTH: u32 = 16;
+const SHAPE_HEIGHT: u32 = 18;
+/// The shapes used here (their entries in the table at `SHAPES`): the box's border, the options
+/// choices' arrows (41st).
+const BORDER_SHAPE: u32 = 960;
+const OPTIONS_SHAPE: u32 = 1312;
+/// `DrawShapeExtended`'s shapes and flags used here: the arrows (left, right), the box's border;
+/// the arrows' and the button image's flags.
+const LEFT_ARROW: u32 = 10;
+const RIGHT_ARROW: u32 = 11;
+const BORDER: u32 = 30;
+const ARROW_FLAGS: u32 = 280;
+const BUTTON_IMAGE_FLAGS: u32 = 1040;
+/// The text box's and the options' fades: `CalcFadeVal`'s colours from and to.
+const BOX_DIM: u32 = 0x00B5_4200;
+const BOX_LIT: u32 = 0xBEBE;
+/// The button image's tint.
+const BUTTON_IMAGE_COLOUR: u32 = 0x00CE_C844;
 
 /// The short in a register's low half, sign-extended.
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
 }
 
-fn lh(m: &mut Mem, at: u32) -> u32 {
-    m.r16(at) as i16 as i32 as u32
+fn shape_width(m: &mut Mem, shape: u32) -> i16 {
+    m.r16(shape + SHAPE_WIDTH) as i16
 }
 
-fn lhu(m: &mut Mem, at: u32) -> u32 {
-    m.r16(at) as u32
+fn shape_height(m: &mut Mem, shape: u32) -> i16 {
+    m.r16(shape + SHAPE_HEIGHT) as i16
+}
+
+/// The address of a caller's stack argument `n` (from 0), for the variadic constructors' item
+/// lists.
+fn stack_arg(c: &Cpu, n: u32) -> u32 {
+    c.r[29].wrapping_add(4 * n)
 }
 
 /// A 12-byte primitive (a draw area's) taken from the scratchpad's buffer and linked into the
@@ -98,980 +129,839 @@ pub(crate) fn add_prim(m: &mut Mem) -> u32 {
     prim
 }
 
-/// A RECT's 8 bytes copied (the original's `lwl`/`lwr` pairs).
-fn copy_rect(m: &mut Mem, from: u32, to: u32) {
-    for k in 0..8 {
-        let b = m.r8(from + k);
-        m.w8(to + k, b);
+/// The drawing clipped to `rect` from here on (a draw area primitive in the ordering table).
+fn set_draw_area(c: &mut Cpu, rect: RECT) {
+    let prim = add_prim(&mut c.m);
+    call_addr(c, SET_DRAW_AREA, &[prim, rect.0]);
+}
+
+fn set_rect(m: &mut Mem, rect: RECT, x: i16, y: i16, w: i16, h: i16) {
+    rect.set_x(m, x);
+    rect.set_y(m, y);
+    rect.set_w(m, w);
+    rect.set_h(m, h);
+}
+
+fn copy_rect(m: &mut Mem, from: RECT, to: RECT) {
+    let (x, y, w, h) = (from.x(m), from.y(m), from.w(m), from.h(m));
+    set_rect(m, to, x, y, w, h);
+}
+
+/// The buffer the drawing functions here pass the library by address: a rectangle,
+/// `DrawShapeExtended`'s options (+4 its colour), a choice's on and off colours, a string.
+struct Locals(u32);
+
+impl Locals {
+    const SIZE: u32 = 136;
+    fn rect(&self) -> RECT {
+        RECT(self.0)
     }
+    fn shape_options(&self) -> u32 {
+        self.0 + 8
+    }
+    fn set_shape_colour(&self, m: &mut Mem, colour: u32) {
+        m.w32(self.0 + 12, colour);
+    }
+    fn shape_colour(&self, m: &mut Mem) -> u32 {
+        m.r32(self.0 + 12)
+    }
+    fn on_colour(&self) -> u32 {
+        self.0 + 32
+    }
+    fn off_colour(&self) -> u32 {
+        self.0 + 36
+    }
+    fn text(&self) -> u32 {
+        self.0 + 40
+    }
+}
+
+/// Text `id`'s width in pixels as the boxes show it: upper case, less a pixel a letter.
+fn upper_text_width(c: &mut Cpu, id: u32, buf: u32) -> u32 {
+    let word = call(c, TEXT_WORD, &[id]);
+    call(c, SPRINTF, &[buf, TEXT_FORMAT, word]);
+    call(c, S_UPPER, &[buf]);
+    let pixels = call(c, TEXT_PIXELS, &[buf]);
+    let letters = call(c, STRLEN, &[buf]);
+    pixels.wrapping_sub(letters)
 }
 
 /// `MenuNFS4_SetHelpPos` (FEMENUEXTENDED.CPP, 0x8001a128): where the help box goes.
 pub fn set_help_pos(m: &mut Mem, rect: u32) {
-    for k in 0..4 {
-        let v = m.r16(rect + 2 * k);
-        m.w16(HELP_POS + 2 * k, v);
-    }
+    copy_rect(m, RECT(rect), RECT(HELP_POS));
 }
 
 pub fn abi_set_help_pos(c: &mut Cpu) {
     set_help_pos(&mut c.m, c.r[4]);
 }
 
-/// `MenuNFS4_DrawTextBox` (FEMENUEXTENDED.CPP, 0x8001a158): an item's box at `rect`: its
-/// text (when it has one) twice, the second `width` (at least the text's) to the left, `offset`
-/// across, in the item's fade (`fade_by_y`: faded by its height on the screen too), between
-/// arrows when `arrows`, clipped to the screen; then the box's border and its square.
+/// `MenuNFS4_DrawTextBox` (FEMENUEXTENDED.CPP, 0x8001a158): an item's box at `rect`. Its text
+/// (when it has one) twice, the second `width` (at least the text's) further left, both `offset`
+/// across, in the item's `fade` (`fade_by_y`: faded by the box's height on the screen too, for
+/// the reflections), between arrows when `arrows`, clipped to the box; then the box's border and
+/// its square.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_text_box(c: &mut Cpu, text: u32, rect: u32, width: u32, offset: u32, fade: u32, arrows: u32, fade_by_y: u32) {
-    abi::frame(c, 168, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = fade;
-        r.0[1] = text;
-        r.0[3] = rect;
-        r.0[5] = width;
-        r.0[6] = offset;
-        r.0[7] = fade_by_y;
+pub fn draw_text_box(c: &mut Cpu, text: u32, rect: RECT, width: u32, offset: u32, fade: u32, arrows: u32, fade_by_y: u32) {
+    with_buffer(c, Locals::SIZE, |c, at| {
+        let l = Locals(at);
         let (view, flip) = (c.m.r32(PLAYER1_VIEW), c.m.r32(FLIP));
-        let env = r.call_leaving(c, GET_DRAWENV, &[view, flip], 0x8001_a1b0);
-        r.0[8] = env;
-        let color = r.call_leaving(c, CALC_FADE_VAL, &[0x00B5_4200, 0xBEBE, sx(fade)], 0x8001_a1c8);
-        r.0[2] = fade;
-        c.m.w32(sp + 44, color);
+        let env = DRAWENV(call(c, GET_DRAWENV, &[view, flip]));
+        let colour = call(c, CALC_FADE_VAL, &[BOX_DIM, BOX_LIT, sx(fade)]);
+        l.set_shape_colour(&mut c.m, colour);
         if fade_by_y != 0 {
-            let v = 224i32.wrapping_sub(lh(&mut c.m, rect + 2) as i32);
-            let v = if v < 0 { 0 } else if v >= 129 { 128 } else { v };
-            let color = c.m.r32(sp + 44);
-            let color = r.call_leaving(c, CALC_FADE_VAL, &[0, color, v as u32], 0x8001_a20c);
-            c.m.w32(sp + 44, color);
+            let down = (224 - rect.y(&mut c.m) as i32).clamp(0, 128);
+            let colour = l.shape_colour(&mut c.m);
+            let colour = call(c, CALC_FADE_VAL, &[0, colour, down as u32]);
+            l.set_shape_colour(&mut c.m, colour);
         }
-        r.call_ptr_leaving(c, SUBTRACT_RECT_EDGES, &[rect], 0x8001_a218);
+        call_addr(c, SUBTRACT_RECT_EDGES, &[rect.0]);
         if (text as i32) >= 0 {
             // the whole screen's draw area
-            let m = &mut c.m;
-            m.w16(sp + 32, 0);
-            let y = m.r16(env + 2);
-            m.w16(sp + 36, 512);
-            m.w16(sp + 38, 240);
-            m.w16(sp + 34, y);
-            let prim = add_prim(m);
-            r.call_ptr_leaving(c, SET_DRAW_AREA, &[prim, sp + 32], 0x8001_a294);
-            r.call_leaving(c, SET_FONT, &[0], 0x8001_a29c);
-            let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_a2a4);
-            let buf = sp + 64;
-            r.0[0] = buf;
-            r.call_leaving(c, SPRINTF, &[buf, TEXT_FORMAT, word], 0x8001_a2bc);
-            r.call_leaving(c, S_UPPER, &[buf], 0x8001_a2c4);
-            let pixels = r.call_leaving(c, TEXT_PIXELS, &[buf], 0x8001_a2cc);
-            r.0[0] = pixels;
-            let len = r.call_leaving(c, STRLEN, &[buf], 0x8001_a2d8);
-            let shown = pixels.wrapping_sub(len);
-            r.0[4] = shown;
-            let gap = (if (shown as i32) < (width as i32) { width } else { shown }).wrapping_add(25);
-            r.0[5] = gap;
-            let mut col = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[1, sx(fade), 0], 0x8001_a304);
-            r.0[0] = col;
+            let screen_y = env.clip().y(&mut c.m);
+            set_rect(&mut c.m, l.rect(), 0, screen_y, 512, 240);
+            set_draw_area(c, l.rect());
+            call(c, SET_FONT, &[0]);
+            let shown = upper_text_width(c, text, l.text());
+            let gap = (shown as i32).max(width as i32).wrapping_add(25) as u32;
+            let mut colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[1, sx(fade), 0]);
             if fade_by_y != 0 {
-                let v = 240u32.wrapping_sub(lh(&mut c.m, rect + 2));
-                col = r.call_leaving(c, CALC_FADE_VAL, &[0, col, v], 0x8001_a324);
-                r.0[0] = col;
+                let down = 240u32.wrapping_sub(rect.y(&mut c.m) as i32 as u32);
+                colour = call(c, CALC_FADE_VAL, &[0, colour, down]);
             }
-            for (dx, ras) in [(0, [0x8001_a330, 0x8001_a364]), (gap, [0x8001_a36c, 0x8001_a3a4])] {
-                let word = r.call_leaving(c, TEXT_WORD, &[text], ras[0]);
+            for dx in [0, gap] {
+                let word = call(c, TEXT_WORD, &[text]);
                 let m = &mut c.m;
-                let x = sx(lhu(m, rect).wrapping_add(offset).wrapping_sub(dx));
-                let y = sx(lhu(m, rect + 2).wrapping_add(4));
-                r.call_leaving(c, FULL_TEXT_RGB, &[word, x, y, col, 0, 0], ras[1]);
+                let x = (rect.x(m) as u16 as u32).wrapping_add(offset).wrapping_sub(dx);
+                let y = (rect.y(m) as u16 as u32).wrapping_add(4);
+                call(c, FULL_TEXT_RGB, &[word, sx(x), sx(y), colour, 0, 0]);
             }
             if arrows != 0 {
                 let m = &mut c.m;
-                let mut y = lh(m, rect + 2).wrapping_add(((m.r16(rect + 6) as i16) >> 1) as i32 as u32);
+                let mut y = (rect.y(m) as i32).wrapping_add((rect.h(m) >> 1) as i32) as u32;
                 if fade_by_y == 0 {
                     y = y.wrapping_add(2);
                 }
-                r.0[2] = y;
-                let shape = sp + 40;
-                let dx = sx(offset);
-                r.0[1] = shape;
-                r.0[0] = dx;
-                let marks = [
-                    (10, (0u32, 0u32, 10u32), 0x8001_a404),
-                    (11, (0, shown, 0u32.wrapping_sub(8)), 0x8001_a430),
-                    (10, (gap, 0, 10), 0x8001_a45c),
-                    (11, (gap, shown, 0u32.wrapping_sub(8)), 0x8001_a48c),
-                ];
-                for (id, (left, right, back), ra) in marks {
-                    let x = lh(&mut c.m, rect).wrapping_add(dx).wrapping_sub(left).wrapping_add(right).wrapping_sub(back);
-                    r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[id, 280, x, y, 0, 0, shape], ra);
+                // each copy's arrows: the left one before it, the right one after
+                for at in [0, gap] {
+                    for (shape, after) in [(LEFT_ARROW, 0u32.wrapping_sub(10)), (RIGHT_ARROW, shown.wrapping_add(8))] {
+                        let x = (rect.x(&mut c.m) as i32 as u32).wrapping_add(sx(offset)).wrapping_sub(at).wrapping_add(after);
+                        call(c, DRAW_SHAPE_EXTENDED, &[shape, ARROW_FLAGS, x, y, 0, 0, l.shape_options()]);
+                    }
                 }
             }
-            // the box's own draw area
+            // the box's own draw area: inside its sides, on the screen being drawn
             let m = &mut c.m;
-            copy_rect(m, rect, sp + 32);
-            let v = lhu(m, sp + 34).wrapping_add(lhu(m, env + 2));
-            m.w16(sp + 34, v as u16);
-            let (x, w) = (lhu(m, sp + 32).wrapping_add(2), lhu(m, sp + 36).wrapping_sub(4));
-            m.w16(sp + 32, x as u16);
-            m.w16(sp + 36, w as u16);
-            let prim = add_prim(m);
-            r.call_ptr_leaving(c, SET_DRAW_AREA, &[prim, sp + 32], 0x8001_a530);
+            copy_rect(m, rect, l.rect());
+            let r = l.rect();
+            let screen_y = env.clip().y(m);
+            r.update_y(m, |y| y.wrapping_add(screen_y));
+            r.update_x(m, |x| x.wrapping_add(2));
+            r.update_w(m, |w| w.wrapping_sub(4));
+            set_draw_area(c, l.rect());
         }
-        // the border, and the square
+        // the border on the right, and the square under it all
         let m = &mut c.m;
-        copy_rect(m, rect, sp + 32);
-        let shape = m.r32(SHAPES).wrapping_add(960);
-        r.0[0] = shape;
-        let y = lhu(m, sp + 34).wrapping_add(1);
-        m.w16(sp + 34, y as u16);
-        let h = lhu(m, sp + 38).wrapping_sub(2);
-        m.w16(sp + 38, h as u16);
-        let w = lhu(m, sp + 36).wrapping_sub(1).wrapping_sub(((m.r16(shape + 16) as i16) >> 1) as i32 as u32);
-        let x = sx(w).wrapping_add(lh(m, sp + 32));
-        m.w16(sp + 36, w as u16);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[30, 8, x, sx(y), 0, 0, 0], 0x8001_a5c0);
+        copy_rect(m, rect, l.rect());
+        let r = l.rect();
+        let shape = m.r32(SHAPES).wrapping_add(BORDER_SHAPE);
+        let y = r.y(m).wrapping_add(1);
+        r.set_y(m, y);
+        r.update_h(m, |h| h.wrapping_sub(2));
+        let w = r.w(m).wrapping_sub(1).wrapping_sub(shape_width(m, shape) >> 1);
+        let x = (w as i32).wrapping_add(r.x(m) as i32) as u32;
+        r.set_w(m, w);
+        call(c, DRAW_SHAPE_EXTENDED, &[BORDER, 8, x, y as i32 as u32, 0, 0, 0]);
         let m = &mut c.m;
-        let args = [0, lh(m, sp + 32), lh(m, sp + 34), lh(m, sp + 36), lh(m, shape + 18)];
-        r.call_ptr_leaving(c, DRAW_SQUARE, &args, 0x8001_a5dc);
+        let args = [0, r.x(m) as i32 as u32, r.y(m) as i32 as u32, r.w(m) as i32 as u32, shape_height(m, shape) as i32 as u32];
+        call_addr(c, DRAW_SQUARE, &args);
     })
 }
 
 pub fn abi_draw_text_box(c: &mut Cpu) {
-    let (fade, arrows, fade_by_y) = (abi::arg(c, 4), abi::arg(c, 5), abi::arg(c, 6));
-    draw_text_box(c, c.r[4], c.r[5], c.r[6], c.r[7], fade, arrows, fade_by_y);
+    let (fade, arrows, fade_by_y) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
+    draw_text_box(c, c.r[4], RECT(c.r[5]), c.r[6], c.r[7], fade, arrows, fade_by_y);
 }
 
-/// The fade between disabled and enabled at `at` stepped (12 a frame, up when enabled) and
-/// kept in 0..128.
-fn step_enabled_fade(m: &mut Mem, this: u32, at: u32) {
-    let v = m.r16(this + at);
-    let v = if m.r32(this) & ITEM_DISABLED == 0 { v.wrapping_add(12) } else { v.wrapping_sub(12) };
-    m.w16(this + at, v);
-    let v = m.r16(this + at) as i16;
-    if v < 0 {
-        m.w16(this + at, 0);
-    } else if v > 128 {
-        m.w16(this + at, 128);
+// ---- The sliding items (the NFS4 button and left-right choice).
+
+/// The four shorts the sliding items end with: where the box is in its slide, the transition
+/// (0 off .. 128 on) and its speed, and the fade between disabled and enabled.
+#[derive(Clone, Copy)]
+struct Slide(u32);
+
+impl Slide {
+    fn of_button(b: MenuItemGoToMenuNFS4Button) -> Self {
+        Slide(b.0 + 0x24)
+    }
+    fn of_choice(c: MenuItemNFS4LeftRightChoice) -> Self {
+        Slide(c.0 + 0x20)
+    }
+    fn offset(self, m: &mut Mem) -> i16 {
+        m.r16(self.0) as i16
+    }
+    fn set_offset(self, m: &mut Mem, v: i16) {
+        m.w16(self.0, v as u16)
+    }
+    fn transition(self, m: &mut Mem) -> i16 {
+        m.r16(self.0 + 2) as i16
+    }
+    fn set_transition(self, m: &mut Mem, v: i16) {
+        m.w16(self.0 + 2, v as u16)
+    }
+    fn speed(self, m: &mut Mem) -> i16 {
+        m.r16(self.0 + 4) as i16
+    }
+    fn set_speed(self, m: &mut Mem, v: i16) {
+        m.w16(self.0 + 4, v as u16)
+    }
+    fn enabled(self, m: &mut Mem) -> i16 {
+        m.r16(self.0 + 6) as i16
+    }
+    fn set_enabled(self, m: &mut Mem, v: i16) {
+        m.w16(self.0 + 6, v as u16)
     }
 }
 
-/// The text box's width: 115 scaled by the lesser of the item's transition and enabled fades
-/// (`a`, `b`: the one read first wins a tie).
-fn box_width(m: &mut Mem, this: u32, a: u32, b: u32) -> u16 {
-    let v = if (m.r16(this + b) as i16) < (m.r16(this + a) as i16) { m.r16(this + b) } else { m.r16(this + a) };
-    let v = (v as i16 as i32).wrapping_mul(115);
-    ((if v < 0 { v + 127 } else { v }) >> 7) as u16
+/// Where a sliding item's box rests.
+const REST: i16 = 14;
+
+/// The fade toward enabled or disabled (12 a frame), within 0..128.
+fn step_enabled_fade(m: &mut Mem, item: MenuItem, s: Slide) {
+    let step = if item.flags(m) & ITEM_DISABLED == 0 { 12 } else { -12 };
+    let v = s.enabled(m).wrapping_add(step).clamp(0, 128);
+    s.set_enabled(m, v);
 }
 
-/// The slide toward the item's place at `at` (2 a frame selected, 4 not; from the text's width
-/// past the box when it would go past 0): `pixels` the text's width.
-fn slide(m: &mut Mem, this: u32, at: u32, selected: u32, pixels: u32) {
-    let back = if (pixels as i16) < 140 { 165 } else { pixels.wrapping_add(25) };
-    let v = lhu(m, this + at);
-    m.w16(this + at, v.wrapping_sub(2) as u16);
-    if selected == 0 {
-        m.w16(this + at, v.wrapping_sub(4) as u16);
+/// The text box's width: 115 scaled by the lesser of the transition and the enabled fade.
+fn box_width(m: &mut Mem, s: Slide) -> i16 {
+    let v = s.transition(m).min(s.enabled(m)) as i32;
+    (v * 115 / 128) as i16
+}
+
+/// The slide toward the box's place (2 a frame selected, 4 not), round from the text's width
+/// past the box (`width`) when it would go past 0.
+fn slide(m: &mut Mem, s: Slide, selected: u32, width: u32) {
+    let back = if (width as i16) < 140 { 165 } else { width.wrapping_add(25) as i16 };
+    let step = if selected != 0 { 2 } else { 4 };
+    let v = s.offset(m).wrapping_sub(step);
+    s.set_offset(m, if v < 0 { v.wrapping_add(back) } else { v });
+}
+
+/// A sliding item's `TransitionOn` (the enabled fade starts again too), `TransitionOff`,
+/// `TransitionIsFinished`, `UpdateTransition`.
+fn transition_on(m: &mut Mem, s: Slide) {
+    s.set_enabled(m, 0);
+    s.set_speed(m, 12);
+}
+
+fn transition_off(m: &mut Mem, s: Slide) {
+    s.set_speed(m, -12);
+}
+
+fn transition_is_finished(m: &mut Mem, s: Slide) -> u32 {
+    (s.speed(m) == 0) as u32
+}
+
+fn update_transition(c: &mut Cpu, item: MenuItem, s: Slide, selected: u32) {
+    let m = &mut c.m;
+    let v = s.transition(m).wrapping_add(s.speed(m));
+    if v < 0 || v > 128 {
+        s.set_transition(m, v.clamp(0, 128));
+        s.set_speed(m, 0);
+    } else {
+        s.set_transition(m, v);
     }
-    if (m.r16(this + at) as i16) < 0 {
-        let v = lhu(m, this + at).wrapping_add(back);
-        m.w16(this + at, v as u16);
-    }
+    femenu::menu_item_update_transition(c, item, selected);
+}
+
+/// A sliding item drawn at (`x`, `y`): its box, and its reflection below (`REFLECTED`).
+fn draw_sliding(c: &mut Cpu, item: MenuItem, s: Slide, x: u32, y: u32, arrows: impl Fn(&mut Mem) -> u32) {
+    with_buffer(c, 8, |c, at| {
+        let rect = RECT(at);
+        for reflection in [false, true] {
+            if reflection {
+                if item.flags(&mut c.m) & REFLECTED == 0 {
+                    return;
+                }
+                call(c, SET_BLITTER, &[MIRROR_BLITTER]);
+            }
+            let m = &mut c.m;
+            let y = if reflection { 280u32.wrapping_sub(y) } else { y };
+            set_rect(m, rect, x as i16, y as i16, 115, 11);
+            let w = box_width(m, s);
+            rect.set_w(m, w);
+            let (text, offset, fade) = (item.text_description(m), s.offset(m) as i32 as u32, item.sel_fade(m) as i32 as u32);
+            let arrows = arrows(m);
+            draw_text_box(c, text, rect, 140, offset, fade, arrows, reflection as u32);
+        }
+        call(c, RESET_BLITTER, &[]);
+    })
 }
 
 /// `tMenuItemGoToMenuNFS4Button::tMenuItemGoToMenuNFS4Button` (FEMENUEXTENDED.CPP,
-/// 0x8001a60c): a button going to `menu` (sliding in from 14), with a button image of
-/// `frames` frames.
-pub fn go_to_menu_nfs4_button(c: &mut Cpu, this: u32, text: u32, menu: u32, on_press: u32, image: u32, frames: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[this, frames, image]);
-        r.enter(c, 0x8002_5348, 0x8001_a630, |c| femenu::go_to_menu_button(c, crate::types::MenuItemGoToMenuButton(this), text, crate::types::Menu(menu), on_press));
-        let m = &mut c.m;
-        m.w32(this + 24, GO_TO_MENU_NFS4_BUTTON_VT);
-        m.w16(this + 36, 14);
-        m.w16(this + 38, 0);
-        m.w16(this + 40, 0);
-        m.w16(this + 42, 0);
-        m.w32(this + 16, frames);
-        m.w32(this + 12, image);
-        this
-    })
+/// 0x8001a60c): a button going to `menu` (its box resting), with a button image of `frames`
+/// frames.
+pub fn go_to_menu_nfs4_button(c: &mut Cpu, this: MenuItemGoToMenuNFS4Button, text: u32, menu: Menu, on_press: u32, image: u32, frames: u32) -> u32 {
+    femenu::go_to_menu_button(c, this.base(), text, menu, on_press);
+    let (m, s) = (&mut c.m, Slide::of_button(this));
+    this.set_vtable(m, GO_TO_MENU_NFS4_BUTTON_VT);
+    s.set_offset(m, REST);
+    s.set_transition(m, 0);
+    s.set_speed(m, 0);
+    s.set_enabled(m, 0);
+    this.set_num_frames(m, frames as i32);
+    this.set_button_image(m, image as i32);
+    this.0
 }
 
 pub fn abi_go_to_menu_nfs4_button(c: &mut Cpu) {
-    let (image, frames) = (abi::arg(c, 4), abi::arg(c, 5));
-    c.r[2] = go_to_menu_nfs4_button(c, c.r[4], c.r[5], c.r[6], c.r[7], image, frames);
+    let (image, frames) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5));
+    c.r[2] = go_to_menu_nfs4_button(c, MenuItemGoToMenuNFS4Button(c.r[4]), c.r[5], Menu(c.r[6]), c.r[7], image, frames);
 }
 
-/// A destructor: the vtable set back to the class's (when there's one), then the base's
-/// (`base` at `base_addr`), given the caller's flags; `ra` its return.
-pub(crate) fn destroy(c: &mut Cpu, this: u32, vptr_vt: Option<(u32, u32)>, base_addr: u32, ra: u32, base: fn(&mut Cpu)) {
-    abi::frame(c, 24, |c, _| {
-        if let Some((vptr, vt)) = vptr_vt {
-            c.m.w32(this + vptr, vt);
-        }
-        let flags = c.r[5];
-        Saved::of(c).enter(c, base_addr, ra, |c| {
-            c.r[4] = this;
-            c.r[5] = flags;
-            base(c)
-        });
-    })
+/// A destructor: the class's vtable put back (when it has one: `(vptr, vtable)`), then the
+/// base class's destructor `base` (its game entry) with the caller's `flags`.
+pub(crate) fn destroy(c: &mut Cpu, this: u32, flags: u32, vtable: Option<(u32, u32)>, base: fn(&mut Cpu)) {
+    if let Some((vptr, vt)) = vtable {
+        c.m.w32(this + vptr, vt);
+    }
+    call(c, base, &[this, flags]);
 }
 
 /// `tMenuItemGoToMenuNFS4Button::~tMenuItemGoToMenuNFS4Button` (FEMENUEXTENDED.CPP,
 /// 0x8001a674).
 pub fn abi_go_to_menu_nfs4_button_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], Some((ITEM_VPTR, GO_TO_MENU_NFS4_BUTTON_VT)), 0x8002_539c, 0x8001_a68c, femenu::abi_go_to_menu_button_dtor);
+    destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, GO_TO_MENU_NFS4_BUTTON_VT)), femenu::abi_go_to_menu_button_dtor);
 }
 
 /// `tMenuItemGoToMenuNFS4Button::Draw` (FEMENUEXTENDED.CPP, 0x8001a69c): the button's box at
-/// (`x`, `y`), sliding in (the selected one first, at its text's width), fading as it is
-/// enabled or not and as it transitions; its reflection below (flag 0x200).
-pub fn go_to_menu_nfs4_button_draw(c: &mut Cpu, this: u32, x: u32, y: u32, selected: u32) {
-    abi::frame(c, 128, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[2] = selected;
-        r.0[3] = x;
-        r.0[4] = y;
-        if selected == 0 && (lh(&mut c.m, this + 36) as i32).wrapping_sub(14) < 2 {
-            c.m.w16(this + 36, 14);
-        } else {
-            r.call_leaving(c, SET_FONT, &[0], 0x8001_a6ec);
-            let text = c.m.r32(this + 4);
-            let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_a6f8);
-            let buf = sp + 40;
-            r.0[0] = buf;
-            r.call_leaving(c, SPRINTF, &[buf, TEXT_FORMAT, word], 0x8001_a710);
-            r.call_leaving(c, S_UPPER, &[buf], 0x8001_a718);
-            let pixels = r.call_leaving(c, TEXT_PIXELS, &[buf], 0x8001_a720);
-            r.0[0] = pixels;
-            let len = r.call_leaving(c, STRLEN, &[buf], 0x8001_a72c);
-            let shown = pixels.wrapping_sub(len);
-            r.0[0] = shown;
-            slide(&mut c.m, this, 36, selected, shown);
-        }
-        step_enabled_fade(&mut c.m, this, 42);
-        r.0[2] = 11;
-        r.0[0] = 115;
-        for (mirror, ras) in [(0u32, [0, 0x8001_a854]), (1, [0x8001_a870, 0x8001_a8f0])] {
-            if mirror == 1 {
-                if c.m.r32(this) & 0x200 == 0 {
-                    return;
-                }
-                r.call_leaving(c, SET_BLITTER, &[MIRROR_BLITTER], ras[0]);
-            }
-            let m = &mut c.m;
-            m.w16(sp + 32, x as u16);
-            m.w16(sp + 34, if mirror == 0 { y } else { 280u32.wrapping_sub(y) } as u16);
-            m.w16(sp + 36, 115);
-            m.w16(sp + 38, 11);
-            let w = box_width(m, this, 38, 42);
-            m.w16(sp + 36, w);
-            let (text, offset, fade) = (m.r32(this + 4), lh(m, this + 36), lh(m, this + 8));
-            r.call_leaving(c, draw_text_box_entry, &[text, sp + 32, 140, offset, fade, 0, mirror], ras[1]);
-        }
-        r.call_leaving(c, RESET_BLITTER, &[], 0x8001_a8f8);
-    })
-}
-
-/// `MenuNFS4_DrawTextBox` entered as the original's callers `jal` it.
-fn draw_text_box_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8001_a158, None, &[]);
-    abi_draw_text_box(c);
+/// (`x`, `y`), sliding to rest unless resting unselected (by its upper-case text's width), fading
+/// as it is enabled or not and as it transitions; no arrows.
+pub fn go_to_menu_nfs4_button_draw(c: &mut Cpu, this: MenuItemGoToMenuNFS4Button, x: u32, y: u32, selected: u32) {
+    let s = Slide::of_button(this);
+    if selected == 0 && s.offset(&mut c.m) < REST + 2 {
+        s.set_offset(&mut c.m, REST);
+    } else {
+        call(c, SET_FONT, &[0]);
+        let text = this.text_description(&mut c.m);
+        let width = with_buffer(c, 88, |c, buf| upper_text_width(c, text, buf));
+        slide(&mut c.m, s, selected, width);
+    }
+    step_enabled_fade(&mut c.m, this.base().base().base(), s);
+    draw_sliding(c, this.base().base().base(), s, x, y, |_| 0);
 }
 
 pub fn abi_go_to_menu_nfs4_button_draw(c: &mut Cpu) {
-    go_to_menu_nfs4_button_draw(c, c.r[4], c.r[5], c.r[6], c.r[7]);
-}
-
-/// A sliding item's `TransitionOn`, `TransitionOff`, `TransitionIsFinished` and
-/// `UpdateTransition` (the button's at +38, the choice's at +34: the transition, then its
-/// speed).
-fn transition_on(m: &mut Mem, this: u32, at: u32) {
-    // (the enabled fade starts again too)
-    m.w16(this + at + 4, 0);
-    m.w16(this + at + 2, 12);
-}
-
-fn transition_off(m: &mut Mem, this: u32, at: u32) {
-    m.w16(this + at + 2, (-12i16) as u16);
-}
-
-fn transition_is_finished(m: &mut Mem, this: u32, at: u32) -> u32 {
-    (m.r16(this + at + 2) == 0) as u32
-}
-
-fn update_transition(c: &mut Cpu, this: u32, at: u32, selected: u32, ra: u32) {
-    abi::frame(c, 24, |c, _| {
-        let m = &mut c.m;
-        let v = m.r16(this + at).wrapping_add(m.r16(this + at + 2));
-        m.w16(this + at, v);
-        let v = v as i16;
-        if v < 0 {
-            m.w16(this + at, 0);
-            m.w16(this + at + 2, 0);
-        } else if v > 128 {
-            m.w16(this + at, 128);
-            m.w16(this + at + 2, 0);
-        }
-        Saved::of(c).enter(c, 0x8002_47c8, ra, |c| femenu::menu_item_update_transition(c, crate::types::MenuItem(this), selected));
-    })
+    go_to_menu_nfs4_button_draw(c, MenuItemGoToMenuNFS4Button(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tMenuItemGoToMenuNFS4Button::TransitionOn` (FEMENUEXTENDED.CPP, 0x8001a918).
 pub fn abi_button_transition_on(c: &mut Cpu) {
-    transition_on(&mut c.m, c.r[4], 38);
+    transition_on(&mut c.m, Slide::of_button(MenuItemGoToMenuNFS4Button(c.r[4])));
 }
 
 /// `tMenuItemGoToMenuNFS4Button::TransitionOff` (FEMENUEXTENDED.CPP, 0x8001a928).
 pub fn abi_button_transition_off(c: &mut Cpu) {
-    transition_off(&mut c.m, c.r[4], 38);
+    transition_off(&mut c.m, Slide::of_button(MenuItemGoToMenuNFS4Button(c.r[4])));
 }
 
 /// `tMenuItemGoToMenuNFS4Button::TransitionIsFinished` (FEMENUEXTENDED.CPP, 0x8001a934).
 pub fn abi_button_transition_is_finished(c: &mut Cpu) {
-    c.r[2] = transition_is_finished(&mut c.m, c.r[4], 38);
+    c.r[2] = transition_is_finished(&mut c.m, Slide::of_button(MenuItemGoToMenuNFS4Button(c.r[4])));
 }
 
 /// `tMenuItemGoToMenuNFS4Button::UpdateTransition` (FEMENUEXTENDED.CPP, 0x8001a940).
 pub fn abi_button_update_transition(c: &mut Cpu) {
-    update_transition(c, c.r[4], 38, c.r[5], 0x8001_a98c);
+    let this = MenuItemGoToMenuNFS4Button(c.r[4]);
+    update_transition(c, MenuItem(this.0), Slide::of_button(this), c.r[5]);
 }
 
 /// `tMenuItemNFS4LeftRightChoice::tMenuItemNFS4LeftRightChoice` (FEMENUEXTENDED.CPP,
 /// 0x8001a99c): a left-right choice that slides in, with a button image of `frames` frames.
-pub fn nfs4_left_right_choice(c: &mut Cpu, this: u32, text: u32, data: u32, image: u32, frames: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[this, image, frames]);
-        r.enter(c, 0x8002_4924, 0x8001_a9c0, |c| femenu::left_right_choice(c, crate::types::MenuItemLeftRightChoice(this), text, crate::types::ListIterator(data)));
-        let m = &mut c.m;
-        m.w32(this + 24, NFS4_LEFT_RIGHT_CHOICE_VT);
-        m.w32(this + 12, image);
-        m.w16(this + 32, 14);
-        m.w16(this + 34, 0);
-        m.w16(this + 36, 0);
-        m.w32(this + 16, frames);
-        this
-    })
+pub fn nfs4_left_right_choice(c: &mut Cpu, this: MenuItemNFS4LeftRightChoice, text: u32, data: ListIterator, image: u32, frames: u32) -> u32 {
+    femenu::left_right_choice(c, this.base(), text, data);
+    let (m, s) = (&mut c.m, Slide::of_choice(this));
+    this.set_vtable(m, NFS4_LEFT_RIGHT_CHOICE_VT);
+    this.set_button_image(m, image as i32);
+    s.set_offset(m, REST);
+    s.set_transition(m, 0);
+    s.set_speed(m, 0);
+    this.set_num_frames(m, frames as i32);
+    this.0
 }
 
 pub fn abi_nfs4_left_right_choice(c: &mut Cpu) {
-    let frames = abi::arg(c, 4);
-    c.r[2] = nfs4_left_right_choice(c, c.r[4], c.r[5], c.r[6], c.r[7], frames);
+    let frames = crate::abi::arg(c, 4);
+    c.r[2] = nfs4_left_right_choice(c, MenuItemNFS4LeftRightChoice(c.r[4]), c.r[5], ListIterator(c.r[6]), c.r[7], frames);
 }
 
 /// `tMenuItemNFS4LeftRightChoice::~tMenuItemNFS4LeftRightChoice` (FEMENUEXTENDED.CPP,
 /// 0x8001aa00).
 pub fn abi_nfs4_left_right_choice_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], Some((ITEM_VPTR, NFS4_LEFT_RIGHT_CHOICE_VT)), 0x8002_4974, 0x8001_aa18, femenu::abi_left_right_choice_dtor);
+    destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, NFS4_LEFT_RIGHT_CHOICE_VT)), femenu::abi_left_right_choice_dtor);
 }
 
-/// `tMenuItemNFS4LeftRightChoice::Draw` (FEMENUEXTENDED.CPP, 0x8001aa28): as the button's, the
-/// text's width straight from the text.
-pub fn nfs4_left_right_choice_draw(c: &mut Cpu, this: u32, x: u32, y: u32, selected: u32) {
-    abi::frame(c, 64, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[..4].copy_from_slice(&[this, selected, x, y]);
-        if selected == 0 && (lh(&mut c.m, this + 32) as i32).wrapping_sub(14) < 2 {
-            c.m.w16(this + 32, 14);
-        } else {
-            r.call_leaving(c, SET_FONT, &[0], 0x8001_aa74);
-            let text = c.m.r32(this + 4);
-            let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_aa80);
-            let pixels = r.call_leaving(c, TEXT_PIXELS, &[word], 0x8001_aa88);
-            slide(&mut c.m, this, 32, selected, pixels);
-        }
-        step_enabled_fade(&mut c.m, this, 38);
-        for (mirror, ras) in [(0u32, [0, 0x8001_abd0]), (1, [0x8001_abec, 0x8001_ac98])] {
-            if mirror == 1 {
-                if c.m.r32(this) & 0x200 == 0 {
-                    return;
-                }
-                r.call_leaving(c, SET_BLITTER, &[MIRROR_BLITTER], ras[0]);
-            }
-            let m = &mut c.m;
-            if mirror == 0 {
-                m.w16(sp + 36, 115);
-                m.w16(sp + 32, x as u16);
-                m.w16(sp + 34, y as u16);
-                m.w16(sp + 38, 11);
-            } else {
-                m.w16(sp + 34, 280u32.wrapping_sub(y) as u16);
-                m.w16(sp + 36, 115);
-                m.w16(sp + 32, x as u16);
-                m.w16(sp + 38, 11);
-            }
-            let w = box_width(m, this, 34, 38);
-            m.w16(sp + 36, w);
-            let (offset, fade) = (lh(m, this + 32), lh(m, this + 8));
-            // the arrows unless sliding in unselected
-            let arrows = (selected != 0 || m.r16(this + 32) as i16 != 14) as u32;
-            let text = m.r32(this + 4);
-            r.call_leaving(c, draw_text_box_entry, &[text, sp + 32, 140, offset, fade, arrows, mirror], ras[1]);
-        }
-        r.call_leaving(c, RESET_BLITTER, &[], 0x8001_aca0);
-    })
+/// `tMenuItemNFS4LeftRightChoice::Draw` (FEMENUEXTENDED.CPP, 0x8001aa28): as the button's, by
+/// its text's width as it is; the arrows unless it rests unselected.
+pub fn nfs4_left_right_choice_draw(c: &mut Cpu, this: MenuItemNFS4LeftRightChoice, x: u32, y: u32, selected: u32) {
+    let s = Slide::of_choice(this);
+    if selected == 0 && s.offset(&mut c.m) < REST + 2 {
+        s.set_offset(&mut c.m, REST);
+    } else {
+        call(c, SET_FONT, &[0]);
+        let text = this.text_description(&mut c.m);
+        let word = call(c, TEXT_WORD, &[text]);
+        let width = call(c, TEXT_PIXELS, &[word]);
+        slide(&mut c.m, s, selected, width);
+    }
+    let item = this.base().base().base();
+    step_enabled_fade(&mut c.m, item, s);
+    draw_sliding(c, item, s, x, y, |m| (selected != 0 || s.offset(m) != REST) as u32);
 }
 
 pub fn abi_nfs4_left_right_choice_draw(c: &mut Cpu) {
-    nfs4_left_right_choice_draw(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    nfs4_left_right_choice_draw(c, MenuItemNFS4LeftRightChoice(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tMenuItemNFS4LeftRightChoice::TransitionOn` (FEMENUEXTENDED.CPP, 0x8001acbc).
 pub fn abi_choice_transition_on(c: &mut Cpu) {
-    transition_on(&mut c.m, c.r[4], 34);
+    transition_on(&mut c.m, Slide::of_choice(MenuItemNFS4LeftRightChoice(c.r[4])));
 }
 
 /// `tMenuItemNFS4LeftRightChoice::TransitionOff` (FEMENUEXTENDED.CPP, 0x8001accc).
 pub fn abi_choice_transition_off(c: &mut Cpu) {
-    transition_off(&mut c.m, c.r[4], 34);
+    transition_off(&mut c.m, Slide::of_choice(MenuItemNFS4LeftRightChoice(c.r[4])));
 }
 
 /// `tMenuItemNFS4LeftRightChoice::TransitionIsFinished` (FEMENUEXTENDED.CPP, 0x8001acd8).
 pub fn abi_choice_transition_is_finished(c: &mut Cpu) {
-    c.r[2] = transition_is_finished(&mut c.m, c.r[4], 34);
+    c.r[2] = transition_is_finished(&mut c.m, Slide::of_choice(MenuItemNFS4LeftRightChoice(c.r[4])));
 }
 
 /// `tMenuItemNFS4LeftRightChoice::UpdateTransition` (FEMENUEXTENDED.CPP, 0x8001ace4).
 pub fn abi_choice_update_transition(c: &mut Cpu) {
-    update_transition(c, c.r[4], 34, c.r[5], 0x8001_ad30);
+    let this = MenuItemNFS4LeftRightChoice(c.r[4]);
+    update_transition(c, MenuItem(this.0), Slide::of_choice(this), c.r[5]);
 }
 
-/// The options screen's choices' arrows either side of the value and the rounded box round the
-/// row (`OptionsLeftRightChoice::Draw`'s and `OptionsTwoItemChoice::Draw`'s ends); `r` the
-/// registers at their calls, `shapes` the shapes' 41st.
-#[allow(clippy::too_many_arguments)]
-fn options_arrows_and_box(c: &mut Cpu, r: &Saved, sp: u32, this: u32, x: u32, y: u32, selected: u32, shapes: u32, ras: [u32; 4]) {
-    let fade = lh(&mut c.m, this + 8);
-    let color = r.call_leaving(c, CALC_FADE_VAL, &[0x00B5_4200, 0xBEBE, fade], ras[0]);
-    c.m.w32(sp + 44, color);
-    let lit = (selected == 0) as u32;
-    r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[10, 280, x.wrapping_add(166), y.wrapping_add(6), 0, lit, sp + 40], ras[1]);
-    let right = x.wrapping_sub(lh(&mut c.m, shapes + 16)).wrapping_add(303);
-    r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[11, 280, right, y.wrapping_add(6), 0, lit, sp + 40], ras[2]);
-    let m = &mut c.m;
-    m.w16(sp + 32, x as u16);
-    m.w16(sp + 34, y as u16);
-    m.w16(sp + 36, 297);
-    let h = m.r16(shapes + 18);
-    m.w16(sp + 38, h);
-    r.call_leaving(c, ROUND_RECTANGLE, &[u32::MAX, sp + 32, sx(selected)], ras[3]);
+// ---- The options screen's choices: the item's text, its value between arrows, in a box.
+
+/// The arrows either side of the value and the rounded box round the row (both options
+/// choices' `Draw` end so); `shapes` the arrows' shape.
+fn options_arrows_and_box(c: &mut Cpu, l: &Locals, item: MenuItem, x: u32, y: u32, selected: u32, shapes: u32) {
+    let fade = item.sel_fade(&mut c.m) as i32 as u32;
+    let colour = call(c, CALC_FADE_VAL, &[BOX_DIM, BOX_LIT, fade]);
+    l.set_shape_colour(&mut c.m, colour);
+    let dim = (selected == 0) as u32;
+    call(c, DRAW_SHAPE_EXTENDED, &[LEFT_ARROW, ARROW_FLAGS, x.wrapping_add(166), y.wrapping_add(6), 0, dim, l.shape_options()]);
+    let right = x.wrapping_sub(shape_width(&mut c.m, shapes) as i32 as u32).wrapping_add(303);
+    call(c, DRAW_SHAPE_EXTENDED, &[RIGHT_ARROW, ARROW_FLAGS, right, y.wrapping_add(6), 0, dim, l.shape_options()]);
+    let h = shape_height(&mut c.m, shapes);
+    set_rect(&mut c.m, l.rect(), x as i16, y as i16, 297, h);
+    call(c, ROUND_RECTANGLE, &[u32::MAX, l.rect().0, sx(selected)]);
 }
 
 /// `tMenuItemOptionsLeftRightChoice::Draw` (FEMENUEXTENDED.CPP, 0x8001ad40): the item's text
 /// and its value's (centred on the value's place) between the arrows, in the rounded box.
-pub fn options_left_right_choice_draw(c: &mut Cpu, this: u32, x: u32, y: u32, selected: u32) {
-    abi::frame(c, 104, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[4] = x;
-        r.0[5] = y;
-        r.0[6] = selected;
-        let shapes = c.m.r32(SHAPES).wrapping_add(1312);
-        r.0[3] = shapes;
-        let fade = lh(&mut c.m, this + 8);
-        let col = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0], 0x8001_ad94);
-        r.0[2] = col;
-        let text = c.m.r32(this + 4);
-        let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_ada0);
+pub fn options_left_right_choice_draw(c: &mut Cpu, this: MenuItemLeftRightChoice, x: u32, y: u32, selected: u32) {
+    with_buffer(c, Locals::SIZE, |c, at| {
+        let l = Locals(at);
+        let shapes = c.m.r32(SHAPES).wrapping_add(OPTIONS_SHAPE);
+        let fade = this.sel_fade(&mut c.m) as i32 as u32;
+        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0]);
+        let text = this.text_description(&mut c.m);
+        let word = call(c, TEXT_WORD, &[text]);
         let ty = sx(y.wrapping_add(3));
-        r.0[0] = ty;
-        r.0[7] = 1;
-        r.call_leaving(c, FULL_TEXT_RGB, &[word, sx(x.wrapping_add(148)), ty, col, 0, 1], 0x8001_add4);
-        let data = c.m.r32(this + 28);
-        let (obj, f) = method(&mut c.m, data, ITERATOR_VPTR, TEXT_VALUE);
-        let id = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8001_adf8);
-        let word = r.call_leaving(c, TEXT_WORD, &[sx(id)], 0x8001_ae04);
-        let half = ((c.m.r16(shapes + 16) as i16) >> 1) as i32 as u32;
+        call(c, FULL_TEXT_RGB, &[word, sx(x.wrapping_add(148)), ty, colour, 0, 1]);
+        let data = this.data(&mut c.m);
+        let value = call_virtual(c, data.0, ITERATOR_VPTR, TEXT_VALUE, &[u32::MAX]);
+        let word = call(c, TEXT_WORD, &[sx(value)]);
+        let half = (shape_width(&mut c.m, shapes) >> 1) as i32 as u32;
         let vx = sx(half.wrapping_add(x).wrapping_add(217));
-        r.call_leaving(c, FULL_TEXT_RGB, &[word, vx, ty, col, 0, 2], 0x8001_ae3c);
-        options_arrows_and_box(c, &r, sp, this, x, y, selected, shapes, [0x8001_ae50, 0x8001_ae84, 0x8001_aec0, 0x8001_aeec]);
+        call(c, FULL_TEXT_RGB, &[word, vx, ty, colour, 0, 2]);
+        options_arrows_and_box(c, &l, this.base().base(), x, y, selected, shapes);
     })
 }
 
 pub fn abi_options_left_right_choice_draw(c: &mut Cpu) {
-    options_left_right_choice_draw(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    options_left_right_choice_draw(c, MenuItemLeftRightChoice(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tMenuItemOptionsTwoItemChoice::TransitionOn` (FEMENUEXTENDED.CPP, 0x8001af18): the on-off
 /// fade at its value's end.
-pub fn two_item_choice_transition_on(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let data = c.m.r32(this + 28);
-        let (obj, f) = method(&mut c.m, data, ITERATOR_VPTR, VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8001_af54);
-        c.m.w16(this + 32, (((v & 0xFF) != 0) as u16) << 7);
-    })
+pub fn two_item_choice_transition_on(c: &mut Cpu, this: MenuItemOptionsTwoItemChoice) {
+    let data = this.data(&mut c.m);
+    let value = call_virtual(c, data.0, ITERATOR_VPTR, VALUE, &[u32::MAX]);
+    this.set_on_off_fade(&mut c.m, if value & 0xFF != 0 { 128 } else { 0 });
 }
 
 pub fn abi_two_item_choice_transition_on(c: &mut Cpu) {
-    two_item_choice_transition_on(c, c.r[4]);
+    two_item_choice_transition_on(c, MenuItemOptionsTwoItemChoice(c.r[4]));
 }
 
 /// `tMenuItemOptionsTwoItemChoice::Draw` (FEMENUEXTENDED.CPP, 0x8001af74): the item's text and
-/// both of its choices (the list's two texts), the on-off fade moving toward the value's (64 a
-/// frame), between the arrows, in the rounded box.
-pub fn two_item_choice_draw(c: &mut Cpu, this: u32, x: u32, y: u32, selected: u32) {
-    abi::frame(c, 104, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        r.0[4] = x;
-        r.0[5] = y;
-        r.0[6] = selected;
+/// both of its choices (the list's two texts, in the colours of the on-off fade moving toward
+/// the value, 64 a frame), between the arrows, in the rounded box.
+pub fn two_item_choice_draw(c: &mut Cpu, this: MenuItemOptionsTwoItemChoice, x: u32, y: u32, selected: u32) {
+    with_buffer(c, Locals::SIZE, |c, at| {
+        let l = Locals(at);
+        let data = this.data(&mut c.m);
+        let shapes = c.m.r32(SHAPES).wrapping_add(OPTIONS_SHAPE);
+        let value = call_virtual(c, data.0, ITERATOR_VPTR, VALUE, &[u32::MAX]);
         let m = &mut c.m;
-        let data = m.r32(this + 28);
-        let vt = m.r32(data + ITERATOR_VPTR);
-        let (obj, f) = method(m, data, ITERATOR_VPTR, VALUE);
-        let shapes = m.r32(SHAPES).wrapping_add(1312);
-        r.0[3] = shapes;
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX, vt], 0x8001_afd4);
+        let step = if value & 0xFF != 0 { 64 } else { -64 };
+        let v = this.on_off_fade(m).wrapping_add(step).clamp(0, 128);
+        this.set_on_off_fade(m, v);
+        let fade = this.sel_fade(m) as i32 as u32;
+        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0]);
         let m = &mut c.m;
-        let fade = m.r16(this + 32);
-        m.w16(this + 32, if v & 0xFF != 0 { fade.wrapping_add(64) } else { fade.wrapping_sub(64) });
-        let v = m.r16(this + 32) as i16;
-        let clamped = v.clamp(0, 128) as u16;
-        m.w16(this + 32, clamped);
-        let fade = lh(m, this + 8);
-        let col = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0], 0x8001_b034);
-        r.0[1] = col;
-        let m = &mut c.m;
-        let (on_off, fade) = (lh(m, this + 32), lh(m, this + 8));
-        r.call_leaving(c, CALC_ON_OFF_FADE, &[6, on_off, fade, 0, sp + 64, sp + 68], 0x8001_b05c);
-        let text = c.m.r32(this + 4);
+        let (on_off, fade) = (this.on_off_fade(m) as i32 as u32, this.sel_fade(m) as i32 as u32);
+        call(c, CALC_ON_OFF_FADE, &[6, on_off, fade, 0, l.on_colour(), l.off_colour()]);
+        let text = this.text_description(&mut c.m);
         let ty = sx(y.wrapping_add(3));
-        r.0[0] = y.wrapping_add(3);
-        let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_b068);
-        r.0[0] = ty;
-        r.0[1] = 1;
-        r.call_leaving(c, FULL_TEXT_RGB, &[word, sx(x.wrapping_add(148)), ty, col, 0, 1], 0x8001_b098);
-        // the two choices' texts, in the on-off fade's colours
-        let list = |m: &mut Mem| {
-            let data = m.r32(this + 28);
-            m.r32(data)
+        let word = call(c, TEXT_WORD, &[text]);
+        call(c, FULL_TEXT_RGB, &[word, sx(x.wrapping_add(148)), ty, colour, 0, 1]);
+        // the two choices' texts, the first in the off colour, the second in the on one
+        let choice = |m: &mut Mem, k: u32| {
+            let list = this.data(m).selection_list(m);
+            m.r16(list + 2 * k) as i16 as i32 as u32
         };
-        let at = list(&mut c.m);
-        let first = lh(&mut c.m, at);
-        let word = r.call_leaving(c, TEXT_WORD, &[first], 0x8001_b0b4);
-        let color = c.m.r32(sp + 68);
-        r.call_leaving(c, FULL_TEXT_RGB, &[word, sx(x.wrapping_add(176)), ty, color, 0, 0], 0x8001_b0d8);
-        let at = list(&mut c.m) + 2;
-        let second = lh(&mut c.m, at);
-        let word = r.call_leaving(c, TEXT_WORD, &[second], 0x8001_b0f4);
+        let first = choice(&mut c.m, 0);
+        let word = call(c, TEXT_WORD, &[first]);
+        let off = c.m.r32(l.off_colour());
+        call(c, FULL_TEXT_RGB, &[word, sx(x.wrapping_add(176)), ty, off, 0, 0]);
+        let second = choice(&mut c.m, 1);
+        let word = call(c, TEXT_WORD, &[second]);
         let m = &mut c.m;
-        let sx2 = sx(x.wrapping_sub(lhu(m, shapes + 16)).wrapping_add(294));
-        let color = m.r32(sp + 64);
-        r.call_leaving(c, FULL_TEXT_RGB, &[word, sx2, ty, color, 0, 1], 0x8001_b120);
-        options_arrows_and_box(c, &r, sp, this, x, y, selected, shapes, [0x8001_b134, 0x8001_b168, 0x8001_b1a4, 0x8001_b1d0]);
+        let x2 = sx(x.wrapping_sub(shape_width(m, shapes) as u16 as u32).wrapping_add(294));
+        let on = m.r32(l.on_colour());
+        call(c, FULL_TEXT_RGB, &[word, x2, ty, on, 0, 1]);
+        options_arrows_and_box(c, &l, this.base().base().base(), x, y, selected, shapes);
     })
 }
 
 pub fn abi_two_item_choice_draw(c: &mut Cpu) {
-    two_item_choice_draw(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    two_item_choice_draw(c, MenuItemOptionsTwoItemChoice(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
-// tMenuNFS4: +108 in an item's transition, +112 in the menu's, +116 its transition, +118 the
-// direction, +119 the last item, +120 how many.
-
-/// The menu's `k`th item.
-fn item(m: &mut Mem, this: u32, k: u32) -> u32 {
-    m.r32(this.wrapping_add(16).wrapping_add(k.wrapping_mul(4)))
+/// `tMenuItemOptionsTwoItemChoice::~tMenuItemOptionsTwoItemChoice`,
+/// `tMenuItemOptionsLeftRightChoice::~tMenuItemOptionsLeftRightChoice` (FEMENUEXTENDED.CPP,
+/// 0x8001c060, 0x8001c080): the left-right choice's (the vtable left as it is).
+pub fn abi_two_item_choice_dtor(c: &mut Cpu) {
+    destroy(c, c.r[4], c.r[5], None, femenu::abi_left_right_choice_dtor);
 }
 
-/// The NFS4 menus' constructors: `tMenu`'s with the caller's stack arguments (options, back,
-/// title: copied to this frame's outgoing ones), then (`items`) the items from the caller's
-/// `first` and the list after it; `base` the constructor (`tMenu`'s or `tMenuNFS4`'s) and `ras`
-/// its call's and the item list's returns; `set_vt` the class's vtable written where the
-/// original does it.
-#[allow(clippy::too_many_arguments)]
-fn construct(c: &mut Cpu, frame: u32, this: u32, base: u32, stack: u32, items: Option<(u32, u32)>, vt: u32, ras: [u32; 2], extra: &[u32]) -> u32 {
-    abi::frame(c, frame, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        for (k, &v) in extra.iter().enumerate() {
-            r.0[1 + k] = v;
+pub fn abi_options_left_right_choice_dtor(c: &mut Cpu) {
+    destroy(c, c.r[4], c.r[5], None, femenu::abi_left_right_choice_dtor);
+}
+
+// ---- tMenuNFS4 and the menus derived from it.
+
+/// The menu's `k`th item (read past the 16 of `item_list`, as the original does: see FEMENU).
+fn item(m: &mut Mem, this: Menu, k: u32) -> MenuItem {
+    MenuItem(m.r32(this.0.wrapping_add(0x10).wrapping_add(k.wrapping_mul(4))))
+}
+
+/// Whether item `k` is the current one.
+fn is_current(m: &mut Mem, this: Menu, k: u32) -> u32 {
+    (k == this.current_item(m) as u32) as u32
+}
+
+/// Each item in order (a short counter, from the first to the null).
+fn items(c: &mut Cpu, this: Menu, mut each: impl FnMut(&mut Cpu, u32, MenuItem)) {
+    let mut k = 0i16;
+    loop {
+        let it = item(&mut c.m, this, k as i32 as u32);
+        if it.0 == 0 {
+            return;
         }
-        let (flags, screen, next) = (c.r[5], c.r[6], c.r[7]);
-        let m = &mut c.m;
-        let (options, on_back, title) = (m.r32(stack), m.r32(stack + 4), sx(m.r32(stack + 8)));
-        m.w32(sp + 16, options);
-        m.w32(sp + 20, on_back);
-        m.w32(sp + 24, title);
-        if base == 0x8002_548c {
-            r.enter(c, base, ras[0], |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
-        } else {
-            r.enter(c, base, ras[0], |c| menu_nfs4_bare(c, this, flags, screen, next, options, on_back, title));
-        }
-        match items {
-            Some((first, rest)) => {
-                c.m.w32(this + MENU_VPTR, vt);
-                if vt == MENU_NFS4_TWO_PLAYER_VT {
-                    c.m.w32(this + 88, 0);
-                }
-                femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, rest);
-            }
-            None => c.m.w32(this + MENU_VPTR, vt),
-        }
-        this
-    })
+        each(c, k as i32 as u32, it);
+        k = k.wrapping_add(1);
+    }
+}
+
+/// A variadic NFS4 menu constructor's arguments: the menu's, then its items (`first`, the rest
+/// listed after it on the caller's stack to a null).
+struct MenuArgs {
+    flags: u32,
+    screen: u32,
+    next: u32,
+    options: u32,
+    on_back: u32,
+    title: u32,
+}
+
+impl MenuArgs {
+    /// A constructor's arguments as it was called: this, flags, screen, next menu in
+    /// registers, options, on back and title on the stack.
+    fn of(c: &mut Cpu) -> Self {
+        let (options, on_back, title) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
+        MenuArgs { flags: c.r[5], screen: c.r[6], next: c.r[7], options, on_back, title: sx(title) }
+    }
 }
 
 /// `tMenuNFS4::tMenuNFS4` (with items: FEMENUEXTENDED.CPP, 0x8001b1f8).
 pub fn abi_menu_nfs4(c: &mut Cpu) {
-    let (this, sp) = (c.r[4], c.r[29]);
-    let first = c.m.r32(sp + 28);
-    c.r[2] = construct(c, 40, this, 0x8002_548c, sp + 16, Some((first, sp + 32)), MENU_NFS4_VT, [0x8001_b230, 0x8001_b24c], &[]);
+    let (this, a) = (Menu(c.r[4]), MenuArgs::of(c));
+    let (first, rest) = (crate::abi::arg(c, 7), stack_arg(c, 8));
+    femenu::menu(&mut c.m, this, a.flags, a.screen, a.next, a.options, a.on_back, a.title);
+    this.set_vtable(&mut c.m, MENU_NFS4_VT);
+    femenu::menu_constructor(&mut c.m, this, first, rest);
+    c.r[2] = this.0;
 }
 
 /// `tMenuNFS4::tMenuNFS4` (without items: FEMENUEXTENDED.CPP, 0x8001b260).
 #[allow(clippy::too_many_arguments)]
 pub fn menu_nfs4_bare(c: &mut Cpu, this: u32, flags: u32, screen: u32, next: u32, options: u32, on_back: u32, title: u32) -> u32 {
-    abi::frame(c, 40, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let m = &mut c.m;
-        m.w32(sp + 20, on_back);
-        m.w32(sp + 16, options);
-        m.w32(sp + 24, sx(title));
-        r.enter(c, 0x8002_548c, 0x8001_b298, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, sx(title)));
-        c.m.w32(this + MENU_VPTR, MENU_NFS4_VT);
-        this
-    })
+    femenu::menu(&mut c.m, Menu(this), flags, screen, next, options, on_back, sx(title));
+    c.m.w32(this + MENU_VPTR, MENU_NFS4_VT);
+    this
 }
 
 pub fn abi_menu_nfs4_bare(c: &mut Cpu) {
-    let (options, on_back, title) = (abi::arg(c, 4), abi::arg(c, 5), abi::arg(c, 6));
-    c.r[2] = menu_nfs4_bare(c, c.r[4], c.r[5], c.r[6], c.r[7], options, on_back, title);
+    let a = MenuArgs::of(c);
+    c.r[2] = menu_nfs4_bare(c, c.r[4], a.flags, a.screen, a.next, a.options, a.on_back, a.title);
+}
+
+/// A menu derived from `tMenuNFS4`: its bare constructor, then the class's vtable, then (when
+/// it has them) the items from `first` and the list `rest`.
+fn construct_nfs4(c: &mut Cpu, this: Menu, a: &MenuArgs, vt: u32, items: Option<(u32, u32)>) {
+    menu_nfs4_bare(c, this.0, a.flags, a.screen, a.next, a.options, a.on_back, a.title);
+    this.set_vtable(&mut c.m, vt);
+    if vt == MENU_NFS4_TWO_PLAYER_VT {
+        this.set_child_menu(&mut c.m, Menu(0));
+    }
+    if let Some((first, rest)) = items {
+        femenu::menu_constructor(&mut c.m, this, first, rest);
+    }
+}
+
+/// The constructors with items of the two-player and bottom menus.
+fn construct_with_items(c: &mut Cpu, vt: u32) {
+    let (this, a) = (Menu(c.r[4]), MenuArgs::of(c));
+    let (first, rest) = (crate::abi::arg(c, 7), stack_arg(c, 8));
+    construct_nfs4(c, this, &a, vt, Some((first, rest)));
+    c.r[2] = this.0;
 }
 
 /// `tMenuNFS4::~tMenuNFS4` (FEMENUEXTENDED.CPP, 0x8001b2b8).
 pub fn abi_menu_nfs4_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], Some((MENU_VPTR, MENU_NFS4_VT)), 0x8002_54d0, 0x8001_b2d0, femenu::abi_menu_dtor);
+    destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, MENU_NFS4_VT)), femenu::abi_menu_dtor);
 }
 
 /// `tMenuNFS4::Initialize` (FEMENUEXTENDED.CPP, 0x8001b2e0): `tMenu`'s; no transitions, the
-/// last item the current one, its items counted (flag 0x200: each reflected).
-pub fn menu_nfs4_initialize(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        femenu::initialize(&mut c.m, crate::types::Menu(this));
-        let m = &mut c.m;
-        let cur = m.r8(this + 8);
-        let first = item(m, this, 0);
-        m.w32(this + 108, 0);
-        m.w32(this + 112, 0);
-        m.w8(this + 120, 0);
-        m.w8(this + 119, cur);
-        if first != 0 {
-            loop {
-                let n = m.r8(this + 120).wrapping_add(1);
-                m.w8(this + 120, n);
-                if item(m, this, n as u32) == 0 {
-                    break;
-                }
+/// current item noted as the last, its items counted; a reflected menu's items reflected.
+pub fn menu_nfs4_initialize(c: &mut Cpu, this: MenuNFS4) {
+    let menu = this.base();
+    femenu::initialize(&mut c.m, menu);
+    let m = &mut c.m;
+    let current = menu.current_item(m) as u8;
+    let first = item(m, menu, 0);
+    this.set_in_item_transition(m, 0);
+    this.set_in_menu_transition(m, 0);
+    this.set_num_items(m, 0);
+    this.set_last_item(m, current as i8);
+    if first.0 != 0 {
+        loop {
+            let n = this.num_items(m).wrapping_add(1);
+            this.set_num_items(m, n);
+            if item(m, menu, n as u8 as u32).0 == 0 {
+                break;
             }
         }
-        if m.r32(this) & 0x200 != 0 {
-            let mut k = 0u32;
-            loop {
-                let it = item(m, this, k as i16 as i32 as u32);
-                if it == 0 {
-                    break;
-                }
-                k = k.wrapping_add(1);
-                let flags = m.r32(it);
-                m.w32(it, flags | 0x200);
-            }
-        }
-    })
+    }
+    if menu.flags(m) & REFLECTED != 0 {
+        items(c, menu, |c, _, it| it.update_flags(&mut c.m, |f| f | REFLECTED));
+    }
 }
 
 pub fn abi_menu_nfs4_initialize(c: &mut Cpu) {
-    menu_nfs4_initialize(c, c.r[4]);
+    menu_nfs4_initialize(c, MenuNFS4(c.r[4]));
 }
 
 /// `tMenuNFS4::ProcessInput` (FEMENUEXTENDED.CPP, 0x8001b390): `tMenu`'s.
 pub fn menu_nfs4_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 24, |c, _| {
-        Saved::of(c).enter(c, 0x8002_5598, 0x8001_b3a0, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
-    })
+    femenu::process_input(c, Menu(this), player, key, MenuCommand(command));
 }
 
 pub fn abi_menu_nfs4_process_input(c: &mut Cpu) {
     menu_nfs4_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
 }
 
-/// Each item's virtual `slot`, in order (`TransitionOff`'s, `TransitionOn`'s and
-/// `TransitionIsFinished`'s loop: the item alone); its results and'd together.
-fn each_item(c: &mut Cpu, r: &mut Saved, this: u32, slot: u32, ra: u32, k_reg: usize, all: Option<usize>) -> u32 {
-    let mut done = 1u32;
-    if item(&mut c.m, this, 0) == 0 {
-        return done;
-    }
-    let mut k = 0u32;
-    loop {
-        r.0[k_reg] = k;
-        let it = item(&mut c.m, this, k as i16 as i32 as u32);
-        let (obj, f) = method(&mut c.m, it, ITEM_VPTR, slot);
-        let v = r.call_ptr_leaving(c, f, &[obj], ra);
-        if let Some(reg) = all {
-            done = ((done & v) != 0) as u32;
-            r.0[reg] = done;
-        }
-        k = k.wrapping_add(1);
-        if item(&mut c.m, this, k as i16 as i32 as u32) == 0 {
-            return done;
-        }
-    }
-}
-
 /// `tMenuNFS4::TransitionOff` (FEMENUEXTENDED.CPP, 0x8001b3b0): each item's.
 pub fn abi_menu_nfs4_transition_off(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[0] = 0;
-        each_item(c, &mut r, this, ITEM_TRANSITION_OFF, 0x8001_b404, 0, None);
-    })
+    items(c, Menu(c.r[4]), |c, _, it| {
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_OFF, &[]);
+    });
 }
 
 /// `tMenuNFS4::TransitionOn` (FEMENUEXTENDED.CPP, 0x8001b438): each item's.
 pub fn abi_menu_nfs4_transition_on(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[0] = 0;
-        each_item(c, &mut r, this, ITEM_TRANSITION_ON, 0x8001_b48c, 0, None);
-    })
+    items(c, Menu(c.r[4]), |c, _, it| {
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_ON, &[]);
+    });
 }
 
-/// `tMenuNFS4::TransitionIsFinished` (FEMENUEXTENDED.CPP, 0x8001b4c0): whether every item's is.
+/// `tMenuNFS4::TransitionIsFinished` (FEMENUEXTENDED.CPP, 0x8001b4c0): whether every item's
+/// is (each asked; their results' low bits and'd).
 pub fn abi_menu_nfs4_transition_is_finished(c: &mut Cpu) {
-    let this = c.r[4];
-    c.r[2] = abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        r.0[0] = 1;
-        r.0[1] = 0;
-        each_item(c, &mut r, this, ITEM_TRANSITION_IS_FINISHED, 0x8001_b51c, 1, Some(0))
+    let mut done = 1u32;
+    items(c, Menu(c.r[4]), |c, _, it| {
+        let v = call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED, &[]);
+        done = (done & v != 0) as u32;
     });
+    c.r[2] = done;
 }
 
 /// `tMenuNFS4::UpdateTransition` (FEMENUEXTENDED.CPP, 0x8001b560): each item's, told whether it
 /// is the current one.
 pub fn abi_menu_nfs4_update_transition(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        if item(&mut c.m, this, 0) == 0 {
-            return;
-        }
-        let mut k = 0u32;
-        loop {
-            r.0[0] = k;
-            let m = &mut c.m;
-            let i = k as i16 as i32 as u32;
-            let it = item(m, this, i);
-            let selected = (i == m.r32(this + 8)) as u32;
-            let vt = m.r32(it + ITEM_VPTR);
-            let (obj, f) = method(m, it, ITEM_VPTR, ITEM_UPDATE_TRANSITION);
-            r.call_ptr_leaving(c, f, &[obj, selected, vt], 0x8001_b5c0);
-            k = k.wrapping_add(1);
-            if item(&mut c.m, this, k as i16 as i32 as u32) == 0 {
-                return;
-            }
-        }
+    let this = Menu(c.r[4]);
+    items(c, this, |c, k, it| {
+        let selected = is_current(&mut c.m, this, k);
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_UPDATE_TRANSITION, &[selected]);
     });
 }
 
-/// An item's `Draw(int, int, bool)` at (`x`, `y`), told whether it is the current one; `ra`
-/// the call's return.
-fn draw_item_at(c: &mut Cpu, this: u32, k: u32, x: u32, y: u32, ra: u32) {
-    abi::frame(c, 24, |c, _| {
-        let m = &mut c.m;
-        let it = item(m, this, k);
-        let selected = (k == m.r32(this + 8)) as u32;
-        let (obj, f) = method(m, it, ITEM_VPTR, ITEM_DRAW_AT);
-        Saved::of(c).call_ptr_leaving(c, f, &[obj, x, y, selected], ra);
-    })
+/// Item `k` drawn at (`x`, `y`), told whether it is the current one.
+fn draw_item_at(c: &mut Cpu, this: Menu, k: u32, x: u32, y: u32) {
+    let it = item(&mut c.m, this, k);
+    let selected = is_current(&mut c.m, this, k);
+    call_virtual(c, it.0, ITEM_VPTR, ITEM_DRAW_AT, &[x, y, selected]);
 }
 
 /// `tMenuNFS4::DrawItem` (FEMENUEXTENDED.CPP, 0x8001b5f4): item `k` at (10, 43 + 18k).
 pub fn abi_menu_nfs4_draw_item(c: &mut Cpu) {
-    let (this, k) = (c.r[4], c.r[5]);
-    draw_item_at(c, this, k, 10, k.wrapping_mul(18).wrapping_add(43), 0x8001_b644);
+    let (this, k) = (Menu(c.r[4]), c.r[5]);
+    draw_item_at(c, this, k, 10, k.wrapping_mul(18).wrapping_add(43));
+}
+
+/// The front end's player whose menus are drawn (the second's half is lower).
+fn drawing_player(m: &mut Mem) -> i8 {
+    FEApplication(m.r32(FE_APP)).player(m)
 }
 
 /// `tMenuNFS4::Draw` (FEMENUEXTENDED.CPP, 0x8001b654): its title, the current item's button
-/// image (animated: a frame every 16 ticks; lower for the second player), each item
-/// (`DrawItem`).
-pub fn menu_nfs4_draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let title = lh(&mut c.m, this + 4);
-        if (title as i32) >= 0 {
-            r.call_leaving(c, TITLE, &[title], 0x8001_b680);
-        }
-        femenu::initialize(&mut c.m, crate::types::Menu(this));
-        let m = &mut c.m;
-        let cur = m.r32(this + 8);
-        let it = item(m, this, cur);
-        let (image, frames) = (m.r32(it + 12), m.r32(it + 16));
-        if (image as i32) >= 0 && (frames as i32) > 0 {
-            let frame = ((m.r32(GAME_TICKS) as i32) >> 4).wrapping_rem(frames as i32) as u32;
-            m.w32(sp + 36, 0x00CE_C844);
-            let app = m.r32(FE_APP);
-            let y = if m.r8(app + 556) != 0 { 121 } else { 16 };
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[image.wrapping_add(frame), 1040, 16, y, 0, 0, sp + 32], 0x8001_b738);
-        }
-        if item(&mut c.m, this, 0) == 0 {
-            return;
-        }
-        let mut k = 0u32;
-        loop {
-            r.0[0] = k;
-            let (obj, f) = method(&mut c.m, this, MENU_VPTR, MENU_DRAW_ITEM);
-            r.call_ptr_leaving(c, f, &[obj, k as i16 as i32 as u32], 0x8001_b768);
-            k = k.wrapping_add(1);
-            if item(&mut c.m, this, k as i16 as i32 as u32) == 0 {
-                return;
-            }
-        }
-    })
+/// image (animated: a frame every 16 ticks; lower for the second player), each item (its
+/// virtual `DrawItem`).
+pub fn menu_nfs4_draw(c: &mut Cpu, this: Menu) {
+    let title = this.title(&mut c.m);
+    if title >= 0 {
+        call(c, TITLE, &[title as i32 as u32]);
+    }
+    femenu::initialize(&mut c.m, this);
+    let m = &mut c.m;
+    let current = this.current_item(m) as u32;
+    let it = item(m, this, current);
+    let (image, frames) = (it.button_image(m), it.num_frames(m));
+    if image >= 0 && frames > 0 {
+        let frame = ((m.r32(GAME_TICKS) as i32) >> 4).wrapping_rem(frames);
+        let y = if drawing_player(m) != 0 { 121 } else { 16 };
+        with_buffer(c, Locals::SIZE, |c, at| {
+            let l = Locals(at);
+            l.set_shape_colour(&mut c.m, BUTTON_IMAGE_COLOUR);
+            call(c, DRAW_SHAPE_EXTENDED, &[image.wrapping_add(frame) as u32, BUTTON_IMAGE_FLAGS, 16, y, 0, 0, l.shape_options()]);
+        });
+    }
+    items(c, this, |c, k, _| {
+        call_virtual(c, this.0, MENU_VPTR, MENU_DRAW_ITEM, &[k]);
+    });
 }
 
 pub fn abi_menu_nfs4_draw(c: &mut Cpu) {
-    menu_nfs4_draw(c, c.r[4]);
-}
-
-/// A derived NFS4 menu's constructor with items (two-player, bottom, options): `tMenuNFS4`'s
-/// without, then the vtable and the items.
-fn construct_nfs4(c: &mut Cpu, vt: u32, ras: [u32; 2]) -> u32 {
-    let (this, sp) = (c.r[4], c.r[29]);
-    let first = c.m.r32(sp + 28);
-    construct(c, 40, this, 0x8001_b260, sp + 16, Some((first, sp + 32)), vt, ras, &[])
+    menu_nfs4_draw(c, Menu(c.r[4]));
 }
 
 /// `tMenuNFS4TwoPlayer::tMenuNFS4TwoPlayer` (FEMENUEXTENDED.CPP, 0x8001b79c).
 pub fn abi_menu_two_player(c: &mut Cpu) {
-    c.r[2] = construct_nfs4(c, MENU_NFS4_TWO_PLAYER_VT, [0x8001_b7d4, 0x8001_b7f4]);
+    construct_with_items(c, MENU_NFS4_TWO_PLAYER_VT);
 }
 
 /// `tMenuNFS4TwoPlayer::~tMenuNFS4TwoPlayer` (FEMENUEXTENDED.CPP, 0x8001b808).
 pub fn abi_menu_two_player_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], Some((MENU_VPTR, MENU_NFS4_TWO_PLAYER_VT)), 0x8001_b2b8, 0x8001_b820, abi_menu_nfs4_dtor);
+    destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, MENU_NFS4_TWO_PLAYER_VT)), abi_menu_nfs4_dtor);
 }
 
-/// `tMenuNFS4TwoPlayer::DrawItem` (FEMENUEXTENDED.CPP, 0x8001b830): item `k` in the player's
-/// half of the screen.
+/// `tMenuNFS4TwoPlayer::DrawItem` (FEMENUEXTENDED.CPP, 0x8001b830): item `k` in the drawing
+/// player's half of the screen.
 pub fn abi_menu_two_player_draw_item(c: &mut Cpu) {
-    let (this, k) = (c.r[4], c.r[5]);
-    let app = c.m.r32(FE_APP);
-    let top = if c.m.r8(app + 556) == 1 { 148 } else { 43 };
-    draw_item_at(c, this, k, 10, k.wrapping_mul(18).wrapping_add(top), 0x8001_b898);
+    let (this, k) = (Menu(c.r[4]), c.r[5]);
+    let top = if drawing_player(&mut c.m) == 1 { 148 } else { 43 };
+    draw_item_at(c, this, k, 10, k.wrapping_mul(18).wrapping_add(top));
 }
 
 /// `tMenuNFS4Bottom::tMenuNFS4Bottom` (FEMENUEXTENDED.CPP, 0x8001b8a8).
 pub fn abi_menu_bottom(c: &mut Cpu) {
-    c.r[2] = construct_nfs4(c, MENU_NFS4_BOTTOM_VT, [0x8001_b8e0, 0x8001_b8fc]);
+    construct_with_items(c, MENU_NFS4_BOTTOM_VT);
 }
 
 /// `tMenuNFS4Bottom::~tMenuNFS4Bottom` (FEMENUEXTENDED.CPP, 0x8001b910).
 pub fn abi_menu_bottom_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], Some((MENU_VPTR, MENU_NFS4_BOTTOM_VT)), 0x8001_b2b8, 0x8001_b928, abi_menu_nfs4_dtor);
+    destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, MENU_NFS4_BOTTOM_VT)), abi_menu_nfs4_dtor);
 }
 
 /// `tMenuNFS4Bottom::Draw` (FEMENUEXTENDED.CPP, 0x8001b938): the help at the bottom, each item
-/// (where it puts itself).
-pub fn menu_bottom_draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 40, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let m = &mut c.m;
-        for (k, v) in [57u16, 198, 114, 11].into_iter().enumerate() {
-            m.w16(sp + 16 + 2 * k as u32, v);
-        }
-        set_help_pos(m, sp + 16);
-        if item(m, this, 0) == 0 {
-            return;
-        }
-        let mut k = 0u32;
-        loop {
-            r.0[0] = k;
-            let m = &mut c.m;
-            let i = k as i16 as i32 as u32;
-            let it = item(m, this, i);
-            let selected = (i == m.r32(this + 8)) as u32;
-            let (obj, f) = method(m, it, ITEM_VPTR, ITEM_DRAW_AT);
-            r.call_ptr_leaving(c, f, &[obj, 0, 0, selected], 0x8001_b9c4);
-            k = k.wrapping_add(1);
-            if item(&mut c.m, this, k as i16 as i32 as u32) == 0 {
-                return;
-            }
-        }
-    })
+/// (where it puts itself: given no place).
+pub fn menu_bottom_draw(c: &mut Cpu, this: Menu) {
+    with_buffer(c, 8, |c, at| {
+        set_rect(&mut c.m, RECT(at), 57, 198, 114, 11);
+        set_help_pos(&mut c.m, at);
+    });
+    items(c, this, |c, k, it| {
+        let selected = is_current(&mut c.m, this, k);
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_DRAW_AT, &[0, 0, selected]);
+    });
 }
 
 pub fn abi_menu_bottom_draw(c: &mut Cpu) {
-    menu_bottom_draw(c, c.r[4]);
+    menu_bottom_draw(c, Menu(c.r[4]));
 }
 
-/// `tMenuBlank::tMenuBlank` (FEMENUEXTENDED.CPP, 0x8001b9f8): a menu of no items.
+/// `tMenuBlank::tMenuBlank` (FEMENUEXTENDED.CPP, 0x8001b9f8): a menu of no items, never any
+/// enabled.
 pub fn abi_menu_blank(c: &mut Cpu) {
-    let (this, sp) = (c.r[4], c.r[29]);
-    let r = construct(c, 40, this, 0x8001_b260, sp + 16, None, MENU_BLANK_VT, [0x8001_ba30, 0], &[]);
-    c.m.w32(this + 12, 1);
-    c.m.w16(this + 100, 0);
-    c.r[2] = r;
+    let (this, a) = (Menu(c.r[4]), MenuArgs::of(c));
+    construct_nfs4(c, this, &a, MENU_BLANK_VT, None);
+    this.set_never_any_enabled(&mut c.m, 1);
+    this.set_vert_help(&mut c.m, 0);
+    c.r[2] = this.0;
 }
 
 /// `tMenuBlank::~tMenuBlank` (FEMENUEXTENDED.CPP, 0x8001ba5c).
 pub fn abi_menu_blank_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], Some((MENU_VPTR, MENU_BLANK_VT)), 0x8001_b2b8, 0x8001_ba74, abi_menu_nfs4_dtor);
+    destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, MENU_BLANK_VT)), abi_menu_nfs4_dtor);
 }
 
-/// `tMenuBlank::Draw` (FEMENUEXTENDED.CPP, 0x8001ba84): in a transition, it steps.
-pub fn menu_blank_draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        if c.m.r32(this + 112) == 0 {
-            return;
-        }
-        let (obj, f) = method(&mut c.m, this, MENU_VPTR, MENU_TRANSITION_IS_FINISHED);
-        r.call_ptr_leaving(c, f, &[obj], 0x8001_bac0);
-        let m = &mut c.m;
-        let v = m.r16(this + 116).wrapping_add(m.r8(this + 118) as i8 as i16 as u16);
-        m.w16(this + 116, v);
-    })
+/// `tMenuBlank::Draw` (FEMENUEXTENDED.CPP, 0x8001ba84): in a transition, it steps (its virtual
+/// `TransitionIsFinished` asked first).
+pub fn menu_blank_draw(c: &mut Cpu, this: MenuBlank) {
+    if this.in_menu_transition(&mut c.m) == 0 {
+        return;
+    }
+    call_virtual(c, this.0, MENU_VPTR, MENU_TRANSITION_IS_FINISHED, &[]);
+    let m = &mut c.m;
+    let step = this.transition_direction(m) as i16;
+    this.update_transition_val(m, |v| v.wrapping_add(step));
 }
 
 pub fn abi_menu_blank_draw(c: &mut Cpu) {
-    menu_blank_draw(c, c.r[4]);
+    menu_blank_draw(c, MenuBlank(c.r[4]));
 }
 
 /// `tMenuBlank::ProcessInput` (FEMENUEXTENDED.CPP, 0x8001bae8): up and down are used up; other
 /// keys go to `tMenu`'s, the items forgotten first.
-pub fn menu_blank_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 24, |c, _| {
-        let k = c.m.r32(key);
-        if k == 512 || k == 1024 {
-            c.m.w32(key, KEY_NONE);
-            return;
-        }
-        c.m.w32(this + 16, 0);
-        Saved::of(c).enter(c, 0x8002_5598, 0x8001_bb1c, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
-    })
+pub fn menu_blank_process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: u32) {
+    let k = c.m.r32(key);
+    if k == femenu::KEY_UP || k == femenu::KEY_DOWN {
+        c.m.w32(key, KEY_NONE);
+        return;
+    }
+    this.set_item_list(&mut c.m, 0, MenuItem(0));
+    femenu::process_input(c, this, player, key, MenuCommand(command));
 }
 
 pub fn abi_menu_blank_process_input(c: &mut Cpu) {
-    menu_blank_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    menu_blank_process_input(c, Menu(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tMenuBlank::Initialize`, `UpdateTransition` (FEMENUEXTENDED.CPP, 0x8001bb2c, 0x8001c058),
@@ -1085,208 +975,178 @@ pub fn abi_menu_blank_debounce_keys(c: &mut Cpu) {
 
 /// `tMenuBlank::TransitionOff` (FEMENUEXTENDED.CPP, 0x8001bb3c): sliding down from -112.
 pub fn abi_menu_blank_transition_off(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    m.w8(this + 118, 8);
-    m.w32(this + 112, 1);
-    m.w16(this + 116, (-112i16) as u16);
+    let (m, this) = (&mut c.m, MenuBlank(c.r[4]));
+    this.set_transition_direction(m, 8);
+    this.set_in_menu_transition(m, 1);
+    this.set_transition_val(m, -112);
 }
 
 /// `tMenuBlank::TransitionOn` (FEMENUEXTENDED.CPP, 0x8001bb58): sliding up from 0.
 pub fn abi_menu_blank_transition_on(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    m.w8(this + 118, (-8i8) as u8);
-    m.w32(this + 112, 1);
-    m.w16(this + 116, 0);
+    let (m, this) = (&mut c.m, MenuBlank(c.r[4]));
+    this.set_transition_direction(m, -8);
+    this.set_in_menu_transition(m, 1);
+    this.set_transition_val(m, 0);
 }
 
 /// `tMenuBlank::TransitionIsFinished` (FEMENUEXTENDED.CPP, 0x8001bb70): done sliding down at 0,
 /// up at -112.
 pub fn abi_menu_blank_transition_is_finished(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    let pos = m.r16(this + 116) as i16;
-    let moving = if (m.r8(this + 118) as i8) > 0 { (pos < 0) as u32 } else { (pos >= -111) as u32 };
-    m.w32(this + 112, moving);
-    c.r[2] = m.r32(this + 112) ^ 1;
+    let (m, this) = (&mut c.m, MenuBlank(c.r[4]));
+    let pos = this.transition_val(m);
+    let moving = if this.transition_direction(m) > 0 { pos < 0 } else { pos >= -111 };
+    this.set_in_menu_transition(m, moving as u32);
+    c.r[2] = this.in_menu_transition(m) ^ 1;
 }
 
-/// `tMenuOptions::tMenuOptions` (FEMENUEXTENDED.CPP, 0x8001bbac): an options menu for `player`.
+/// `tMenuOptions::tMenuOptions` (FEMENUEXTENDED.CPP, 0x8001bbac): an options menu for `player`
+/// (after the menu's arguments; its items after it).
 pub fn abi_menu_options(c: &mut Cpu) {
-    let (this, sp) = (c.r[4], c.r[29]);
-    let (player, first) = (c.m.r32(sp + 28), c.m.r32(sp + 32));
-    c.r[2] = construct(c, 48, this, 0x8001_b260, sp + 16, Some((first, sp + 36)), MENU_OPTIONS_VT, [0x8001_bbec, 0x8001_bc08], &[player]);
-    c.m.w16(this + 128, player as u16);
+    let (this, a) = (MenuOptions(c.r[4]), MenuArgs::of(c));
+    let (player, first, rest) = (crate::abi::arg(c, 7), crate::abi::arg(c, 8), stack_arg(c, 9));
+    construct_nfs4(c, Menu(this.0), &a, MENU_OPTIONS_VT, Some((first, rest)));
+    this.set_player(&mut c.m, player as i16);
+    c.r[2] = this.0;
 }
 
 /// `tMenuOptions::~tMenuOptions` (FEMENUEXTENDED.CPP, 0x8001bc24).
 pub fn abi_menu_options_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], Some((MENU_VPTR, MENU_OPTIONS_VT)), 0x8001_b2b8, 0x8001_bc3c, abi_menu_nfs4_dtor);
+    destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, MENU_OPTIONS_VT)), abi_menu_nfs4_dtor);
 }
 
-/// `tMenuOptions::Draw` (FEMENUEXTENDED.CPP, 0x8001bc4c): the options box (320 wide, 18 a
-/// line of the enabled items; growing out of or into the middle over 32 ticks in a
-/// transition), centred (the player's half of the screen for one of two), with its title and
-/// the enabled items in it; the box's back and edges.
-pub fn menu_options_draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 56, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        let n = femenu::get_number_enabled_items(&mut c.m, crate::types::Menu(this));
-        r.0[6] = 320;
-        r.0[0] = n;
-        let (obj, f) = method(&mut c.m, this, MENU_VPTR, MENU_TRANSITION_IS_FINISHED);
-        r.call_ptr_leaving(c, f, &[obj], 0x8001_bc98);
-        let n = n as i16 as i32 as u32;
-        r.0[0] = n;
-        let mut width = 320u32;
-        let mut height = n.wrapping_mul(18);
-        let m = &mut c.m;
-        let direction = |m: &mut Mem| m.r8(this + 118) as i8;
-        if m.r32(this + 112) != 0 {
-            let mut t = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 124));
-            if t >= 33 {
-                t = 32;
-                m.w32(this + 112, 0);
-                if direction(m) < 0 {
-                    return;
-                }
-            }
-            let grown = t.wrapping_mul(320) >> 5;
-            let grown_h = height.wrapping_mul(t) >> 5;
-            if direction(m) < 0 {
-                width = 320u32.wrapping_sub(grown);
-                height = height.wrapping_sub(grown_h);
-            } else {
-                width = grown;
-                height = grown_h;
-            }
-        } else if direction(m) < 0 {
-            return;
-        }
-        let height = height.wrapping_add(18);
-        let rest = 240u32.wrapping_sub(height);
-        let mut top = ((rest as i32) >> 1) as u32;
-        let left = ((m.r32(SCREEN_WIDTH).wrapping_sub(width) as i32) >> 1) as u32;
-        match m.r16(this + 128) as i16 {
-            0 => top = top.wrapping_sub(((rest as i32) >> 2) as u32),
-            1 => top = top.wrapping_add(((rest as i32) >> 2) as u32),
-            _ => {}
-        }
-        r.0[3] = top;
-        r.0[4] = left;
-        r.0[5] = height;
-        r.0[6] = width;
-        if m.r32(this + 112) == 0 {
-            let title = lh(m, this + 4);
-            if (title as i32) >= 0 {
-                let x = sx(left.wrapping_add(((width as i32) >> 1) as u32));
-                r.call_leaving(c, MENU_TEXT_POSITIONED_JUSTIFY, &[title, x, sx(top.wrapping_add(2)), 2, 2, 9], 0x8001_bde4);
-            }
-            let mut y = top.wrapping_add(18);
-            r.0[1] = y;
-            let mut k = 0u32;
-            loop {
-                r.0[0] = k;
-                let m = &mut c.m;
-                let i = k as i16 as i32 as u32;
-                let it = item(m, this, i);
-                if it == 0 {
-                    break;
-                }
-                if m.r32(it) & ITEM_DISABLED == 0 {
-                    let at = y;
-                    y = y.wrapping_add(18);
-                    r.0[1] = y;
-                    let selected = (i == m.r32(this + 8)) as u32;
-                    let (obj, f) = method(m, it, ITEM_VPTR, ITEM_DRAW_AT);
-                    r.call_ptr_leaving(c, f, &[obj, left.wrapping_add(10), at, selected], 0x8001_be50);
-                }
-                k = k.wrapping_add(1);
+/// How long the options box takes to open or close, in ticks.
+const OPTIONS_OPENING: u32 = 32;
+
+/// `tMenuOptions::Draw` (FEMENUEXTENDED.CPP, 0x8001bc4c): the options box (320 wide, 18 high a
+/// line of the enabled items; growing out of the middle or shrinking into it over 32 ticks in
+/// a transition), centred (in the player's half of the screen for one of two players), with
+/// its title and the enabled items once open; its back and edges.
+pub fn menu_options_draw(c: &mut Cpu, this: MenuOptions) {
+    let menu = Menu(this.0);
+    let lines = femenu::get_number_enabled_items(&mut c.m, menu);
+    call_virtual(c, this.0, MENU_VPTR, MENU_TRANSITION_IS_FINISHED, &[]);
+    let m = &mut c.m;
+    let closing = this.transition_direction(m) < 0;
+    let (mut width, mut height) = (320u32, (lines as i16 as i32 as u32).wrapping_mul(18));
+    if this.in_menu_transition(m) != 0 {
+        let mut t = m.r32(GAME_TICKS).wrapping_sub(this.menu_enter_ticks(m));
+        if t > OPTIONS_OPENING {
+            t = OPTIONS_OPENING;
+            this.set_in_menu_transition(m, 0);
+            if this.transition_direction(m) < 0 {
+                return;
             }
         }
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, left, top, width, 12], 0x8001_be74);
-        r.0[0] = 1;
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, left, top.wrapping_add(height), width, (-2i32) as u32, 1], 0x8001_be98);
-        let (edge_top, edge_h) = (top.wrapping_add(12), height.wrapping_sub(14));
-        r.0[2] = edge_top;
-        r.0[1] = edge_h;
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, left, edge_top, 4, edge_h, 1], 0x8001_bebc);
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, left.wrapping_add(width), edge_top, (-4i32) as u32, edge_h, 1], 0x8001_bed8);
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, left, top, width, height, 1], 0x8001_bef4);
-        r.call_leaving(c, SET_ABR_MODE, &[0], 0x8001_befc);
-    })
+        let (grown_w, grown_h) = (t.wrapping_mul(320) >> 5, height.wrapping_mul(t) >> 5);
+        if this.transition_direction(m) < 0 {
+            width = 320u32.wrapping_sub(grown_w);
+            height = height.wrapping_sub(grown_h);
+        } else {
+            width = grown_w;
+            height = grown_h;
+        }
+    } else if closing {
+        return;
+    }
+    let height = height.wrapping_add(18);
+    let spare = 240u32.wrapping_sub(height) as i32;
+    let mut top = (spare >> 1) as u32;
+    let left = ((m.r32(SCREEN_WIDTH).wrapping_sub(width) as i32) >> 1) as u32;
+    match this.player(m) {
+        0 => top = top.wrapping_sub((spare >> 2) as u32),
+        1 => top = top.wrapping_add((spare >> 2) as u32),
+        _ => {}
+    }
+    if this.in_menu_transition(m) == 0 {
+        let title = menu.title(m);
+        if title >= 0 {
+            let x = sx(left.wrapping_add(((width as i32) >> 1) as u32));
+            call(c, MENU_TEXT_POSITIONED_JUSTIFY, &[title as i32 as u32, x, sx(top.wrapping_add(2)), 2, 2, 9]);
+        }
+        let mut y = top.wrapping_add(18);
+        items(c, menu, |c, k, it| {
+            if it.flags(&mut c.m) & ITEM_DISABLED == 0 {
+                let selected = is_current(&mut c.m, menu, k);
+                call_virtual(c, it.0, ITEM_VPTR, ITEM_DRAW_AT, &[left.wrapping_add(10), y, selected]);
+                y = y.wrapping_add(18);
+            }
+        });
+    }
+    // the title bar, the shade under the box, its sides, its back
+    call_addr(c, DRAW_SQUARE, &[0, left, top, width, 12]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, left, top.wrapping_add(height), width, (-2i32) as u32, 1]);
+    let (sides_top, sides_h) = (top.wrapping_add(12), height.wrapping_sub(14));
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, left, sides_top, 4, sides_h, 1]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, left.wrapping_add(width), sides_top, (-4i32) as u32, sides_h, 1]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, left, top, width, height, 1]);
+    call(c, SET_ABR_MODE, &[0]);
 }
 
 pub fn abi_menu_options_draw(c: &mut Cpu) {
-    menu_options_draw(c, c.r[4]);
+    menu_options_draw(c, MenuOptions(c.r[4]));
 }
+
+/// The options box's sounds: opening, closing.
+const SOUND_OPEN: u32 = 15;
+const SOUND_CLOSE: u32 = 18;
 
 /// `tMenuOptions::TransitionOff` (FEMENUEXTENDED.CPP, 0x8001bf24): shrinking, from now, with a
 /// sound.
-pub fn menu_options_transition_off(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        let m = &mut c.m;
-        m.w8(this + 118, 0xFF);
-        let t = m.r32(GAME_TICKS);
-        m.w32(this + 112, 1);
-        m.w32(this + 124, t);
-        Saved::of(c).call_leaving(c, PLAY_FE_SFX, &[18], 0x8001_bf50);
-    })
+pub fn menu_options_transition_off(c: &mut Cpu, this: MenuOptions) {
+    let m = &mut c.m;
+    this.set_transition_direction(m, -1);
+    let now = m.r32(GAME_TICKS);
+    this.set_in_menu_transition(m, 1);
+    this.set_menu_enter_ticks(m, now);
+    call(c, PLAY_FE_SFX, &[SOUND_CLOSE]);
 }
 
 pub fn abi_menu_options_transition_off(c: &mut Cpu) {
-    menu_options_transition_off(c, c.r[4]);
+    menu_options_transition_off(c, MenuOptions(c.r[4]));
 }
 
 /// `tMenuOptions::TransitionOn` (FEMENUEXTENDED.CPP, 0x8001bf60): each enabled item's, then
 /// growing, from now, with a sound.
-pub fn menu_options_transition_on(c: &mut Cpu, this: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let mut at = this;
-        loop {
-            r.0[0] = at;
-            let it = c.m.r32(at + 16);
-            if it == 0 {
-                break;
-            }
-            if c.m.r32(it) & ITEM_DISABLED == 0 {
-                let (obj, f) = method(&mut c.m, it, ITEM_VPTR, ITEM_TRANSITION_ON);
-                r.call_ptr_leaving(c, f, &[obj], 0x8001_bfbc);
-            }
-            at = at.wrapping_add(4);
+pub fn menu_options_transition_on(c: &mut Cpu, this: MenuOptions) {
+    let mut k = 0u32;
+    loop {
+        let it = item(&mut c.m, Menu(this.0), k);
+        if it.0 == 0 {
+            break;
         }
-        let m = &mut c.m;
-        m.w8(this + 118, 1);
-        let t = m.r32(GAME_TICKS);
-        m.w32(this + 112, 1);
-        m.w32(this + 124, t);
-        r.call_leaving(c, PLAY_FE_SFX, &[15], 0x8001_bfe4);
-    })
+        if it.flags(&mut c.m) & ITEM_DISABLED == 0 {
+            call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_ON, &[]);
+        }
+        k += 1;
+    }
+    let m = &mut c.m;
+    this.set_transition_direction(m, 1);
+    let now = m.r32(GAME_TICKS);
+    this.set_in_menu_transition(m, 1);
+    this.set_menu_enter_ticks(m, now);
+    call(c, PLAY_FE_SFX, &[SOUND_OPEN]);
 }
 
 pub fn abi_menu_options_transition_on(c: &mut Cpu) {
-    menu_options_transition_on(c, c.r[4]);
+    menu_options_transition_on(c, MenuOptions(c.r[4]));
 }
 
 /// `tMenuOptions::TransitionIsFinished` (FEMENUEXTENDED.CPP, 0x8001bff8): 32 ticks after it
 /// began.
 pub fn abi_menu_options_transition_is_finished(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    let moving = (m.r32(GAME_TICKS).wrapping_sub(m.r32(this + 124)) < 32) as u32;
-    m.w32(this + 112, moving);
-    c.r[2] = moving ^ 1;
+    let (m, this) = (&mut c.m, MenuOptions(c.r[4]));
+    let moving = m.r32(GAME_TICKS).wrapping_sub(this.menu_enter_ticks(m)) < OPTIONS_OPENING;
+    this.set_in_menu_transition(m, moving as u32);
+    c.r[2] = !moving as u32;
 }
 
-/// `tMenuOptions::ProcessInput` (FEMENUEXTENDED.CPP, 0x8001c01c): options as start; then
+/// `tMenuOptions::ProcessInput` (FEMENUEXTENDED.CPP, 0x8001c01c): options taken as start; then
 /// `tMenuNFS4`'s.
 pub fn menu_options_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 24, |c, _| {
-        if c.m.r32(key) == 8 {
-            c.m.w32(key, 16);
-        }
-        Saved::of(c).enter(c, 0x8001_b390, 0x8001_c040, |c| menu_nfs4_process_input(c, this, player, key, command));
-    })
+    if c.m.r32(key) == femenu::KEY_OPTIONS {
+        c.m.w32(key, femenu::KEY_START);
+    }
+    menu_nfs4_process_input(c, this, player, key, command);
 }
 
 pub fn abi_menu_options_process_input(c: &mut Cpu) {
@@ -1296,17 +1156,6 @@ pub fn abi_menu_options_process_input(c: &mut Cpu) {
 /// `tMenuOptions::IsSubMenu` (FEMENUEXTENDED.CPP, 0x8001c050): it is.
 pub fn abi_menu_options_is_sub_menu(c: &mut Cpu) {
     c.r[2] = 1;
-}
-
-/// `tMenuItemOptionsTwoItemChoice::~tMenuItemOptionsTwoItemChoice`,
-/// `tMenuItemOptionsLeftRightChoice::~tMenuItemOptionsLeftRightChoice` (FEMENUEXTENDED.CPP,
-/// 0x8001c060, 0x8001c080): the left-right choice's (the vtable left as it is).
-pub fn abi_two_item_choice_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], None, 0x8002_4974, 0x8001_c070, femenu::abi_left_right_choice_dtor);
-}
-
-pub fn abi_options_left_right_choice_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], None, 0x8002_4974, 0x8001_c090, femenu::abi_left_right_choice_dtor);
 }
 
 #[cfg(test)]
