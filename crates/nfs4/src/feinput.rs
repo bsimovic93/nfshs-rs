@@ -1,53 +1,64 @@
 //! FEINPUT.CPP: the front end's keys: a pad's buttons (or an analog pad's sticks, a NeGcon's
 //! twist and buttons, past their thresholds) as the front end's keys, each key taken once per
-//! press but for those that repeat while held (up, down, left, right), a player's key from the
-//! table of buttons and keys; a pad swapped for another kind reset.
+//! press but for those that repeat while held (the d-pad's), a player's key from the table of
+//! buttons and keys; a pad swapped for another kind reset.
+//!
+//! Written as FEMENU.CPP is (see there).
 
-use crate::abi::{self, Saved};
+use crate::call::call;
+use crate::femenu::{KEY_ACCEPT, KEY_BACK, KEY_HELP, KEY_OPTIONS, KEY_START};
 use crate::globals::{FRONT_END, GAME_TICKS, PAD_INFO};
 use ps1rt::{Cpu, Mem};
 
-/// The pads' kinds (their state's +5): the NeGcon, the analog joystick, the DualShock.
+/// A pad's state (32 bytes each): +4 nonzero when nothing is plugged in, +5 its kind, +6 its
+/// buttons (held low), +8.. its sticks (an analog pad's four, a NeGcon's twist, I and II).
+const PAD_STATE_SIZE: u32 = 32;
+const UNPLUGGED: u32 = 4;
+const KIND: u32 = 5;
+const BUTTONS: u32 = 6;
+/// The pads' kinds: the NeGcon, the analog joystick, the DualShock.
 const PAD_NEGCON: u32 = 0x23;
 const PAD_ANALOG: u32 = 0x53;
 const PAD_DUAL_SHOCK: u32 = 0x73;
-/// The kind each pad had (`frontEnd + 862`, a short each).
+/// The kind each pad had when reset (`frontEnd + 862`, a short each).
 const PAD_KINDS: u32 = FRONT_END + 862;
 
 /// The keys held (a word per pad), when a held key repeats next (0: not yet held), the repeat's
-/// delay.
+/// delay (the first one 10 ticks longer).
 const HELD: u32 = 0x8005_2FF0;
 const REPEAT_AT: u32 = 0x8005_1BC0;
 const REPEAT_DELAY: u32 = 0x8005_1C58;
-/// The keys that repeat while held (the pad's up, down, left, right as the front end has
-/// them).
-const REPEATING: [u32; 4] = [16, 128, 32, 64];
-/// The front end's keys: a pad button (or stick direction) and its key, 16 of them; the
-/// buttons that accept, start, help and give options, and the select button (back).
+const FIRST_REPEAT_EXTRA: u32 = 10;
+/// The buttons that repeat while held: the d-pad's.
+const REPEATING: [u32; 4] = [0x10, 0x80, 0x20, 0x40];
+/// The front end's table of 16 buttons (or stick directions) and their keys (8 bytes each); then
+/// the buttons always taken: Cross, Triangle, Circle, Square, Start.
 const KEYS: u32 = 0x8005_1BC4;
 const KEY_COUNT: u32 = 16;
-const BUTTON_KEYS: [(u32, u32, u32); 4] = [(0x4000, 2, 0x8002_3d54), (0x1000, 16, 0x8002_3d68), (0x2000, 4, 0x8002_3d7c), (0x8000, 8, 0x8002_3d90)];
+const BUTTON_KEYS: [(u32, u32); 5] = [(0x4000, KEY_ACCEPT), (0x1000, KEY_BACK), (0x2000, KEY_HELP), (0x8000, KEY_OPTIONS), (8, KEY_START)];
 
-/// `PAD_update`; the pad's buttons (`PAD_buttons`, 0x800e4da4); the pad reset
+/// `PAD_update`; the pad's buttons (`PAD_buttons`); the pad reset
 /// (`Front_ResetPSXController`).
 const PAD_UPDATE: fn(&mut Cpu) = nfs4rc::f_800e4e08;
 const PAD_BUTTONS: fn(&mut Cpu) = nfs4rc::f_800e4da4;
 const RESET_CONTROLLER: fn(&mut Cpu) = crate::front::reset_psx_controller_entry;
 
+fn pad_state(pad: u32) -> u32 {
+    pad.wrapping_mul(PAD_STATE_SIZE).wrapping_add(PAD_INFO)
+}
+
 /// `FEInput_VerifyControllerValues` (FEINPUT.CPP, 0x800238b8): a pad plugged in as another kind
-/// than it was reset.
+/// than it was reset as is reset.
 pub fn verify_controller_values(c: &mut Cpu, pad: u32) {
-    abi::frame(c, 24, |c, _| {
-        let m = &mut c.m;
-        let info = (pad << 5).wrapping_add(PAD_INFO);
-        if m.r8(info + 4) != 0 {
-            return;
-        }
-        let was = m.r16(PAD_KINDS.wrapping_add(pad << 1)) as i16 as i32;
-        if was != m.r8(info + 5) as i32 {
-            Saved::of(c).call_leaving(c, RESET_CONTROLLER, &[pad, 0], 0x8002_3908);
-        }
-    })
+    let m = &mut c.m;
+    let info = pad_state(pad);
+    if m.r8(info + UNPLUGGED) != 0 {
+        return;
+    }
+    let was = m.r16(PAD_KINDS.wrapping_add(pad << 1)) as i16 as i32;
+    if was != m.r8(info + KIND) as i32 {
+        call(c, RESET_CONTROLLER, &[pad, 0]);
+    }
 }
 
 pub fn abi_verify_controller_values(c: &mut Cpu) {
@@ -56,7 +67,7 @@ pub fn abi_verify_controller_values(c: &mut Cpu) {
 
 /// The stick byte (of a pad's state) and threshold an analog pad's key `key` is, and whether
 /// the stick must be below it (else at or over it).
-fn analog_key(key: u32) -> Option<(u32, u32, bool)> {
+fn analog_key(key: u32) -> Option<(u32, u8, bool)> {
     Some(match key {
         0x0080_0000 => (8, 64, true),
         0x0020_0000 => (8, 193, false),
@@ -70,8 +81,8 @@ fn analog_key(key: u32) -> Option<(u32, u32, bool)> {
     })
 }
 
-/// The same for a NeGcon.
-fn negcon_key(key: u32) -> Option<(u32, u32, bool)> {
+/// The same for a NeGcon (its twist, I and II).
+fn negcon_key(key: u32) -> Option<(u32, u8, bool)> {
     Some(match key {
         0x0080_0000 => (8, 98, true),
         0x0020_0000 => (8, 161, false),
@@ -85,123 +96,92 @@ fn negcon_key(key: u32) -> Option<(u32, u32, bool)> {
 /// down: an analog pad's stick past its threshold, or a button (its state's, held low); a
 /// NeGcon's twist or buttons I and II past theirs, or a button (`PAD_buttons`); a digital
 /// pad's button.
-pub fn get_no_debounce_key(c: &mut Cpu, key: u32, pad: u32) -> u32 {
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = key;
-        r.0[4] = pad;
-        r.call_leaving(c, PAD_UPDATE, &[], 0x8002_3940);
-        let info = (pad << 5).wrapping_add(PAD_INFO);
-        r.0[3] = PAD_INFO;
-        r.0[2] = pad << 5;
-        r.0[1] = info;
-        if c.m.r8(info + 4) != 0 {
-            return 0;
+pub fn get_no_debounce_key(c: &mut Cpu, key: u32, pad: u32) -> bool {
+    call(c, PAD_UPDATE, &[]);
+    let info = pad_state(pad);
+    if c.m.r8(info + UNPLUGGED) != 0 {
+        return false;
+    }
+    verify_controller_values(c, pad);
+    let m = &mut c.m;
+    let past = |m: &mut Mem, (at, threshold, below): (u32, u8, bool)| (m.r8(info + at) < threshold) == below;
+    let kind = m.r8(info + KIND) as u32;
+    if kind == PAD_DUAL_SHOCK || kind == PAD_ANALOG {
+        if let Some(k) = analog_key(key) {
+            return past(m, k);
         }
-        r.enter(c, 0x8002_38b8, 0x8002_3968, |c| verify_controller_values(c, pad));
-        let m = &mut c.m;
-        let past = |m: &mut Mem, (at, threshold, below): (u32, u32, bool)| ((m.r8(info + at) < threshold as u8) == below) as u32;
-        let kind = m.r8(info + 5) as u32;
-        if kind == PAD_DUAL_SHOCK || kind == PAD_ANALOG {
-            if let Some(k) = analog_key(key) {
-                return past(m, k);
-            }
-            let buttons = m.r16(info + 6) as u32;
-            return (!buttons & key != 0) as u32;
-        }
-        let ra = if kind == PAD_NEGCON {
-            if let Some(k) = negcon_key(key) {
-                return past(m, k);
-            }
-            0x8002_3b40
-        } else {
-            0x8002_3b60
-        };
-        let buttons = r.call_leaving(c, PAD_BUTTONS, &[pad << 2], ra);
-        (buttons & 0xFFFF & key != 0) as u32
-    })
+        return !(m.r16(info + BUTTONS) as u32) & key != 0;
+    }
+    if kind == PAD_NEGCON
+        && let Some(k) = negcon_key(key)
+    {
+        return past(m, k);
+    }
+    call(c, PAD_BUTTONS, &[pad << 2]) & 0xFFFF & key != 0
 }
 
 pub fn abi_get_no_debounce_key(c: &mut Cpu) {
-    c.r[2] = get_no_debounce_key(c, c.r[4], c.r[5]);
+    c.r[2] = get_no_debounce_key(c, c.r[4], c.r[5]) as u32;
 }
 
 /// `FEInput_GetDebounceKey` (FEINPUT.CPP, 0x80023b94): whether `key` was just pressed on `pad`
-/// (noted held); a held key that repeats again after the delay (longer the first time).
-pub fn get_debounce_key(c: &mut Cpu, key: u32, pad: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..2].copy_from_slice(&[key, pad]);
-        let down = r.enter(c, 0x8002_3918, 0x8002_3bb0, |c| get_no_debounce_key(c, key, pad));
-        let m = &mut c.m;
-        let held_at = HELD.wrapping_add(pad << 2);
-        let held = m.r32(held_at);
-        if down == 0 {
-            m.w32(held_at, held & !key);
-            return 0;
-        }
-        if held & key == 0 {
-            m.w32(held_at, held | key);
-            m.w32(REPEAT_AT, 0);
-            return 1;
-        }
-        let ticks = m.r32(GAME_TICKS);
-        if !REPEATING.contains(&key) {
-            return 0;
-        }
-        if m.r32(REPEAT_AT) == 0 {
-            let at = ticks.wrapping_add(m.r32(REPEAT_DELAY)).wrapping_add(10);
-            m.w32(REPEAT_AT, at);
-        }
-        if (ticks as i32) < (m.r32(REPEAT_AT) as i32) {
-            return 0;
-        }
-        let at = ticks.wrapping_add(m.r32(REPEAT_DELAY));
+/// (noted held); a held d-pad button repeats after the delay (longer the first time).
+pub fn get_debounce_key(c: &mut Cpu, key: u32, pad: u32) -> bool {
+    let down = get_no_debounce_key(c, key, pad);
+    let m = &mut c.m;
+    let held_at = HELD.wrapping_add(pad << 2);
+    let held = m.r32(held_at);
+    if !down {
+        m.w32(held_at, held & !key);
+        return false;
+    }
+    if held & key == 0 {
+        m.w32(held_at, held | key);
+        m.w32(REPEAT_AT, 0);
+        return true;
+    }
+    let ticks = m.r32(GAME_TICKS);
+    if !REPEATING.contains(&key) {
+        return false;
+    }
+    if m.r32(REPEAT_AT) == 0 {
+        let at = ticks.wrapping_add(m.r32(REPEAT_DELAY)).wrapping_add(FIRST_REPEAT_EXTRA);
         m.w32(REPEAT_AT, at);
-        1
-    })
+    }
+    if (ticks as i32) < (m.r32(REPEAT_AT) as i32) {
+        return false;
+    }
+    let at = ticks.wrapping_add(m.r32(REPEAT_DELAY));
+    m.w32(REPEAT_AT, at);
+    true
 }
 
 pub fn abi_get_debounce_key(c: &mut Cpu) {
-    c.r[2] = get_debounce_key(c, c.r[4], c.r[5]);
+    c.r[2] = get_debounce_key(c, c.r[4], c.r[5]) as u32;
 }
 
 /// `FEInput_GetKeyFromPlayer` (FEINPUT.CPP, 0x80023ca8): `player`'s key: the first of the
-/// table's buttons just pressed (or held, for those not in `mask`), else accept, start, help,
-/// options or back pressed, else none (0).
+/// table's buttons just pressed (or held, for keys not in `mask`), else accept, back, help,
+/// options or start pressed, else none (0).
 pub fn get_key_from_player(c: &mut Cpu, player: u32, mask: u32) -> u32 {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[3] = player;
-        r.0[5] = mask;
-        r.0[1] = 0;
-        r.0[4] = KEYS;
-        r.0[2] = 0;
-        while (r.0[1] & 0xFFFF) < KEY_COUNT {
-            let entry = KEYS + ((r.0[1] & 0xFFFF) << 3);
-            r.0[0] = entry;
+    for k in 0..KEY_COUNT {
+        let entry = KEYS + 8 * k;
+        let button = c.m.r32(entry);
+        let mut found = get_debounce_key(c, button, player);
+        if !found && mask & c.m.r32(entry + 4) == 0 {
             let button = c.m.r32(entry);
-            let mut found = r.enter(c, 0x8002_3b94, 0x8002_3cf8, |c| get_debounce_key(c, button, player)) != 0;
-            if !found && mask & c.m.r32(entry + 4) == 0 {
-                let button = c.m.r32(entry);
-                found = r.enter(c, 0x8002_3918, 0x8002_3d20, |c| get_no_debounce_key(c, button, player)) != 0;
-            }
-            if found {
-                r.0[2] = 1;
-                let entry = KEYS + ((r.0[1] & 0xFFFF) << 3);
-                return c.m.r32(entry + 4);
-            }
-            r.0[1] = r.0[1].wrapping_add(1);
-            r.0[2] = 0;
+            found = get_no_debounce_key(c, button, player);
         }
-        for (button, key, ra) in BUTTON_KEYS {
-            if r.enter(c, 0x8002_3b94, ra, |c| get_debounce_key(c, button, player)) != 0 {
-                return key;
-            }
+        if found {
+            return c.m.r32(entry + 4);
         }
-        let back = r.enter(c, 0x8002_3b94, 0x8002_3da0, |c| get_debounce_key(c, 8, player));
-        ((back != 0) as u32) << 13
-    })
+    }
+    for (button, key) in BUTTON_KEYS {
+        if get_debounce_key(c, button, player) {
+            return key;
+        }
+    }
+    0
 }
 
 pub fn abi_get_key_from_player(c: &mut Cpu) {
