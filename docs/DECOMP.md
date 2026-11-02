@@ -123,7 +123,8 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
   stack tests are gone: they checked the fidelity this drops.
 
 Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP, FETEXTRENDER.CPP, FEDIALOG.CPP,
-FEAPP.CPP, FESCREEN.CPP.
+FEAPP.CPP, FESCREEN.CPP, SCREENDISPLAY.CPP, SCREENTROPHYINFO.CPP, SCREENTRACKINFO.CPP,
+SCREENUSERNAME.CPP, SCREENAUDIO.CPP, SCREENTRACKRECORDS.CPP, SCREENTROPHYROOM.CPP.
 
 The fuzz tests' RAM comparison leaves out the whole main stack (to 0x80200000, as
 `decomp-check`): the original homes its arguments in its caller's frame, which the rewritten
