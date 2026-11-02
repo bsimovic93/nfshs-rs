@@ -2,13 +2,19 @@
 //! (`tTexture_ShapeInfo`, see `psxfront`): unpacked first when packed, its CLUT found (but for
 //! 16-bit shapes), uploaded at its place in VRAM (moved by an offset), its size, origin, texture
 //! place, depth, texture page and CLUT noted.
+//!
+//! Written as FEMENU.CPP is (see there).
 
-use crate::abi::{self, Saved};
-use ps1rt::Cpu;
+use crate::call::{call, with_buffer};
+use crate::types::TextureShapeInfo;
+use ps1rt::{Cpu, Mem};
 
 /// `"unpacked"`.
 const UNPACKED: u32 = 0x8001_27F8;
 
+/// The shape library's: a shape's header in a file, the size it unpacks to, unpacking it;
+/// `reservememadr`, `purgememadr`, `blockmove`; a shape kind's CLUT place; the shape and its
+/// CLUT uploaded to VRAM; a shape's depth; `GetClut`.
 const SHAPE_POINTER: fn(&mut Cpu) = nfs4rc::f_800f17ec;
 const UNPACK_SIZE: fn(&mut Cpu) = nfs4rc::f_800e4c10;
 const UNPACK: fn(&mut Cpu) = nfs4rc::f_800e4b28;
@@ -16,137 +22,135 @@ const RESERVE: fn(&mut Cpu) = nfs4rc::f_800e5f28;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 const BLOCKMOVE: fn(&mut Cpu) = nfs4rc::f_800e6ec8;
 const GET_CLUT_ID: fn(&mut Cpu) = nfs4rc::f_800e0544;
-/// The shape uploaded to VRAM at a place, with its CLUT.
 const UPLOAD_SHAPE: fn(&mut Cpu) = nfs4rc::f_800f7304;
 const SHAPE_DEPTH: fn(&mut Cpu) = nfs4rc::f_800f4d40;
 const GET_CLUT: fn(&mut Cpu) = nfs4rc::f_800f4dac;
+
+/// A shape's header (16 bytes): +0 its kind (low 2 bits; 2 = 16-bit, no CLUT; bit 7 packed)
+/// and the offset to the next block (24 bits), +4 its size, +8 its origin, +12 its place in VRAM
+/// (x and y in 12-bit signed fields); 20 bytes are kept to put back.
+const HEADER: u32 = 16;
+const KEPT: u32 = 20;
+const PACKED: u8 = 0x80;
+const KIND_16BIT: u32 = 2;
+/// The front-end shape's bytes that have no field of their own: +9 the shape's kind byte, +12
+/// (24 bits) the offset to its next block.
+const INFO_KIND: u32 = 9;
+const INFO_NEXT: u32 = 12;
 
 /// A 12-bit signed field at `shift` (from the top) of a shape's place word.
 fn field12(v: u32, shift: u32) -> u32 {
     ((v << shift) as i32 >> 20) as u32
 }
 
+/// The place word's x, y.
+fn place(m: &mut Mem, s: u32) -> (u32, u32) {
+    let p = m.r32(s + 12);
+    (field12(p, 20), field12(p, 4))
+}
+
 /// `FETexture_LoadPmxAtOffset` (FETEXTURE.CPP, 0x8004f5e8): shape `k` of the shape file `file`
 /// into `info`, uploaded `dy` lines down and `dx` across from its place (its header put back
-/// after when moved); the unpacked copy freed.
-pub fn abi_load_pmx_at_offset(c: &mut Cpu) {
-    let (file, k, info, dy) = (c.r[4], c.r[5], c.r[6], c.r[7]);
-    let dx = abi::arg(c, 4);
-    abi::frame(c, 88, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[6], r.0[3], r.0[5]) = (dx, info, dy);
-        c.m.w32(sp + 48, 0);
-        c.m.w32(sp + 52, 0);
-        let shape = r.call_leaving(c, SHAPE_POINTER, &[file, k], 0x8004_f624);
-        r.0[2] = shape;
-        if shape == 0 {
-            c.r[2] = 0;
-            return;
-        }
-        let packed = c.m.r8(shape) as u32 & 0x80;
-        r.0[4] = packed;
-        r.0[0] = shape + 16;
-        let s = if packed != 0 {
-            let size = r.call_leaving(c, UNPACK_SIZE, &[shape + 16], 0x8004_f64c);
-            let s = r.call_leaving(c, RESERVE, &[UNPACKED, size.wrapping_add(16), 0], 0x8004_f660);
-            r.0[1] = s;
-            r.call_leaving(c, BLOCKMOVE, &[shape, s, 16], 0x8004_f674);
-            r.call_leaving(c, UNPACK, &[shape + 16, s + 16], 0x8004_f680);
-            let m = &mut c.m;
-            let v = m.r8(s) & 0x7F;
-            m.w8(s, v);
-            let next = (m.r32(shape) as i32 >> 8) as u32;
-            let low = m.r8(s) as u32;
-            let v = low | (shape.wrapping_add(next).wrapping_sub(s) << 8);
-            m.w32(s, v);
-            s
-        } else {
-            r.0[1] = shape;
-            shape
-        };
+/// after when moved); the unpacked copy freed. Nothing when the file has no such shape.
+pub fn load_pmx_at_offset(c: &mut Cpu, file: u32, k: u32, info: TextureShapeInfo, dy: u32, dx: u32) {
+    let shape = call(c, SHAPE_POINTER, &[file, k]);
+    if shape == 0 {
+        return;
+    }
+    let packed = c.m.r8(shape) & PACKED != 0;
+    // the shape, unpacked into memory of its own when packed (its header copied, the packed
+    // bit cleared, the next block's offset made relative to the copy)
+    let s = if packed {
+        let size = call(c, UNPACK_SIZE, &[shape + HEADER]);
+        let s = call(c, RESERVE, &[UNPACKED, size.wrapping_add(HEADER), 0]);
+        call(c, BLOCKMOVE, &[shape, s, HEADER]);
+        call(c, UNPACK, &[shape + HEADER, s + HEADER]);
+        let m = &mut c.m;
+        let v = m.r8(s) & !PACKED;
+        m.w8(s, v);
+        let next = (m.r32(shape) as i32 >> 8) as u32;
+        let v = m.r8(s) as u32 | (shape.wrapping_add(next).wrapping_sub(s) << 8);
+        m.w32(s, v);
+        s
+    } else {
+        shape
+    };
+    with_buffer(c, 8 + KEPT, |c, buffer| {
+        let (clut_at, kept) = (buffer, buffer + 8);
+        c.m.w32(clut_at, 0);
+        c.m.w32(clut_at + 4, 0);
         let kind = c.m.r8(s) as u32 & 3;
-        if kind != 2 {
-            r.call_leaving(c, GET_CLUT_ID, &[kind, sp + 48, sp + 52], 0x8004_f6d8);
+        if kind != KIND_16BIT {
+            call(c, GET_CLUT_ID, &[kind, clut_at, clut_at + 4]);
             let m = &mut c.m;
-            let v = (m.r32(sp + 52) << 6) | ((m.r32(sp + 48) as i32 >> 4) as u32 & 0x3F);
-            m.w32(info + 4, v);
-        } else {
-            c.r[5] = sp + 48;
+            let v = (m.r32(clut_at + 4) << 6) | ((m.r32(clut_at) as i32 >> 4) as u32 & 0x3F);
+            info.set_clut_id(m, v as i32);
         }
+        // the header kept, the shape uploaded at its place moved
         let m = &mut c.m;
-        for k in 0..5 {
+        for k in 0..KEPT / 4 {
             let v = m.r32(s + 4 * k);
-            m.w32(sp + 24 + 4 * k, v);
+            m.w32(kept + 4 * k, v);
         }
-        let place = m.r32(s + 12);
-        let (clut_x, clut_y) = (m.r32(sp + 48), m.r32(sp + 52));
-        let x = field12(place, 20).wrapping_add(dx);
-        let y = field12(place, 4).wrapping_add(dy);
-        r.call_leaving(c, UPLOAD_SHAPE, &[s, x, y, clut_x, clut_y], 0x8004_f750);
+        let (x, y) = place(m, s);
+        let (clut_x, clut_y) = (m.r32(clut_at), m.r32(clut_at + 4));
+        call(c, UPLOAD_SHAPE, &[s, x.wrapping_add(dx), y.wrapping_add(dy), clut_x, clut_y]);
+        // the description
         let m = &mut c.m;
-        m.w32(info, shape);
+        info.set_shpptr(m, shape);
         let b = m.r8(s);
-        let v = m.r32(info + 12);
-        m.w8(info + 9, b);
+        let v = m.r32(info.0 + INFO_NEXT);
+        m.w8(info.0 + INFO_KIND, b);
         let v = (v & 0xFF00_0000) | (m.r32(s) >> 8);
-        m.w32(info + 12, v);
-        for at in [4, 6, 8, 10] {
-            let v = m.r16(s + at);
-            m.w16(info + 12 + at, v);
-        }
-        let place = m.r32(s + 12);
-        m.w16(info + 24, field12(place, 20) as u16);
-        let place = m.r32(s + 12);
-        m.w16(info + 26, field12(place, 4) as u16);
-        let depth = r.call_leaving(c, SHAPE_DEPTH, &[s], 0x8004_f7d4);
+        m.w32(info.0 + INFO_NEXT, v);
+        let size = (m.r16(s + 4), m.r16(s + 6), m.r16(s + 8), m.r16(s + 10));
+        info.set_width(m, size.0 as i16);
+        info.set_height(m, size.1 as i16);
+        info.set_centerx(m, size.2 as i16);
+        info.set_centery(m, size.3 as i16);
+        let (x, _) = place(m, s);
+        info.set_shapex(m, x as i16);
+        let (_, y) = place(m, s);
+        info.set_shapey(m, y as i16);
+        let depth = call(c, SHAPE_DEPTH, &[s]);
         let m = &mut c.m;
-        let clut = m.r32(info + 4);
-        let blend = m.r8(info + 9) as u32;
-        let ty = m.r16(info + 26) as u32;
-        let tx = m.r16(info + 24) as u32;
-        m.w8(info + 8, depth as u8);
-        let page = ((blend & 3) << 7)
-            | ((((ty & 0x100) << 16) as i32 >> 20) as u32)
-            | ((tx & 0x3FF) >> 6)
-            | ((ty & 0x200) << 2);
-        m.w16(info + 28, page as u16);
-        let v = r.call_leaving(c, GET_CLUT, &[(clut & 0x3F) << 4, (clut as i32 >> 6) as u32, page, (ty & 0x200) << 2], 0x8004_f82c);
-        c.m.w16(info + 30, v as u16);
+        let clut = info.clut_id(m) as u32;
+        let blend = m.r8(info.0 + INFO_KIND) as u32;
+        let (ty, tx) = (info.shapey(m) as u16 as u32, info.shapex(m) as u16 as u32);
+        info.set_depth(m, depth as i8);
+        let page = ((blend & 3) << 7) | ((((ty & 0x100) << 16) as i32 >> 20) as u32) | ((tx & 0x3FF) >> 6) | ((ty & 0x200) << 2);
+        info.set_tpage(m, page as u16);
+        let v = call(c, GET_CLUT, &[(clut & 0x3F) << 4, (clut as i32 >> 6) as u32, page, (ty & 0x200) << 2]);
+        info.set_clut(&mut c.m, v as u16);
         if dx != 0 || dy != 0 {
             let m = &mut c.m;
-            for k in 0..5 {
-                let v = m.r32(sp + 24 + 4 * k);
+            for k in 0..KEPT / 4 {
+                let v = m.r32(kept + 4 * k);
                 m.w32(s + 4 * k, v);
             }
         }
-        if packed != 0 {
-            r.call_leaving(c, PURGE, &[s], 0x8004_f878);
-        }
-    })
+    });
+    if packed {
+        call(c, PURGE, &[s]);
+    }
 }
 
-/// `FETexture_LoadPmx` (FETEXTURE.CPP, 0x8004f8a0): `FETexture_LoadPmxAtOffset` at its place.
+pub fn abi_load_pmx_at_offset(c: &mut Cpu) {
+    let dx = crate::abi::arg(c, 4);
+    load_pmx_at_offset(c, c.r[4], c.r[5], TextureShapeInfo(c.r[6]), c.r[7], dx);
+}
+
+/// `FETexture_LoadPmx` (FETEXTURE.CPP, 0x8004f8a0): the shape at its place.
+pub fn load_pmx(c: &mut Cpu, file: u32, k: u32, info: TextureShapeInfo) {
+    load_pmx_at_offset(c, file, k, info, 0, 0);
+}
+
 pub fn abi_load_pmx(c: &mut Cpu) {
-    let (file, k, info) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 32, |c, sp| {
-        let r = Saved::of(c);
-        c.m.w32(sp + 16, 0);
-        r.enter_leaving(c, 0x8004_f5e8, 0x8004_f8b4, |c| {
-            (c.r[4], c.r[5], c.r[6], c.r[7]) = (file, k, info, 0);
-            abi_load_pmx_at_offset(c)
-        });
-    })
+    load_pmx(c, c.r[4], c.r[5], TextureShapeInfo(c.r[6]));
 }
 
-/// `FETexture_LoadPmx` entered as the original's callers `jal` it.
-pub(crate) fn load_pmx_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8004_f8a0, None, &[]);
-    abi_load_pmx(c);
-}
-
-/// `FETexture_LoadPmxAtOffset` entered as the original's callers `jal` it.
+/// For callers not rewritten yet: the functions with the C convention's arguments.
 pub(crate) fn load_pmx_at_offset_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8004_f5e8, None, &[]);
     abi_load_pmx_at_offset(c);
 }
 
