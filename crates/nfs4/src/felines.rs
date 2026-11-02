@@ -1,28 +1,46 @@
 //! FELINES.CPP: the front end's bright-ended lines: a bar filled by `128 - fade` 128ths along
 //! it (from either end, vertically or horizontally), a glow (the colour halfway to white, up to
 //! 8 wide) shading into its end, and glows at its edges; drawn solid or translucent.
+//!
+//! Written as FEMENU.CPP is (see there). The squares are the host's (called by address: it
+//! captures their primitives).
 
-use crate::abi::{self, Saved};
+use crate::call::call_addr;
+use crate::fefades;
 use ps1rt::Cpu;
 
-/// `PSXDrawSquare`, `PSXDrawTransSquare`, `PSXDrawGouraudSquare` (the host captures their
-/// primitives: called by address).
+/// `PSXDrawSquare`, `PSXDrawTransSquare`, `PSXDrawGouraudSquare`.
 const DRAW_SQUARE: u32 = 0x8004_F12C;
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 const DRAW_GOURAUD_SQUARE: u32 = 0x8004_F1C4;
 
-/// `PSXDrawBrightEndLine` (FELINES.CPP, 0x8004c018): a solid bright-ended line.
-pub fn abi_draw_bright_end_line(c: &mut Cpu) {
-    let args: Vec<u32> = (0..8).map(|k| abi::arg(c, k)).collect();
-    abi::frame(c, 48, |c, sp| {
-        let mut a = args.clone();
-        a.push(0);
-        // (the stack's arguments where the callee reads them)
-        for (k, &v) in a.iter().enumerate().skip(4) {
-            c.m.w32(sp + 4 * k as u32, v);
-        }
-        Saved::of(c).enter_leaving(c, 0x8004_c058, 0x8004_c048, |c| draw(c, &a));
-    })
+/// The fill's directions (`mode`): 0 up from the bottom, 1 down from the top (vertical), 2
+/// left from the right, 3 right from the left (horizontal).
+const FROM_TOP: u32 = 1;
+const FROM_RIGHT: u32 = 2;
+const FROM_LEFT: u32 = 3;
+
+/// A line: its colour, place, size, direction (see `FROM_*`), how far faded (128ths, 128 none of
+/// it), its end glows' width, translucent or not.
+#[derive(Clone, Copy)]
+pub struct Line {
+    pub color: u32,
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub mode: u32,
+    pub fade: u32,
+    pub glow: u32,
+    pub trans: bool,
+}
+
+impl Line {
+    /// The arguments as the original takes them (`PSXTransDrawBrightEndLine`'s nine, the last
+    /// `trans`).
+    pub fn from_args(a: &[u32]) -> Line {
+        Line { color: a[0], x: a[1], y: a[2], w: a[3], h: a[4], mode: a[5], fade: a[6], glow: a[7], trans: a.get(8).is_some_and(|&t| t != 0) }
+    }
 }
 
 /// `x / 128` rounded toward 0 (the original's shift), and the glow's width (`x >> 10` of the
@@ -32,70 +50,67 @@ fn part(x: i32) -> (u32, u32) {
     ((v >> 7) as u32, (v >> 10).min(8) as u32)
 }
 
-/// `PSXTransDrawBrightEndLine` (FELINES.CPP, 0x8004c058): `color` at `x`, `y`, `w` by `h`,
-/// filled along `mode` (0 and 1 vertically from either end, 2 and 3 horizontally) but `fade`
-/// 128ths (nothing at 128), its end glowing; `glow` wide glows at its ends; translucent when
-/// `trans`.
-pub fn draw(c: &mut Cpu, a: &[u32]) {
-    let (color, x, y, w, h, mode, fade, glow, trans) = (a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8]);
-    abi::frame(c, 72, |c, _| {
-        let mut r = Saved::of(c);
-        let s1 = r.0[1];
-        r.0[..8].copy_from_slice(&[128, s1, x, color, y, w, h, fade]);
-        r.0[8] = mode;
-        if fade == 128 {
-            return;
-        }
-        let bright = r.call_leaving(c, nfs4rc::f_8004bcd8, &[color, 0x00FF_FFFF, 64], 0x8004_c0b8);
-        let gouraud = |c: &mut Cpu, r: &Saved, args: &[u32], ra: u32| {
-            r.call_ptr_leaving(c, DRAW_GOURAUD_SQUARE, args, ra);
-        };
-        if fade == 0 {
-            r.0[1] = w;
-            r.0[0] = h;
-        } else if mode < 2 {
-            let (len, edge) = part((h as i32).wrapping_mul(128i32.wrapping_sub(fade as i32)));
-            r.0[0] = len;
-            r.0[1] = w;
-            if mode == 1 {
-                let top = y.wrapping_add(len).wrapping_sub(edge);
-                gouraud(c, &r, &[x, top, w, edge, color, color, bright, bright], 0x8004_c1d4);
-            } else {
-                r.0[4] = y.wrapping_add(h).wrapping_sub(len);
-                gouraud(c, &r, &[x, r.0[4], w, edge, bright, bright, color, color], 0x8004_c1a8);
-            }
+fn gouraud(c: &mut Cpu, x: u32, y: u32, w: u32, h: u32, colors: [u32; 4]) {
+    let [a, b, cc, d] = colors;
+    call_addr(c, DRAW_GOURAUD_SQUARE, &[x, y, w, h, a, b, cc, d]);
+}
+
+/// `PSXTransDrawBrightEndLine` (FELINES.CPP, 0x8004c058): the bar filled along its direction
+/// but for its faded part, the colour halfway to white glowing into its moving end; its edges'
+/// glows (`glow` wide: the right one when filled from the right, the left one from the left,
+/// both unfaded); then the bar itself, solid or translucent.
+pub fn draw(c: &mut Cpu, l: Line) {
+    if l.fade == 128 {
+        return;
+    }
+    let bright = fefades::fade(l.color, 0x00FF_FFFF, 64);
+    let (color, (mut x, mut y), (mut w, mut h)) = (l.color, (l.x, l.y), (l.w, l.h));
+    // the part left (the whole bar unfaded) and its glowing end
+    if l.fade != 0 && l.mode <= FROM_TOP {
+        let (len, edge) = part((l.h as i32).wrapping_mul(128i32.wrapping_sub(l.fade as i32)));
+        h = len;
+        if l.mode == FROM_TOP {
+            let top = l.y.wrapping_add(len).wrapping_sub(edge);
+            gouraud(c, x, top, w, edge, [color, color, bright, bright]);
         } else {
-            let (len, edge) = part((w as i32).wrapping_mul(128i32.wrapping_sub(fade as i32)));
-            r.0[1] = len;
-            r.0[0] = h;
-            if mode == 2 {
-                r.0[2] = x.wrapping_add(w).wrapping_sub(len);
-                gouraud(c, &r, &[r.0[2], y, edge, h, bright, color, bright, color], 0x8004_c1a8);
-            } else {
-                let left = x.wrapping_add(len).wrapping_sub(edge);
-                gouraud(c, &r, &[left, y, edge, h, color, bright, color, bright], 0x8004_c1d4);
-            }
+            y = l.y.wrapping_add(l.h).wrapping_sub(len);
+            gouraud(c, x, y, w, edge, [bright, bright, color, color]);
         }
-        let (x, y, len, h) = (r.0[2], r.0[4], r.0[1], r.0[0]);
-        if glow != 0 {
-            if mode == 2 || fade == 0 {
-                gouraud(c, &r, &[x.wrapping_add(len).wrapping_sub(glow), y, glow, h, color, 0, color, 0], 0x8004_c230);
-            }
-            if mode == 3 || fade == 0 {
-                gouraud(c, &r, &[x, y, glow, h, 0, color, 0, color], 0x8004_c264);
-            }
-        }
-        if trans == 0 {
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[color, x, y, len, h], 0x8004_c288);
+    } else if l.fade != 0 {
+        let (len, edge) = part((l.w as i32).wrapping_mul(128i32.wrapping_sub(l.fade as i32)));
+        w = len;
+        if l.mode == FROM_RIGHT {
+            x = l.x.wrapping_add(l.w).wrapping_sub(len);
+            gouraud(c, x, y, edge, h, [bright, color, bright, color]);
         } else {
-            r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[color, x, y, len, h, 1], 0x8004_c2ac);
+            let left = l.x.wrapping_add(len).wrapping_sub(edge);
+            gouraud(c, left, y, edge, h, [color, bright, color, bright]);
         }
-    })
+    }
+    if l.glow != 0 {
+        if l.mode == FROM_RIGHT || l.fade == 0 {
+            gouraud(c, x.wrapping_add(w).wrapping_sub(l.glow), y, l.glow, h, [color, 0, color, 0]);
+        }
+        if l.mode == FROM_LEFT || l.fade == 0 {
+            gouraud(c, x, y, l.glow, h, [0, color, 0, color]);
+        }
+    }
+    if l.trans {
+        call_addr(c, DRAW_TRANS_SQUARE, &[color, x, y, w, h, 1]);
+    } else {
+        call_addr(c, DRAW_SQUARE, &[color, x, y, w, h]);
+    }
 }
 
 pub fn abi_draw(c: &mut Cpu) {
-    let a: Vec<u32> = (0..9).map(|k| abi::arg(c, k)).collect();
-    draw(c, &a);
+    let a: Vec<u32> = (0..9).map(|k| crate::abi::arg(c, k)).collect();
+    draw(c, Line::from_args(&a));
+}
+
+/// `PSXDrawBrightEndLine` (FELINES.CPP, 0x8004c018): the line drawn solid.
+pub fn abi_draw_bright_end_line(c: &mut Cpu) {
+    let a: Vec<u32> = (0..8).map(|k| crate::abi::arg(c, k)).collect();
+    draw(c, Line::from_args(&a));
 }
 
 #[cfg(test)]
