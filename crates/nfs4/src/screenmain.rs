@@ -249,8 +249,12 @@ pub fn abi_swap_background(c: &mut Cpu) {
 
 /// `tScreenMain::DoneLoadingBackground` (SCREENMAIN.CPP, 0x800372d4): neither background still
 /// loading.
+pub fn done_loading_background(m: &mut Mem, this: u32) -> bool {
+    !loading(m, this)
+}
+
 pub fn abi_done_loading_background(c: &mut Cpu) {
-    c.r[2] = !loading(&mut c.m, c.r[4]) as u32;
+    c.r[2] = done_loading_background(&mut c.m, c.r[4]) as u32;
 }
 
 /// `tScreenMain::SetState` (SCREENMAIN.CPP, 0x80037350): a new state from now (the video

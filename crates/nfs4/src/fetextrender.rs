@@ -406,10 +406,6 @@ pub fn abi_word_wrap_text_rgb_justify(c: &mut Cpu) {
     c.r[2] = word_wrap_text_rgb_justify(c, c.r[4], RECT(c.r[5]), c.r[6], c.r[7], font, measure);
 }
 
-pub(crate) fn word_wrap_text_rgb_justify_entry(c: &mut Cpu) {
-    abi_word_wrap_text_rgb_justify(c);
-}
-
 /// `FETextRender_WordWrapTextRGB` (FETEXTRENDER.CPP, 0x80021878): [`word_wrap_text_rgb_justify`]
 /// left-justified in font 0.
 pub fn word_wrap_text_rgb(c: &mut Cpu, text: u32, rect: u32, colour: u32) -> u32 {
@@ -437,10 +433,6 @@ pub fn word_wrap_text_fade(c: &mut Cpu, fade: u32, text: u32, rect: u32, state: 
 pub fn abi_word_wrap_text_fade(c: &mut Cpu) {
     let ty = crate::abi::arg(c, 4);
     c.r[2] = word_wrap_text_fade(c, c.r[4], c.r[5], c.r[6], c.r[7], ty);
-}
-
-pub(crate) fn word_wrap_text_fade_entry(c: &mut Cpu) {
-    abi_word_wrap_text_fade(c);
 }
 
 /// `FETextRender_WordWrapText` (FETEXTRENDER.CPP, 0x80021948): [`word_wrap_text_fade`]

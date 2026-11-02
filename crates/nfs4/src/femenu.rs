@@ -113,15 +113,6 @@ const DISPLAY_HELP: fn(&mut Cpu) = nfs4rc::f_80014048;
 /// `DrawSlider(value, min, max, x, y, w, h, ...)`, hooked by the host: called by address.
 const DRAW_SLIDER: u32 = 0x8002_4C4C;
 
-/// The virtual function at `slot` of the object `this` whose vtable pointer is at
-/// `this + vptr`: `this` adjusted by the entry's offset, and the function. (For the modules
-/// not rewritten yet; `crate::call::virtual_fn` is the same.)
-pub(crate) fn method(m: &mut Mem, this: u32, vptr: u32, slot: u32) -> (u32, u32) {
-    let vt = m.r32(this.wrapping_add(vptr));
-    let delta = m.r16(vt.wrapping_add(slot)) as i16 as i32 as u32;
-    (this.wrapping_add(delta), m.r32(vt.wrapping_add(slot + 4)))
-}
-
 /// A destructor: the class's vtable put back (its pointer at `vptr`), then the base class's
 /// destructor `base` with the caller's `flags`.
 fn destroy(c: &mut Cpu, this: u32, flags: u32, vptr: u32, vtable: u32, base: fn(&mut Cpu, u32, u32)) {
@@ -278,8 +269,12 @@ pub fn abi_indexed(c: &mut Cpu) {
 }
 
 /// `tListIteratorIndexed::~tListIteratorIndexed` (FEMENU.CPP, 0x80023fc4).
+pub fn indexed_dtor(c: &mut Cpu, this: u32, flags: u32) {
+    destroy(c, this, flags, ITERATOR_VPTR, INDEXED_VT, list_iterator_dtor);
+}
+
 pub fn abi_indexed_dtor(c: &mut Cpu) {
-    destroy(c, c.r[4], c.r[5], ITERATOR_VPTR, INDEXED_VT, list_iterator_dtor);
+    indexed_dtor(c, c.r[4], c.r[5]);
 }
 
 /// `tListIteratorIndexed::Value` (FEMENU.CPP, 0x80023fec).
