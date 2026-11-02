@@ -21,7 +21,7 @@ as their own commits. Where the original's output only reaches the host (picture
 the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
 
 1. **Finish the readable front end** (see "The readable front end"): the rest of the screens,
-   FRONT, FEMENUDEFS and the other bit-exact front-end ports.
+   FRONT, FEMENUDEFS and the other bit-exact front-end ports. Done 2026-11-02.
 2. **The race's leftovers.** Run the race in lockstep with `NFSHS_DECOMP_SCRAMBLE=1` to find
    every place the race's bit-exact code reads stack or register leftovers (the barrier
    check's uninitialized wall normal is one), and make those values explicit, before readable
@@ -132,7 +132,7 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
 
 ## The readable front end
 
-The front end is being rewritten as readable Rust (decided 2026-11-01; step 1 of "The plan"), module by module:
+The front end is rewritten as readable Rust (decided 2026-11-01, done 2026-11-02; step 1 of "The plan"), module by module:
 the game's data in RAM stays exactly the original's, but the stack and the registers no longer
 reproduce the original's layout and leftovers. `NFSHS_DECOMP_SCRAMBLE=1` (below) measured what
 that costs: nothing the game does depends on them but three places, now handled (the controller
@@ -157,7 +157,13 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
 Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP, FETEXTRENDER.CPP, FEDIALOG.CPP,
 FEAPP.CPP, FESCREEN.CPP, SCREENDISPLAY.CPP, SCREENTROPHYINFO.CPP, SCREENTRACKINFO.CPP,
 SCREENUSERNAME.CPP, SCREENAUDIO.CPP, SCREENTRACKRECORDS.CPP, SCREENTROPHYROOM.CPP,
-SCREENTRACKS.CPP, SCREENTOURNSELECT.CPP, SCREENPINKSLIPS.CPP, SCREENPOST.CPP, SCREENMAIN.CPP.
+SCREENTRACKS.CPP, SCREENTOURNSELECT.CPP, SCREENPINKSLIPS.CPP, SCREENPOST.CPP, SCREENMAIN.CPP,
+FEFADES.CPP, FELINES.CPP, FETV.CPP, DRAWSHP.CPP, FETEXTURE.CPP, FEMISSION.CPP, MMEFFECT.CPP,
+MINFRONT.CPP, MOVIE.CPP, FETOOLS.CPP, FEINPUT.CPP, FECHEATS.CPP, FETRACKS.CPP, STATTOOL.CPP,
+STATCHK.CPP, FEVIDEOWALL.CPP, FECREDITS.CPP, FECARS.CPP, FETOURN.CPP, FE3DMENU.CPP, FEAUDIO.CPP,
+SCREENCONGRATS.CPP, PSXFRONT.CPP, MEMCARD.C, FEMEMCARD.CPP, SCREENMEMCARD.CPP,
+SCREENCONTROLLER.CPP, FRONT.CPP, SCREENCARSELECT.CPP, FEMENUDEFS.CPP: the whole front end (step 1
+done).
 
 The fuzz tests' RAM comparison leaves out the whole main stack (to 0x80200000, as
 `decomp-check`): the original homes its arguments in its caller's frame, which the rewritten
@@ -177,7 +183,14 @@ The car select's marks (`tScreenCarSelect::DrawOverlay`, overlay kinds 4 and 5) 
 `GetCar` may not have filled in (an empty garage): the original then reads the stack's leftover,
 the last `y` `DrawShapeExtended` homed while FESCREEN drew the background strips. The rewritten
 FESCREEN leaves something else there, so which marks light up on such a screen may differ; the
-car select's fuzz test keeps out of that state.
+car select's fuzz test keeps out of that state. The same goes for its video wall with no car: the
+original gives the wall the `fAvailable` of the car it didn't get, and `UpdateVideoWall` notes its
+livery (the stack's leftover, or in the duel the opponent's car read into the same buffer before).
+The rewrite clears its car buffers when it makes them, and keeps the duel's reuse.
+
+The test CPUs' `systemtask` lets a tick go by (the word `timedwait` reads), so code that waits
+(`Front_ResetPSXController`, the memory card's checks) runs in the tests; their `GetDirentry`
+fills the card's directory from `test_util::DIRECTORY` when it's marked.
 
 The test CPUs stand in for the host's shape emitter (0x8004e74c, under `DrawShapeExtended`): in
 the game the host draws the shape and the original never runs, and the original reads stack it
