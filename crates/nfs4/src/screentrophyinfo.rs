@@ -1,19 +1,18 @@
-//! SCREENTROPHYINFO.CPP: a trophy's screen (`tScreenTrophyInfo`): the trophy room's chosen
-//! tournament's trophy (its picture's 32 shapes swapped in), its banner in the colour of the
-//! best place won, the tournament's name, up to three paragraphs of its texts (headings lit),
-//! its description, the trophy turning, and two rows of studs.
+//! SCREENTROPHYINFO.CPP: a trophy's screen (`tScreenTrophyInfo`). It shows the trophy room's
+//! chosen tournament: its trophy (the picture's 32 shapes swapped in), turning; its banner in
+//! the colour of the best place won; the tournament's name; up to three paragraphs of its texts
+//! (headings lit); its description; and two rows of studs.
+//!
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
 
-use crate::abi::{self, Saved};
+use crate::call::{call, with_buffer};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, STRLEN, TEXT_WORD};
 use crate::globals::{FRONT_END, GAME_TICKS, TOURNAMENT_MANAGER};
+use crate::types::{DrawShapeExtended, RECT, Screen};
 use crate::{fefades, fescreen, fetextrender, fetourn};
 use ps1rt::{Cpu, Mem};
 
-// The screen: a `tScreen` (+40 its swapped shapes: +40 their table, +44 the file read; +92 its
-// fade), then +100 the banner's colour.
-const SWAP_TABLE: u32 = 40;
-const SWAP_DATA: u32 = 44;
-const FADE: u32 = 92;
+/// The screen: a `tScreen`, then +100 the banner's colour.
 const BANNER: u32 = 100;
 
 /// The trophy room (`tScreenTrophyRoom *`): +208 its tier, +212 each tier's tournament
@@ -32,8 +31,11 @@ const BEST_PLACES: u32 = 496;
 /// The banners' colours (by place: none, first, second, third), the trophy's file's name.
 const BANNER_COLORS: u32 = 0x8005_2508;
 const TROPHY_NAME: u32 = 0x8005_251C;
-/// "zSTI"; the colours' table and the name's colour's index.
+/// "zSTI" (11 shapes; the trophy's picture 32); the colours' table and the name's colour's
+/// index.
 const INFO_NAME: u32 = 0x8001_1E34;
+const SHAPES: u16 = 11;
+const TROPHY_SHAPES: u32 = 32;
 const COLORS: u32 = 0x8005_1B50;
 const NAME_COLOR: u32 = 0x8005_1ABD;
 /// The texts by tournament id: names (834 on), the three paragraphs (891, 929, 910 on) with
@@ -43,19 +45,14 @@ const PARAGRAPHS: [(u32, u32); 3] = [(891, 988), (929, 990), (910, 989)];
 const DESCRIPTIONS: u32 = 872;
 /// The texts' grey.
 const GREY: u32 = 0x0050_5050;
+/// The shapes' flags: the trophy's (its own table, from its top left), the studs' (coloured,
+/// from their top left).
+const TROPHY_FLAGS: u32 = 0x600;
+const STUD_FLAGS: u32 = 0x410;
 
 /// `tTournamentManager::GetTrophyName` (FETOURN.CPP's port), `ScaleShapeExtended`.
 const GET_TROPHY_NAME: fn(&mut Cpu) = fetourn::get_trophy_name_entry;
 const SCALE_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::scale_shape_extended_entry;
-
-/// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
-}
 
 /// The trophy room's chosen tournament (`tTourneyInfo *`).
 fn tournament(m: &mut Mem) -> u32 {
@@ -68,142 +65,115 @@ fn tournament(m: &mut Mem) -> u32 {
     definition.wrapping_add(first.wrapping_add(current).wrapping_mul(TOURNAMENT_SIZE)) + TOURNAMENTS
 }
 
-/// `tScreenTrophyInfo::GetShapeInfo` (SCREENTROPHYINFO.CPP, 0x800413e8): the banner's colour
-/// by the best place won; 11 shapes of "zSTI", 32 of the trophy's picture.
-pub fn abi_get_shape_info(c: &mut Cpu) {
-    let (this, permanent, swap, name) = (c.r[4], c.r[5], c.r[6], c.r[7]);
-    let swap_name = abi::arg(c, 4);
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[3] = permanent;
-        r.0[1] = swap;
-        r.0[2] = name;
-        let m = &mut c.m;
-        let t = tournament(m);
-        let id = m.r8(t) as i8 as i32 as u32;
-        let place = m.r8(TOURNAMENT_MANAGER.wrapping_add(id) + BEST_PLACES) as i8 as i32;
-        let place = if ((place - 1) as u32) < 3 { place as u32 } else { 0 };
-        let color = m.r32(BANNER_COLORS.wrapping_add(place << 2));
-        m.w32(this + BANNER, color);
-        r.0[0] = TROPHY_NAME;
-        r.call_leaving(c, GET_TROPHY_NAME, &[TOURNAMENT_MANAGER, t, 2, TROPHY_NAME, u32::MAX], 0x8004_14d4);
-        let m = &mut c.m;
-        m.w16(swap, 32);
-        m.w32(swap_name, TROPHY_NAME);
-        m.w32(name, INFO_NAME);
-        m.w16(permanent, 11);
-    })
+/// A tournament's id.
+fn id(m: &mut Mem, tournament: u32) -> u32 {
+    m.r8(tournament) as i8 as i32 as u32
 }
 
-/// `tScreenTrophyInfo::DrawBackground` (SCREENTROPHYINFO.CPP, 0x80041518): the texts fading in
-/// over the screen's second half; the tournament's name; each paragraph it has, its heading lit
-/// (the first on a line, the others word-wrapped one under another); the trophy's picture
-/// uploaded once read; the description; the trophy turning; the studs.
-pub fn abi_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 120, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[6] = this;
-        let fade = c.m.r16(this + FADE) as i16 as i32;
-        r.0[4] = (fade << 1).clamp(0, 128) as u32;
-        let texts = ((fade - 64).max(0) << 1) as u32;
-        r.0[3] = texts;
-        let m = &mut c.m;
-        let t = tournament(m);
-        let id = m.r8(t) as i8 as i32 as u32;
-        r.0[5] = id;
-        r.0[0] = t;
-        let k = m.r8(NAME_COLOR) as u32;
-        let name_color = m.r32(COLORS + (k << 2));
-        let grey = |c: &mut Cpu, r: &Saved, ra: u32| port(c, r, 0x8004_bd68, ra, &[GREY, texts], fefades::abi_fade_out);
-        let color = port(c, &r, 0x8004_bd68, 0x8004_15f4, &[name_color, texts], fefades::abi_fade_out);
-        r.0[1] = 175;
-        r.0[0] = color;
-        let w = r.call_leaving(c, TEXT_WORD, &[id.wrapping_add(NAMES)], 0x8004_1608);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[w, 30, 25, color, 3, 3], 0x8004_1628);
-        // the paragraphs
-        let ras = [
-            [0x8004_1634, 0x8004_163c, 0x8004_166c, 0x8004_1674, 0x8004_1688, 0x8004_16a4, 0, 0],
-            [0x8004_16b4, 0x8004_16bc, 0x8004_16f0, 0x8004_1714, 0x8004_1728, 0x8004_1738, 0x8004_1740, 0x8004_174c],
-            [0x8004_175c, 0x8004_1764, 0x8004_1798, 0x8004_17bc, 0x8004_17d0, 0x8004_17e0, 0x8004_17e8, 0x8004_17f4],
-        ];
-        let rect = sp + 32;
-        for (j, ((text, heading), ras)) in PARAGRAPHS.into_iter().zip(ras).enumerate() {
+/// `tScreenTrophyInfo::GetShapeInfo` (SCREENTROPHYINFO.CPP, 0x800413e8): the banner's colour
+/// by the best place won; 11 shapes of "zSTI", 32 of the trophy's picture.
+pub fn get_shape_info(c: &mut Cpu, this: Screen, permanent: u32, swap: u32, name: u32, swap_name: u32) {
+    let m = &mut c.m;
+    let t = tournament(m);
+    let id = id(m, t);
+    let place = m.r8(TOURNAMENT_MANAGER.wrapping_add(id) + BEST_PLACES) as i8 as i32;
+    let place = if (1..=3).contains(&place) { place as u32 } else { 0 };
+    let color = m.r32(BANNER_COLORS + 4 * place);
+    m.w32(this.0 + BANNER, color);
+    call(c, GET_TROPHY_NAME, &[TOURNAMENT_MANAGER, t, 2, TROPHY_NAME, u32::MAX]);
+    let m = &mut c.m;
+    m.w16(swap, TROPHY_SHAPES as u16);
+    m.w32(swap_name, TROPHY_NAME);
+    m.w32(name, INFO_NAME);
+    m.w16(permanent, SHAPES);
+}
+
+pub fn abi_get_shape_info(c: &mut Cpu) {
+    let swap_name = crate::abi::arg(c, 4);
+    get_shape_info(c, Screen(c.r[4]), c.r[5], c.r[6], c.r[7], swap_name);
+}
+
+/// `tScreenTrophyInfo::DrawBackground` (SCREENTROPHYINFO.CPP, 0x80041518). The texts fade in
+/// over the screen's second half. It draws the tournament's name, then each paragraph it has
+/// with its heading lit: the first on one line, the others word-wrapped one under another. The
+/// trophy's picture is uploaded once read; then come the description, the trophy turning, and
+/// the studs.
+pub fn draw_background(c: &mut Cpu, this: Screen) {
+    let fade = this.screen_fade_val(&mut c.m) as i32;
+    let bright = (fade << 1).clamp(0, 128) as u32;
+    let texts = ((fade - 64).max(0) << 1) as u32;
+    let m = &mut c.m;
+    let t = tournament(m);
+    let id = id(m, t);
+    let k = m.r8(NAME_COLOR) as u32;
+    let name_color = fefades::fade(m.r32(COLORS + 4 * k), 0, texts);
+    let grey = fefades::fade(GREY, 0, texts);
+    let w = call(c, TEXT_WORD, &[id.wrapping_add(NAMES)]);
+    fetextrender::full_text_rgb(c, w, 30, 25, name_color, 3, 3);
+    // the rectangle the texts wrap in, the trophy's shapes' options, the studs'
+    with_buffer(c, 56, |c, at| {
+        let (rect, trophy, studs) = (RECT(at), DrawShapeExtended(at + 8), DrawShapeExtended(at + 32));
+        let mut y = 175u32;
+        for (j, (text, heading)) in PARAGRAPHS.into_iter().enumerate() {
             let text = id.wrapping_add(text);
-            if j == 0 {
-                r.0[0] = text;
-            } else {
-                r.0[2] = text;
-            }
-            let w = r.call_leaving(c, TEXT_WORD, &[text], ras[0]);
-            if r.call_leaving(c, STRLEN, &[w], ras[1]) == 0 {
+            let w = call(c, TEXT_WORD, &[text]);
+            if call(c, STRLEN, &[w]) == 0 {
                 continue;
             }
-            let y = if j == 0 { r.0[1] } else { r.0[1] as i16 as i32 as u32 };
-            r.call_leaving(c, menu_text_positioned_justify_fade_entry, &[texts, heading, 140, y, 1, 2, 4], ras[2]);
+            fetextrender::menu_text_positioned_justify_fade(c, texts, heading, 140, y as i16 as i32 as u32, 1, 2, 4);
+            let w = call(c, TEXT_WORD, &[text]);
             if j == 0 {
-                let w = r.call_leaving(c, TEXT_WORD, &[text], ras[3]);
-                r.0[0] = w;
-                let color = grey(c, &r, ras[4]);
-                r.call_leaving(c, fetextrender::full_text_rgb_entry, &[w, 145, r.0[1], color, 0, 0], ras[5]);
-                r.0[1] = 183;
+                fetextrender::full_text_rgb(c, w, 145, y, grey, 0, 0);
+                y = 183;
             } else {
-                for (k, v) in [(0, 145u16), (4, 347), (2, r.0[1] as u16), (6, 100)] {
-                    c.m.w16(rect + k, v);
-                }
-                let w = r.call_leaving(c, TEXT_WORD, &[text], ras[3]);
-                r.0[0] = w;
-                let color = grey(c, &r, ras[4]);
-                r.call_leaving(c, fetextrender::word_wrap_text_rgb_entry, &[w, rect, color], ras[5]);
-                let w = r.call_leaving(c, TEXT_WORD, &[text], ras[6]);
-                let h = r.call_leaving(c, fetextrender::word_wrap_height_entry, &[347, w], ras[7]);
+                set_rect(&mut c.m, rect, 145, y as i16, 347, 100);
+                fetextrender::word_wrap_text_rgb(c, w, rect.0, grey);
+                let w = call(c, TEXT_WORD, &[text]);
+                let h = fetextrender::word_wrap_height(c, 347, w);
                 if j == 1 {
-                    r.0[1] = r.0[1].wrapping_add(h);
+                    y = y.wrapping_add(h);
                 }
             }
         }
         // the trophy's picture, the description
-        port(c, &r, 0x8002_5e2c, 0x8004_1800, &[this, this + SWAP_TABLE], fescreen::abi_is_shape_file_loaded);
-        if c.m.r32(this + SWAP_DATA) != 0 {
-            port(c, &r, 0x8002_5ff0, 0x8004_181c, &[this, 32], fescreen::abi_upload_swap_shapes);
+        fescreen::is_shape_file_loaded(c, this, this.swap_shapes());
+        if this.swap_shapes().file(&mut c.m) != 0 {
+            fescreen::upload_swap_shapes(c, this, TROPHY_SHAPES);
         }
-        for (k, v) in [(0, 35u16), (2, 45), (4, 452), (6, 100)] {
-            c.m.w16(rect + k, v);
-        }
-        let w = r.call_leaving(c, TEXT_WORD, &[id.wrapping_add(DESCRIPTIONS)], 0x8004_1844);
-        r.0[0] = w;
-        let color = grey(c, &r, 0x8004_1858);
-        r.call_leaving(c, fetextrender::word_wrap_text_rgb_justify_entry, &[w, rect, color, 3, 0, 0], 0x8004_1874);
+        set_rect(&mut c.m, rect, 35, 45, 452, 100);
+        let w = call(c, TEXT_WORD, &[id.wrapping_add(DESCRIPTIONS)]);
+        fetextrender::word_wrap_text_rgb_justify(c, w, rect, grey, 3, 0, 0);
         // the trophy turning
         let frame = (c.m.r32(GAME_TICKS) as i32 / 12) % 32;
-        let table = c.m.r32(this + SWAP_TABLE);
-        c.m.w32(sp + 60, table);
-        r.call_leaving(c, SCALE_SHAPE_EXTENDED, &[frame as u32, 1536, 70, (-5i32) as u32, texts, 0, sp + 40], 0x8004_18d8);
-        // the studs
-        r.0[2] = 0x5555_5556;
-        let banner = c.m.r32(this + BANNER);
-        r.0[1] = sp + 64;
-        c.m.w32(sp + 68, banner);
-        for (from, to, ra) in [(1, 30, 0x8004_192c), (34, 63, 0x8004_1988)] {
-            for k in from..to {
-                r.0[0] = k;
-                if k % 3 != 0 {
-                    r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[0, 1040, 2 * k, 0, r.0[4], 0, sp + 64], ra);
-                }
+        let table = this.swap_shapes().shapes(&mut c.m);
+        trophy.set_custom_shapes(&mut c.m, table);
+        call(c, SCALE_SHAPE_EXTENDED, &[frame as u32, TROPHY_FLAGS, 70, (-5i32) as u32, texts, 0, trophy.0]);
+        // the studs: two rows, every third left out
+        let banner = c.m.r32(this.0 + BANNER);
+        studs.set_tint(&mut c.m, 0, banner as i32);
+        for k in (1..30).chain(34..63) {
+            if k % 3 != 0 {
+                call(c, DRAW_SHAPE_EXTENDED, &[0, STUD_FLAGS, 2 * k, 0, bright, 0, studs.0]);
             }
         }
     })
 }
 
-/// `tScreenTrophyInfo::~tScreenTrophyInfo` (SCREENTROPHYINFO.H, 0x800419c0): the screen's.
-pub fn abi_destructor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        port(c, &Saved::of(c), 0x8002_6098, 0x8004_19d0, &[this, flags], fescreen::abi_screen_destructor);
-    })
+fn set_rect(m: &mut Mem, rect: RECT, x: i16, y: i16, w: i16, h: i16) {
+    rect.set_x(m, x);
+    rect.set_y(m, y);
+    rect.set_w(m, w);
+    rect.set_h(m, h);
 }
 
-use fetextrender::menu_text_positioned_justify_fade_entry;
+pub fn abi_draw_background(c: &mut Cpu) {
+    draw_background(c, Screen(c.r[4]));
+}
+
+/// `tScreenTrophyInfo::~tScreenTrophyInfo` (SCREENTROPHYINFO.H, 0x800419c0): the screen's.
+pub fn abi_destructor(c: &mut Cpu) {
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
+}
 
 #[cfg(test)]
 mod tests {
@@ -211,6 +181,11 @@ mod tests {
     use crate::femenu::tests::{self as base, ADDR, Case, pick, via_abi};
     use crate::globals::FE_APP;
     use crate::test_util::{Rng, against_original_in, fe_ram};
+
+    /// The screen's swapped shapes (their table, the file read) and its fade.
+    const SWAP_TABLE: u32 = 40;
+    const SWAP_DATA: u32 = 44;
+    const FADE: u32 = 92;
 
     /// The game's trophy info screen (its vtable the real one); the outputs of `GetShapeInfo`.
     const SCREEN: u32 = 0x8018_04AC;
