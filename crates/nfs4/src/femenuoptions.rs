@@ -1,23 +1,30 @@
-//! FEMENUOPTIONS.CPP: the options screens' menus and items: the pulsing yellow and the flare
-//! left of the current item, items that fade in and out (buttons, left-right choices: the
-//! display's, the controller's, on-off ones; audio sliders), the options menu (its items fading
-//! in one after the other and out the other way, the screen fading, its animated picture),
-//! the sliding boxes that open into an inside menu (the songs', sliders, the analog sticks'
-//! calibration), the user name's letter grid and the memory card's button.
+//! FEMENUOPTIONS.CPP: the options screens' menus and items.
+//! - The pulsing yellow and the flare left of the current item.
+//! - Items that fade in and out: buttons, left-right choices (the display's, the controller's,
+//!   on-off ones), audio sliders.
+//! - The options menu: its items fade in one after the other and out the other way, the
+//!   screen fades, its picture animates.
+//! - The sliding boxes that open into an inside menu: the songs', sliders, the analog sticks'
+//!   calibration.
+//! - The user name's letter grid, and the memory card's button.
 //!
-//! Like FEMENU.CPP's, the classes call each other through their vtables (`method`), the
-//! registers each call gets as the original has them at its `jal` or `jalr`.
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
 
-use crate::abi::{self, Saved};
-use crate::femenu::{self, ITEM_DISABLED, ITEM_VPTR, method};
+use crate::call::{call, call_addr, call_virtual, with_buffer};
+use crate::femenu::{self, ITEM_DISABLED, ITEM_VPTR, KEY_DOWN, KEY_HELP, KEY_NONE, KEY_START, KEY_UP};
 use crate::femenuextended::{
-    self, CALC_ON_OFF_FADE, CALC_TEXT_FADE_SEL_TO_HI, DRAW_SHAPE_EXTENDED, DRAW_SQUARE, GET_DRAWENV, ITEM_DRAW_AT, ITEM_TRANSITION_IS_FINISHED, ITEM_TRANSITION_OFF, ITEM_TRANSITION_ON, ITEM_UPDATE_TRANSITION, MENU_TRANSITION_IS_FINISHED, MENU_VPTR,
-    SET_DRAW_AREA, SPRINTF, STRLEN, TEXT_WORD,
+    self, CALC_ON_OFF_FADE, CALC_TEXT_FADE_SEL_TO_HI, DRAW_SHAPE_EXTENDED, DRAW_SQUARE, GET_DRAWENV, ITEM_DRAW_AT, ITEM_TRANSITION_IS_FINISHED, ITEM_TRANSITION_OFF, ITEM_TRANSITION_ON,
+    ITEM_UPDATE_TRANSITION, MENU_TRANSITION_IS_FINISHED, MENU_VPTR, SET_DRAW_AREA, SPRINTF, STRLEN, TEXT_WORD,
 };
 use crate::fetextrender;
 use crate::globals::{
     BOX_HELP_TEXT, FE_APP, FLIP, FRONT_END, GAME_TICKS, MUSIC_STATE, PAD_INFO, PLAYER1_VIEW, PULSATE_YELLOW, SCREEN_HEIGHT, SHAPES, SLIDING_FLARE_PHASE, SONGS_SCREEN, SUB_MENU_PLAYER, TEXT_COLORS,
     TEXT_STYLES,
+};
+use crate::types::{
+    DRAWENV, FEApplication, InsideBoxMenu, InsideBoxSongMenu, ListIterator, Menu, MenuCommand, MenuItem, MenuItemGoToMenuButtonFade, MenuItemLeftRightAudioSlider,
+    MenuItemLeftRightFade, MenuItemLeftRightSlider, MenuItemOnOffLeftRightChoice, MenuItemSlidingActivated, MenuItemSlidingMenu, MemoryCardMenuItem, InsideBoxTwoWaySlider,
+    OptionsMenu, RECT, UserNameMenuItem,
 };
 use ps1rt::{Cpu, Mem};
 
@@ -38,8 +45,7 @@ const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const FLARE_2D_HALO: u32 = 0x800C_ECD0;
 /// `CalcFadeVal` (a colour between two by the selection, faded), `TextSys_WordY`;
-/// `tMenuItem::ProcessInput` (nothing); `SubtractiveBox` (the host captures its primitives:
-/// called by address).
+/// `SubtractiveBox` (the host captures its primitives: called by address).
 const CALC_FADE_VAL_FADED: fn(&mut Cpu) = nfs4rc::f_8004bd8c;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 /// `TextSys_WordFlags` (a text's text type); `DrawSlider` (the host captures its primitives:
@@ -76,7 +82,6 @@ const CARD_BUSY: u32 = 0x8005_19E0;
 /// ON, OFF.
 const TEXT_ON: u32 = 103;
 const TEXT_OFF: u32 = 104;
-const MENU_ITEM_PROCESS_INPUT: fn(&mut Cpu) = nfs4rc::f_800247c0;
 const SUBTRACTIVE_BOX: u32 = 0x8001_C25C;
 /// The music: `AudioMus_StopSong`, `AudioMus_SysCleanUp`, `AudioMus_SysStartUp`, the song list's
 /// loading (0x8007b214), `purgememadr`; `AudioMus_PlaySong` (the host logs it: called by
@@ -97,237 +102,270 @@ const SONG_LIST_FILE: u32 = 0x8001_0984;
 /// The text whose place the flare is drawn left of.
 const FLARE_TEXT: u32 = 479;
 /// An options menu's fade over the screen at its full (its transition's end).
-const SCREEN_FADE_FULL: u32 = 552;
-/// A screen's vptr and its `TransitionIsFinished` (the front end's current screen, at
-/// `gFEApp + 12`).
+const SCREEN_FADE_FULL: i32 = 552;
+/// A screen's vptr and its `TransitionIsFinished`.
 const SCREEN_VPTR: u32 = 96;
 const SCREEN_TRANSITION_IS_FINISHED: u32 = 64;
-/// The items' `DebounceKeys`, `ProcessInput`, `Draw(int, int, bool)` and `Draw(int, int, int,
-/// bool)` (their vtable's); the menus' `DebounceKeys`.
+/// The items' `DebounceKeys`, `ProcessInput`, `Draw(int, int, int, bool)` (their vtable's).
 const ITEM_DEBOUNCE_KEYS: u32 = 16;
 const ITEM_PROCESS_INPUT: u32 = 24;
 const ITEM_DRAW_AT3: u32 = 48;
+/// The menus' `DebounceKeys`, `ProcessInput`; a sliding box's `UpdatefOpenHeight`; the inside
+/// menus' `Draw(short, short, short, short, short)` and the songs' `DrawOneSong`.
 const MENU_DEBOUNCE_KEYS: u32 = 32;
-/// A sliding box's `UpdatefOpenHeight`; the menus' `ProcessInput` and the inside menus'
-/// `Draw(short, short, short, short, short)`.
-const SLIDING_UPDATE_OPEN_HEIGHT: u32 = 88;
 const MENU_PROCESS_INPUT: u32 = 24;
+const SLIDING_UPDATE_OPEN_HEIGHT: u32 = 88;
 const MENU_DRAW_BOX: u32 = 88;
 const MENU_DRAW_ONE_SONG: u32 = 96;
+/// An item's flag: it is a slider (FEMENU's), set on the sliding boxes too.
+const ITEM_SLIDER: u32 = 0x80;
+/// `DrawShapeExtended`'s flags for the menu's animated picture; its tint.
+const PICTURE_FLAGS: u32 = 1040;
+const PICTURE_COLOUR: u32 = 0x00CE_C844;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
 }
 
-fn lh(m: &mut Mem, at: u32) -> u32 {
-    m.r16(at) as i16 as i32 as u32
+/// A menu's `k`th item (`k` taken as a short, as the original's loops do; read past the 16 of
+/// `item_list` as the original does).
+fn item(m: &mut Mem, this: Menu, k: u32) -> MenuItem {
+    MenuItem(m.r32(this.0.wrapping_add(16).wrapping_add(sx(k) << 2)))
 }
 
-/// A menu's `k`th item (`k` taken as a short, as the original's loops do).
-fn item(m: &mut Mem, this: u32, k: u32) -> u32 {
-    m.r32(this.wrapping_add(16).wrapping_add(sx(k) << 2))
+/// Each item in order, from the first to the null (a short counter).
+fn items(c: &mut Cpu, this: Menu, mut each: impl FnMut(&mut Cpu, u32, MenuItem)) {
+    let mut k = 0u32;
+    loop {
+        let it = item(&mut c.m, this, k);
+        if it.0 == 0 {
+            return;
+        }
+        each(c, sx(k), it);
+        k = k.wrapping_add(1);
+    }
+}
+
+fn is_disabled(m: &mut Mem, it: MenuItem) -> bool {
+    it.flags(m) & ITEM_DISABLED != 0
+}
+
+/// The front end's screen now (the first player's).
+fn current_screen(m: &mut Mem) -> u32 {
+    FEApplication(m.r32(FE_APP)).current_screen(m, 0).0
+}
+
+/// The address of a caller's stack argument `n` (from 0): the variadic constructors' item
+/// lists.
+fn stack_arg(c: &Cpu, n: u32) -> u32 {
+    c.r[29].wrapping_add(4 * n)
 }
 
 /// `CalcPulsateYellow` (FEMENUOPTIONS.CPP, 0x8001c0a8): the yellow pulsing with the clock
 /// (up for 64 ticks of 128, down for the rest).
 pub fn calc_pulsate_yellow(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| {
-        let t = c.m.r32(GAME_TICKS) as i32;
-        let mut f = t % 128;
-        if f >= 65 {
-            f = 128 - f;
-        }
-        let v = Saved::of(c).call_leaving(c, CALC_FADE_VAL, &[0xBEBE, f as u32], 0x8001_c0ec);
-        c.m.w32(PULSATE_YELLOW, v);
-    })
+    let t = (c.m.r32(GAME_TICKS) as i32) % 128;
+    let f = if t >= 65 { 128 - t } else { t };
+    let v = call(c, CALC_FADE_VAL, &[0xBEBE, f as u32]);
+    c.m.w32(PULSATE_YELLOW, v);
 }
 
 pub fn abi_calc_pulsate_yellow(c: &mut Cpu) {
     calc_pulsate_yellow(c);
 }
 
-/// `DrawLeftFlare` (FEMENUOPTIONS.CPP, 0x8001c100): the flare left of the current item at `y`:
-/// its phase (`*phase`, 0..60) counting on while the item is fully selected (`sel` 128) and
-/// winding back out after; a halo growing and shrinking with it and a shape, both by the
-/// selection and the item's `fade`.
+/// `DrawLeftFlare` (FEMENUOPTIONS.CPP, 0x8001c100): the flare left of the current item at `y`.
+/// Its phase (`*phase`, 0..60) counts on while the item is fully selected (`sel` 128) and winds
+/// back out after; a halo grows and shrinks with it and a shape is drawn, both by the selection
+/// and the item's `fade`.
 pub fn draw_left_flare(c: &mut Cpu, y: u32, sel: u32, fade: u32, phase: u32) {
-    abi::frame(c, 56, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[4] = y;
-        let m = &mut c.m;
-        if sel == 128 {
-            let v = m.r32(phase).wrapping_add(1);
-            m.w32(phase, v);
-        } else if m.r32(phase) != 0 {
-            let v = m.r32(phase).wrapping_add(5);
-            m.w32(phase, v);
-        }
-        if m.r32(phase) as i32 >= 61 {
-            m.w32(phase, 0);
-        }
-        let p = m.r32(phase) as i32;
-        let half = if p < 31 { p / 2 } else { (60 - p) / 2 };
-        let size = (half + 20).wrapping_mul(sel as i32);
-        let scaled = size.wrapping_mul(128i32.wrapping_sub(fade as i32));
-        let size = scaled / 128;
-        let shade = (128i32.wrapping_sub(sel as i32)).max(fade as i32);
-        // (s2 keeps the product rounded toward zero, as the original's shift leaves it)
-        r.0[1] = size as u32;
-        r.0[2] = if scaled < 0 { scaled.wrapping_add(127) } else { scaled } as u32;
-        r.0[3] = shade as u32;
-        if size <= 0 {
-            return;
-        }
-        let x = r.call_leaving(c, WORD_X, &[FLARE_TEXT], 0x8001_c1d8);
-        r.0[0] = x;
-        // (a third of twice the size by the original's multiply)
-        let twice = size.wrapping_mul(2);
-        let third = ((twice as i64 * 0x5555_5556) >> 32) as i32 - (twice >> 31);
-        let args = [x, y.wrapping_add(5), (size / 2) as u32, third as u32, 23];
-        r.call_ptr_leaving(c, FLARE_2D_HALO, &args, 0x8001_c218);
-        let args = [0, 0, x.wrapping_sub(3), y.wrapping_sub(1), shade as u32, (shade != 0) as u32, 0];
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &args, 0x8001_c23c);
-    })
+    let m = &mut c.m;
+    if sel == 128 {
+        let v = m.r32(phase).wrapping_add(1);
+        m.w32(phase, v);
+    } else if m.r32(phase) != 0 {
+        let v = m.r32(phase).wrapping_add(5);
+        m.w32(phase, v);
+    }
+    if m.r32(phase) as i32 >= 61 {
+        m.w32(phase, 0);
+    }
+    let p = m.r32(phase) as i32;
+    let half = if p < 31 { p / 2 } else { (60 - p) / 2 };
+    let size = (half + 20).wrapping_mul(sel as i32).wrapping_mul(128i32.wrapping_sub(fade as i32)) / 128;
+    let shade = (128i32.wrapping_sub(sel as i32)).max(fade as i32);
+    if size <= 0 {
+        return;
+    }
+    let x = call(c, WORD_X, &[FLARE_TEXT]);
+    let twice = size.wrapping_mul(2);
+    call_addr(c, FLARE_2D_HALO, &[x, y.wrapping_add(5), (size / 2) as u32, (twice / 3) as u32, 23]);
+    call(c, DRAW_SHAPE_EXTENDED, &[0, 0, x.wrapping_sub(3), y.wrapping_sub(1), shade as u32, (shade != 0) as u32, 0]);
 }
 
 pub fn abi_draw_left_flare(c: &mut Cpu) {
     draw_left_flare(c, c.r[4], c.r[5], c.r[6], c.r[7]);
 }
 
-// The fading items: +32 the fade, +34 its step, +36 whether it is still fading (+40: a
-// button's enabled fade, a left-right choice's flare phase); a sliding menu's at +44.
-const FADE: u32 = 32;
-const SLIDING_FADE: u32 = 44;
-const AUDIO_FADE: u32 = 40;
-const USER_NAME_FADE: u32 = 130;
+// ---- The fading items.
 
-/// Whether a fading item's fade (at `at`: then its step, the flag) has reached its end (the
-/// flag left set while it hasn't).
-fn fade_is_finished(m: &mut Mem, this: u32, at: u32) -> u32 {
-    let (fade, step) = (m.r16(this + at) as i16, m.r16(this + at + 2) as i16);
-    let fading = (step < 0 && fade > 0) || (step > 0 && fade < 128);
-    m.w32(this + at + 4, fading as u32);
-    m.r32(this + at + 4) ^ 1
+/// A fading item's fade: its value (0 shown .. 128 gone), its step a frame, and whether it is
+/// still fading. Each class keeps it at its own place.
+#[derive(Clone, Copy)]
+struct Fade(u32);
+
+impl Fade {
+    fn of_button(b: MenuItemGoToMenuButtonFade) -> Self {
+        Fade(b.0 + 0x20)
+    }
+    fn of_choice(c: MenuItemLeftRightFade) -> Self {
+        Fade(c.0 + 0x20)
+    }
+    fn of_sliding(s: MenuItemSlidingMenu) -> Self {
+        Fade(s.0 + 0x2c)
+    }
+    fn of_audio(a: MenuItemLeftRightAudioSlider) -> Self {
+        Fade(a.0 + 0x28)
+    }
+    fn value(self, m: &mut Mem) -> i16 {
+        m.r16(self.0) as i16
+    }
+    fn set_value(self, m: &mut Mem, v: i16) {
+        m.w16(self.0, v as u16)
+    }
+    fn step(self, m: &mut Mem) -> i16 {
+        m.r16(self.0 + 2) as i16
+    }
+    fn set_step(self, m: &mut Mem, v: i16) {
+        m.w16(self.0 + 2, v as u16)
+    }
+    fn fading(self, m: &mut Mem) -> u32 {
+        m.r32(self.0 + 4)
+    }
+    fn set_fading(self, m: &mut Mem, v: u32) {
+        m.w32(self.0 + 4, v)
+    }
 }
 
-/// A fading item's `UpdateTransition`: the fade (at `at`) stepped within 0..128, its
-/// `TransitionIsFinished` (which notes whether it still fades), `tMenuItem`'s; `ras` the two
-/// calls' returns.
-fn fade_update_transition(c: &mut Cpu, this: u32, at: u32, selected: u32, ras: [u32; 2]) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[1] = selected;
-        let m = &mut c.m;
-        let v = (m.r16(this + at) as i16 as i32 + m.r16(this + at + 2) as i16 as i32).clamp(0, 128);
-        m.w16(this + at, v as u16);
-        let (obj, f) = method(m, this, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED);
-        r.call_ptr_leaving(c, f, &[obj], ras[0]);
-        r.enter(c, 0x8002_47c8, ras[1], |c| femenu::menu_item_update_transition(c, crate::types::MenuItem(this), selected));
-    })
+/// A fade's step, either way.
+const FADE_STEP: i16 = 30;
+
+/// A fading item's `TransitionIsFinished`: whether the fade has reached its end (noting that
+/// it still fades while it hasn't).
+fn fade_is_finished(m: &mut Mem, f: Fade) -> u32 {
+    let (value, step) = (f.value(m), f.step(m));
+    let fading = (step < 0 && value > 0) || (step > 0 && value < 128);
+    f.set_fading(m, fading as u32);
+    f.fading(m) ^ 1
+}
+
+/// A fading item's `UpdateTransition`: the fade stepped within 0..128, its virtual
+/// `TransitionIsFinished` (which notes whether it still fades), then `tMenuItem`'s.
+fn fade_update_transition(c: &mut Cpu, item: MenuItem, f: Fade, selected: u32) {
+    let m = &mut c.m;
+    let v = (f.value(m) as i32 + f.step(m) as i32).clamp(0, 128);
+    f.set_value(m, v as i16);
+    call_virtual(c, item.0, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED, &[]);
+    femenu::menu_item_update_transition(c, item, selected);
 }
 
 /// `tMenuItemGoToMenuButtonFade::TransitionOff` (FEMENUOPTIONS.CPP, 0x8001c3bc): fading out.
 pub fn abi_button_fade_transition_off(c: &mut Cpu) {
-    c.m.w16(c.r[4] + 34, 30);
+    Fade::of_button(MenuItemGoToMenuButtonFade(c.r[4])).set_step(&mut c.m, FADE_STEP);
 }
 
 /// `tMenuItemGoToMenuButtonFade::TransitionOn` (FEMENUOPTIONS.CPP, 0x8001c3c8): fading in from
 /// 128, unselected, the enabled fade from 0.
 pub fn abi_button_fade_transition_on(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    m.w16(this + 32, 128);
-    m.w16(this + 34, (-30i16) as u16);
-    m.w16(this + 8, 0);
-    m.w16(this + 40, 0);
+    let (m, this) = (&mut c.m, MenuItemGoToMenuButtonFade(c.r[4]));
+    let f = Fade::of_button(this);
+    f.set_value(m, 128);
+    f.set_step(m, -FADE_STEP);
+    this.set_sel_fade(m, 0);
+    this.set_enable_val(m, 0);
 }
 
 /// `tMenuItemGoToMenuButtonFade::TransitionIsFinished` (FEMENUOPTIONS.CPP, 0x8001c3e4).
 pub fn abi_button_fade_transition_is_finished(c: &mut Cpu) {
-    c.r[2] = fade_is_finished(&mut c.m, c.r[4], FADE);
+    c.r[2] = fade_is_finished(&mut c.m, Fade::of_button(MenuItemGoToMenuButtonFade(c.r[4])));
 }
 
 /// `tMenuItemGoToMenuButtonFade::UpdateTransition` (FEMENUOPTIONS.CPP, 0x8001c43c).
 pub fn abi_button_fade_update_transition(c: &mut Cpu) {
-    fade_update_transition(c, c.r[4], FADE, c.r[5], [0x8001_c498, 0x8001_c4a4]);
+    let this = MenuItemGoToMenuButtonFade(c.r[4]);
+    fade_update_transition(c, MenuItem(this.0), Fade::of_button(this), c.r[5]);
 }
 
 /// `tMenuItemLeftRightFade::tMenuItemLeftRightFade` (FEMENUOPTIONS.CPP, 0x8001c4b8): a
 /// left-right choice that fades, its flare's phase 0.
-pub fn left_right_fade(c: &mut Cpu, this: u32, text: u32, data: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.enter(c, 0x8002_4924, 0x8001_c4cc, |c| femenu::left_right_choice(c, crate::types::MenuItemLeftRightChoice(this), text, crate::types::ListIterator(data)));
-        let m = &mut c.m;
-        m.w32(this + ITEM_VPTR, LEFT_RIGHT_FADE_VT);
-        m.w32(this + 40, 0);
-        m.w16(this + 8, 0);
-        this
-    })
+pub fn left_right_fade(c: &mut Cpu, this: MenuItemLeftRightFade, text: u32, data: ListIterator) -> u32 {
+    femenu::left_right_choice(c, this.base(), text, data);
+    let m = &mut c.m;
+    this.set_vtable(m, LEFT_RIGHT_FADE_VT);
+    this.set_flareextra(m, 0);
+    this.set_sel_fade(m, 0);
+    this.0
 }
 
 pub fn abi_left_right_fade(c: &mut Cpu) {
-    c.r[2] = left_right_fade(c, c.r[4], c.r[5], c.r[6]);
+    c.r[2] = left_right_fade(c, MenuItemLeftRightFade(c.r[4]), c.r[5], ListIterator(c.r[6]));
 }
 
 /// `tMenuItemLeftRightFade::TransitionOff` (FEMENUOPTIONS.CPP, 0x8001c4f4): fading out from 0.
 pub fn abi_left_right_fade_transition_off(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    m.w32(this + 36, 1);
-    m.w16(this + 34, 30);
-    m.w16(this + 32, 0);
+    let (m, f) = (&mut c.m, Fade::of_choice(MenuItemLeftRightFade(c.r[4])));
+    f.set_fading(m, 1);
+    f.set_step(m, FADE_STEP);
+    f.set_value(m, 0);
 }
 
 /// `tMenuItemLeftRightFade::TransitionOn` (FEMENUOPTIONS.CPP, 0x8001c50c): fading in from 128,
 /// unselected, the flare from its start.
 pub fn abi_left_right_fade_transition_on(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    m.w32(this + 36, 1);
-    m.w16(this + 34, (-30i16) as u16);
-    m.w32(this + 40, 0);
-    m.w16(this + 8, 0);
-    m.w16(this + 32, 128);
+    let (m, this) = (&mut c.m, MenuItemLeftRightFade(c.r[4]));
+    let f = Fade::of_choice(this);
+    f.set_fading(m, 1);
+    f.set_step(m, -FADE_STEP);
+    this.set_flareextra(m, 0);
+    this.set_sel_fade(m, 0);
+    f.set_value(m, 128);
 }
 
 /// `tMenuItemLeftRightFade::TransitionIsFinished` (FEMENUOPTIONS.CPP, 0x8001c530).
 pub fn abi_left_right_fade_transition_is_finished(c: &mut Cpu) {
-    c.r[2] = fade_is_finished(&mut c.m, c.r[4], FADE);
+    c.r[2] = fade_is_finished(&mut c.m, Fade::of_choice(MenuItemLeftRightFade(c.r[4])));
 }
 
 /// `tMenuItemLeftRightFade::UpdateTransition` (FEMENUOPTIONS.CPP, 0x8001c598).
 pub fn abi_left_right_fade_update_transition(c: &mut Cpu) {
-    fade_update_transition(c, c.r[4], FADE, c.r[5], [0x8001_c5f4, 0x8001_c600]);
+    let this = MenuItemLeftRightFade(c.r[4]);
+    fade_update_transition(c, MenuItem(this.0), Fade::of_choice(this), c.r[5]);
 }
 
-// tOptionsMenu: +108 in its transition, +112 the transition's direction (a byte: 40 out, -40
-// in), +114 the item before, +116 the screen's fade, +120 its picture's first frame, +124 how
-// many.
+// ---- tOptionsMenu: its items fade in one after the other and out the other way; the screen
+// fades over them; its picture animates.
+
+/// A screen's fade's step a frame (out: up; in: down).
+const SCREEN_FADE_STEP: i8 = 40;
 
 /// `tOptionsMenu::tOptionsMenu` (FEMENUOPTIONS.CPP, 0x8001c614): `tMenu`'s with a picture of
 /// `frames` frames from `first_frame`, its items from the caller's list.
 pub fn abi_options_menu(c: &mut Cpu) {
-    let (this, flags, screen, next) = (c.r[4], c.r[5], c.r[6], c.r[7]);
-    let args = c.r[29] + 16;
-    c.r[2] = abi::frame(c, 48, |c, sp| {
-        let mut r = Saved::of(c);
-        let m = &mut c.m;
-        let (options, on_back, title) = (m.r32(args), m.r32(args + 4), sx(m.r32(args + 8)));
-        let (first_frame, frames, first) = (m.r32(args + 12), m.r32(args + 16), m.r32(args + 20));
-        r.0[..3].copy_from_slice(&[this, first_frame, frames]);
-        m.w32(sp + 16, options);
-        m.w32(sp + 20, on_back);
-        m.w32(sp + 24, title);
-        r.enter(c, 0x8002_548c, 0x8001_c65c, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
-        c.m.w32(this + MENU_VPTR, OPTIONS_MENU_VT);
-        r.enter(c, 0x8002_5454, 0x8001_c678, |c| femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, args + 24));
-        let m = &mut c.m;
-        m.w32(this + 116, 0);
-        m.w16(this + 114, 0);
-        m.w32(this + 120, first_frame);
-        m.w32(this + 124, frames);
-        this
-    });
+    let this = OptionsMenu(c.r[4]);
+    let (flags, screen, next) = (c.r[5], c.r[6], c.r[7]);
+    let arg = |c: &mut Cpu, n| crate::abi::arg(c, n);
+    let (options, on_back, title) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)));
+    let (first_frame, frames, first, rest) = (arg(c, 7), arg(c, 8), arg(c, 9), stack_arg(c, 10));
+    let menu = this.base();
+    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_back, title);
+    let m = &mut c.m;
+    this.set_vtable(m, OPTIONS_MENU_VT);
+    femenu::menu_constructor(m, menu, first, rest);
+    this.set_screen_fade(m, 0);
+    this.set_prev_item(m, 0);
+    this.set_first_frame(m, first_frame as i32);
+    this.set_num_frames(m, frames as i32);
+    c.r[2] = this.0;
 }
 
 /// `tOptionsMenu::~tOptionsMenu` (FEMENUOPTIONS.CPP, 0x8001c6a4).
@@ -337,343 +375,242 @@ pub fn abi_options_menu_dtor(c: &mut Cpu) {
 
 /// `tOptionsMenu::DebounceKeys` (FEMENUOPTIONS.CPP, 0x8001c6cc): the current item's (none when
 /// it is missing or disabled).
-pub fn options_menu_debounce_keys(c: &mut Cpu, this: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let m = &mut c.m;
-        let cur = m.r32(this + 8);
-        let it = m.r32(this.wrapping_add(cur << 2).wrapping_add(16));
-        if it == 0 || m.r32(it) & ITEM_DISABLED != 0 {
-            return 0;
-        }
-        let (obj, f) = method(m, it, ITEM_VPTR, ITEM_DEBOUNCE_KEYS);
-        Saved::of(c).call_ptr_leaving(c, f, &[obj], 0x8001_c728)
-    })
+pub fn options_menu_debounce_keys(c: &mut Cpu, this: OptionsMenu) -> u32 {
+    let m = &mut c.m;
+    let current = this.current_item(m) as u32;
+    let it = MenuItem(m.r32(this.0.wrapping_add(current << 2).wrapping_add(16)));
+    if it.0 == 0 || is_disabled(m, it) {
+        return 0;
+    }
+    call_virtual(c, it.0, ITEM_VPTR, ITEM_DEBOUNCE_KEYS, &[])
 }
 
 pub fn abi_options_menu_debounce_keys(c: &mut Cpu) {
-    c.r[2] = options_menu_debounce_keys(c, c.r[4]);
-}
-
-/// Each of a menu's items' virtual `slot` in order, `r.0[k_reg]` the index at each call (and
-/// one past the last after); `ra` the calls' return.
-fn each_item(c: &mut Cpu, r: &mut Saved, this: u32, slot: u32, ra: u32, k_reg: usize) {
-    let mut k = 0u32;
-    r.0[k_reg] = 0;
-    if item(&mut c.m, this, 0) == 0 {
-        return;
-    }
-    loop {
-        let it = item(&mut c.m, this, k);
-        let (obj, f) = method(&mut c.m, it, ITEM_VPTR, slot);
-        r.call_ptr_leaving(c, f, &[obj], ra);
-        k = k.wrapping_add(1);
-        r.0[k_reg] = k;
-        if item(&mut c.m, this, k) == 0 {
-            return;
-        }
-    }
+    c.r[2] = options_menu_debounce_keys(c, OptionsMenu(c.r[4]));
 }
 
 /// `tOptionsMenu::TransitionOff` (FEMENUOPTIONS.CPP, 0x8001c738): the items fading out, the
 /// screen's fade going up from 0.
 pub fn abi_options_menu_transition_off(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let m = &mut c.m;
-        m.w8(this + 112, 40);
-        m.w32(this + 116, 0);
-        each_item(c, &mut r, this, ITEM_TRANSITION_OFF, 0x8001_c794, 0);
-        c.m.w32(this + 108, 1);
-    })
+    let this = OptionsMenu(c.r[4]);
+    this.set_transition_direction(&mut c.m, SCREEN_FADE_STEP);
+    this.set_screen_fade(&mut c.m, 0);
+    items(c, this.base(), |c, _, it| {
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_OFF, &[]);
+    });
+    this.set_in_menu_transition(&mut c.m, 1);
 }
 
 /// `tOptionsMenu::TransitionOn` (FEMENUOPTIONS.CPP, 0x8001c7d0): the items fading in, the
 /// screen's fade going down from its full.
 pub fn abi_options_menu_transition_on(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let m = &mut c.m;
-        m.w8(this + 112, (-40i8) as u8);
-        m.w32(this + 108, 1);
-        m.w32(this + 116, SCREEN_FADE_FULL);
-        each_item(c, &mut r, this, ITEM_TRANSITION_ON, 0x8001_c838, 0);
-    })
+    let this = OptionsMenu(c.r[4]);
+    let m = &mut c.m;
+    this.set_transition_direction(m, -SCREEN_FADE_STEP);
+    this.set_in_menu_transition(m, 1);
+    this.set_screen_fade(m, SCREEN_FADE_FULL);
+    items(c, this.base(), |c, _, it| {
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_ON, &[]);
+    });
 }
 
 /// `tOptionsMenu::TransitionIsFinished` (FEMENUOPTIONS.CPP, 0x8001c86c): when the screen's fade
 /// is at its end, every item's transition and the screen's are.
-pub fn options_menu_transition_is_finished(c: &mut Cpu, this: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let m = &mut c.m;
-        let fade = m.r32(this + 116) as i32;
-        let dir = m.r8(this + 112) as i8;
-        let moving = if fade >= SCREEN_FADE_FULL as i32 && dir > 0 { 0 } else { (fade > 0 || dir >= 0) as u32 };
-        m.w32(this + 108, moving);
-        if m.r32(this + 108) == 0 {
-            r.0[0] = 0;
-            if item(m, this, 0) != 0 {
-                r.0[2] = 1;
-                let mut k = 0u32;
-                loop {
-                    let it = item(&mut c.m, this, k);
-                    let (obj, f) = method(&mut c.m, it, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED);
-                    let done = r.call_ptr_leaving(c, f, &[obj], 0x8001_c928);
-                    if done != 1 {
-                        c.m.w32(this + 108, 1);
-                    }
-                    k = k.wrapping_add(1);
-                    r.0[0] = k;
-                    if item(&mut c.m, this, k) == 0 {
-                        break;
-                    }
-                }
+pub fn options_menu_transition_is_finished(c: &mut Cpu, this: OptionsMenu) -> u32 {
+    let m = &mut c.m;
+    let (fade, direction) = (this.screen_fade(m), this.transition_direction(m));
+    let moving = if fade >= SCREEN_FADE_FULL && direction > 0 { false } else { fade > 0 || direction >= 0 };
+    this.set_in_menu_transition(m, moving as u32);
+    if this.in_menu_transition(m) == 0 {
+        items(c, this.base(), |c, _, it| {
+            if call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED, &[]) != 1 {
+                this.set_in_menu_transition(&mut c.m, 1);
             }
-        }
-        let m = &mut c.m;
-        let app = m.r32(FE_APP);
-        let screen = m.r32(app + 12);
-        let (obj, f) = method(m, screen, SCREEN_VPTR, SCREEN_TRANSITION_IS_FINISHED);
-        let done = r.call_ptr_leaving(c, f, &[obj], 0x8001_c984);
-        if done != 1 {
-            c.m.w32(this + 108, 1);
-        }
-        c.m.r32(this + 108) ^ 1
-    })
+        });
+    }
+    let screen = current_screen(&mut c.m);
+    if call_virtual(c, screen, SCREEN_VPTR, SCREEN_TRANSITION_IS_FINISHED, &[]) != 1 {
+        this.set_in_menu_transition(&mut c.m, 1);
+    }
+    this.in_menu_transition(&mut c.m) ^ 1
 }
 
 pub fn abi_options_menu_transition_is_finished(c: &mut Cpu) {
-    c.r[2] = options_menu_transition_is_finished(c, c.r[4]);
+    c.r[2] = options_menu_transition_is_finished(c, OptionsMenu(c.r[4]));
 }
 
-/// An item's virtual `UpdateTransition` told it isn't the current one (`r` the registers at
-/// the call).
-fn update_item_unselected(c: &mut Cpu, r: &Saved, it: u32) {
-    let (obj, f) = method(&mut c.m, it, ITEM_VPTR, ITEM_UPDATE_TRANSITION);
-    r.call_ptr_leaving(c, f, &[obj, 0], 0x8001_cb68);
+/// An item's virtual `UpdateTransition`, told it isn't the current one.
+fn update_item_unselected(c: &mut Cpu, it: MenuItem) {
+    call_virtual(c, it.0, ITEM_VPTR, ITEM_UPDATE_TRANSITION, &[0]);
+}
+
+/// Whether an item's virtual `TransitionIsFinished` says it is.
+fn transition_is_finished(c: &mut Cpu, it: MenuItem) -> bool {
+    call_virtual(c, it.0, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED, &[]) != 0
 }
 
 /// `tOptionsMenu::UpdateTransition` (FEMENUOPTIONS.CPP, 0x8001c9b4): out of a transition, each
 /// item's, told whether it is the current one. Fading in: the screen's fade first, then the
 /// items one at a time from the first; fading out: the items from the last, then the screen.
-/// Then its `TransitionIsFinished`.
-pub fn options_menu_update_transition(c: &mut Cpu, this: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let m = &mut c.m;
-        if m.r32(this + 108) == 0 {
-            r.0[0] = 0;
-            if item(m, this, 0) != 0 {
-                let mut k = 0u32;
-                loop {
-                    let m = &mut c.m;
-                    let i = sx(k);
-                    let it = item(m, this, i);
-                    let selected = if m.r32(this + 108) == 0 { (i == m.r32(this + 8)) as u32 } else { 0 };
-                    let vt = m.r32(it + ITEM_VPTR);
-                    let (obj, f) = method(m, it, ITEM_VPTR, ITEM_UPDATE_TRANSITION);
-                    r.call_ptr_leaving(c, f, &[obj, selected, i, vt + ITEM_UPDATE_TRANSITION], 0x8001_cc10);
-                    k = k.wrapping_add(1);
-                    r.0[0] = k;
-                    if item(&mut c.m, this, k) == 0 {
-                        break;
-                    }
-                }
-            }
-        } else if (m.r8(this + 112) as i8) < 0 {
-            let dir = m.r8(this + 112) as i8 as i32;
-            let fade = m.r32(this + 116) as i32;
-            if fade > 0 {
-                m.w32(this + 116, (fade + dir).max(0) as u32);
-            } else {
-                // the first item still fading
-                r.0[0] = 0;
-                if item(m, this, 0) != 0 {
-                    let mut k = 0u32;
-                    loop {
-                        let it = item(&mut c.m, this, k);
-                        let (obj, f) = method(&mut c.m, it, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED);
-                        if r.call_ptr_leaving(c, f, &[obj], 0x8001_ca4c) == 0 {
-                            break;
-                        }
-                        k = k.wrapping_add(1);
-                        r.0[0] = k;
-                        if item(&mut c.m, this, k) == 0 {
-                            break;
-                        }
-                    }
-                    let it = item(&mut c.m, this, k);
-                    if it != 0 {
-                        update_item_unselected(c, &r, it);
-                    }
-                }
-            }
-        } else {
-            // the last item still fading, else the screen's fade
-            let mut n = 0u32;
-            if item(m, this, 0) != 0 {
-                loop {
-                    n = n.wrapping_add(1);
-                    if item(m, this, n) == 0 {
-                        break;
-                    }
-                }
-            }
-            let mut k = n.wrapping_sub(1);
-            r.0[0] = k;
-            r.0[2] = u32::MAX;
-            let mut found = false;
-            while sx(k) != u32::MAX {
-                let it = item(&mut c.m, this, k);
-                let (obj, f) = method(&mut c.m, it, ITEM_VPTR, ITEM_TRANSITION_IS_FINISHED);
-                if r.call_ptr_leaving(c, f, &[obj], 0x8001_cb10) == 0 {
-                    found = true;
+/// Then its virtual `TransitionIsFinished`.
+pub fn options_menu_update_transition(c: &mut Cpu, this: OptionsMenu) {
+    let menu = this.base();
+    let m = &mut c.m;
+    if this.in_menu_transition(m) == 0 {
+        items(c, menu, |c, k, it| {
+            let m = &mut c.m;
+            let selected = (this.in_menu_transition(m) == 0 && k == menu.current_item(m) as u32) as u32;
+            call_virtual(c, it.0, ITEM_VPTR, ITEM_UPDATE_TRANSITION, &[selected]);
+        });
+    } else if this.transition_direction(m) < 0 {
+        let fade = this.screen_fade(m);
+        if fade > 0 {
+            let v = (fade + this.transition_direction(m) as i32).max(0);
+            this.set_screen_fade(m, v);
+        } else if item(m, menu, 0).0 != 0 {
+            // the first item still fading
+            let mut k = 0u32;
+            loop {
+                let it = item(&mut c.m, menu, k);
+                if !transition_is_finished(c, it) {
                     break;
                 }
-                k = k.wrapping_sub(1);
-                r.0[0] = k;
+                k = k.wrapping_add(1);
+                if item(&mut c.m, menu, k).0 == 0 {
+                    break;
+                }
             }
-            if found {
-                let it = item(&mut c.m, this, k);
-                update_item_unselected(c, &r, it);
-            } else {
-                let m = &mut c.m;
-                let fade = m.r32(this + 116) as i32;
-                if fade < SCREEN_FADE_FULL as i32 {
-                    let v = fade.wrapping_add(m.r8(this + 112) as i8 as i32);
-                    m.w32(this + 116, v as u32);
-                    if v > SCREEN_FADE_FULL as i32 {
-                        m.w32(this + 116, SCREEN_FADE_FULL);
-                    }
+            let it = item(&mut c.m, menu, k);
+            if it.0 != 0 {
+                update_item_unselected(c, it);
+            }
+        }
+    } else {
+        // the last item still fading, else the screen's fade
+        let mut n = 0u32;
+        if item(m, menu, 0).0 != 0 {
+            loop {
+                n = n.wrapping_add(1);
+                if item(m, menu, n).0 == 0 {
+                    break;
                 }
             }
         }
-        let (obj, f) = method(&mut c.m, this, MENU_VPTR, MENU_TRANSITION_IS_FINISHED);
-        r.call_ptr_leaving(c, f, &[obj], 0x8001_cc4c);
-    })
+        let mut k = n.wrapping_sub(1);
+        let mut fading = None;
+        while sx(k) != u32::MAX {
+            let it = item(&mut c.m, menu, k);
+            if !transition_is_finished(c, it) {
+                fading = Some(it);
+                break;
+            }
+            k = k.wrapping_sub(1);
+        }
+        match fading {
+            Some(it) => update_item_unselected(c, it),
+            None => {
+                let m = &mut c.m;
+                let fade = this.screen_fade(m);
+                if fade < SCREEN_FADE_FULL {
+                    let v = fade.wrapping_add(this.transition_direction(m) as i32);
+                    this.set_screen_fade(m, v.min(SCREEN_FADE_FULL));
+                }
+            }
+        }
+    }
+    call_virtual(c, this.0, MENU_VPTR, MENU_TRANSITION_IS_FINISHED, &[]);
 }
 
 pub fn abi_options_menu_update_transition(c: &mut Cpu) {
-    options_menu_update_transition(c, c.r[4]);
+    options_menu_update_transition(c, OptionsMenu(c.r[4]));
 }
 
 /// `tOptionsMenu::Draw` (FEMENUOPTIONS.CPP, 0x8001cc64): the pulsing yellow worked out; the
 /// current item moved off disabled ones (forward, then back); the picture's frame by the clock;
 /// each item at its own place, told whether it is the current one (none in a transition).
-pub fn options_menu_draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.enter(c, 0x8001_c0a8, 0x8001_cc7c, calc_pulsate_yellow);
+pub fn options_menu_draw(c: &mut Cpu, this: OptionsMenu) {
+    calc_pulsate_yellow(c);
+    let menu = this.base();
+    let m = &mut c.m;
+    let at = |m: &mut Mem, k: u32| MenuItem(m.r32(this.0.wrapping_add(k << 2).wrapping_add(16)));
+    let current = |m: &mut Mem| menu.current_item(m) as u32;
+    let k = current(m);
+    let it = at(m, k);
+    if it.0 == 0 || is_disabled(m, it) {
+        menu.set_current_item(m, 0);
+    }
+    loop {
+        let k = current(m);
+        let it = at(m, k);
+        if !is_disabled(m, it) || at(m, k.wrapping_add(1)).0 == 0 {
+            break;
+        }
+        menu.set_current_item(m, k.wrapping_add(1) as i32);
+    }
+    loop {
+        let k = current(m);
+        let it = at(m, k);
+        if !is_disabled(m, it) || k as i32 <= 0 {
+            break;
+        }
+        menu.set_current_item(m, k.wrapping_sub(1) as i32);
+    }
+    let (first, frames) = (this.first_frame(m), this.num_frames(m));
+    if first >= 0 && frames > 0 {
+        let frame = first.wrapping_add(((m.r32(GAME_TICKS) as i32) >> 4) % frames) as u32;
+        with_buffer(c, 8, |c, options| {
+            c.m.w32(options + 4, PICTURE_COLOUR);
+            call(c, DRAW_SHAPE_EXTENDED, &[frame, PICTURE_FLAGS, 16, 16, 0, 0, options]);
+        });
+    }
+    items(c, menu, |c, k, it| {
         let m = &mut c.m;
-        let at = |m: &mut Mem, k: u32| m.r32(this.wrapping_add(k << 2).wrapping_add(16));
-        let cur = m.r32(this + 8);
-        let it = at(m, cur);
-        if it == 0 || m.r32(it) & ITEM_DISABLED != 0 {
-            m.w32(this + 8, 0);
-        }
-        loop {
-            let cur = m.r32(this + 8);
-            let it = at(m, cur);
-            if m.r32(it) & ITEM_DISABLED == 0 || at(m, cur.wrapping_add(1)) == 0 {
-                break;
-            }
-            m.w32(this + 8, cur.wrapping_add(1));
-        }
-        loop {
-            let cur = m.r32(this + 8);
-            let it = at(m, cur);
-            if m.r32(it) & ITEM_DISABLED == 0 || cur as i32 <= 0 {
-                break;
-            }
-            m.w32(this + 8, cur.wrapping_sub(1));
-        }
-        let (first, frames) = (m.r32(this + 120) as i32, m.r32(this + 124) as i32);
-        if first >= 0 && frames > 0 {
-            m.w32(sp + 36, 0x00CE_C844);
-            let t = (m.r32(GAME_TICKS) as i32) >> 4;
-            let frame = first.wrapping_add(t % frames) as u32;
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[frame, 1040, 16, 16, 0, 0, sp + 32], 0x8001_cdc8);
-        }
-        r.0[1] = 0;
-        if item(&mut c.m, this, 0) == 0 {
-            return;
-        }
-        let mut k = 0u32;
-        loop {
-            let m = &mut c.m;
-            let i = sx(k);
-            let it = item(m, this, i);
-            let selected = if m.r32(this + 108) == 0 { (i == m.r32(this + 8)) as u32 } else { 0 };
-            let (obj, f) = method(m, it, ITEM_VPTR, ITEM_DRAW_AT);
-            r.call_ptr_leaving(c, f, &[obj, 0, 0, selected], 0x8001_ce34);
-            k = k.wrapping_add(1);
-            r.0[1] = k;
-            if item(&mut c.m, this, k) == 0 {
-                return;
-            }
-        }
-    })
+        let selected = (this.in_menu_transition(m) == 0 && k == menu.current_item(m) as u32) as u32;
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_DRAW_AT, &[0, 0, selected]);
+    });
 }
 
 pub fn abi_options_menu_draw(c: &mut Cpu) {
-    options_menu_draw(c, c.r[4]);
+    options_menu_draw(c, OptionsMenu(c.r[4]));
 }
 
 /// `tOptionsMenu::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001ce68): with no item enabled, the
 /// first current and every key but start and help used up; then `tMenu`'s.
-pub fn options_menu_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..4].copy_from_slice(&[this, key, player, command]);
-        let n = r.enter(c, 0x8002_58b4, 0x8001_ce94, |c| femenu::get_number_enabled_items(&mut c.m, crate::types::Menu(this)));
-        if n & 0xFFFF == 0 {
-            let m = &mut c.m;
-            m.w32(this + 8, 0);
-            let k = m.r32(key);
-            if k != femenu::KEY_START && k != femenu::KEY_HELP {
-                m.w32(key, femenu::KEY_NONE);
-            }
+pub fn options_menu_process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: u32) {
+    let m = &mut c.m;
+    if femenu::get_number_enabled_items(m, this) & 0xFFFF == 0 {
+        this.set_current_item(m, 0);
+        let k = m.r32(key);
+        if k != KEY_START && k != KEY_HELP {
+            m.w32(key, KEY_NONE);
         }
-        r.enter(c, 0x8002_5598, 0x8001_ced4, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
-    })
+    }
+    femenu::process_input(c, this, player, key, MenuCommand(command));
 }
 
 pub fn abi_options_menu_process_input(c: &mut Cpu) {
-    options_menu_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    options_menu_process_input(c, Menu(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
-// tInsideBoxMenu: +108 the item before (a short), +110 the items' scroll (a short: 24 or -24
-// toward 0 when the current one changes), +112 its step.
+// ---- tInsideBoxMenu: a menu inside a sliding box, its items scrolling (24 a row) when the
+// current one changes.
 
 /// `tInsideBoxMenu::tInsideBoxMenu` (FEMENUOPTIONS.CPP, 0x8001cef0): `tMenu`'s, its items from
 /// the caller's list, not scrolling.
 pub fn abi_inside_box_menu(c: &mut Cpu) {
-    let (this, flags, screen, next) = (c.r[4], c.r[5], c.r[6], c.r[7]);
-    let args = c.r[29] + 16;
-    c.r[2] = abi::frame(c, 40, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let m = &mut c.m;
-        let (options, on_back, title, first) = (m.r32(args), m.r32(args + 4), sx(m.r32(args + 8)), m.r32(args + 12));
-        m.w32(sp + 16, options);
-        m.w32(sp + 20, on_back);
-        m.w32(sp + 24, title);
-        r.enter(c, 0x8002_548c, 0x8001_cf28, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
-        c.m.w32(this + MENU_VPTR, INSIDE_BOX_MENU_VT);
-        r.enter(c, 0x8002_5454, 0x8001_cf44, |c| femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, args + 16));
-        let m = &mut c.m;
-        m.w16(this + 108, 0);
-        m.w16(this + 110, 0);
-        m.w16(this + 112, 0);
-        this
-    });
+    let this = InsideBoxMenu(c.r[4]);
+    let (flags, screen, next) = (c.r[5], c.r[6], c.r[7]);
+    let arg = |c: &mut Cpu, n| crate::abi::arg(c, n);
+    let (options, on_back, title, first, rest) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)), arg(c, 7), stack_arg(c, 8));
+    let menu = this.base();
+    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_back, title);
+    let m = &mut c.m;
+    this.set_vtable(m, INSIDE_BOX_MENU_VT);
+    femenu::menu_constructor(m, menu, first, rest);
+    this.set_prev_item(m, 0);
+    this.set_moving(m, 0);
+    this.set_moving_dir(m, 0);
+    c.r[2] = this.0;
 }
 
 /// `tInsideBoxMenu::~tInsideBoxMenu` (FEMENUOPTIONS.CPP, 0x8001cf64).
@@ -682,139 +619,116 @@ pub fn abi_inside_box_menu_dtor(c: &mut Cpu) {
 }
 
 /// `tInsideBoxMenu::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001cf8c): up and down used up while
-/// the items scroll; up at the first item goes to it (the box closing), down at the last does
-/// nothing; the rest `tMenu`'s.
-pub fn inside_box_menu_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 24, |c, _| {
-        let m = &mut c.m;
-        let k = m.r32(key);
-        if m.r16(this + 110) != 0 && (k == femenu::KEY_UP || k == femenu::KEY_DOWN) {
-            m.w32(key, femenu::KEY_NONE);
-        }
-        let k = m.r32(key);
-        let cur = m.r32(this + 8);
-        if k == femenu::KEY_UP && cur == 0 {
-            let first = m.r32(this + 16);
-            let (obj, f) = method(m, first, ITEM_VPTR, ITEM_PROCESS_INPUT);
-            Saved::of(c).call_ptr_leaving(c, f, &[obj], 0x8001_d008);
-            return;
-        }
-        if k == femenu::KEY_DOWN && m.r32(this.wrapping_add(cur.wrapping_add(1) << 2).wrapping_add(16)) == 0 {
-            return;
-        }
-        Saved::of(c).enter(c, 0x8002_5598, 0x8001_d04c, |c| femenu::process_input(c, crate::types::Menu(this), player, key, crate::types::MenuCommand(command)));
-    })
+/// the items scroll; up at the first item goes to that item (the box closing), down at the last
+/// does nothing; the rest is `tMenu`'s.
+pub fn inside_box_menu_process_input(c: &mut Cpu, this: InsideBoxMenu, player: u32, key: u32, command: u32) {
+    let m = &mut c.m;
+    let k = m.r32(key);
+    if this.moving(m) != 0 && (k == KEY_UP || k == KEY_DOWN) {
+        m.w32(key, KEY_NONE);
+    }
+    let k = m.r32(key);
+    let current = this.current_item(m) as u32;
+    if k == KEY_UP && current == 0 {
+        let first = this.item_list(m, 0);
+        call_virtual(c, first.0, ITEM_VPTR, ITEM_PROCESS_INPUT, &[player, key, command]);
+        return;
+    }
+    if k == KEY_DOWN && m.r32(this.0.wrapping_add(current.wrapping_add(1) << 2).wrapping_add(16)) == 0 {
+        return;
+    }
+    femenu::process_input(c, this.base(), player, key, MenuCommand(command));
 }
 
 pub fn abi_inside_box_menu_process_input(c: &mut Cpu) {
-    inside_box_menu_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    inside_box_menu_process_input(c, InsideBoxMenu(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
+
+/// The scroll a row's change sets going (toward 0), and its step.
+const SCROLL: i16 = 24;
+const SCROLL_STEP: i16 = 4;
 
 /// `tInsideBoxMenu::Draw` (FEMENUOPTIONS.CPP, 0x8001d05c): the items scrolling toward the
 /// current one; the two before it, it and the two after (the last only when the one before it
 /// is there), 24 apart from `y + top`, each told whether it is the current one (none while
 /// scrolling): first its `UpdateTransition`, then its four-argument `Draw` at `x` with `w`.
-pub fn inside_box_menu_draw(c: &mut Cpu, this: u32, x: u32, y: u32, w: u32, top: u32) {
-    abi::frame(c, 56, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[6] = top & 0xFFFF;
+pub fn inside_box_menu_draw(c: &mut Cpu, this: InsideBoxMenu, x: u32, y: u32, w: u32, top: u32) {
+    let m = &mut c.m;
+    let (prev, current) = (this.prev_item(m) as i32, this.current_item(m));
+    if current != prev {
+        let (scroll, step) = if prev < current { (SCROLL, -SCROLL_STEP) } else { (-SCROLL, SCROLL_STEP) };
+        this.set_moving(m, scroll);
+        this.set_moving_dir(m, step);
+        this.set_prev_item(m, current as i16);
+    }
+    if this.moving(m) != 0 {
+        let v = this.moving(m).wrapping_add(this.moving_dir(m));
+        this.set_moving(m, v);
+        if this.moving_dir(m) < 0 && v < 0 {
+            this.set_moving(m, 0);
+        }
+        if this.moving_dir(m) > 0 && this.moving(m) > 0 {
+            this.set_moving(m, 0);
+        }
+    }
+    let (x, y, w) = (sx(x), sx(y), sx(w));
+    let selected = |m: &mut Mem, k: u32| (this.moving(m) == 0 && k == this.current_item(m) as u32) as u32;
+    for slot in 0..5u32 {
         let m = &mut c.m;
-        let (prev, cur) = (m.r16(this + 108) as i16 as i32, m.r32(this + 8) as i32);
-        if cur != prev {
-            let (scroll, step) = if prev < cur { (24i16, -4i16) } else { (-24, 4) };
-            m.w16(this + 110, scroll as u16);
-            m.w16(this + 112, step as u16);
-            let v = m.r16(this + 8);
-            m.w16(this + 108, v);
+        let k = (this.current_item(m) as u16 as u32).wrapping_add(slot.wrapping_sub(2));
+        let ki = sx(k);
+        // (the last row only below an item)
+        if slot >= 4 && m.r32(this.0.wrapping_add(ki << 2).wrapping_add(12)) == 0 {
+            return;
         }
-        if m.r16(this + 110) != 0 {
-            let v = m.r16(this + 110).wrapping_add(m.r16(this + 112));
-            m.w16(this + 110, v);
-            if (m.r16(this + 112) as i16) < 0 && (v as i16) < 0 {
-                m.w16(this + 110, 0);
-            }
-            if (m.r16(this + 112) as i16) > 0 && (m.r16(this + 110) as i16) > 0 {
-                m.w16(this + 110, 0);
-            }
+        if (ki as i32) < 0 {
+            continue;
         }
-        let (x, y, w) = (sx(x), sx(y), sx(w));
-        r.0[3] = w;
-        r.0[4] = y;
-        r.0[5] = x;
-        let mut slot = 0u32;
-        loop {
-            r.0[1] = slot;
-            let m = &mut c.m;
-            let k = (m.r16(this + 8) as u32).wrapping_add(slot.wrapping_sub(2));
-            r.0[2] = k;
-            let ki = sx(k);
-            if sx(slot) as i32 >= 4 && m.r32(this.wrapping_add(ki << 2).wrapping_add(12)) == 0 {
-                return;
-            }
-            if (ki as i32) >= 0 {
-                let it = m.r32(this.wrapping_add(ki << 2).wrapping_add(16));
-                if it != 0 {
-                    let selected = if m.r16(this + 110) == 0 { (ki == m.r32(this + 8)) as u32 } else { 0 };
-                    let vt = m.r32(it + ITEM_VPTR);
-                    let (obj, f) = method(m, it, ITEM_VPTR, ITEM_UPDATE_TRANSITION);
-                    r.call_ptr_leaving(c, f, &[obj, selected, vt + ITEM_UPDATE_TRANSITION], 0x8001_d1e4);
-                    let m = &mut c.m;
-                    let it = item(m, this, k);
-                    let row = (sx(slot) as i32 - 1).wrapping_mul(24) as u32;
-                    let at = (lh(m, this + 110)).wrapping_add(y.wrapping_add(sx(top)).wrapping_add(row)).wrapping_add(5);
-                    let selected = if m.r16(this + 110) == 0 { (ki == m.r32(this + 8)) as u32 } else { 0 };
-                    let (obj, f) = method(m, it, ITEM_VPTR, ITEM_DRAW_AT3);
-                    r.call_ptr_leaving(c, f, &[obj, x, at, w, selected], 0x8001_d27c);
-                }
-            }
-            slot = slot.wrapping_add(1);
-            if sx(slot) as i32 >= 5 {
-                return;
-            }
+        let it = MenuItem(m.r32(this.0.wrapping_add(ki << 2).wrapping_add(16)));
+        if it.0 == 0 {
+            continue;
         }
-    })
+        let sel = selected(m, ki);
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_UPDATE_TRANSITION, &[sel]);
+        let m = &mut c.m;
+        let it = item(m, this.base(), k);
+        let row = ((slot as i32 - 1) * 24) as u32;
+        let at = (this.moving(m) as i32 as u32).wrapping_add(y.wrapping_add(sx(top)).wrapping_add(row)).wrapping_add(5);
+        let sel = selected(m, ki);
+        call_virtual(c, it.0, ITEM_VPTR, ITEM_DRAW_AT3, &[x, at, w, sel]);
+    }
 }
 
 pub fn abi_inside_box_menu_draw(c: &mut Cpu) {
-    let top = abi::arg(c, 4);
-    inside_box_menu_draw(c, c.r[4], c.r[5], c.r[6], c.r[7], top);
+    let top = crate::abi::arg(c, 4);
+    inside_box_menu_draw(c, InsideBoxMenu(c.r[4]), c.r[5], c.r[6], c.r[7], top);
 }
 
-// tMenuItemSlidingMenu: +28 the menu open in the box, +32 the one to open next, +36 the box's
-// width, +38 its height, +40 how far it is open, +42 the slide, +44 the fade (+46 its step, +48
-// whether it fades), +52 transitioning out, +56 closing, +60 and +62 where the box goes, +64
-// whether its back is filled.
+// ---- tMenuItemSlidingMenu: an item that opens into a box holding an inside menu.
 
 /// `tMenuItemSlidingMenu::tMenuItemSlidingMenu` (FEMENUOPTIONS.CPP, 0x8001d2c0): a box `w` by
-/// `h` (flag 0x80), no menu in it.
+/// `h` (a slider's flag), no menu in it.
 #[allow(clippy::too_many_arguments)]
-pub fn sliding_menu(c: &mut Cpu, this: u32, text: u32, w: u32, h: u32, dx: u32, dy: u32, fill: u32) -> u32 {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..6].copy_from_slice(&[this, dx, dy, fill, w, h]);
-        r.enter(c, 0x8002_4754, 0x8001_d2fc, |c| femenu::menu_item(&mut c.m, crate::types::MenuItem(this), text));
-        let m = &mut c.m;
-        let flags = m.r32(this);
-        m.w32(this + 28, 0);
-        m.w32(this + 32, 0);
-        m.w16(this + 36, w as u16);
-        m.w16(this + 38, h as u16);
-        m.w16(this + 8, 0);
-        m.w32(this, flags | 0x80);
-        let flags = m.r32(this);
-        m.w32(this + ITEM_VPTR, SLIDING_MENU_VT);
-        m.w16(this + 60, dx as u16);
-        m.w16(this + 62, dy as u16);
-        m.w32(this + 64, fill);
-        m.w32(this, flags | 0x80);
-        this
-    })
+pub fn sliding_menu(c: &mut Cpu, this: MenuItemSlidingMenu, text: u32, w: u32, h: u32, dx: u32, dy: u32, fill: u32) -> u32 {
+    femenu::menu_item(&mut c.m, this.base(), text);
+    let m = &mut c.m;
+    this.set_curr_menu(m, InsideBoxMenu(0));
+    this.set_next_menu(m, InsideBoxMenu(0));
+    this.set_width(m, w as i16);
+    this.set_height(m, h as i16);
+    this.set_sel_fade(m, 0);
+    this.set_vtable(m, SLIDING_MENU_VT);
+    this.set_diff_x(m, dx as i16);
+    this.set_diff_y(m, dy as i16);
+    this.set_fillback(m, fill);
+    let flags = this.flags(m);
+    this.set_flags(m, flags | ITEM_SLIDER);
+    this.0
 }
 
 pub fn abi_sliding_menu(c: &mut Cpu) {
-    let (dx, dy, fill) = (abi::arg(c, 4), abi::arg(c, 5), abi::arg(c, 6));
-    c.r[2] = sliding_menu(c, c.r[4], c.r[5], c.r[6], c.r[7], dx, dy, fill);
+    let (dx, dy, fill) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
+    c.r[2] = sliding_menu(c, MenuItemSlidingMenu(c.r[4]), c.r[5], c.r[6], c.r[7], dx, dy, fill);
 }
 
 /// `tMenuItemSlidingMenu::~tMenuItemSlidingMenu` (FEMENUOPTIONS.CPP, 0x8001d368).
@@ -822,642 +736,568 @@ pub fn abi_sliding_menu_dtor(c: &mut Cpu) {
     femenuextended::destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, SLIDING_MENU_VT)), femenu::abi_menu_item_dtor);
 }
 
+/// A box's slide when it opens: half its height again.
+fn opening_slide(m: &mut Mem, this: MenuItemSlidingMenu) -> i16 {
+    let h = this.height(m);
+    h.wrapping_add(h >> 1)
+}
+
 /// `tMenuItemSlidingMenu::TransitionOff` (FEMENUOPTIONS.CPP, 0x8001d390): transitioning out;
-/// fading out from 0 with a menu open.
+/// fading out from 0 when a menu is open in it.
 pub fn abi_sliding_menu_transition_off(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    let open = m.r32(this + 28);
-    m.w16(this + 46, 0);
-    m.w32(this + 52, 1);
+    let (m, this) = (&mut c.m, MenuItemSlidingMenu(c.r[4]));
+    let f = Fade::of_sliding(this);
+    let open = this.curr_menu(m).0;
+    f.set_step(m, 0);
+    this.set_transitioning_out(m, 1);
     if open != 0 {
-        m.w32(this + 48, 1);
-        m.w16(this + 46, 30);
-        m.w16(this + 44, 0);
+        f.set_fading(m, 1);
+        f.set_step(m, FADE_STEP);
+        f.set_value(m, 0);
     }
 }
 
 /// `tMenuItemSlidingMenu::TransitionOn` (FEMENUOPTIONS.CPP, 0x8001d3bc): fading in from 128,
-/// closed, the slide at half the height again.
+/// closed, its slide at the start again.
 pub fn abi_sliding_menu_transition_on(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    let h = m.r16(this + 38);
-    m.w16(this + 46, (-30i16) as u16);
-    m.w32(this + 48, 1);
-    m.w16(this + 40, 0);
-    m.w32(this + 52, 0);
-    m.w16(this + 44, 128);
-    m.w16(this + 42, h.wrapping_add((h as i16 >> 1) as u16));
+    let (m, this) = (&mut c.m, MenuItemSlidingMenu(c.r[4]));
+    let f = Fade::of_sliding(this);
+    let slide = opening_slide(m, this);
+    f.set_step(m, -FADE_STEP);
+    f.set_fading(m, 1);
+    this.set_open_height(m, 0);
+    this.set_transitioning_out(m, 0);
+    f.set_value(m, 128);
+    this.set_slide_offset(m, slide);
 }
 
 /// `tMenuItemSlidingMenu::TransitionIsFinished` (FEMENUOPTIONS.CPP, 0x8001d3f4): finished
 /// unless a menu is open and one to open next, and the fade isn't at its end.
 pub fn abi_sliding_menu_transition_is_finished(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    if m.r32(this + 28) == 0 || m.r32(this + 32) == 0 {
-        m.w16(this + 46, 0);
-        m.w32(this + 48, 0);
+    let (m, this) = (&mut c.m, MenuItemSlidingMenu(c.r[4]));
+    let f = Fade::of_sliding(this);
+    if this.curr_menu(m).0 == 0 || this.next_menu(m).0 == 0 {
+        f.set_step(m, 0);
+        f.set_fading(m, 0);
         c.r[2] = 1;
         return;
     }
-    c.r[2] = fade_is_finished(m, this, SLIDING_FADE);
+    c.r[2] = fade_is_finished(m, f);
 }
 
-/// `tMenuItemSlidingMenu::UpdateTransition` (FEMENUOPTIONS.CPP, 0x8001d47c).
+/// `tMenuItemSlidingMenu::UpdateTransition` (FEMENUOPTIONS.CPP, 0x8001d47c), and
+/// `tMenuItemSlidingActivated`'s (0x8001e028).
 pub fn abi_sliding_menu_update_transition(c: &mut Cpu) {
-    fade_update_transition(c, c.r[4], SLIDING_FADE, c.r[5], [0x8001_d4d8, 0x8001_d4e4]);
+    let this = MenuItemSlidingMenu(c.r[4]);
+    fade_update_transition(c, this.base(), Fade::of_sliding(this), c.r[5]);
 }
 
 /// `tMenuItemSlidingMenu::DebounceKeys` (FEMENUOPTIONS.CPP, 0x8001d4f8): up and down, and the
-/// open menu's.
-pub fn sliding_menu_debounce_keys(c: &mut Cpu, this: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let open = c.m.r32(this + 28);
-        if open == 0 {
-            return femenu::KEY_UP | femenu::KEY_DOWN;
-        }
-        let (obj, f) = method(&mut c.m, open, MENU_VPTR, MENU_DEBOUNCE_KEYS);
-        Saved::of(c).call_ptr_leaving(c, f, &[obj], 0x8001_d52c) | femenu::KEY_UP | femenu::KEY_DOWN
-    })
+/// open menu's keys.
+pub fn sliding_menu_debounce_keys(c: &mut Cpu, this: MenuItemSlidingMenu) -> u32 {
+    let open = this.curr_menu(&mut c.m).0;
+    if open == 0 {
+        return KEY_UP | KEY_DOWN;
+    }
+    call_virtual(c, open, MENU_VPTR, MENU_DEBOUNCE_KEYS, &[]) | KEY_UP | KEY_DOWN
 }
 
 pub fn abi_sliding_menu_debounce_keys(c: &mut Cpu) {
-    c.r[2] = sliding_menu_debounce_keys(c, c.r[4]);
+    c.r[2] = sliding_menu_debounce_keys(c, MenuItemSlidingMenu(c.r[4]));
 }
 
 /// `tMenuItemSlidingMenu::Draw(bool)` (FEMENUOPTIONS.CPP, 0x8001d540): its `Draw` at (0, 0).
 pub fn sliding_menu_draw_bool(c: &mut Cpu, this: u32, selected: u32) {
-    abi::frame(c, 24, |c, _| {
-        let (obj, f) = method(&mut c.m, this, ITEM_VPTR, ITEM_DRAW_AT);
-        Saved::of(c).call_ptr_leaving(c, f, &[obj, 0, 0, selected], 0x8001_d56c);
-    })
+    call_virtual(c, this, ITEM_VPTR, ITEM_DRAW_AT, &[0, 0, selected]);
 }
 
 pub fn abi_sliding_menu_draw_bool(c: &mut Cpu) {
     sliding_menu_draw_bool(c, c.r[4], c.r[5]);
 }
 
-/// The fade 40 nearer `128` (`out`: 0), within 0..128.
-fn step_fade(m: &mut Mem, this: u32, out: bool) {
-    let fade = m.r16(this + 44) as i16 as i32;
-    let v = if out { (fade - 40).max(0) } else { (fade + 40).min(128) };
-    m.w16(this + 44, v as u16);
+/// The fade 40 nearer gone (`out`: shown), within 0..128.
+fn step_fade(m: &mut Mem, f: Fade, out: bool) {
+    let v = f.value(m) as i32;
+    let v = if out { (v - 40).max(0) } else { (v + 40).min(128) };
+    f.set_value(m, v as i16);
 }
 
+/// The open height's and the slide's steps a frame.
+const OPEN_STEP: i32 = 4;
+const SLIDE_STEP: i32 = 6;
+
 /// `tMenuItemSlidingMenu::UpdatefOpenHeight` (FEMENUOPTIONS.CPP, 0x8001d57c): a box changing
-/// menus closes first (4 a frame; then the next menu fading in, the old one out); open, the
-/// selected box opens to its height (4 a frame), then slides (6 a frame); an unselected one
-/// closes.
-pub fn sliding_menu_update_open_height(m: &mut Mem, this: u32, selected: u32) {
-    m.w32(this + 56, 0);
-    if m.r16(this + 40) == 0 {
-        let h = m.r16(this + 38);
-        m.w16(this + 42, h.wrapping_add((h as i16 >> 1) as u16));
+/// menus closes first (then the next menu fades in, the old one out); open, the selected box
+/// opens to its height, then slides; an unselected one closes.
+pub fn sliding_menu_update_open_height(m: &mut Mem, this: MenuItemSlidingMenu, selected: u32) {
+    let f = Fade::of_sliding(this);
+    this.set_closing(m, 0);
+    if this.open_height(m) == 0 {
+        let slide = opening_slide(m, this);
+        this.set_slide_offset(m, slide);
     }
-    let (next, open) = (m.r32(this + 32), m.r32(this + 28));
-    if next != open && (m.r16(this + 40) as i16) > 0 {
-        let v = (m.r16(this + 40) as i16 as i32 - 4).max(0);
-        m.w16(this + 40, v as u16);
-        m.w32(this + 56, 1);
-    } else if next == 0 && (m.r16(this + 44) as i16) < 128 {
-        if m.r32(this + 48) == 0 {
-            step_fade(m, this, false);
+    let (next, open) = (this.next_menu(m).0, this.curr_menu(m).0);
+    if next != open && this.open_height(m) > 0 {
+        // closing to change menus
+        let v = (this.open_height(m) as i32 - OPEN_STEP).max(0);
+        this.set_open_height(m, v as i16);
+        this.set_closing(m, 1);
+    } else if next == 0 && f.value(m) < 128 {
+        if f.fading(m) == 0 {
+            step_fade(m, f, false);
+        }
+    } else if f.value(m) > 0 && this.curr_menu(m).0 == 0 && this.next_menu(m).0 != 0 {
+        if f.fading(m) == 0 {
+            step_fade(m, f, true);
+        }
+        if this.transitioning_out(m) == 0 {
+            let next = this.next_menu(m);
+            this.set_curr_menu(m, next);
         }
     } else {
-        let fade = m.r16(this + 44) as i16;
-        if fade > 0 && m.r32(this + 28) == 0 && m.r32(this + 32) != 0 {
-            if m.r32(this + 48) == 0 {
-                step_fade(m, this, true);
-            }
-            if m.r32(this + 52) == 0 {
-                let v = m.r32(this + 32);
-                m.w32(this + 28, v);
-            }
-        } else {
-            let next = m.r32(this + 32);
-            m.w32(this + 28, next);
-            if m.r32(this + 52) == 0 && m.r32(this + 48) == 0 {
-                step_fade(m, this, next != 0);
-            }
+        let next = this.next_menu(m);
+        this.set_curr_menu(m, next);
+        if this.transitioning_out(m) == 0 && f.fading(m) == 0 {
+            step_fade(m, f, next.0 != 0);
         }
     }
-    if m.r32(this + 28) == 0 {
+    if this.curr_menu(m).0 == 0 {
         return;
     }
     if selected != 0 {
-        if m.r32(this + 56) == 0 {
-            let (open, h) = (m.r16(this + 40) as i16 as i32, m.r16(this + 38) as i16 as i32);
+        if this.closing(m) == 0 {
+            let (open, h) = (this.open_height(m) as i32, this.height(m) as i32);
             if open < h {
-                m.w16(this + 40, (open + 4).min(h) as u16);
+                this.set_open_height(m, (open + OPEN_STEP).min(h) as i16);
             } else {
-                let v = (m.r16(this + 42) as i16 as i32 - 6).max(0);
-                m.w16(this + 42, v as u16);
+                let v = (this.slide_offset(m) as i32 - SLIDE_STEP).max(0);
+                this.set_slide_offset(m, v as i16);
             }
         }
         return;
     }
-    let open = m.r16(this + 40) as i16 as i32;
+    let open = this.open_height(m) as i32;
     if open > 0 {
-        m.w16(this + 40, (open - 4).max(0) as u16);
+        this.set_open_height(m, (open - OPEN_STEP).max(0) as i16);
     }
 }
 
 pub fn abi_sliding_menu_update_open_height(c: &mut Cpu) {
-    sliding_menu_update_open_height(&mut c.m, c.r[4], c.r[5]);
+    sliding_menu_update_open_height(&mut c.m, MenuItemSlidingMenu(c.r[4]), c.r[5]);
 }
 
-/// A draw-area primitive set to `rect` (`SetDrawArea`, called by address: the host records the
-/// front end's clipping), linked into the ordering table; `r` the registers at the call.
-fn set_draw_area(c: &mut Cpu, r: &Saved, rect: u32, ra: u32) {
+/// The drawing clipped to `rect` from here on (a draw area primitive in the ordering table;
+/// `SetDrawArea` called by address: the host records the front end's clipping).
+fn set_draw_area(c: &mut Cpu, rect: RECT) {
     let prim = femenuextended::add_prim(&mut c.m);
-    r.call_ptr_leaving(c, SET_DRAW_AREA, &[prim, rect], ra);
+    call_addr(c, SET_DRAW_AREA, &[prim, rect.0]);
 }
+
+fn set_rect(m: &mut Mem, rect: RECT, x: i16, y: i16, w: i16, h: i16) {
+    rect.set_x(m, x);
+    rect.set_y(m, y);
+    rect.set_w(m, w);
+    rect.set_h(m, h);
+}
+
+/// A front-end shape's width and height (PSXFRONT.CPP's shape entries: +16, +18).
+fn shape_w(m: &mut Mem, shape: u32) -> u32 {
+    m.r16(shape + 16) as i16 as i32 as u32
+}
+
+fn shape_h(m: &mut Mem, shape: u32) -> u32 {
+    m.r16(shape + 18) as i16 as i32 as u32
+}
+
+/// The shapes a sliding box draws with: its bar (30), its filled back's top and bottom corners
+/// (31, 32: entries of 32 bytes in the table at `SHAPES`), its arrows (57, 58).
+const BAR: u32 = 30;
+const TOP_CORNER: u32 = 31;
+const BOTTOM_CORNER: u32 = 32;
+const UP_ARROW: u32 = 57;
+const DOWN_ARROW: u32 = 58;
+/// The box's shaded edges' grey.
+const BOX_GREY: u32 = 0x0050_5050;
+/// The songs' screen's box (its offset in the songs' screen).
+const SONGS_BOX: u32 = 10072;
 
 /// `tMenuItemSlidingMenu::Draw` (FEMENUOPTIONS.CPP, 0x8001d79c): the box's open height worked
 /// out; its text at its own place (offset by `x`, `y`) with the flare (the songs' box, not
 /// fully faded) and the arrows (an open box or the songs'); an open box: dark at its edges
 /// (two shaded halves), the menu in it (scrolled by the slide), its back filled (corners and
 /// squares) or not, the help text of its items, the text again over it and the bar under it.
-pub fn sliding_menu_draw(c: &mut Cpu, this: u32, x: u32, y: u32, selected: u32) {
-    abi::frame(c, 120, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = x;
-        r.0[1] = y;
-        r.0[6] = this;
-        let (obj, f) = method(&mut c.m, this, ITEM_VPTR, SLIDING_UPDATE_OPEN_HEIGHT);
-        r.call_ptr_leaving(c, f, &[obj, selected], 0x8001_d7f0);
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + SLIDING_FADE));
-        let color = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade], 0x8001_d800);
-        c.m.w32(sp + 56, color);
-        let text = c.m.r32(this + 4);
-        let tx = r.call_leaving(c, WORD_X, &[text], 0x8001_d80c).wrapping_add(x);
-        c.m.w32(sp + 60, tx);
-        let text = c.m.r32(this + 4);
-        let ty = r.call_leaving(c, WORD_Y, &[text], 0x8001_d81c).wrapping_add(y);
-        let m = &mut c.m;
-        m.w32(BOX_HELP_TEXT, u32::MAX);
-        m.w32(sp + 64, ty);
-        let shapes = m.r32(SHAPES).wrapping_add(960);
-        m.w32(sp + 68, shapes);
-        let songs = (m.r32(this + 28) == m.r32(SONGS_SCREEN).wrapping_add(10072)) as u32;
-        m.w32(sp + 72, songs);
-        let fade = lh(m, this + SLIDING_FADE);
-        if fade != 128 && songs != 0 {
-            let sel = lh(m, this + 8);
-            r.enter(c, 0x8001_c100, 0x8001_d888, |c| draw_left_flare(c, ty, sel, fade, SLIDING_FLARE_PHASE));
+pub fn sliding_menu_draw(c: &mut Cpu, this: MenuItemSlidingMenu, x: u32, y: u32, selected: u32) {
+    call_virtual(c, this.0, ITEM_VPTR, SLIDING_UPDATE_OPEN_HEIGHT, &[selected]);
+    let f = Fade::of_sliding(this);
+    let (sel, fade) = (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
+    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    let text = this.text_description(&mut c.m);
+    let tx = call(c, WORD_X, &[text]).wrapping_add(x);
+    let ty = call(c, WORD_Y, &[text]).wrapping_add(y);
+    let m = &mut c.m;
+    m.w32(BOX_HELP_TEXT, u32::MAX);
+    let bar = m.r32(SHAPES).wrapping_add(BAR * 32);
+    let songs = this.curr_menu(m).0 == m.r32(SONGS_SCREEN).wrapping_add(SONGS_BOX);
+    // (the shape options and the full screen's rectangle at +0, the box's at +8)
+    with_buffer(c, 16, |c, buf| {
+        let fade = f.value(&mut c.m) as i32 as u32;
+        if fade != 128 && songs {
+            let sel = this.sel_fade(&mut c.m) as i32 as u32;
+            draw_left_flare(c, ty, sel, fade, SLIDING_FLARE_PHASE);
         }
-        if c.m.r32(this + 28) != 0 || songs != 0 {
-            // the arrows either side
-            let right = if songs != 0 { 220 } else { lh(&mut c.m, this + 36) };
-            r.0[0] = right;
-            let m = &mut c.m;
-            let (sel, fade) = (lh(m, this + 8), lh(m, this + SLIDING_FADE));
-            let arrow = r.call_leaving(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade], 0x8001_d8d0);
-            let m = &mut c.m;
-            m.w32(sp + 36, arrow);
+        if this.curr_menu(&mut c.m).0 != 0 || songs {
+            // the arrows at its right end
+            let right = if songs { 220 } else { this.width(&mut c.m) as i32 as u32 };
+            let (sel, fade) = (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
+            let arrow = call(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade]);
+            c.m.w32(buf + 4, arrow);
             let end = tx.wrapping_add(right);
-            r.0[1] = end;
-            r.0[2] = 1;
-            r.0[0] = sp + 32;
-            let ax = end.wrapping_sub(lh(m, shapes + 16)).wrapping_sub(10);
-            let ay = if songs != 0 { ty.wrapping_sub(3) } else { ty.wrapping_sub(2) };
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[57, 24, ax, ay, 0, 1, sp + 32], 0x8001_d934);
-            let ax = end.wrapping_sub(lh(&mut c.m, shapes + 16)).wrapping_sub(10);
-            let ay = if songs != 0 { ty.wrapping_add(3) } else { ty.wrapping_add(4) };
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[58, 24, ax, ay, 0, 1, sp + 32], 0x8001_d984);
+            let ax = end.wrapping_sub(shape_w(&mut c.m, bar)).wrapping_sub(10);
+            let ay = if songs { ty.wrapping_sub(3) } else { ty.wrapping_sub(2) };
+            call(c, DRAW_SHAPE_EXTENDED, &[UP_ARROW, 24, ax, ay, 0, 1, buf]);
+            let ax = end.wrapping_sub(shape_w(&mut c.m, bar)).wrapping_sub(10);
+            let ay = if songs { ty.wrapping_add(3) } else { ty.wrapping_add(4) };
+            call(c, DRAW_SHAPE_EXTENDED, &[DOWN_ARROW, 24, ax, ay, 0, 1, buf]);
         }
-        if c.m.r32(this + 28) == 0 {
+        let menu = this.curr_menu(&mut c.m);
+        if menu.0 == 0 {
             return;
         }
-        // the box: its two shaded halves, clipped to the screen
+        // the box's two shaded halves, clipped to the screen
         let m = &mut c.m;
-        let grey = 0x0050_5050;
-        let (bx, by) = (tx.wrapping_add(lh(m, this + 60)), ty.wrapping_add(lh(m, this + 62)));
-        let w = lh(m, this + 36);
-        let open16 = (m.r16(this + 40) as u32) << 16;
-        r.0[1] = grey;
-        r.0[2] = open16;
-        r.0[4] = bx;
-        r.0[5] = by;
-        r.0[8] = w;
+        let (bx, by) = (tx.wrapping_add(this.diff_x(m) as i32 as u32), ty.wrapping_add(this.diff_y(m) as i32 as u32));
+        let w = this.width(m) as i32 as u32;
+        let open = this.open_height(m) as i32;
         let (view, flip) = (m.r32(PLAYER1_VIEW), m.r32(FLIP));
-        let env = r.call_leaving(c, GET_DRAWENV, &[view, flip], 0x8001_d9d0);
+        let env = DRAWENV(call(c, GET_DRAWENV, &[view, flip]));
         let m = &mut c.m;
-        m.w16(sp + 32, 0);
-        m.w32(sp + 76, env);
-        let top = m.r16(env + 2);
-        m.w16(sp + 36, 512);
-        let h = m.r16(SCREEN_HEIGHT);
-        m.w16(sp + 34, top);
-        m.w16(sp + 38, h);
-        set_draw_area(c, &r, sp + 32, 0x8001_da50);
-        let half = ((open16 as i32) >> 17) as u32;
-        r.0[0] = half;
-        r.call_ptr_leaving(c, SUBTRACTIVE_BOX, &[bx, by, w, half, grey, grey, 0, 0], 0x8001_da78);
-        r.call_ptr_leaving(c, SUBTRACTIVE_BOX, &[bx, by.wrapping_add(half), w, half, 0, 0, grey, grey], 0x8001_da9c);
+        let screen = RECT(buf);
+        let (top, height) = (env.clip().y(m), m.r16(SCREEN_HEIGHT) as i16);
+        set_rect(m, screen, 0, top, 512, height);
+        set_draw_area(c, screen);
+        let half = (open >> 1) as u32;
+        call_addr(c, SUBTRACTIVE_BOX, &[bx, by, w, half, BOX_GREY, BOX_GREY, 0, 0]);
+        call_addr(c, SUBTRACTIVE_BOX, &[bx, by.wrapping_add(half), w, half, 0, 0, BOX_GREY, BOX_GREY]);
         // the menu in it
         let m = &mut c.m;
-        let menu = m.r32(this + 28);
-        let slide = ((((m.r16(this + 42) as u32) << 17) as i32) >> 16) as u32;
+        let slide = (this.slide_offset(m).wrapping_mul(2)) as i32 as u32;
         let shapes = m.r32(SHAPES);
-        let bh = lh(m, this + 38);
-        r.0[7] = shapes.wrapping_add(992);
-        r.0[3] = shapes.wrapping_add(1024);
-        let (obj, f) = method(m, menu, MENU_VPTR, MENU_DRAW_BOX);
-        r.call_ptr_leaving(c, f, &[obj, sx(bx), sx(by), w, slide, bh], 0x8001_daf4);
-        let open = sx(open16 >> 16);
-        r.0[2] = open;
-        let (corner, corner2) = (shapes.wrapping_add(992), shapes.wrapping_add(1024));
-        if c.m.r32(this + 64) != 0 && (lh(&mut c.m, corner + 18) as i32) < open as i32 {
+        let box_h = this.height(m) as i32 as u32;
+        call_virtual(c, menu.0, MENU_VPTR, MENU_DRAW_BOX, &[sx(bx), sx(by), w, slide, box_h]);
+        let open = open as u32;
+        let (top_corner, bottom_corner) = (shapes.wrapping_add(TOP_CORNER * 32), shapes.wrapping_add(BOTTOM_CORNER * 32));
+        if this.fillback(&mut c.m) != 0 && (shape_h(&mut c.m, top_corner) as i32) < open as i32 {
             // the filled back's corners
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[31, 12, bx, by, 0, 0, 0], 0x8001_db34);
+            call(c, DRAW_SHAPE_EXTENDED, &[TOP_CORNER, 12, bx, by, 0, 0, 0]);
             let right = bx.wrapping_add(w);
-            r.0[1] = right;
-            let x2 = right.wrapping_sub(lh(&mut c.m, corner + 16));
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[31, 8, x2, by, 0, 0, 0], 0x8001_db5c);
+            let x2 = right.wrapping_sub(shape_w(&mut c.m, top_corner));
+            call(c, DRAW_SHAPE_EXTENDED, &[TOP_CORNER, 8, x2, by, 0, 0, 0]);
             let bottom = by.wrapping_add(open);
-            r.0[0] = bottom;
-            let y2 = bottom.wrapping_sub(lh(&mut c.m, corner2 + 18));
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[32, 12, bx, y2, 0, 0, 0], 0x8001_db84);
+            let y2 = bottom.wrapping_sub(shape_h(&mut c.m, bottom_corner));
+            call(c, DRAW_SHAPE_EXTENDED, &[BOTTOM_CORNER, 12, bx, y2, 0, 0, 0]);
             let m = &mut c.m;
-            let (x2, y2) = (right.wrapping_sub(lh(m, corner2 + 16)), bottom.wrapping_sub(lh(m, corner2 + 18)));
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[32, 8, x2, y2, 0, 0, 0], 0x8001_dbac);
+            let (x2, y2) = (right.wrapping_sub(shape_w(m, bottom_corner)), bottom.wrapping_sub(shape_h(m, bottom_corner)));
+            call(c, DRAW_SHAPE_EXTENDED, &[BOTTOM_CORNER, 8, x2, y2, 0, 0, 0]);
         }
         let m = &mut c.m;
-        let (cw, cw2) = (lh(m, corner + 16), lh(m, corner2 + 16));
-        let sw = w.wrapping_sub(cw).wrapping_sub(cw2).wrapping_sub(10);
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, bx.wrapping_add(cw).wrapping_add(5), by, sw, open], 0x8001_dbd8);
+        let (cw, cw2) = (shape_w(m, top_corner), shape_w(m, bottom_corner));
+        let middle_w = w.wrapping_sub(cw).wrapping_sub(cw2).wrapping_sub(10);
+        call_addr(c, DRAW_SQUARE, &[0, bx.wrapping_add(cw).wrapping_add(5), by, middle_w, open]);
         let m = &mut c.m;
-        let (ch, ch2) = (lh(m, corner + 18), lh(m, corner2 + 18));
+        let (ch, ch2) = (shape_h(m, top_corner), shape_h(m, bottom_corner));
         if (ch.wrapping_add(ch2) as i32) < open as i32 {
-            let sh = open.wrapping_sub(ch).wrapping_sub(ch2);
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[0, bx, by.wrapping_add(ch), w, sh], 0x8001_dc10);
+            call_addr(c, DRAW_SQUARE, &[0, bx, by.wrapping_add(ch), w, open.wrapping_sub(ch).wrapping_sub(ch2)]);
         }
-        // clipped to the box
+        // clipped to the box: its items' help text
         let m = &mut c.m;
-        m.w16(sp + 40, bx as u16);
-        let env = m.r32(sp + 76);
-        let top = m.r16(env + 2);
-        m.w16(sp + 44, w as u16);
-        m.w16(sp + 46, open as u16);
-        m.w16(sp + 42, top.wrapping_add(by as u16));
-        set_draw_area(c, &r, sp + 40, 0x8001_dc88);
-        r.0[0] = 0x8005_0000;
-        let help = c.m.r32(BOX_HELP_TEXT);
-        if help != u32::MAX {
-            let word = r.call_leaving(c, TEXT_WORD, &[help], 0x8001_dca4);
-            r.0[1] = word;
+        let inside = RECT(buf + 8);
+        let top = env.clip().y(m);
+        set_rect(m, inside, bx as i16, top.wrapping_add(by as i16), w as i16, open as i16);
+        set_draw_area(c, inside);
+        if c.m.r32(BOX_HELP_TEXT) != u32::MAX {
             let help = c.m.r32(BOX_HELP_TEXT);
-            let hx = sx(r.call_leaving(c, WORD_X, &[help], 0x8001_dcb0));
-            r.0[0] = hx;
+            let word = call(c, TEXT_WORD, &[help]);
             let help = c.m.r32(BOX_HELP_TEXT);
-            let hy = sx(r.call_leaving(c, WORD_Y, &[help], 0x8001_dcc0));
+            let hx = sx(call(c, WORD_X, &[help]));
+            let help = c.m.r32(BOX_HELP_TEXT);
+            let hy = sx(call(c, WORD_Y, &[help]));
             let yellow = c.m.r32(PULSATE_YELLOW);
-            r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, hx, hy, yellow, 0, 2], 0x8001_dce8);
+            call(c, fetextrender::full_text_rgb_entry, &[word, hx, hy, yellow, 0, 2]);
         }
-        let m = &mut c.m;
-        let text = m.r32(this + 4);
-        let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_dcf4);
-        let m = &mut c.m;
-        let (tx, ty, color, songs) = (m.r32(sp + 60), m.r32(sp + 64), m.r32(sp + 56), m.r32(sp + 72));
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), color, 0, (songs != 0) as u32], 0x8001_dd3c);
-        // the bar under the text
+        // its text again over it, and the bar under the text
+        let text = this.text_description(&mut c.m);
+        let word = call(c, TEXT_WORD, &[text]);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), colour, 0, songs as u32]);
         let m = &mut c.m;
         let bar_y = ty.wrapping_sub(2);
-        r.0[0] = bar_y;
-        let shapes = m.r32(sp + 68);
-        let bar_x = tx.wrapping_add(lh(m, this + 36)).wrapping_sub(lh(m, shapes + 16));
-        let fade = lh(m, this + SLIDING_FADE);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[30, 8, bar_x, bar_y, fade, 0, 0], 0x8001_dd7c);
+        let bar_x = tx.wrapping_add(this.width(m) as i32 as u32).wrapping_sub(shape_w(m, bar));
+        let fade = f.value(m) as i32 as u32;
+        call(c, DRAW_SHAPE_EXTENDED, &[BAR, 8, bar_x, bar_y, fade, 0, 0]);
         let m = &mut c.m;
-        if m.r32(this + 64) != 0 {
-            let shapes = m.r32(sp + 68);
-            let len = lh(m, this + 36).wrapping_sub(lh(m, shapes + 16));
-            let (h, tx) = (lh(m, shapes + 18), m.r32(sp + 60));
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[0, tx, bar_y, len, h], 0x8001_ddb0);
+        if this.fillback(m) != 0 {
+            let len = (this.width(m) as i32 as u32).wrapping_sub(shape_w(m, bar));
+            let h = shape_h(m, bar);
+            call_addr(c, DRAW_SQUARE, &[0, tx, bar_y, len, h]);
         }
-    })
+    });
 }
 
 pub fn abi_sliding_menu_draw(c: &mut Cpu) {
-    sliding_menu_draw(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    sliding_menu_draw(c, MenuItemSlidingMenu(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tMenuItemSlidingMenu::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001dde0): a fully open box's
-/// menu takes the input first; down used up; then `tMenuItem`'s.
-pub fn sliding_menu_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..4].copy_from_slice(&[this, key, player, command]);
-        let m = &mut c.m;
-        let menu = m.r32(this + 28);
-        if m.r16(this + 40) == m.r16(this + 38) && menu != 0 {
-            let (obj, f) = method(m, menu, MENU_VPTR, MENU_PROCESS_INPUT);
-            r.call_ptr_leaving(c, f, &[obj], 0x8001_de44);
-        }
-        if c.m.r32(key) == femenu::KEY_DOWN {
-            c.m.w32(key, femenu::KEY_NONE);
-        }
-        r.call_leaving(c, MENU_ITEM_PROCESS_INPUT, &[this, player, key, command], 0x8001_de6c);
-    })
+/// menu takes the input first; down used up (then `tMenuItem`'s, which does nothing).
+pub fn sliding_menu_process_input(c: &mut Cpu, this: MenuItemSlidingMenu, player: u32, key: u32, command: u32) {
+    let m = &mut c.m;
+    let menu = this.curr_menu(m).0;
+    if this.open_height(m) == this.height(m) && menu != 0 {
+        call_virtual(c, menu, MENU_VPTR, MENU_PROCESS_INPUT, &[player, key, command]);
+    }
+    if c.m.r32(key) == KEY_DOWN {
+        c.m.w32(key, KEY_NONE);
+    }
 }
 
 pub fn abi_sliding_menu_process_input(c: &mut Cpu) {
-    sliding_menu_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    sliding_menu_process_input(c, MenuItemSlidingMenu(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tMenuItemSlidingMenu::SetMenu` (FEMENUOPTIONS.CPP, 0x8001de88): the menu to open next (and
 /// now, when `now`); the box disabled without one.
-pub fn sliding_menu_set_menu(m: &mut Mem, this: u32, now: u32, menu: u32) {
-    m.w32(this + 32, menu);
+pub fn sliding_menu_set_menu(m: &mut Mem, this: MenuItemSlidingMenu, now: u32, menu: u32) {
+    this.set_next_menu(m, InsideBoxMenu(menu));
     if now != 0 {
-        m.w32(this + 28, menu);
+        this.set_curr_menu(m, InsideBoxMenu(menu));
     }
-    let flags = m.r32(this);
-    let none = m.r32(this + 32) == 0;
-    m.w32(this, if none { flags | ITEM_DISABLED } else { flags & !ITEM_DISABLED });
+    let flags = this.flags(m);
+    let none = this.next_menu(m).0 == 0;
+    this.set_flags(m, if none { flags | ITEM_DISABLED } else { flags & !ITEM_DISABLED });
 }
 
 pub fn abi_sliding_menu_set_menu(c: &mut Cpu) {
-    sliding_menu_set_menu(&mut c.m, c.r[4], c.r[5], c.r[6]);
+    sliding_menu_set_menu(&mut c.m, MenuItemSlidingMenu(c.r[4]), c.r[5], c.r[6]);
 }
 
-// tMenuItemSlidingActivated: +68 whether it is active (the music playing in the songs' box).
+// ---- tMenuItemSlidingActivated: the songs' box, active while the game's music plays in it.
+
+/// The slide's step a frame while the box is active (up) or not (down).
+const ACTIVE_SLIDE_STEP: i16 = 3;
 
 /// `tMenuItemSlidingActivated::UpdatefOpenHeight` (FEMENUOPTIONS.CPP, 0x8001decc): the slide
-/// 3 up a frame while active, else 3 down, within 0 and half the height again.
-pub fn sliding_activated_update_open_height(m: &mut Mem, this: u32) {
-    let slide = m.r16(this + 42);
-    let slide = if m.r32(this + 68) != 0 { slide.wrapping_sub(3) } else { slide.wrapping_add(3) };
-    m.w16(this + 42, slide);
-    let h = m.r16(this + 38) as i16 as i32;
-    let v = (slide as i16 as i32).min(h + (h >> 1)).max(0);
-    m.w16(this + 42, v as u16);
+/// up while active, else down, within 0 and its start.
+pub fn sliding_activated_update_open_height(m: &mut Mem, this: MenuItemSlidingActivated) {
+    let slide = this.slide_offset(m);
+    let slide = if this.active(m) != 0 { slide.wrapping_sub(ACTIVE_SLIDE_STEP) } else { slide.wrapping_add(ACTIVE_SLIDE_STEP) };
+    let start = opening_slide(m, this.base()) as i32;
+    this.set_slide_offset(m, (slide as i32).min(start).max(0) as i16);
 }
 
 pub fn abi_sliding_activated_update_open_height(c: &mut Cpu) {
-    sliding_activated_update_open_height(&mut c.m, c.r[4]);
+    sliding_activated_update_open_height(&mut c.m, MenuItemSlidingActivated(c.r[4]));
 }
 
 /// `tMenuItemSlidingActivated::TransitionOn` (FEMENUOPTIONS.CPP, 0x8001df60): fading in from
-/// 128, inactive, fully open, the slide at half the height again.
+/// 128, inactive, fully open, its slide at the start.
 pub fn abi_sliding_activated_transition_on(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    let h = m.r16(this + 38);
-    m.w16(this + 46, (-30i16) as u16);
-    m.w32(this + 48, 1);
-    m.w32(this + 68, 0);
-    m.w32(this + 52, 0);
-    m.w16(this + 44, 128);
-    m.w16(this + 42, h.wrapping_add((h as i16 >> 1) as u16));
-    m.w16(this + 40, h);
+    let (m, this) = (&mut c.m, MenuItemSlidingActivated(c.r[4]));
+    let f = Fade::of_sliding(this.base());
+    let (slide, h) = (opening_slide(m, this.base()), this.height(m));
+    f.set_step(m, -FADE_STEP);
+    f.set_fading(m, 1);
+    this.set_active(m, 0);
+    this.set_transitioning_out(m, 0);
+    f.set_value(m, 128);
+    this.set_slide_offset(m, slide);
+    this.set_open_height(m, h);
 }
 
 /// `tMenuItemSlidingActivated::UpdateTransition` (FEMENUOPTIONS.CPP, 0x8001e028).
 pub fn abi_sliding_activated_update_transition(c: &mut Cpu) {
-    fade_update_transition(c, c.r[4], SLIDING_FADE, c.r[5], [0x8001_e084, 0x8001_e090]);
+    abi_sliding_menu_update_transition(c);
 }
+
+/// The front end's sounds for the songs' box: activated, back.
+const SOUND_ACTIVATE: u32 = 0;
+const SOUND_BACK: u32 = 1;
 
 /// `tMenuItemSlidingActivated::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001e0a4): accept makes it
 /// active (the menu music stopped, the game's songs loaded and one playing), start makes it
 /// inactive again (the menu music back); active and slid in, its menu takes the input and up
-/// and down are used up; then `tMenuItem`'s.
-pub fn sliding_activated_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1..5].copy_from_slice(&[this, key, player, command]);
-        let k = c.m.r32(key);
-        if k == femenu::KEY_ACCEPT && c.m.r32(this + 68) == 0 {
-            r.call_leaving(c, femenu::PLAY_FE_SFX, &[0], 0x8001_e188);
-            c.m.w32(this + 68, 1);
-            c.m.w32(key, femenu::KEY_NONE);
-            r.call_leaving(c, STOP_SONG, &[20], 0x8001_e19c);
-            r.call_leaving(c, MUSIC_CLEAN_UP, &[], 0x8001_e1a4);
-            r.call_leaving(c, MUSIC_START_UP, &[0xC000, 0x18000, GAME_MUSIC_FILE], 0x8001_e1bc);
-            r.call_ptr_leaving(c, PLAY_SONG, &[GAME_SONGS], 0x8001_e1c8);
-            let list = r.call_leaving(c, LOAD_SONG_LIST, &[SONG_LIST_FILE, 0], 0x8001_e1d8);
-            let state = c.m.r32(MUSIC_STATE);
-            c.m.w32(state + 120, list);
-        } else if k == femenu::KEY_START && c.m.r32(this + 68) != 0 {
-            r.call_leaving(c, femenu::PLAY_FE_SFX, &[1], 0x8001_e100);
-            c.m.w32(this + 68, 0);
-            c.m.w32(key, femenu::KEY_NONE);
-            r.call_leaving(c, STOP_SONG, &[20], 0x8001_e114);
-            r.0[0] = 0x8005_0000;
-            let state = c.m.r32(MUSIC_STATE);
-            let list = c.m.r32(state + 120);
-            if list != 0 {
-                r.call_leaving(c, PURGE_MEM, &[list], 0x8001_e138);
-            }
-            let state = c.m.r32(MUSIC_STATE);
-            c.m.w32(state + 120, 0);
-            r.call_leaving(c, MUSIC_CLEAN_UP, &[], 0x8001_e144);
-            r.call_leaving(c, MUSIC_START_UP, &[0xD800, 0x18000, MENU_MUSIC_FILE], 0x8001_e15c);
-            r.call_ptr_leaving(c, PLAY_SONG, &[MENU_SONGS], 0x8001_e168);
+/// and down are used up (then `tMenuItem`'s, which does nothing).
+pub fn sliding_activated_process_input(c: &mut Cpu, this: MenuItemSlidingActivated, player: u32, key: u32, command: u32) {
+    let k = c.m.r32(key);
+    if k == femenu::KEY_ACCEPT && this.active(&mut c.m) == 0 {
+        call(c, femenu::PLAY_FE_SFX, &[SOUND_ACTIVATE]);
+        this.set_active(&mut c.m, 1);
+        c.m.w32(key, KEY_NONE);
+        call(c, STOP_SONG, &[20]);
+        call(c, MUSIC_CLEAN_UP, &[]);
+        call(c, MUSIC_START_UP, &[0xC000, 0x18000, GAME_MUSIC_FILE]);
+        call_addr(c, PLAY_SONG, &[GAME_SONGS]);
+        let list = call(c, LOAD_SONG_LIST, &[SONG_LIST_FILE, 0]);
+        let state = c.m.r32(MUSIC_STATE);
+        c.m.w32(state + 120, list);
+    } else if k == KEY_START && this.active(&mut c.m) != 0 {
+        call(c, femenu::PLAY_FE_SFX, &[SOUND_BACK]);
+        this.set_active(&mut c.m, 0);
+        c.m.w32(key, KEY_NONE);
+        call(c, STOP_SONG, &[20]);
+        let list = song_list(&mut c.m);
+        if list != 0 {
+            call(c, PURGE_MEM, &[list]);
         }
-        let m = &mut c.m;
-        if m.r16(this + 42) == 0 {
-            if m.r32(this + 68) == 0 {
-                r.call_leaving(c, MENU_ITEM_PROCESS_INPUT, &[this, player, key, command], 0x8001_e27c);
-                return;
-            }
-            let menu = m.r32(this + 28);
-            if menu != 0 {
-                let (obj, f) = method(m, menu, MENU_VPTR, MENU_PROCESS_INPUT);
-                r.call_ptr_leaving(c, f, &[obj, player, key, command], 0x8001_e238);
-            }
+        let state = c.m.r32(MUSIC_STATE);
+        c.m.w32(state + 120, 0);
+        call(c, MUSIC_CLEAN_UP, &[]);
+        call(c, MUSIC_START_UP, &[0xD800, 0x18000, MENU_MUSIC_FILE]);
+        call_addr(c, PLAY_SONG, &[MENU_SONGS]);
+    }
+    let m = &mut c.m;
+    if this.slide_offset(m) == 0 {
+        if this.active(m) == 0 {
+            return;
         }
-        let m = &mut c.m;
-        if m.r32(this + 68) != 0 {
-            let k = m.r32(key);
-            if k == femenu::KEY_UP || k == femenu::KEY_DOWN {
-                m.w32(key, femenu::KEY_NONE);
-            }
+        let menu = this.curr_menu(m).0;
+        if menu != 0 {
+            call_virtual(c, menu, MENU_VPTR, MENU_PROCESS_INPUT, &[player, key, command]);
         }
-        r.call_leaving(c, MENU_ITEM_PROCESS_INPUT, &[this, player, key, command], 0x8001_e27c);
-    })
+    }
+    let m = &mut c.m;
+    if this.active(m) != 0 {
+        let k = m.r32(key);
+        if k == KEY_UP || k == KEY_DOWN {
+            m.w32(key, KEY_NONE);
+        }
+    }
 }
 
 pub fn abi_sliding_activated_process_input(c: &mut Cpu) {
-    sliding_activated_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    sliding_activated_process_input(c, MenuItemSlidingActivated(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
+
+// ---- The fading left-right choices: the display's, the controller's, on-off ones.
+
+/// The arrows' and the speaker's colours (`CalcFadeVal`'s from).
+const ARROWS_COLOUR: u32 = 0x00C8_3C1E;
+const SPEAKER_COLOUR: u32 = 0x0055_1E00;
 
 /// `tMenuItemLeftRightFade::MyLeftRightDraw` (FEMENUOPTIONS.CPP, 0x8001e29c): a fading
 /// left-right choice's flare, its text at (`x`, `y`) and the arrows either side of its value.
-pub fn my_left_right_draw(c: &mut Cpu, this: u32, x: u32, y: u32) {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[this, y, x]);
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let arrows = r.call_leaving(c, CALC_FADE_VAL_FADED, &[0x00C8_3C1E, 0xBEBE, sel, fade], 0x8001_e2d4);
-        c.m.w32(sp + 36, arrows);
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        r.enter(c, 0x8001_c100, 0x8001_e2ec, |c| draw_left_flare(c, y, sel, fade, this + 40));
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let color = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade], 0x8001_e2fc);
-        r.0[0] = color;
-        let text = c.m.r32(this + 4);
-        let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_e308);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(x), sx(y), color, 0, 1], 0x8001_e330);
+pub fn my_left_right_draw(c: &mut Cpu, this: MenuItemLeftRightFade, x: u32, y: u32) {
+    let f = Fade::of_choice(this);
+    let faded = |c: &mut Cpu| (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
+    with_buffer(c, 8, |c, options| {
+        let (sel, fade) = faded(c);
+        let arrows = call(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
+        c.m.w32(options + 4, arrows);
+        let (sel, fade) = faded(c);
+        draw_left_flare(c, y, sel, fade, this.0 + 0x28);
+        let (sel, fade) = faded(c);
+        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+        let text = this.text_description(&mut c.m);
+        let word = call(c, TEXT_WORD, &[text]);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(x), sx(y), colour, 0, 1]);
         let ay = y.wrapping_add(1);
-        r.0[1] = ay;
-        r.0[0] = sp + 32;
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[46, 24, x.wrapping_add(26), ay, 0, 0, sp + 32], 0x8001_e358);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[47, 24, x.wrapping_add(200), ay, 0, 0, sp + 32], 0x8001_e378);
-    })
+        call(c, DRAW_SHAPE_EXTENDED, &[46, 24, x.wrapping_add(26), ay, 0, 0, options]);
+        call(c, DRAW_SHAPE_EXTENDED, &[47, 24, x.wrapping_add(200), ay, 0, 0, options]);
+    });
 }
 
 pub fn abi_my_left_right_draw(c: &mut Cpu) {
-    my_left_right_draw(c, c.r[4], c.r[5], c.r[6]);
-}
-
-/// The iterator's virtual function `slot` (`Value` or `TextValue`) for `player`; `r` the
-/// registers at the call.
-fn iterator_call(c: &mut Cpu, r: &Saved, data: u32, slot: u32, player: u32, ra: u32) -> u32 {
-    let (obj, f) = method(&mut c.m, data, femenu::ITERATOR_VPTR, slot);
-    r.call_ptr_leaving(c, f, &[obj, player, data], ra)
+    my_left_right_draw(c, MenuItemLeftRightFade(c.r[4]), c.r[5], c.r[6]);
 }
 
 /// `tMenuItemDisplayLeftRightChoice::Draw` (FEMENUOPTIONS.CPP, 0x8001e390): unless faded out,
 /// the choice at its text's place (offset by `x`, `y`), its value (the sub-menu player's)
 /// right of it.
-pub fn display_choice_draw(c: &mut Cpu, this: u32, x: u32, y: u32) {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = x;
-        r.0[2] = y;
-        r.0[3] = this;
-        if c.m.r16(this + FADE) == 128 {
-            return;
-        }
-        let text = c.m.r32(this + 4);
-        let tx = r.call_leaving(c, WORD_X, &[text], 0x8001_e3cc).wrapping_add(x);
-        r.0[1] = tx;
-        let text = c.m.r32(this + 4);
-        let ty = r.call_leaving(c, WORD_Y, &[text], 0x8001_e3d8).wrapping_add(y);
-        r.0[0] = ty;
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let color = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade], 0x8001_e3ec);
-        let ty = sx(ty);
-        r.0[0] = ty;
-        r.0[2] = color;
-        r.enter(c, 0x8001_e29c, 0x8001_e40c, |c| my_left_right_draw(c, this, sx(tx), ty));
-        let m = &mut c.m;
-        let (data, player) = (m.r32(this + 28), m.r32(SUB_MENU_PLAYER));
-        let id = iterator_call(c, &r, data, femenu::TEXT_VALUE, player, 0x8001_e430);
-        let word = r.call_leaving(c, TEXT_WORD, &[sx(id)], 0x8001_e43c);
-        // (s1 keeps the sum shifted up, the argument shifted back)
-        let vx = sx(tx.wrapping_add(115));
-        r.0[1] = tx.wrapping_add(115) << 16;
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, vx, ty, color, 0, 2], 0x8001_e464);
-    })
+pub fn display_choice_draw(c: &mut Cpu, this: MenuItemLeftRightFade, x: u32, y: u32) {
+    let f = Fade::of_choice(this);
+    if f.value(&mut c.m) == 128 {
+        return;
+    }
+    let text = this.text_description(&mut c.m);
+    let tx = call(c, WORD_X, &[text]).wrapping_add(x);
+    let ty = call(c, WORD_Y, &[text]).wrapping_add(y);
+    let (sel, fade) = (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
+    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    let ty = sx(ty);
+    my_left_right_draw(c, this, sx(tx), ty);
+    let (data, player) = (this.data(&mut c.m), c.m.r32(SUB_MENU_PLAYER));
+    let value = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::TEXT_VALUE, &[player]);
+    let word = call(c, TEXT_WORD, &[sx(value)]);
+    call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx.wrapping_add(115)), ty, colour, 0, 2]);
 }
 
 pub fn abi_display_choice_draw(c: &mut Cpu) {
-    display_choice_draw(c, c.r[4], c.r[5], c.r[6]);
+    display_choice_draw(c, MenuItemLeftRightFade(c.r[4]), c.r[5], c.r[6]);
 }
-
-// tMenuItemOnOffLeftRightChoice: +44 the on-off fade (128 on).
 
 /// `tMenuItemOnOffLeftRightChoice::TransitionOn` (FEMENUOPTIONS.CPP, 0x8001e480): the on-off
 /// fade at its value's end, then the left-right fade's.
-pub fn on_off_transition_on(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let data = c.m.r32(this + 28);
-        let (obj, f) = method(&mut c.m, data, femenu::ITERATOR_VPTR, femenu::VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8001_e4bc);
-        c.m.w16(this + 44, (((v & 0xFF) != 0) as u16) << 7);
-        r.enter(c, 0x8001_c50c, 0x8001_e4d4, |c| {
-            c.r[4] = this;
-            abi_left_right_fade_transition_on(c);
-        });
-    })
+pub fn on_off_transition_on(c: &mut Cpu, this: MenuItemOnOffLeftRightChoice) {
+    let data = this.data(&mut c.m);
+    let value = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::VALUE, &[u32::MAX]);
+    this.set_on_fade(&mut c.m, if value & 0xFF != 0 { 128 } else { 0 });
+    call(c, abi_left_right_fade_transition_on, &[this.0]);
 }
 
 pub fn abi_on_off_transition_on(c: &mut Cpu) {
-    on_off_transition_on(c, c.r[4]);
+    on_off_transition_on(c, MenuItemOnOffLeftRightChoice(c.r[4]));
 }
 
 /// `tMenuItemOnOffLeftRightChoice::Draw` (FEMENUOPTIONS.CPP, 0x8001e4e4): unless faded out, the
-/// on-off fade moving toward the value's (32 a frame), the choice at its text's place (offset
-/// by `x`, `y`), ON and OFF right of it in the fade's colours.
-pub fn on_off_draw(c: &mut Cpu, this: u32, x: u32, y: u32) {
-    abi::frame(c, 56, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = x;
-        r.0[2] = this;
-        r.0[3] = y;
-        if c.m.r16(this + FADE) == 128 {
-            return;
-        }
-        let data = c.m.r32(this + 28);
-        let (obj, f) = method(&mut c.m, data, femenu::ITERATOR_VPTR, femenu::VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8001_e538);
+/// on-off fade moving toward the value (32 a frame), the choice at its text's place (offset by
+/// `x`, `y`), ON and OFF right of it in the fade's colours.
+pub fn on_off_draw(c: &mut Cpu, this: MenuItemOnOffLeftRightChoice, x: u32, y: u32) {
+    let f = Fade::of_choice(this.base());
+    if f.value(&mut c.m) == 128 {
+        return;
+    }
+    let data = this.data(&mut c.m);
+    let value = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::VALUE, &[u32::MAX]);
+    let m = &mut c.m;
+    let step = if value & 0xFF != 0 { 32 } else { -32 };
+    let v = this.on_fade(m).wrapping_add(step).clamp(0, 128);
+    this.set_on_fade(m, v);
+    let text = this.text_description(m);
+    let tx = call(c, WORD_X, &[text]).wrapping_add(x);
+    let ty = call(c, WORD_Y, &[text]).wrapping_add(y);
+    with_buffer(c, 8, |c, colours| {
         let m = &mut c.m;
-        let on = m.r16(this + 44);
-        m.w16(this + 44, if v & 0xFF != 0 { on.wrapping_add(32) } else { on.wrapping_sub(32) });
-        if (m.r16(this + 44) as i16) > 128 {
-            m.w16(this + 44, 128);
-        }
-        if (m.r16(this + 44) as i16) < 0 {
-            m.w16(this + 44, 0);
-        }
-        let text = m.r32(this + 4);
-        let tx = r.call_leaving(c, WORD_X, &[text], 0x8001_e598).wrapping_add(x);
-        r.0[1] = tx;
-        let text = c.m.r32(this + 4);
-        let wy = r.call_leaving(c, WORD_Y, &[text], 0x8001_e5a4);
-        let ty = wy.wrapping_add(y);
-        r.0[0] = ty;
-        let m = &mut c.m;
-        let (on, sel, fade) = (lh(m, this + 44), lh(m, this + 8), lh(m, this + FADE));
-        r.call_leaving(c, CALC_ON_OFF_FADE, &[6, on, sel, fade, sp + 24, sp + 28], 0x8001_e5cc);
+        let (on, sel, fade) = (this.on_fade(m) as i32 as u32, this.sel_fade(m) as i32 as u32, f.value(m) as i32 as u32);
+        call(c, CALC_ON_OFF_FADE, &[6, on, sel, fade, colours, colours + 4]);
         let ty = sx(ty);
-        r.0[0] = ty;
-        r.enter(c, 0x8001_e29c, 0x8001_e5e8, |c| my_left_right_draw(c, this, sx(tx), ty));
-        let word = r.call_leaving(c, TEXT_WORD, &[TEXT_ON], 0x8001_e5f0);
-        let color = c.m.r32(sp + 24);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(tx.wrapping_add(55)), ty, color, 0, 0], 0x8001_e614);
-        let word = r.call_leaving(c, TEXT_WORD, &[TEXT_OFF], 0x8001_e61c);
-        let ox = sx(tx.wrapping_add(158));
-        r.0[1] = tx.wrapping_add(158) << 16;
-        let color = c.m.r32(sp + 28);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, ox, ty, color, 0, 0], 0x8001_e640);
-    })
+        my_left_right_draw(c, this.base(), sx(tx), ty);
+        let word = call(c, TEXT_WORD, &[TEXT_ON]);
+        let colour = c.m.r32(colours);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx.wrapping_add(55)), ty, colour, 0, 0]);
+        let word = call(c, TEXT_WORD, &[TEXT_OFF]);
+        let colour = c.m.r32(colours + 4);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx.wrapping_add(158)), ty, colour, 0, 0]);
+    });
 }
 
 pub fn abi_on_off_draw(c: &mut Cpu) {
-    on_off_draw(c, c.r[4], c.r[5], c.r[6]);
+    on_off_draw(c, MenuItemOnOffLeftRightChoice(c.r[4]), c.r[5], c.r[6]);
 }
 
-// tMenuItemLeftRightAudioSlider: the slider's place at +32 (its text's, +34 the y), +40 the
-// fade (+42 its step, +44 whether it fades), +48 the speaker picture, +52 the flare's phase.
+// ---- tMenuItemLeftRightAudioSlider: a slider with a speaker picture, fading.
 
 /// `tMenuItemLeftRightAudioSlider::tMenuItemLeftRightAudioSlider` (FEMENUOPTIONS.CPP,
 /// 0x8001e65c): a slider with picture `art`.
-pub fn audio_slider(c: &mut Cpu, this: u32, text: u32, data: u32, art: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[1] = art;
-        r.enter(c, 0x8002_4b18, 0x8001_e678, |c| femenu::left_right_slider(c, crate::types::MenuItemLeftRightSlider(this), text, crate::types::ListIterator(data)));
-        let m = &mut c.m;
-        m.w32(this + ITEM_VPTR, AUDIO_SLIDER_VT);
-        m.w16(this + 48, art as u16);
-        m.w32(this + 52, 0);
-        m.w16(this + 8, 0);
-        this
-    })
+pub fn audio_slider(c: &mut Cpu, this: MenuItemLeftRightAudioSlider, text: u32, data: ListIterator, art: u32) -> u32 {
+    femenu::left_right_slider(c, this.base(), text, data);
+    let m = &mut c.m;
+    this.set_vtable(m, AUDIO_SLIDER_VT);
+    this.set_audio_art(m, art as i16);
+    this.set_flareextra(m, 0);
+    this.set_sel_fade(m, 0);
+    this.0
 }
 
 pub fn abi_audio_slider(c: &mut Cpu) {
-    c.r[2] = audio_slider(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    c.r[2] = audio_slider(c, MenuItemLeftRightAudioSlider(c.r[4]), c.r[5], ListIterator(c.r[6]), c.r[7]);
 }
 
 /// `tMenuItemLeftRightAudioSlider::~tMenuItemLeftRightAudioSlider` (FEMENUOPTIONS.CPP,
@@ -1466,143 +1306,126 @@ pub fn abi_audio_slider_dtor(c: &mut Cpu) {
     femenuextended::destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, AUDIO_SLIDER_VT)), femenu::abi_left_right_slider_dtor);
 }
 
+/// The colour of text `id`'s text type's style `k` (4 unselected, 5 selected).
+fn style_colour(c: &mut Cpu, id: u32, k: u32) -> u32 {
+    let ty = call(c, WORD_FLAGS, &[id]);
+    let m = &mut c.m;
+    let colour = m.r8(TEXT_STYLES.wrapping_add(ty.wrapping_mul(6)).wrapping_add(k)) as u32;
+    m.r32(TEXT_COLORS + 4 * colour)
+}
+
 /// `tMenuItemLeftRightAudioSlider::Draw` (FEMENUOPTIONS.CPP, 0x8001e6d0): the slider placed at
 /// its text's place (offset by `x`, `y`); the flare; unless faded out its text (in its text
 /// type's colours, blended by the selection), the speaker picture when selected and the
 /// slider at the value.
-pub fn audio_slider_draw(c: &mut Cpu, this: u32, x: u32, y: u32) {
-    abi::frame(c, 104, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = x;
-        r.0[1] = y;
-        r.0[3] = this;
-        let text = c.m.r32(this + 4);
-        let wx = r.call_leaving(c, WORD_X, &[text], 0x8001_e6fc);
-        c.m.w16(this + 32, wx.wrapping_add(x) as u16);
-        let text = c.m.r32(this + 4);
-        let wy = r.call_leaving(c, WORD_Y, &[text], 0x8001_e70c);
-        c.m.w16(this + 34, wy.wrapping_add(y) as u16);
-        r.0[1] = TEXT_COLORS;
-        let id = lh(&mut c.m, this + 4);
-        let ty = r.call_leaving(c, WORD_FLAGS, &[id], 0x8001_e724);
-        r.0[0] = TEXT_STYLES;
-        let style = |m: &mut Mem, ty: u32, k: u32| m.r8(TEXT_STYLES.wrapping_add(ty.wrapping_mul(6)).wrapping_add(k)) as u32;
-        let k = style(&mut c.m, ty, 5);
-        let hi = c.m.r32(TEXT_COLORS + 4 * k);
-        r.0[2] = hi;
-        let id = lh(&mut c.m, this + 4);
-        let ty = r.call_leaving(c, WORD_FLAGS, &[id], 0x8001_e758);
-        let k = style(&mut c.m, ty, 4);
-        let lo = c.m.r32(TEXT_COLORS + 4 * k);
-        r.0[0] = lo;
-        let m = &mut c.m;
-        let (fy, sel, fade) = (lh(m, this + 34), lh(m, this + 8), lh(m, this + 40));
-        r.enter(c, 0x8001_c100, 0x8001_e78c, |c| draw_left_flare(c, fy, sel, fade, this + 52));
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + 40));
-        let color = r.call_leaving(c, CALC_FADE_VAL_FADED, &[lo, hi, sel, fade], 0x8001_e7a0);
-        r.0[0] = color;
-        if c.m.r16(this + 40) == 128 {
-            return;
+pub fn audio_slider_draw(c: &mut Cpu, this: MenuItemLeftRightAudioSlider, x: u32, y: u32) {
+    let f = Fade::of_audio(this);
+    let text = this.text_description(&mut c.m);
+    let wx = call(c, WORD_X, &[text]);
+    this.set_x(&mut c.m, wx.wrapping_add(x) as i16);
+    let wy = call(c, WORD_Y, &[text]);
+    this.set_y(&mut c.m, wy.wrapping_add(y) as i16);
+    let id = text as i16 as i32 as u32;
+    let selected_colour = style_colour(c, id, 5);
+    let unselected_colour = style_colour(c, id, 4);
+    let faded = |c: &mut Cpu| (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
+    let (sel, fade) = faded(c);
+    let fy = this.y(&mut c.m) as i32 as u32;
+    draw_left_flare(c, fy, sel, fade, this.0 + 0x34);
+    let (sel, fade) = faded(c);
+    let colour = call(c, CALC_FADE_VAL_FADED, &[unselected_colour, selected_colour, sel, fade]);
+    if f.value(&mut c.m) == 128 {
+        return;
+    }
+    let word = call(c, TEXT_WORD, &[text]);
+    let (px, py) = (this.x(&mut c.m) as i32 as u32, this.y(&mut c.m) as i32 as u32);
+    call(c, fetextrender::full_text_rgb_entry, &[word, px, py, colour, 0, 1]);
+    let (sel, fade) = faded(c);
+    let speaker = call(c, CALC_FADE_VAL_FADED, &[SPEAKER_COLOUR, 0xBEBE, sel, fade]);
+    with_buffer(c, 8, |c, options| {
+        c.m.w32(options + 4, speaker);
+        if this.sel_fade(&mut c.m) != 0 {
+            let art = (this.audio_art(&mut c.m) as i32 as u32).wrapping_add(1);
+            call(c, DRAW_SHAPE_EXTENDED, &[art, 16, 0, 0, 0, 0, options]);
         }
-        let text = c.m.r32(this + 4);
-        let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_e7c0);
-        let m = &mut c.m;
-        let (px, py) = (lh(m, this + 32), lh(m, this + 34));
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, px, py, color, 0, 1], 0x8001_e7e0);
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + 40));
-        let speaker = r.call_leaving(c, CALC_FADE_VAL_FADED, &[0x0055_1E00, 0xBEBE, sel, fade], 0x8001_e7f8);
-        c.m.w32(sp + 60, speaker);
-        if c.m.r16(this + 8) != 0 {
-            let art = lh(&mut c.m, this + 48).wrapping_add(1);
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[art, 16, 0, 0, 0, 0, sp + 56], 0x8001_e830);
-        }
-        let data = c.m.r32(this + 28);
-        let (obj, f) = method(&mut c.m, data, femenu::ITERATOR_VPTR, femenu::VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8001_e854) & 0xFF;
-        let m = &mut c.m;
-        let data = m.r32(this + 28);
-        let (min, max) = (m.r8(data + 8) as u32, m.r8(data + 9) as u32);
-        let sx_ = sx((m.r16(this + 32) as u32).wrapping_add(20));
-        let sy = sx((m.r16(this + 34) as u32).wrapping_add(1));
-        let (w, h, sel, fade) = (lh(m, this + 36), lh(m, this + 38), lh(m, this + 8), lh(m, this + 40));
-        r.call_ptr_leaving(c, DRAW_SLIDER, &[v, min, max, sx_, sy, w, h, 4, 4, 0, 0, sel, fade], 0x8001_e8c0);
-    })
+    });
+    let data = this.data(&mut c.m);
+    let value = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::VALUE, &[u32::MAX]) & 0xFF;
+    let m = &mut c.m;
+    let data = this.data(m);
+    let (min, max) = (data.min_value(m) as u32, data.max_value(m) as u32);
+    let (sx_, sy) = (sx((this.x(m) as u16 as u32).wrapping_add(20)), sx((this.y(m) as u16 as u32).wrapping_add(1)));
+    let (w, h) = (this.width(m) as i32 as u32, this.height(m) as i32 as u32);
+    let (sel, fade) = (this.sel_fade(m) as i32 as u32, f.value(m) as i32 as u32);
+    call_addr(c, DRAW_SLIDER, &[value, min, max, sx_, sy, w, h, 4, 4, 0, 0, sel, fade]);
 }
 
 pub fn abi_audio_slider_draw(c: &mut Cpu) {
-    audio_slider_draw(c, c.r[4], c.r[5], c.r[6]);
+    audio_slider_draw(c, MenuItemLeftRightAudioSlider(c.r[4]), c.r[5], c.r[6]);
 }
 
 /// `tMenuItemLeftRightAudioSlider::Percentage` (FEMENUOPTIONS.CPP, 0x8001e8dc): the value's
 /// place in the iterator's range in percent (one up when it isn't 0, up to 100).
-pub fn audio_slider_percentage(c: &mut Cpu, this: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let data = c.m.r32(this + 28);
-        let (obj, f) = method(&mut c.m, data, femenu::ITERATOR_VPTR, femenu::VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8001_e910);
-        let m = &mut c.m;
-        let data = m.r32(this + 28);
-        let min = m.r8(data + 8) as u32;
-        let range = (m.r8(data + 9) as u32).wrapping_sub(min);
-        let pc = crate::fixed::div(((v & 0xFF).wrapping_sub(min)).wrapping_mul(100) as i32, range as i32) as u32;
-        r.0[0] = pc;
-        let (obj, f) = method(m, data, femenu::ITERATOR_VPTR, femenu::VALUE);
-        let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX, data], 0x8001_e984);
-        if v & 0xFF != 0 && (pc as i32) < 100 { pc.wrapping_add(1) } else { pc }
-    })
+pub fn audio_slider_percentage(c: &mut Cpu, this: MenuItemLeftRightAudioSlider) -> u32 {
+    let data = this.data(&mut c.m);
+    let value = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::VALUE, &[u32::MAX]);
+    let m = &mut c.m;
+    let data = this.data(m);
+    let min = data.min_value(m) as u32;
+    let range = (data.max_value(m) as u32).wrapping_sub(min);
+    let percent = crate::fixed::div(((value & 0xFF).wrapping_sub(min)).wrapping_mul(100) as i32, range as i32) as u32;
+    let value = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::VALUE, &[u32::MAX]);
+    if value & 0xFF != 0 && (percent as i32) < 100 { percent.wrapping_add(1) } else { percent }
 }
 
 pub fn abi_audio_slider_percentage(c: &mut Cpu) {
-    c.r[2] = audio_slider_percentage(c, c.r[4]);
+    c.r[2] = audio_slider_percentage(c, MenuItemLeftRightAudioSlider(c.r[4]));
 }
+
+/// The audio sliders' fade step, either way.
+const AUDIO_FADE_STEP: i16 = 60;
 
 /// `tMenuItemLeftRightAudioSlider::TransitionOff` (FEMENUOPTIONS.CPP, 0x8001e9b0): fading out
 /// from 0.
 pub fn abi_audio_slider_transition_off(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    m.w16(this + 40, 0);
-    m.w16(this + 42, 60);
+    let (m, f) = (&mut c.m, Fade::of_audio(MenuItemLeftRightAudioSlider(c.r[4])));
+    f.set_value(m, 0);
+    f.set_step(m, AUDIO_FADE_STEP);
 }
 
 /// `tMenuItemLeftRightAudioSlider::TransitionOn` (FEMENUOPTIONS.CPP, 0x8001e9c0): fading in
 /// from 128, unselected.
 pub fn abi_audio_slider_transition_on(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    m.w16(this + 40, 128);
-    m.w16(this + 42, (-60i16) as u16);
-    m.w16(this + 8, 0);
+    let (m, this) = (&mut c.m, MenuItemLeftRightAudioSlider(c.r[4]));
+    let f = Fade::of_audio(this);
+    f.set_value(m, 128);
+    f.set_step(m, -AUDIO_FADE_STEP);
+    this.set_sel_fade(m, 0);
 }
 
 /// `tMenuItemLeftRightAudioSlider::TransitionIsFinished` (FEMENUOPTIONS.CPP, 0x8001e9d8).
 pub fn abi_audio_slider_transition_is_finished(c: &mut Cpu) {
-    c.r[2] = fade_is_finished(&mut c.m, c.r[4], AUDIO_FADE);
+    c.r[2] = fade_is_finished(&mut c.m, Fade::of_audio(MenuItemLeftRightAudioSlider(c.r[4])));
 }
 
 /// `tMenuItemLeftRightAudioSlider::UpdateTransition` (FEMENUOPTIONS.CPP, 0x8001ea34): the fade
 /// stepped within 0..128, then `tMenuItem`'s.
-pub fn audio_slider_update_transition(c: &mut Cpu, this: u32, selected: u32) {
-    abi::frame(c, 24, |c, _| {
-        let m = &mut c.m;
-        let v = (m.r16(this + AUDIO_FADE) as i16 as i32 + m.r16(this + AUDIO_FADE + 2) as i16 as i32).clamp(0, 128);
-        m.w16(this + AUDIO_FADE, v as u16);
-        Saved::of(c).enter(c, 0x8002_47c8, 0x8001_ea70, |c| femenu::menu_item_update_transition(c, crate::types::MenuItem(this), selected));
-    })
+pub fn audio_slider_update_transition(c: &mut Cpu, this: MenuItemLeftRightAudioSlider, selected: u32) {
+    let (m, f) = (&mut c.m, Fade::of_audio(this));
+    let v = (f.value(m) as i32 + f.step(m) as i32).clamp(0, 128);
+    f.set_value(m, v as i16);
+    femenu::menu_item_update_transition(c, MenuItem(this.0), selected);
 }
 
 pub fn abi_audio_slider_update_transition(c: &mut Cpu) {
-    audio_slider_update_transition(c, c.r[4], c.r[5]);
+    audio_slider_update_transition(c, MenuItemLeftRightAudioSlider(c.r[4]), c.r[5]);
 }
 
-// tInsideBoxSongMenu: the songs' on-off fades at +116 and selection fades at +126 (5 each: the
-// two songs before the current one, it and the two after); the music's state has the song list
-// (+120: its count at +0, 64 bytes a song from +12) and the current song (+116); the front
-// end's +924 whether each song is on.
+// ---- tInsideBoxSongMenu: the songs (the music library's song list), five rows about the
+// current song, each with an on-off and a selection fade.
 
-/// The music's song list (0: none loaded) and current song.
+/// The music's song list (0: none loaded: its count at +0, 64 bytes a song from +12) and the
+/// current song.
 fn song_list(m: &mut Mem) -> u32 {
     let state = m.r32(MUSIC_STATE);
     m.r32(state + 120)
@@ -1610,35 +1433,39 @@ fn song_list(m: &mut Mem) -> u32 {
 
 fn current_song(m: &mut Mem) -> u32 {
     let state = m.r32(MUSIC_STATE);
-    lh(m, state + 116)
+    m.r16(state + 116) as i16 as i32 as u32
 }
+
+/// Where the front end keeps whether each song is on (a word each).
+const SONGS_ON: u32 = 924;
+
+fn song_on(song: u32) -> u32 {
+    FRONT_END.wrapping_add(song << 2).wrapping_add(SONGS_ON)
+}
+
+/// The rows' spacing; the middle row's index.
+const SONG_ROW: i32 = 21;
+const MIDDLE: u32 = 2;
 
 /// `tInsideBoxSongMenu::tInsideBoxSongMenu` (FEMENUOPTIONS.CPP, 0x8001ea80): `tMenu`'s, the
 /// fades 0, its items from the caller's list, not scrolling.
 pub fn abi_song_menu(c: &mut Cpu) {
-    let (this, flags, screen, next) = (c.r[4], c.r[5], c.r[6], c.r[7]);
-    let args = c.r[29] + 16;
-    c.r[2] = abi::frame(c, 40, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let m = &mut c.m;
-        let (options, on_back, title, first) = (m.r32(args), m.r32(args + 4), sx(m.r32(args + 8)), m.r32(args + 12));
-        m.w32(sp + 16, options);
-        m.w32(sp + 20, on_back);
-        m.w32(sp + 24, title);
-        r.enter(c, 0x8002_548c, 0x8001_eab8, |c| femenu::menu(&mut c.m, crate::types::Menu(this), flags, screen, next, options, on_back, title));
-        let m = &mut c.m;
-        m.w32(this + MENU_VPTR, SONG_MENU_VT);
-        for k in 0..5 {
-            m.w16(this + 126 + 2 * k, 0);
-            m.w16(this + 116 + 2 * k, 0);
-        }
-        r.enter(c, 0x8002_5454, 0x8001_eaf4, |c| femenu::menu_constructor(&mut c.m, crate::types::Menu(this), first, args + 16));
-        let m = &mut c.m;
-        m.w16(this + 110, 0);
-        m.w16(this + 112, 0);
-        this
-    });
+    let this = InsideBoxSongMenu(c.r[4]);
+    let (flags, screen, next) = (c.r[5], c.r[6], c.r[7]);
+    let arg = |c: &mut Cpu, n| crate::abi::arg(c, n);
+    let (options, on_back, title, first, rest) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)), arg(c, 7), stack_arg(c, 8));
+    let menu = Menu(this.0);
+    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_back, title);
+    let m = &mut c.m;
+    this.set_vtable(m, SONG_MENU_VT);
+    for k in 0..5 {
+        this.set_sel_fade(m, k, 0);
+        this.set_on_off_fade(m, k, 0);
+    }
+    femenu::menu_constructor(m, menu, first, rest);
+    this.set_moving(m, 0);
+    this.set_moving_dir(m, 0);
+    c.r[2] = this.0;
 }
 
 /// `tInsideBoxSongMenu::~tInsideBoxSongMenu` (FEMENUOPTIONS.CPP, 0x8001eb10).
@@ -1646,297 +1473,238 @@ pub fn abi_song_menu_dtor(c: &mut Cpu) {
     femenuextended::destroy(c, c.r[4], c.r[5], Some((MENU_VPTR, SONG_MENU_VT)), abi_inside_box_menu_dtor);
 }
 
-/// `tInsideBoxSongMenu::Draw` (FEMENUOPTIONS.CPP, 0x8001eb38): with songs loaded, the songs'
-/// selection fades toward the middle one, the list scrolling (twice the step), and the two
+/// `tInsideBoxSongMenu::Draw` (FEMENUOPTIONS.CPP, 0x8001eb38): with songs loaded, the
+/// selection fades toward the middle row, the list scrolling (twice the step), and the two
 /// songs before the current one, it and the two after (those there are), 21 apart about the
 /// middle of the box (`h` high, from `y + top`), each's on-off fade moving toward whether it is
-/// on (32 a frame): its `DrawOneSong`.
+/// on (32 a frame): its virtual `DrawOneSong`.
 #[allow(clippy::too_many_arguments)]
-pub fn song_menu_draw(c: &mut Cpu, this: u32, x: u32, y: u32, w: u32, top: u32, h: u32) {
-    abi::frame(c, 72, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        r.0[6] = top & 0xFFFF;
-        r.0[7] = x;
-        if song_list(&mut c.m) == 0 {
-            return;
+pub fn song_menu_draw(c: &mut Cpu, this: InsideBoxSongMenu, x: u32, y: u32, w: u32, top: u32, h: u32) {
+    if song_list(&mut c.m) == 0 {
+        return;
+    }
+    let mid = sx(y).wrapping_add(((sx(h) as i32 - SONG_ROW) >> 1) as u32);
+    let m = &mut c.m;
+    for k in 0..5 {
+        let v = this.sel_fade(m, k) as i32;
+        this.set_sel_fade(m, k, if k == MIDDLE { (v + 8).min(128) } else { (v - 8).max(0) } as i16);
+    }
+    if this.moving(m) != 0 {
+        let step = this.moving_dir(m);
+        let v = this.moving(m).wrapping_add(step.wrapping_mul(2));
+        this.set_moving(m, v);
+        if step < 0 && v < 0 {
+            this.set_moving(m, 0);
         }
-        let mid = sx(y).wrapping_add(((sx(h) as i32 - 21) >> 1) as u32);
-        r.0[5] = mid;
+        if this.moving_dir(m) > 0 && this.moving(m) > 0 {
+            this.set_moving(m, 0);
+        }
+    }
+    for k in 0..5u32 {
         let m = &mut c.m;
-        for k in 0..5 {
-            if k != 2 {
-                let v = (m.r16(this + 126 + 2 * k) as i16 as i32 - 8).max(0);
-                m.w16(this + 126 + 2 * k, v as u16);
-            }
+        let row = (-40 + SONG_ROW * k as i32) as u32;
+        let song = current_song(m).wrapping_add(k).wrapping_sub(MIDDLE);
+        let list = song_list(m);
+        let count = m.r32(list) as i32;
+        if (song as i32) < 0 || (song as i32) >= count {
+            continue;
         }
-        let v = (m.r16(this + 130) as i16 as i32 + 8).min(128);
-        m.w16(this + 130, v as u16);
-        if m.r16(this + 110) != 0 {
-            let v = m.r16(this + 110).wrapping_add(m.r16(this + 112) << 1);
-            let step = m.r16(this + 112) as i16;
-            m.w16(this + 110, v);
-            if step < 0 && (v as i16) < 0 {
-                m.w16(this + 110, 0);
-            }
-            if (m.r16(this + 112) as i16) > 0 && (m.r16(this + 110) as i16) > 0 {
-                m.w16(this + 110, 0);
-            }
-        }
-        r.0[8] = FRONT_END;
-        r.0[4] = sx(w);
-        let mut row = -40i32 as u32;
-        for k in 0..5u32 {
-            r.0[0] = this + 2 * k;
-            r.0[1] = k;
-            r.0[3] = row;
-            let m = &mut c.m;
-            let song = current_song(m).wrapping_add(k).wrapping_sub(2);
-            let list = song_list(m);
-            if (song as i32) >= 0 && (song as i32) < m.r32(list) as i32 {
-                let fade = this + 116 + 2 * k;
-                let on = m.r32(FRONT_END.wrapping_add(song << 2).wrapping_add(924)) != 0;
-                let v = m.r16(fade);
-                m.w16(fade, if on { v.wrapping_add(32) } else { v.wrapping_sub(32) });
-                if (m.r16(fade) as i16) > 128 {
-                    m.w16(fade, 128);
-                }
-                if (m.r16(fade) as i16) < 0 {
-                    m.w16(fade, 0);
-                }
-                let at = (top & 0xFFFF).wrapping_add((m.r16(this + 110) as u32).wrapping_add(mid.wrapping_add(row)));
-                let (on_fade, sel_fade) = (lh(m, fade), lh(m, this + 126 + 2 * k));
-                let (obj, f) = method(m, this, MENU_VPTR, MENU_DRAW_ONE_SONG);
-                r.call_ptr_leaving(c, f, &[obj, sx(song), sx(x), sx(at), sx(w), on_fade, sel_fade], 0x8001_ed64);
-            }
-            row = row.wrapping_add(21);
-        }
-    })
+        let on = m.r32(song_on(song)) != 0;
+        let v = this.on_off_fade(m, k).wrapping_add(if on { 32 } else { -32 }).clamp(0, 128);
+        this.set_on_off_fade(m, k, v);
+        let at = (top & 0xFFFF).wrapping_add((this.moving(m) as u16 as u32).wrapping_add(mid.wrapping_add(row)));
+        let (on_fade, sel_fade) = (this.on_off_fade(m, k) as i32 as u32, this.sel_fade(m, k) as i32 as u32);
+        call_virtual(c, this.0, MENU_VPTR, MENU_DRAW_ONE_SONG, &[sx(song), sx(x), sx(at), sx(w), on_fade, sel_fade]);
+    }
 }
 
 pub fn abi_song_menu_draw(c: &mut Cpu) {
-    let (top, h) = (abi::arg(c, 4), abi::arg(c, 5));
-    song_menu_draw(c, c.r[4], c.r[5], c.r[6], c.r[7], top, h);
+    let (top, h) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5));
+    song_menu_draw(c, InsideBoxSongMenu(c.r[4]), c.r[5], c.r[6], c.r[7], top, h);
 }
 
 /// `tInsideBoxSongMenu::DrawOneSong` (FEMENUOPTIONS.CPP, 0x8001eda8): a song's two lines of
 /// text (in its selection's colour), ON and OFF in its on-off fade's, and its frame.
 #[allow(clippy::too_many_arguments)]
 pub fn song_menu_draw_one_song(c: &mut Cpu, song: u32, x: u32, y: u32, w: u32, on_fade: u32, sel_fade: u32) {
-    abi::frame(c, 64, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[..6].copy_from_slice(&[sel_fade, on_fade, y, x, song, w]);
-        let frame = r.call_leaving(c, CALC_FADE_VAL, &[0x0055_1E00, 40], 0x8001_edf4);
-        r.0[6] = frame;
-        r.0[1] = on_fade << 16;
-        r.0[0] = sx(sel_fade);
-        r.call_leaving(c, CALC_ON_OFF_FADE, &[6, sx(on_fade), sx(sel_fade), 0, sp + 24, sp + 28], 0x8001_ee28);
-        let color = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sx(sel_fade), 0], 0x8001_ee38);
-        r.0[1] = MUSIC_STATE & 0xFFFF_0000;
-        let entry = ((song << 16) as i32 >> 10) as u32;
-        r.0[4] = entry;
-        r.0[0] = color;
+    let frame = call(c, CALC_FADE_VAL, &[SPEAKER_COLOUR, 40]);
+    with_buffer(c, 8, |c, colours| {
+        call(c, CALC_ON_OFF_FADE, &[6, sx(on_fade), sx(sel_fade), 0, colours, colours + 4]);
+        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sx(sel_fade), 0]);
+        // the song's entry: 64 bytes, its two lines' texts at +12 and +16
+        let entry = (sx(song) << 6).wrapping_add(12);
         let list = song_list(&mut c.m);
-        let line = c.m.r32(list.wrapping_add(entry).wrapping_add(12));
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[line, sx(x.wrapping_add(3)), sx(y.wrapping_add(2)), color, 0, 0], 0x8001_ee80);
+        let line = c.m.r32(list.wrapping_add(entry));
+        call(c, fetextrender::full_text_rgb_entry, &[line, sx(x.wrapping_add(3)), sx(y.wrapping_add(2)), colour, 0, 0]);
         let list = song_list(&mut c.m);
-        let line = c.m.r32(list.wrapping_add(entry).wrapping_add(16));
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[line, sx(x.wrapping_add(2)), sx(y.wrapping_add(10)), color, 0, 0], 0x8001_eeb8);
-        let word = r.call_leaving(c, TEXT_WORD, &[TEXT_ON], 0x8001_eec0);
+        let line = c.m.r32(list.wrapping_add(entry + 4));
+        call(c, fetextrender::full_text_rgb_entry, &[line, sx(x.wrapping_add(2)), sx(y.wrapping_add(10)), colour, 0, 0]);
         let right = x.wrapping_add(w);
         let ty = sx(y.wrapping_add(6));
-        r.0[1] = right;
-        r.0[0] = ty;
-        r.0[4] = 2;
-        let on_color = c.m.r32(sp + 24);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(right.wrapping_sub(90)), ty, on_color, 0, 2], 0x8001_eef8);
-        let word = r.call_leaving(c, TEXT_WORD, &[TEXT_OFF], 0x8001_ef00);
-        r.0[1] = right.wrapping_sub(30) << 16;
-        let off_color = c.m.r32(sp + 28);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(right.wrapping_sub(30)), ty, off_color, 0, 2], 0x8001_ef24);
-        // the frame: two dividers, the top and the bottom
-        let (x, w, y) = (sx(x), sx(w), sx(y));
-        let right = x.wrapping_add(w);
-        r.0[3] = x;
-        r.0[5] = w;
-        r.0[1] = right;
-        r.0[2] = y;
-        r.0[0] = 19;
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[frame, right.wrapping_sub(120), y, 2, 19], 0x8001_ef5c);
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[frame, right.wrapping_sub(60), y, 2, 19], 0x8001_ef74);
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[frame, x, y, w, 1], 0x8001_ef90);
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[frame, x, y.wrapping_add(19), w, u32::MAX], 0x8001_efac);
-    })
+        let word = call(c, TEXT_WORD, &[TEXT_ON]);
+        let on = c.m.r32(colours);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(right.wrapping_sub(90)), ty, on, 0, 2]);
+        let word = call(c, TEXT_WORD, &[TEXT_OFF]);
+        let off = c.m.r32(colours + 4);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(right.wrapping_sub(30)), ty, off, 0, 2]);
+    });
+    // the frame: two dividers, the top and the bottom
+    let (x, w, y) = (sx(x), sx(w), sx(y));
+    let right = x.wrapping_add(w);
+    call_addr(c, DRAW_SQUARE, &[frame, right.wrapping_sub(120), y, 2, 19]);
+    call_addr(c, DRAW_SQUARE, &[frame, right.wrapping_sub(60), y, 2, 19]);
+    call_addr(c, DRAW_SQUARE, &[frame, x, y, w, 1]);
+    call_addr(c, DRAW_SQUARE, &[frame, x, y.wrapping_add(19), w, u32::MAX]);
 }
 
 pub fn abi_song_menu_draw_one_song(c: &mut Cpu) {
-    let (w, on_fade, sel_fade) = (abi::arg(c, 4), abi::arg(c, 5), abi::arg(c, 6));
+    let (w, on_fade, sel_fade) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
     song_menu_draw_one_song(c, c.r[5], c.r[6], c.r[7], w, on_fade, sel_fade);
 }
 
 /// `tInsideBoxSongMenu::DebounceKeys` (FEMENUOPTIONS.CPP, 0x8001efd4): up, down, left and right.
 pub fn abi_song_menu_debounce_keys(c: &mut Cpu) {
-    c.r[2] = femenu::KEY_UP | femenu::KEY_DOWN | femenu::KEY_LEFT | femenu::KEY_RIGHT;
+    c.r[2] = KEY_UP | KEY_DOWN | femenu::KEY_LEFT | femenu::KEY_RIGHT;
 }
 
 /// `tInsideBoxSongMenu::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001efdc): with songs loaded, left
 /// and right turn the current song on or off (with a sound); up and down move to the song
-/// before or after, the list and its fades shifting and scrolling (none while it scrolls).
+/// before or after, the rows' fades shifting and the list scrolling (none while it scrolls).
 /// The keys it takes are used up.
-pub fn song_menu_process_input(c: &mut Cpu, this: u32, key: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[1] = key;
-        if song_list(&mut c.m) == 0 {
-            return;
+pub fn song_menu_process_input(c: &mut Cpu, this: InsideBoxSongMenu, key: u32) {
+    if song_list(&mut c.m) == 0 {
+        return;
+    }
+    match c.m.r32(key) {
+        femenu::KEY_LEFT => {
+            call(c, femenu::PLAY_FE_SFX, &[5]);
         }
-        match c.m.r32(key) {
-            femenu::KEY_LEFT => r.call_leaving(c, femenu::PLAY_FE_SFX, &[5], 0x8001_f030),
-            femenu::KEY_RIGHT => r.call_leaving(c, femenu::PLAY_FE_SFX, &[6], 0x8001_f030),
-            _ => 0,
-        };
-        let m = &mut c.m;
-        match m.r32(key) {
-            femenu::KEY_LEFT | femenu::KEY_RIGHT => {
-                let at = FRONT_END.wrapping_add(current_song(m) << 2).wrapping_add(924);
-                let off = (m.r32(at) == 0) as u32;
-                m.w32(at, off);
-            }
-            femenu::KEY_UP => {
-                if (current_song(m) as i32) > 0 && m.r16(this + 110) == 0 {
-                    m.w16(this + 110, (-21i16) as u16);
-                    m.w16(this + 112, 4);
-                    for k in (1..5).rev() {
-                        let v = m.r16(this + 116 + 2 * (k - 1));
-                        m.w16(this + 116 + 2 * k, v);
-                        let v = m.r16(this + 126 + 2 * (k - 1));
-                        m.w16(this + 126 + 2 * k, v);
-                    }
-                    m.w16(this + 116, 0);
-                    m.w16(this + 126, 0);
-                    let state = m.r32(MUSIC_STATE);
-                    let v = m.r16(state + 116).wrapping_sub(1);
-                    m.w16(state + 116, v);
-                    r.call_leaving(c, femenu::PLAY_FE_SFX, &[3], 0x8001_f1c8);
-                }
-            }
-            femenu::KEY_DOWN => {
-                let list = song_list(m);
-                let last = m.r32(list).wrapping_sub(1);
-                if (current_song(m) as i32) < last as i32 && m.r16(this + 110) == 0 {
-                    m.w16(this + 110, 21);
-                    m.w16(this + 112, (-4i16) as u16);
-                    for k in 0..4 {
-                        let v = m.r16(this + 116 + 2 * (k + 1));
-                        m.w16(this + 116 + 2 * k, v);
-                        let v = m.r16(this + 126 + 2 * (k + 1));
-                        m.w16(this + 126 + 2 * k, v);
-                    }
-                    m.w16(this + 124, 0);
-                    m.w16(this + 134, 0);
-                    let state = m.r32(MUSIC_STATE);
-                    let v = m.r16(state + 116).wrapping_add(1);
-                    m.w16(state + 116, v);
-                    r.call_leaving(c, femenu::PLAY_FE_SFX, &[4], 0x8001_f1c8);
-                }
-            }
-            _ => return,
+        femenu::KEY_RIGHT => {
+            call(c, femenu::PLAY_FE_SFX, &[6]);
         }
-        c.m.w32(key, femenu::KEY_NONE);
-    })
+        _ => {}
+    }
+    let m = &mut c.m;
+    match m.r32(key) {
+        femenu::KEY_LEFT | femenu::KEY_RIGHT => {
+            let at = song_on(current_song(m));
+            let toggled = (m.r32(at) == 0) as u32;
+            m.w32(at, toggled);
+        }
+        KEY_UP => {
+            if (current_song(m) as i32) > 0 && this.moving(m) == 0 {
+                this.set_moving(m, -(SONG_ROW as i16));
+                this.set_moving_dir(m, SCROLL_STEP);
+                for k in (1..5).rev() {
+                    let v = this.on_off_fade(m, k - 1);
+                    this.set_on_off_fade(m, k, v);
+                    let v = this.sel_fade(m, k - 1);
+                    this.set_sel_fade(m, k, v);
+                }
+                this.set_on_off_fade(m, 0, 0);
+                this.set_sel_fade(m, 0, 0);
+                let state = m.r32(MUSIC_STATE);
+                let v = m.r16(state + 116).wrapping_sub(1);
+                m.w16(state + 116, v);
+                call(c, femenu::PLAY_FE_SFX, &[3]);
+            }
+        }
+        KEY_DOWN => {
+            let list = song_list(m);
+            let last = m.r32(list).wrapping_sub(1);
+            if (current_song(m) as i32) < last as i32 && this.moving(m) == 0 {
+                this.set_moving(m, SONG_ROW as i16);
+                this.set_moving_dir(m, -SCROLL_STEP);
+                for k in 0..4 {
+                    let v = this.on_off_fade(m, k + 1);
+                    this.set_on_off_fade(m, k, v);
+                    let v = this.sel_fade(m, k + 1);
+                    this.set_sel_fade(m, k, v);
+                }
+                this.set_on_off_fade(m, 4, 0);
+                this.set_sel_fade(m, 4, 0);
+                let state = m.r32(MUSIC_STATE);
+                let v = m.r16(state + 116).wrapping_add(1);
+                m.w16(state + 116, v);
+                call(c, femenu::PLAY_FE_SFX, &[4]);
+            }
+        }
+        _ => return,
+    }
+    c.m.w32(key, KEY_NONE);
 }
 
 pub fn abi_song_menu_process_input(c: &mut Cpu) {
-    song_menu_process_input(c, c.r[4], c.r[6]);
+    song_menu_process_input(c, InsideBoxSongMenu(c.r[4]), c.r[6]);
 }
 
 /// `tMenuItemControllerLeftRightChoice::Draw` (FEMENUOPTIONS.CPP, 0x8001f1e4): unless faded
 /// out, the choice's text at its own place (offset by `x`, `y`) and its value (the sub-menu
 /// player's) right of it; the arrows, the bar under it and its square.
-pub fn controller_choice_draw(c: &mut Cpu, this: u32, x: u32, y: u32) {
-    abi::frame(c, 88, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = x;
-        r.0[1] = y;
-        r.0[4] = this;
-        let text = c.m.r32(this + 4);
-        let tx = r.call_leaving(c, WORD_X, &[text], 0x8001_f218).wrapping_add(x);
-        r.0[2] = tx;
-        let text = c.m.r32(this + 4);
-        let ty = r.call_leaving(c, WORD_Y, &[text], 0x8001_f224).wrapping_add(y);
-        r.0[3] = ty;
-        let m = &mut c.m;
-        let shapes = m.r32(SHAPES).wrapping_add(960);
-        r.0[5] = shapes;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let arrows = r.call_leaving(c, CALC_FADE_VAL_FADED, &[0x00C8_3C1E, 0xBEBE, sel, fade], 0x8001_f24c);
-        r.0[0] = arrows;
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let color = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade], 0x8001_f260);
-        r.0[1] = color;
-        c.m.w32(sp + 36, arrows);
-        if c.m.r16(this + FADE) != 128 {
-            let text = c.m.r32(this + 4);
-            r.0[0] = ty << 16;
-            let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_f284);
-            r.0[0] = sx(ty);
-            r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), color, 0, 0], 0x8001_f2a8);
-            let m = &mut c.m;
-            let (data, player) = (m.r32(this + 28), m.r32(SUB_MENU_PLAYER));
-            let id = iterator_call(c, &r, data, femenu::TEXT_VALUE, player, 0x8001_f2cc);
-            let word = r.call_leaving(c, TEXT_WORD, &[sx(id)], 0x8001_f2d8);
-            r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(tx.wrapping_add(151)), sx(ty), color, 0, 2], 0x8001_f300);
+pub fn controller_choice_draw(c: &mut Cpu, this: MenuItemLeftRightFade, x: u32, y: u32) {
+    let f = Fade::of_choice(this);
+    let text = this.text_description(&mut c.m);
+    let tx = call(c, WORD_X, &[text]).wrapping_add(x);
+    let ty = call(c, WORD_Y, &[text]).wrapping_add(y);
+    let bar = c.m.r32(SHAPES).wrapping_add(BAR * 32);
+    let faded = |c: &mut Cpu| (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
+    let (sel, fade) = faded(c);
+    let arrows = call(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
+    let (sel, fade) = faded(c);
+    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    with_buffer(c, 8, |c, options| {
+        c.m.w32(options + 4, arrows);
+        if f.value(&mut c.m) != 128 {
+            let word = call(c, TEXT_WORD, &[text]);
+            call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), colour, 0, 0]);
+            let (data, player) = (this.data(&mut c.m), c.m.r32(SUB_MENU_PLAYER));
+            let value = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::TEXT_VALUE, &[player]);
+            let word = call(c, TEXT_WORD, &[sx(value)]);
+            call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx.wrapping_add(151)), sx(ty), colour, 0, 2]);
         }
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let v = r.call_leaving(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade], 0x8001_f314);
+        let (sel, fade) = faded(c);
+        let v = call(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade]);
         let (x, y) = (sx(tx), sx(ty));
-        r.0[1] = x;
-        r.0[0] = y;
-        r.0[3] = 1;
-        r.0[2] = sp + 32;
-        c.m.w32(sp + 36, v);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[10, 24, x.wrapping_add(131), y, 0, 1, sp + 32], 0x8001_f350);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[11, 24, x.wrapping_add(161), y, 0, 1, sp + 32], 0x8001_f370);
-        let by = y.wrapping_sub(3);
-        r.0[0] = by;
+        c.m.w32(options + 4, v);
+        call(c, DRAW_SHAPE_EXTENDED, &[10, 24, x.wrapping_add(131), y, 0, 1, options]);
+        call(c, DRAW_SHAPE_EXTENDED, &[11, 24, x.wrapping_add(161), y, 0, 1, options]);
+        let bar_y = y.wrapping_sub(3);
         let m = &mut c.m;
-        let bx = x.wrapping_sub(lh(m, shapes + 16).wrapping_sub(176));
-        let fade = lh(m, this + FADE);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[30, 8, bx, by, fade, 0, 0], 0x8001_f3a0);
+        let bar_x = x.wrapping_sub(shape_w(m, bar).wrapping_sub(176));
+        let fade = f.value(m) as i32 as u32;
+        call(c, DRAW_SHAPE_EXTENDED, &[BAR, 8, bar_x, bar_y, fade, 0, 0]);
         let m = &mut c.m;
-        let (sw, sh) = (176u32.wrapping_sub(lh(m, shapes + 16)), lh(m, shapes + 18));
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, x, by, sw, sh], 0x8001_f3c4);
-    })
+        let (w, h) = (176u32.wrapping_sub(shape_w(m, bar)), shape_h(m, bar));
+        call_addr(c, DRAW_SQUARE, &[0, x, bar_y, w, h]);
+    });
 }
 
 pub fn abi_controller_choice_draw(c: &mut Cpu) {
-    controller_choice_draw(c, c.r[4], c.r[5], c.r[6]);
+    controller_choice_draw(c, MenuItemLeftRightFade(c.r[4]), c.r[5], c.r[6]);
 }
 
-// The sliders in a box: tMenuItemLeftRightSlider's (+32 and +34 where it is drawn, +36 and +38
-// its size); a two-way slider's +40 what it calibrates (0..3: the NeGcon's twist or the
-// sticks' ranges, each way), +44 whether it is calibrating.
+// ---- The sliders in a box: a plain one, and a two-way one that calibrates a pad's axis.
+
+/// An inside slider's height.
+const INSIDE_SLIDER_HEIGHT: i16 = 5;
+/// The inside sliders' lines' colours: unselected, selected; the two-way slider's middle mark.
+const LINE_DIM: u32 = 0x0055_1E00;
+const LINE_LIT: u32 = 0x00C8_3C1E;
+const MARK_LIT: u32 = 0xBEBE;
 
 /// `tInsideBoxLeftRightSlider::tInsideBoxLeftRightSlider` (FEMENUOPTIONS.CPP, 0x8001f3e8): a
 /// slider 5 high.
-pub fn inside_slider(c: &mut Cpu, this: u32, text: u32, data: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.enter(c, 0x8002_4b18, 0x8001_f3fc, |c| femenu::left_right_slider(c, crate::types::MenuItemLeftRightSlider(this), text, crate::types::ListIterator(data)));
-        let m = &mut c.m;
-        m.w32(this + ITEM_VPTR, INSIDE_SLIDER_VT);
-        m.w16(this + 8, 0);
-        m.w16(this + 38, 5);
-        this
-    })
+pub fn inside_slider(c: &mut Cpu, this: MenuItemLeftRightSlider, text: u32, data: ListIterator) -> u32 {
+    femenu::left_right_slider(c, this, text, data);
+    let m = &mut c.m;
+    this.set_vtable(m, INSIDE_SLIDER_VT);
+    this.set_sel_fade(m, 0);
+    this.set_height(m, INSIDE_SLIDER_HEIGHT);
+    this.0
 }
 
 pub fn abi_inside_slider(c: &mut Cpu) {
-    c.r[2] = inside_slider(c, c.r[4], c.r[5], c.r[6]);
+    c.r[2] = inside_slider(c, MenuItemLeftRightSlider(c.r[4]), c.r[5], ListIterator(c.r[6]));
 }
 
 /// `tInsideBoxLeftRightSlider::~tInsideBoxLeftRightSlider` (FEMENUOPTIONS.CPP, 0x8001f428).
@@ -1944,78 +1712,63 @@ pub fn abi_inside_slider_dtor(c: &mut Cpu) {
     femenuextended::destroy(c, c.r[4], c.r[5], Some((ITEM_VPTR, INSIDE_SLIDER_VT)), femenu::abi_left_right_slider_dtor);
 }
 
-/// A slider's value and its iterator's range; `r` the registers at the call.
-fn slider_value(c: &mut Cpu, r: &Saved, this: u32, ra: u32) -> (u32, u32, u32) {
-    let data = c.m.r32(this + 28);
-    let (obj, f) = method(&mut c.m, data, femenu::ITERATOR_VPTR, femenu::VALUE);
-    let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], ra) & 0xFF;
-    let data = c.m.r32(this + 28);
-    (v, c.m.r8(data + 8) as u32, c.m.r8(data + 9) as u32)
+/// A slider's value (its iterator's virtual `Value`) and the iterator's range.
+fn slider_value(c: &mut Cpu, this: MenuItemLeftRightSlider) -> (u32, u32, u32) {
+    let data = this.data(&mut c.m);
+    let v = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::VALUE, &[u32::MAX]) & 0xFF;
+    let m = &mut c.m;
+    let data = this.data(m);
+    (v, data.min_value(m) as u32, data.max_value(m) as u32)
+}
+
+/// A slider's place, plus (`dx`, `dy`), sign-extended.
+fn slider_at(m: &mut Mem, this: MenuItemLeftRightSlider, dx: u32, dy: u32) -> (u32, u32) {
+    (sx((this.x(m) as u16 as u32).wrapping_add(dx)), sx((this.y(m) as u16 as u32).wrapping_add(dy)))
 }
 
 /// `tInsideBoxLeftRightSlider::Draw` (FEMENUOPTIONS.CPP, 0x8001f450): the slider at (`x`, `y`)
 /// `w` wide: two lines, its text and the slider at the value.
-pub fn inside_slider_draw(c: &mut Cpu, this: u32, x: u32, y: u32, w: u32) {
-    abi::frame(c, 80, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[1] = w;
-        let m = &mut c.m;
-        m.w16(this + 32, x as u16);
-        m.w16(this + 34, y as u16);
-        let sel = lh(m, this + 8);
-        let line = r.call_leaving(c, CALC_FADE_VAL_SEL, &[0x0055_1E00, 0x00C8_3C1E, sel], 0x8001_f494);
-        r.0[3] = line;
-        let sel = lh(&mut c.m, this + 8);
-        let color = r.call_leaving(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, sel, 0], 0x8001_f4a8);
-        r.0[2] = 1;
-        r.0[4] = color;
-        let m = &mut c.m;
-        let (px, py) = (lh(m, this + 32), lh(m, this + 34));
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[line, px, py, w, 1], 0x8001_f4c8);
-        let m = &mut c.m;
-        let (px, py) = (lh(m, this + 32), lh(m, this + 34));
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[line, px, py.wrapping_add(8), w, 1], 0x8001_f4e4);
-        let text = c.m.r32(this + 4);
-        r.0[1] = w.wrapping_sub(8);
-        let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_f4f0);
-        let m = &mut c.m;
-        let (tx, ty) = (sx((m.r16(this + 32) as u32).wrapping_add(4)), sx((m.r16(this + 34) as u32).wrapping_add(10)));
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, tx, ty, color, 0, 0], 0x8001_f524);
-        let (v, min, max) = slider_value(c, &r, this, 0x8001_f548);
-        let sw = sx(w.wrapping_sub(8));
-        r.0[1] = sw;
-        let m = &mut c.m;
-        let (sx_, sy) = (sx((m.r16(this + 32) as u32).wrapping_add(4)), sx((m.r16(this + 34) as u32).wrapping_add(2)));
-        let (h, sel) = (lh(m, this + 38), lh(m, this + 8));
-        r.call_ptr_leaving(c, DRAW_SLIDER, &[v, min, max, sx_, sy, sw, h, 4, 4, 0, 0, sel, 0], 0x8001_f5b4);
-    })
+pub fn inside_slider_draw(c: &mut Cpu, this: MenuItemLeftRightSlider, x: u32, y: u32, w: u32) {
+    this.set_x(&mut c.m, x as i16);
+    this.set_y(&mut c.m, y as i16);
+    let sel = this.sel_fade(&mut c.m) as i32 as u32;
+    let line = call(c, CALC_FADE_VAL_SEL, &[LINE_DIM, LINE_LIT, sel]);
+    let sel = this.sel_fade(&mut c.m) as i32 as u32;
+    let colour = call(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, sel, 0]);
+    for dy in [0, 8] {
+        let (px, py) = (this.x(&mut c.m) as i32 as u32, this.y(&mut c.m) as i32 as u32);
+        call_addr(c, DRAW_SQUARE, &[line, px, py.wrapping_add(dy), w, 1]);
+    }
+    let text = this.text_description(&mut c.m);
+    let word = call(c, TEXT_WORD, &[text]);
+    let (tx, ty) = slider_at(&mut c.m, this, 4, 10);
+    call(c, fetextrender::full_text_rgb_entry, &[word, tx, ty, colour, 0, 0]);
+    let (v, min, max) = slider_value(c, this);
+    let m = &mut c.m;
+    let (sx_, sy) = slider_at(m, this, 4, 2);
+    let (h, sel) = (this.height(m) as i32 as u32, this.sel_fade(m) as i32 as u32);
+    call_addr(c, DRAW_SLIDER, &[v, min, max, sx_, sy, sx(w.wrapping_sub(8)), h, 4, 4, 0, 0, sel, 0]);
 }
 
 pub fn abi_inside_slider_draw(c: &mut Cpu) {
-    inside_slider_draw(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    inside_slider_draw(c, MenuItemLeftRightSlider(c.r[4]), c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tInsideBoxTwoWaySlider::tInsideBoxTwoWaySlider` (FEMENUOPTIONS.CPP, 0x8001f5d4): a slider 5
-/// high calibrating `ty`.
-pub fn two_way_slider(c: &mut Cpu, this: u32, text: u32, data: u32, ty: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[1] = ty;
-        r.enter(c, 0x8002_4b18, 0x8001_f5f0, |c| femenu::left_right_slider(c, crate::types::MenuItemLeftRightSlider(this), text, crate::types::ListIterator(data)));
-        let m = &mut c.m;
-        m.w32(this + ITEM_VPTR, TWO_WAY_SLIDER_VT);
-        m.w16(this + 40, ty as u16);
-        m.w16(this + 8, 0);
-        m.w16(this + 38, 5);
-        m.w32(this + 44, 0);
-        this
-    })
+/// high calibrating `ty` (0..3: the NeGcon's twist or a stick each way).
+pub fn two_way_slider(c: &mut Cpu, this: InsideBoxTwoWaySlider, text: u32, data: ListIterator, ty: u32) -> u32 {
+    femenu::left_right_slider(c, this.base(), text, data);
+    let m = &mut c.m;
+    this.set_vtable(m, TWO_WAY_SLIDER_VT);
+    this.set_type_(m, ty as i16);
+    this.set_sel_fade(m, 0);
+    this.set_height(m, INSIDE_SLIDER_HEIGHT);
+    this.set_active(m, 0);
+    this.0
 }
 
 pub fn abi_two_way_slider(c: &mut Cpu) {
-    c.r[2] = two_way_slider(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    c.r[2] = two_way_slider(c, InsideBoxTwoWaySlider(c.r[4]), c.r[5], ListIterator(c.r[6]), c.r[7]);
 }
 
 /// `tInsideBoxTwoWaySlider::~tInsideBoxTwoWaySlider` (FEMENUOPTIONS.CPP, 0x8001f628).
@@ -2024,101 +1777,86 @@ pub fn abi_two_way_slider_dtor(c: &mut Cpu) {
 }
 
 /// `tInsideBoxTwoWaySlider::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001f650): accept starts the
-/// calibration, the stop key (128) ends it (with sounds); calibrating it takes every key,
-/// otherwise left and right.
-pub fn two_way_slider_process_input(c: &mut Cpu, this: u32, key: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = key;
-        r.0[1] = this;
-        if c.m.r32(key) == femenu::KEY_ACCEPT {
-            r.call_leaving(c, femenu::PLAY_FE_SFX, &[0], 0x8001_f67c);
-            c.m.w32(this + 44, 1);
-            c.m.w32(key, femenu::KEY_NONE);
+/// calibration, the stop key ends it (with sounds); calibrating it takes every key, otherwise
+/// left and right.
+pub fn two_way_slider_process_input(c: &mut Cpu, this: InsideBoxTwoWaySlider, key: u32) {
+    if c.m.r32(key) == femenu::KEY_ACCEPT {
+        call(c, femenu::PLAY_FE_SFX, &[SOUND_ACTIVATE]);
+        this.set_active(&mut c.m, 1);
+        c.m.w32(key, KEY_NONE);
+    }
+    if c.m.r32(key) == KEY_STOP {
+        if this.active(&mut c.m) == 0 {
+            return;
         }
-        if c.m.r32(key) == KEY_STOP {
-            if c.m.r32(this + 44) == 0 {
-                return;
-            }
-            r.call_leaving(c, femenu::PLAY_FE_SFX, &[1], 0x8001_f6b0);
-            c.m.w32(this + 44, 0);
-            c.m.w32(key, femenu::KEY_NONE);
-        }
-        let m = &mut c.m;
-        let k = m.r32(key);
-        if m.r32(this + 44) != 0 || k == femenu::KEY_LEFT || k == femenu::KEY_RIGHT {
-            m.w32(key, femenu::KEY_NONE);
-        }
-    })
+        call(c, femenu::PLAY_FE_SFX, &[SOUND_BACK]);
+        this.set_active(&mut c.m, 0);
+        c.m.w32(key, KEY_NONE);
+    }
+    let m = &mut c.m;
+    let k = m.r32(key);
+    if this.active(m) != 0 || k == femenu::KEY_LEFT || k == femenu::KEY_RIGHT {
+        m.w32(key, KEY_NONE);
+    }
 }
 
 pub fn abi_two_way_slider_process_input(c: &mut Cpu) {
-    two_way_slider_process_input(c, c.r[4], c.r[6]);
+    two_way_slider_process_input(c, InsideBoxTwoWaySlider(c.r[4]), c.r[6]);
 }
 
 /// `tInsideBoxTwoWaySlider::Draw` (FEMENUOPTIONS.CPP, 0x8001f700): calibrating, the pad
-/// measured first; then the slider at (`x`, `y`) `w` wide, two halves either side of a mark:
+/// measured first; then the slider at (`x`, `y`) `w` wide, in two halves either side of a mark:
 /// their lines, its text and both halves' sliders at the value.
-pub fn two_way_slider_draw(c: &mut Cpu, this: u32, x: u32, y: u32, w: u32) {
-    abi::frame(c, 88, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[x, y, w]);
-        r.0[6] = this;
-        if c.m.r32(this + 44) != 0 {
-            r.enter_leaving(c, 0x8001_fa78, 0x8001_f748, |c| calibrate(c, this));
-        }
-        let half = ((w as i32) >> 1) as u32;
-        r.0[2] = half;
-        let m = &mut c.m;
-        m.w16(this + 32, x as u16);
-        m.w16(this + 34, y as u16);
-        let sel = lh(m, this + 8);
-        let line = r.call_leaving(c, CALC_FADE_VAL_SEL, &[0x0055_1E00, 0x00C8_3C1E, sel], 0x8001_f76c);
-        r.0[0] = line;
-        let sel = lh(&mut c.m, this + 8);
-        let mark = r.call_leaving(c, CALC_FADE_VAL_SEL, &[0x0055_1E00, 0xBEBE, sel], 0x8001_f784);
-        r.0[4] = mark;
-        let sel = lh(&mut c.m, this + 8);
-        let color = r.call_leaving(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, sel, 0], 0x8001_f798);
-        let len = half.wrapping_sub(4);
-        r.0[1] = len;
-        r.0[3] = 1;
-        r.0[5] = color;
-        for (dx, dy, ra) in [(0, 0, 0x8001_f7bc), (8, 0, 0x8001_f7dc), (0, 8, 0x8001_f7f8), (9, 8, 0x8001_f81c)] {
-            let m = &mut c.m;
-            let (px, py) = (lh(m, this + 32), lh(m, this + 34));
-            let px = if dx != 0 { px.wrapping_add(len).wrapping_add(dx) } else { px };
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[line, px, py.wrapping_add(dy), len, 1], ra);
-        }
-        let m = &mut c.m;
-        let (px, py) = (lh(m, this + 32), lh(m, this + 34));
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[mark, px.wrapping_add(len).wrapping_add(3), py, 2, 9], 0x8001_f840);
-        let text = c.m.r32(this + 4);
-        let sw = half.wrapping_sub(8);
-        r.0[2] = sw;
-        let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8001_f84c);
-        let m = &mut c.m;
-        let (tx, ty) = (sx((m.r16(this + 32) as u32).wrapping_add(4)), sx((m.r16(this + 34) as u32).wrapping_add(10)));
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, tx, ty, color, 0, 0], 0x8001_f880);
-        let (v, min, max) = slider_value(c, &r, this, 0x8001_f8a4);
-        let sw = sx(sw);
-        r.0[2] = sw;
-        r.0[0] = 4;
-        let m = &mut c.m;
-        let (sx_, sy) = (sx((m.r16(this + 32) as u32).wrapping_add(1)), sx((m.r16(this + 34) as u32).wrapping_add(2)));
-        let (h, sel) = (lh(m, this + 38), lh(m, this + 8));
-        r.call_ptr_leaving(c, DRAW_SLIDER, &[v, min, max, sx_, sy, sw, h, 4, 4, 1, 0, sel, 0], 0x8001_f910);
-        let (v, min, max) = slider_value(c, &r, this, 0x8001_f934);
-        let m = &mut c.m;
-        let sx_ = sx((m.r16(this + 32) as u32).wrapping_add(len).wrapping_add(10));
-        let sy = sx((m.r16(this + 34) as u32).wrapping_add(2));
-        let (h, sel) = (lh(m, this + 38), lh(m, this + 8));
-        r.call_ptr_leaving(c, DRAW_SLIDER, &[v, min, max, sx_, sy, sw, h, 4, 4, 0, 0, sel, 0], 0x8001_f998);
-    })
+pub fn two_way_slider_draw(c: &mut Cpu, this: InsideBoxTwoWaySlider, x: u32, y: u32, w: u32) {
+    if this.active(&mut c.m) != 0 {
+        calibrate(c, this);
+    }
+    let slider = this.base();
+    let half = ((w as i32) >> 1) as u32;
+    slider.set_x(&mut c.m, x as i16);
+    slider.set_y(&mut c.m, y as i16);
+    let sel = |c: &mut Cpu| this.sel_fade(&mut c.m) as i32 as u32;
+    let s = sel(c);
+    let line = call(c, CALC_FADE_VAL_SEL, &[LINE_DIM, LINE_LIT, s]);
+    let s = sel(c);
+    let mark = call(c, CALC_FADE_VAL_SEL, &[LINE_DIM, MARK_LIT, s]);
+    let s = sel(c);
+    let colour = call(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, s, 0]);
+    let len = half.wrapping_sub(4);
+    // the halves' lines, above and below
+    for (dx, dy) in [(0, 0), (8, 0), (0, 8), (9, 8)] {
+        let (px, py) = (slider.x(&mut c.m) as i32 as u32, slider.y(&mut c.m) as i32 as u32);
+        let px = if dx != 0 { px.wrapping_add(len).wrapping_add(dx) } else { px };
+        call_addr(c, DRAW_SQUARE, &[line, px, py.wrapping_add(dy), len, 1]);
+    }
+    let (px, py) = (slider.x(&mut c.m) as i32 as u32, slider.y(&mut c.m) as i32 as u32);
+    call_addr(c, DRAW_SQUARE, &[mark, px.wrapping_add(len).wrapping_add(3), py, 2, 9]);
+    let text = this.text_description(&mut c.m);
+    let word = call(c, TEXT_WORD, &[text]);
+    let (tx, ty) = slider_at(&mut c.m, slider, 4, 10);
+    call(c, fetextrender::full_text_rgb_entry, &[word, tx, ty, colour, 0, 0]);
+    // the left half's slider (reversed), the right half's
+    let w = sx(half.wrapping_sub(8));
+    let (v, min, max) = slider_value(c, slider);
+    let m = &mut c.m;
+    let (sx_, sy) = slider_at(m, slider, 1, 2);
+    let (h, s) = (slider.height(m) as i32 as u32, slider.sel_fade(m) as i32 as u32);
+    call_addr(c, DRAW_SLIDER, &[v, min, max, sx_, sy, w, h, 4, 4, 1, 0, s, 0]);
+    let (v, min, max) = slider_value(c, slider);
+    let m = &mut c.m;
+    let (sx_, sy) = slider_at(m, slider, len.wrapping_add(10), 2);
+    let (h, s) = (slider.height(m) as i32 as u32, slider.sel_fade(m) as i32 as u32);
+    call_addr(c, DRAW_SLIDER, &[v, min, max, sx_, sy, w, h, 4, 4, 0, 0, s, 0]);
 }
 
 pub fn abi_two_way_slider_draw(c: &mut Cpu) {
-    two_way_slider_draw(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    two_way_slider_draw(c, InsideBoxTwoWaySlider(c.r[4]), c.r[5], c.r[6], c.r[7]);
+}
+
+/// A pad's state (32 bytes each from `PAD_INFO`): its kind (+5), the NeGcon's twist and
+/// buttons (+8, +9, +10), the left and right sticks' axes (+8, +10).
+fn pad_info(pad: u32) -> u32 {
+    PAD_INFO.wrapping_add(pad << 5)
 }
 
 /// How far from the middle (128) a byte of the pad's state is.
@@ -2126,15 +1864,11 @@ fn from_middle(v: u32) -> u32 {
     v.abs_diff(128)
 }
 
-/// The furthest from the middle of pad `pad`'s two axes at +`at` and +`at + 1` (its state, 32
-/// bytes a pad).
+/// The furthest from the middle of pad `pad`'s two axes at +`at` and +`at + 1`.
 fn stick_range(m: &mut Mem, pad: u32, at: u32) -> u32 {
-    let p = PAD_INFO.wrapping_add(pad << 5);
-    let x = m.r8(p + at) as i32;
-    let y = m.r8(p + at + 1) as i32;
-    let a = if 128 - x > 0 { 128 - x } else { x - 128 };
-    let b = if 128 - y > 0 { 128 - y } else { y - 128 };
-    b.max(a) as u32
+    let p = pad_info(pad);
+    let (x, y) = (m.r8(p + at) as u32, m.r8(p + at + 1) as u32);
+    from_middle(y).max(from_middle(x))
 }
 
 /// `GetCurrentStickRange` (FEMENUOPTIONS.CPP, 0x8001f9c0): how far pad `pad`'s left stick is
@@ -2148,288 +1882,265 @@ pub fn abi_get_current_stick_range2(c: &mut Cpu) {
     c.r[2] = stick_range(&mut c.m, c.r[4], 10);
 }
 
+/// The front end's calibration, a byte a pad from each place: the NeGcon's twist each way, its
+/// two buttons' ranges; the left stick's range each way, the right's.
+const TWIST_MAX: u32 = 841;
+const TWIST_MIN: u32 = 843;
+const NEGCON_I: u32 = 845;
+const NEGCON_II: u32 = 847;
+const LEFT_STICK_MAX: u32 = 849;
+const LEFT_STICK_MIN: u32 = 851;
+const RIGHT_STICK_MAX: u32 = 853;
+const RIGHT_STICK_MIN: u32 = 855;
+/// How far apart a range's two ends are kept.
+const CALIBRATION_GAP: i32 = 10;
+
 /// `tInsideBoxTwoWaySlider::Calibrate` (FEMENUOPTIONS.CPP, 0x8001fa78): the help text for it;
-/// the front end player's pad measured into the front end's calibration (per pad: +841 and
-/// +843 the NeGcon's twist each way, +845 and +847 its buttons; +849..+855 the sticks'
-/// ranges each way), each kept 10 from the other way's.
-pub fn calibrate(c: &mut Cpu, this: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let m = &mut c.m;
-        let arg = m.r32(CALIBRATE_HELP_ARG);
-        let app = m.r32(FE_APP);
-        let pad = m.r8(app + 557) as u32;
-        let info = PAD_INFO.wrapping_add(pad << 5);
-        r.0[1] = info;
-        r.0[2] = pad;
-        let help = r.call_leaving(c, CALIBRATE_HELP, &[arg], 0x8001_fab8);
-        let m = &mut c.m;
-        m.w32(BOX_HELP_TEXT, help);
-        let cal = pad.wrapping_add(FRONT_END);
-        let kind = m.r8(info + 5) as u32;
-        let analog = kind == PAD_ANALOG || kind == PAD_DUAL_SHOCK;
-        match lh(m, this + 40) as i32 {
-            0 => {
-                if kind == PAD_NEGCON {
-                    let v = from_middle(m.r8(info + 8) as u32) as i32;
-                    let floor = m.r8(cal + 843) as i32 + 10;
-                    m.w8(cal + 841, v.max(floor) as u8);
-                } else if analog {
-                    let v = r.enter(c, 0x8001_f9c0, 0x8001_fb78, |c| stick_range(&mut c.m, pad, 8)) & 0xFF;
-                    let m = &mut c.m;
-                    let floor = m.r8(cal + 851) as i32 + 10;
-                    m.w8(cal + 849, (v as i32).max(floor) as u8);
-                }
-            }
-            1 => {
-                if kind == PAD_NEGCON {
-                    let v = from_middle(m.r8(info + 8) as u32) as i32;
-                    let ceil = m.r8(cal + 841) as i32 - 10;
-                    m.w8(cal + 843, v.min(ceil).max(0) as u8);
-                } else if analog {
-                    let v = r.enter(c, 0x8001_f9c0, 0x8001_fc2c, |c| stick_range(&mut c.m, pad, 8)) & 0xFF;
-                    let m = &mut c.m;
-                    let ceil = m.r8(cal + 849) as i32 - 10;
-                    m.w8(cal + 851, (v as i32).min(ceil).max(0) as u8);
-                }
-            }
-            2 => {
-                if kind == PAD_NEGCON {
-                    let v = m.r8(info + 9);
-                    m.w8(cal + 845, v);
-                } else if analog {
-                    let v = r.enter(c, 0x8001_fa1c, 0x8001_fcb8, |c| stick_range(&mut c.m, pad, 10)) & 0xFF;
-                    let m = &mut c.m;
-                    let floor = m.r8(cal + 855) as i32 + 10;
-                    m.w8(cal + 853, (v as i32).max(floor) as u8);
-                }
-            }
-            3 => {
-                if kind == PAD_NEGCON {
-                    let v = m.r8(info + 10).max(10);
-                    m.w8(cal + 847, v);
-                } else if analog {
-                    let v = r.enter(c, 0x8001_fa1c, 0x8001_fd48, |c| stick_range(&mut c.m, pad, 10)) & 0xFF;
-                    let m = &mut c.m;
-                    let ceil = m.r8(cal + 853) as i32 - 10;
-                    m.w8(cal + 855, (v as i32).min(ceil).max(0) as u8);
-                }
-            }
-            _ => {}
+/// the front end input player's pad measured into the front end's calibration, each end kept
+/// 10 from the other.
+pub fn calibrate(c: &mut Cpu, this: InsideBoxTwoWaySlider) {
+    let m = &mut c.m;
+    let arg = m.r32(CALIBRATE_HELP_ARG);
+    let pad = FEApplication(m.r32(FE_APP)).input_player(m) as u8 as u32;
+    let info = pad_info(pad);
+    let help = call(c, CALIBRATE_HELP, &[arg]);
+    let m = &mut c.m;
+    m.w32(BOX_HELP_TEXT, help);
+    let cal = pad.wrapping_add(FRONT_END);
+    let kind = m.r8(info + 5) as u32;
+    let analog = kind == PAD_ANALOG || kind == PAD_DUAL_SHOCK;
+    let at_least = |m: &mut Mem, at: u32, v: i32, other: u32| {
+        let floor = m.r8(cal + other) as i32 + CALIBRATION_GAP;
+        m.w8(cal + at, v.max(floor) as u8);
+    };
+    let at_most = |m: &mut Mem, at: u32, v: i32, other: u32| {
+        let ceil = m.r8(cal + other) as i32 - CALIBRATION_GAP;
+        m.w8(cal + at, v.min(ceil).max(0) as u8);
+    };
+    match this.type_(m) {
+        0 if kind == PAD_NEGCON => {
+            let v = from_middle(m.r8(info + 8) as u32) as i32;
+            at_least(m, TWIST_MAX, v, TWIST_MIN);
         }
-    })
+        0 if analog => {
+            let v = stick_range(m, pad, 8) as i32;
+            at_least(m, LEFT_STICK_MAX, v, LEFT_STICK_MIN);
+        }
+        1 if kind == PAD_NEGCON => {
+            let v = from_middle(m.r8(info + 8) as u32) as i32;
+            at_most(m, TWIST_MIN, v, TWIST_MAX);
+        }
+        1 if analog => {
+            let v = stick_range(m, pad, 8) as i32;
+            at_most(m, LEFT_STICK_MIN, v, LEFT_STICK_MAX);
+        }
+        2 if kind == PAD_NEGCON => {
+            let v = m.r8(info + 9);
+            m.w8(cal + NEGCON_I, v);
+        }
+        2 if analog => {
+            let v = stick_range(m, pad, 10) as i32;
+            at_least(m, RIGHT_STICK_MAX, v, RIGHT_STICK_MIN);
+        }
+        3 if kind == PAD_NEGCON => {
+            let v = m.r8(info + 10).max(10);
+            m.w8(cal + NEGCON_II, v);
+        }
+        3 if analog => {
+            let v = stick_range(m, pad, 10) as i32;
+            at_most(m, RIGHT_STICK_MIN, v, RIGHT_STICK_MAX);
+        }
+        _ => {}
+    }
 }
 
 pub fn abi_calibrate(c: &mut Cpu) {
-    calibrate(c, c.r[4]);
+    calibrate(c, InsideBoxTwoWaySlider(c.r[4]));
 }
 
-// tUserNameMenuItem: +28 the name being typed, +32 its longest, +34 the grid's column (0..5),
-// +36 its row, from +38 the rows (9 bytes each: their letters; '!' and '@' end the name, '#'
-// and '$' delete a letter, '&' and '^' a space, '-' an empty cell), +128 the player, +130 the
-// fade (+132 its step, +136 whether it fades). The grid has `gNameRows` rows, drawn from
-// `gNameGridTop`.
+// ---- tUserNameMenuItem: the name typed with a grid of letters (6 columns; `gNameRows` rows
+// of 9 bytes: '!' and '@' end the name, '#' and '$' delete a letter, '&' and '^' add a space,
+// '-' is an empty cell).
 
-/// The grid's cell (`row`, `col`): its letter's place in the item.
+const COLUMNS: i16 = 6;
+const EMPTY_CELL: u8 = b'-';
+
+/// The grid's cell (`row`, `col`): its letter's place in the item (its rows from +0x26).
 fn cell(this: u32, row: u32, col: u32) -> u32 {
-    this.wrapping_add(col).wrapping_add(row.wrapping_mul(9)).wrapping_add(38)
+    this.wrapping_add(col).wrapping_add(row.wrapping_mul(9)).wrapping_add(0x26)
 }
 
 /// The current cell's letter.
-fn current_letter(m: &mut Mem, this: u32) -> u8 {
-    let (row, col) = (lh(m, this + 36), lh(m, this + 34));
-    m.r8(cell(this, row, col))
+fn current_letter(m: &mut Mem, this: UserNameMenuItem) -> u8 {
+    let (row, col) = (this.current_row(m) as i32 as u32, this.current_column(m) as i32 as u32);
+    m.r8(cell(this.0, row, col))
+}
+
+/// The cursor one column left or right, round.
+fn column_left(m: &mut Mem, this: UserNameMenuItem) {
+    let col = this.current_column(m).wrapping_sub(1);
+    this.set_current_column(m, if col < 0 { COLUMNS - 1 } else { col });
+}
+
+fn column_right(m: &mut Mem, this: UserNameMenuItem) {
+    let col = this.current_column(m).wrapping_add(1);
+    this.set_current_column(m, if col >= COLUMNS { 0 } else { col });
 }
 
 /// `tUserNameMenuItem::tUserNameMenuItem` (FEMENUOPTIONS.CPP, 0x8001fd98): the grid at its
 /// top left, its rows empty, no name.
-pub fn user_name(c: &mut Cpu, this: u32, text: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.enter(c, 0x8002_4754, 0x8001_fdac, |c| femenu::menu_item(&mut c.m, crate::types::MenuItem(this), text));
-        let m = &mut c.m;
-        m.w32(this + ITEM_VPTR, USER_NAME_VT);
-        m.w16(this + 36, 0);
-        m.w16(this + 34, 0);
-        for row in 0..10 {
-            m.w8(cell(this, row, 0), 0);
-        }
-        m.w32(this + 28, 0);
-        this
-    })
+pub fn user_name(c: &mut Cpu, this: UserNameMenuItem, text: u32) -> u32 {
+    femenu::menu_item(&mut c.m, this.base(), text);
+    let m = &mut c.m;
+    this.set_vtable(m, USER_NAME_VT);
+    this.set_current_row(m, 0);
+    this.set_current_column(m, 0);
+    for row in 0..10 {
+        m.w8(cell(this.0, row, 0), 0);
+    }
+    this.set_data(m, 0);
+    this.0
 }
 
 pub fn abi_user_name(c: &mut Cpu) {
-    c.r[2] = user_name(c, c.r[4], c.r[5]);
+    c.r[2] = user_name(c, UserNameMenuItem(c.r[4]), c.r[5]);
 }
 
 /// `CheckForCheats` (FEMENUOPTIONS.CPP, 0x8001fe0c): `name` (padded with zeros to 8) entered
 /// as a cheat or a bonus code; whether it was one.
 pub fn check_for_cheats(c: &mut Cpu, name: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = name;
-        let len = r.call_leaving(c, STRLEN, &[name], 0x8001_fe24) as i32;
-        for k in len.max(0)..8 {
-            c.m.w8(name.wrapping_add(k as u32), 0);
-        }
-        r.0[1] = 0;
-        if r.call_leaving(c, ACTIVATE_CHEAT, &[name], 0x8001_fe58) != 0 {
-            return 1;
-        }
-        (r.call_leaving(c, ACTIVATE_BONUS, &[name], 0x8001_fe68) != 0) as u32
-    })
+    let len = call(c, STRLEN, &[name]) as i32;
+    for k in len.max(0)..8 {
+        c.m.w8(name.wrapping_add(k as u32), 0);
+    }
+    if call(c, ACTIVATE_CHEAT, &[name]) != 0 {
+        return 1;
+    }
+    (call(c, ACTIVATE_BONUS, &[name]) != 0) as u32
 }
 
 pub fn abi_check_for_cheats(c: &mut Cpu) {
     c.r[2] = check_for_cheats(c, c.r[4]);
 }
 
+/// The menu flag that ends the name with start (else back).
+const MENU_NAME_ENDS_WITH_START: u32 = 0x100;
+/// The user name's sounds: a letter typed or deleted, refused or done.
+const SOUND_LETTER: u32 = 21;
+const SOUND_REFUSED: u32 = 1;
+
 /// `tUserNameMenuItem::ProcessInput` (FEMENUOPTIONS.CPP, 0x8001fe8c): up and down change rows
 /// (round), left and right columns (round; right past empty cells), with sounds; accept types
 /// the letter (up to the longest), deletes one, adds a space or ends the name (a cheat, or
-/// start or back by the menu's flag 0x100); the cursor kept off empty cells; the name's case
-/// set as the records have it.
-pub fn user_name_process_input(c: &mut Cpu, this: u32, key: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[1] = key;
-        let k = c.m.r32(key);
-        let mut used = true;
-        match k {
-            femenu::KEY_UP | femenu::KEY_DOWN => {
-                let m = &mut c.m;
-                let rows = m.r16(NAME_ROWS);
-                let sfx = if k == femenu::KEY_UP {
-                    let row = m.r16(this + 36).wrapping_sub(1);
-                    m.w16(this + 36, row);
-                    if (row as i16) < 0 {
-                        m.w16(this + 36, rows.wrapping_sub(1));
-                    }
-                    3
-                } else {
-                    let row = m.r16(this + 36).wrapping_add(1);
-                    m.w16(this + 36, row);
-                    if row as i16 >= rows as i16 {
-                        m.w16(this + 36, 0);
-                    }
-                    4
-                };
-                r.call_leaving(c, femenu::PLAY_FE_SFX, &[sfx], 0x8001_ff60);
-                if (c.m.r16(this + 34) as i16) < 0 {
-                    c.m.w16(this + 34, 0);
-                }
+/// start or back by the menu's flag); the cursor kept off empty cells; the name's case set as
+/// the records have it.
+pub fn user_name_process_input(c: &mut Cpu, this: UserNameMenuItem, key: u32) {
+    let k = c.m.r32(key);
+    let mut used = true;
+    match k {
+        KEY_UP | KEY_DOWN => {
+            let m = &mut c.m;
+            let rows = m.r16(NAME_ROWS) as i16;
+            let row = this.current_row(m);
+            let sound = if k == KEY_UP {
+                this.set_current_row(m, if row.wrapping_sub(1) < 0 { rows.wrapping_sub(1) } else { row.wrapping_sub(1) });
+                3
+            } else {
+                this.set_current_row(m, if row.wrapping_add(1) >= rows { 0 } else { row.wrapping_add(1) });
+                4
+            };
+            call(c, femenu::PLAY_FE_SFX, &[sound]);
+            if this.current_column(&mut c.m) < 0 {
+                this.set_current_column(&mut c.m, 0);
             }
-            femenu::KEY_LEFT => {
-                let m = &mut c.m;
-                let col = m.r16(this + 34).wrapping_sub(1);
-                m.w16(this + 34, col);
-                if (col as i16) < 0 {
-                    m.w16(this + 34, 5);
-                }
-                r.call_leaving(c, femenu::PLAY_FE_SFX, &[3], 0x8002_01b8);
+        }
+        femenu::KEY_LEFT => {
+            column_left(&mut c.m, this);
+            call(c, femenu::PLAY_FE_SFX, &[3]);
+        }
+        femenu::KEY_RIGHT => {
+            column_right(&mut c.m, this);
+            call(c, femenu::PLAY_FE_SFX, &[4]);
+            let m = &mut c.m;
+            m.w32(key, KEY_NONE);
+            while current_letter(m, this) == EMPTY_CELL {
+                column_right(m, this);
             }
-            femenu::KEY_RIGHT => {
+            let name = this.data(m);
+            call(c, CASE_FOR_RECORDS, &[name]);
+            return;
+        }
+        femenu::KEY_ACCEPT => {
+            let name = this.data(&mut c.m);
+            let len = sx(call(c, STRLEN, &[name]));
+            let m = &mut c.m;
+            let letter = current_letter(m, this);
+            let room = (len as i32) < this.max_string_length(m) as i32;
+            // a letter or a space typed at the end of the name
+            let type_at_end = |c: &mut Cpu, ch: u8| {
                 let m = &mut c.m;
-                let col = m.r16(this + 34).wrapping_add(1);
-                m.w16(this + 34, col);
-                if col as i16 >= 6 {
-                    m.w16(this + 34, 0);
-                }
-                r.call_leaving(c, femenu::PLAY_FE_SFX, &[4], 0x8001_ffd0);
-                let m = &mut c.m;
-                m.w32(key, femenu::KEY_NONE);
-                // past the empty cells to the right
-                while current_letter(m, this) == b'-' {
-                    let col = m.r16(this + 34).wrapping_add(1);
-                    m.w16(this + 34, col);
-                    if col as i16 >= 6 {
-                        m.w16(this + 34, 0);
+                let name = this.data(m);
+                m.w8(name.wrapping_add(len), ch);
+                let name = this.data(m);
+                m.w8(len.wrapping_add(name).wrapping_add(1), 0);
+                call(c, femenu::PLAY_FE_SFX, &[SOUND_LETTER]);
+            };
+            match letter {
+                b'#' | b'$' => {
+                    if (len as i32) > 0 {
+                        let name = this.data(m);
+                        m.w8(len.wrapping_add(name).wrapping_sub(1), 0);
+                        call(c, femenu::PLAY_FE_SFX, &[SOUND_LETTER]);
                     }
                 }
-                let name = m.r32(this + 28);
-                r.call_leaving(c, CASE_FOR_RECORDS, &[name], 0x8002_0238);
-                return;
-            }
-            femenu::KEY_ACCEPT => {
-                let name = c.m.r32(this + 28);
-                let len = r.call_leaving(c, STRLEN, &[name], 0x8002_005c);
-                let m = &mut c.m;
-                let letter = current_letter(m, this);
-                let len16 = sx(len);
-                match letter {
-                    b'#' | b'$' => {
-                        if (len16 as i32) > 0 {
-                            let name = m.r32(this + 28);
-                            m.w8(len16.wrapping_add(name).wrapping_sub(1), 0);
-                            r.call_leaving(c, femenu::PLAY_FE_SFX, &[21], 0x8002_01b8);
-                        }
+                b'!' | b'@' => {
+                    used = false;
+                    let name = this.data(m);
+                    if check_for_cheats(c, name) != 0 {
+                        let name = this.data(&mut c.m);
+                        c.m.w8(name, 0);
+                    } else {
+                        let m = &mut c.m;
+                        let menu = FEApplication(m.r32(FE_APP)).current_menu(m, 0);
+                        let k = if menu.flags(m) & MENU_NAME_ENDS_WITH_START != 0 { KEY_START } else { femenu::KEY_BACK };
+                        m.w32(key, k);
+                        call(c, femenu::PLAY_FE_SFX, &[SOUND_REFUSED]);
                     }
-                    b'!' | b'@' => {
+                }
+                b'&' | b'^' => {
+                    used = false;
+                    if room {
+                        type_at_end(c, b' ');
+                    } else {
+                        call(c, femenu::PLAY_FE_SFX, &[SOUND_REFUSED]);
+                    }
+                }
+                _ => {
+                    if room {
+                        type_at_end(c, letter);
+                    } else {
                         used = false;
-                        let name = m.r32(this + 28);
-                        if r.enter(c, 0x8001_fe0c, 0x8002_00d0, |c| check_for_cheats(c, name)) != 0 {
-                            let name = c.m.r32(this + 28);
-                            c.m.w8(name, 0);
-                        } else {
-                            let m = &mut c.m;
-                            let app = m.r32(FE_APP);
-                            let menu = m.r32(app + 4);
-                            let k = if m.r32(menu) & 0x100 != 0 { femenu::KEY_START } else { femenu::KEY_BACK };
-                            m.w32(key, k);
-                            r.call_leaving(c, femenu::PLAY_FE_SFX, &[1], 0x8002_0188);
-                        }
-                    }
-                    b'&' | b'^' => {
-                        used = false;
-                        if (len16 as i32) < lh(m, this + 32) as i32 {
-                            let name = m.r32(this + 28);
-                            m.w8(name.wrapping_add(len16), b' ');
-                            let name = m.r32(this + 28);
-                            m.w8(len16.wrapping_add(name).wrapping_add(1), 0);
-                            r.call_leaving(c, femenu::PLAY_FE_SFX, &[21], 0x8002_0160);
-                        } else {
-                            r.call_leaving(c, femenu::PLAY_FE_SFX, &[1], 0x8002_0188);
-                        }
-                    }
-                    _ => {
-                        if (len16 as i32) < lh(m, this + 32) as i32 {
-                            let name = m.r32(this + 28);
-                            m.w8(name.wrapping_add(len16), letter);
-                            let name = m.r32(this + 28);
-                            m.w8(len16.wrapping_add(name).wrapping_add(1), 0);
-                            r.call_leaving(c, femenu::PLAY_FE_SFX, &[21], 0x8002_01b8);
-                        } else {
-                            used = false;
-                            r.call_leaving(c, femenu::PLAY_FE_SFX, &[1], 0x8002_0188);
-                        }
+                        call(c, femenu::PLAY_FE_SFX, &[SOUND_REFUSED]);
                     }
                 }
             }
-            _ => used = false,
         }
-        let m = &mut c.m;
-        if used {
-            m.w32(key, femenu::KEY_NONE);
-        }
-        // off the empty cells to the left
-        while current_letter(m, this) == b'-' {
-            let col = m.r16(this + 34).wrapping_sub(1);
-            m.w16(this + 34, col);
-            if (col as i16) < 0 {
-                m.w16(this + 34, 5);
-            }
-        }
-        let name = m.r32(this + 28);
-        r.call_leaving(c, CASE_FOR_RECORDS, &[name], 0x8002_0238);
-    })
+        _ => used = false,
+    }
+    let m = &mut c.m;
+    if used {
+        m.w32(key, KEY_NONE);
+    }
+    // off the empty cells, to the left
+    while current_letter(m, this) == EMPTY_CELL {
+        column_left(m, this);
+    }
+    let name = this.data(m);
+    call(c, CASE_FOR_RECORDS, &[name]);
 }
 
 pub fn abi_user_name_process_input(c: &mut Cpu) {
-    user_name_process_input(c, c.r[4], c.r[6]);
+    user_name_process_input(c, UserNameMenuItem(c.r[4]), c.r[6]);
 }
 
 /// `SpecialCharacter` (FEMENUOPTIONS.CPP, 0x8002024c): the shape of an accented letter (225..252,
@@ -2450,339 +2161,265 @@ pub fn abi_special_character(c: &mut Cpu) {
     c.r[2] = special_character(&mut c.m, c.r[4]);
 }
 
+/// The user name's cursor's shape for a grid letter: the end key, delete, space, a letter or a
+/// digit, an accented letter.
+fn cursor_shape(m: &mut Mem, letter: u8) -> u32 {
+    match letter {
+        b'!' | b'@' => 78,
+        b'#' | b'$' => 79,
+        b'&' | b'^' => 80,
+        b'a'..=b'z' => letter as u32 - 55,
+        b'0'..=b'9' => letter as u32 + 20,
+        _ => special_character(m, letter as u32),
+    }
+}
+
+/// The name bar's shape (33), under the name.
+const NAME_BAR: u32 = 33;
+
 /// `tUserNameMenuItem::Draw(bool)` (FEMENUOPTIONS.CPP, 0x800202dc): unless faded out, its text,
 /// the name typed so far a letter at a time (the longest name's cells right-aligned from its
 /// text's place, 20 apart), lines under the cells left, the cursor's letter (in the pulsing
 /// yellow) on the grid; the two bars at its place.
-pub fn user_name_draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 136, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        let text = c.m.r32(this + 4);
-        let tx = r.call_leaving(c, WORD_X, &[text], 0x8002_0318);
-        c.m.w32(sp + 88, tx);
-        let text = c.m.r32(this + 4);
-        let ty = r.call_leaving(c, WORD_Y, &[text], 0x8002_0324);
-        r.0[8] = ty;
-        let shapes = c.m.r32(SHAPES).wrapping_add(960);
-        r.0[6] = shapes;
-        if c.m.r16(this + 130) != 128 {
-            c.m.w8(sp + 33, 0);
-            let fade = lh(&mut c.m, this + 130);
-            let color = r.call_leaving(c, CALC_FADE_VAL, &[0xBEBE, fade], 0x8002_0354);
-            r.0[3] = color;
-            let fade = lh(&mut c.m, this + 130);
-            let line = r.call_leaving(c, CALC_FADE_VAL, &[0xBEBE, fade], 0x8002_0364);
-            r.0[7] = line;
-            c.m.w32(sp + 44, line);
-            let text = c.m.r32(this + 4);
-            r.0[0] = 0;
-            let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8002_0378);
-            r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), color, 0, 0], 0x8002_03a0);
-            let name = c.m.r32(this + 28);
-            let len = r.call_leaving(c, STRLEN, &[name], 0x8002_03ac);
-            let m = &mut c.m;
-            m.w16(sp + 92, len as u16);
-            let longest = lh(m, this + 32);
-            let left = tx.wrapping_add(78).wrapping_sub(longest.wrapping_mul(10));
-            r.0[1] = left;
-            let n = sx(len);
-            if (n as i32) > 0 {
-                let ly = (ty.wrapping_add(17)) << 16;
-                r.0[5] = ly;
-                r.0[4] = n;
-                let mut k = 0u32;
-                loop {
-                    r.0[0] = k;
-                    let m = &mut c.m;
-                    let i = sx(k);
-                    let lx = sx(left.wrapping_add(i.wrapping_mul(20)));
-                    let name = m.r32(this + 28);
-                    let ch = m.r8(name.wrapping_add(i));
-                    m.w8(sp + 32, ch);
-                    r.call_leaving(c, fetextrender::full_text_rgb_entry, &[sp + 32, lx, ((ly as i32) >> 16) as u32, color, 1, 0], 0x8002_0430);
-                    k = k.wrapping_add(1);
-                    if (sx(k) as i32) >= n as i32 {
-                        break;
-                    }
-                }
-            }
-            let mut k = c.m.r16(sp + 92) as u32;
-            r.0[0] = k;
-            if (sx(k) as i32) < lh(&mut c.m, this + 32) as i32 {
-                let left = sx(left);
-                r.0[1] = left;
-                loop {
-                    let lx = left.wrapping_add(sx(k).wrapping_mul(20));
-                    r.call_ptr_leaving(c, DRAW_SQUARE, &[line, lx, ty.wrapping_add(25), 17, 1], 0x8002_049c);
-                    k = k.wrapping_add(1);
-                    r.0[0] = k;
-                    if (sx(k) as i32) >= lh(&mut c.m, this + 32) as i32 {
-                        break;
-                    }
-                }
-            }
-            // the cursor
-            let m = &mut c.m;
-            let (col, row) = (lh(m, this + 34), lh(m, this + 36));
-            let cx = col.wrapping_mul(28);
-            r.0[1] = cx.wrapping_add(258);
-            let cy = lh(m, NAME_GRID_TOP).wrapping_add(row.wrapping_mul(15));
-            r.0[0] = cy;
-            if m.r16(this + 130) == 0 {
-                let yellow = m.r32(PULSATE_YELLOW);
-                m.w32(sp + 68, yellow);
-                let letter = current_letter(m, this) as u32;
-                let shape = match letter as u8 {
-                    b'!' | b'@' => 78,
-                    b'#' | b'$' => 79,
-                    b'&' | b'^' => 80,
-                    b'a'..=b'z' => letter - 55,
-                    b'0'..=b'9' => letter + 20,
-                    _ => r.enter(c, 0x8002_024c, 0x8002_05cc, |c| special_character(&mut c.m, letter)),
-                };
-                r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[shape, 16, cx.wrapping_add(253), cy.wrapping_sub(3), 0, 0, sp + 64], 0x8002_05f0);
-            }
+pub fn user_name_draw(c: &mut Cpu, this: UserNameMenuItem) {
+    let text = this.text_description(&mut c.m);
+    let tx = call(c, WORD_X, &[text]);
+    let ty = call(c, WORD_Y, &[text]);
+    let bar = c.m.r32(SHAPES).wrapping_add(BAR * 32);
+    // (a one-letter string at +0; the cursor's shape options at +8)
+    with_buffer(c, 16, |c, buf| {
+        if this.fade_val(&mut c.m) == 128 {
+            return;
         }
-        // the bars under its text and the name
+        c.m.w8(buf + 1, 0);
+        let fade = this.fade_val(&mut c.m) as i32 as u32;
+        let colour = call(c, CALC_FADE_VAL, &[0xBEBE, fade]);
+        let fade = this.fade_val(&mut c.m) as i32 as u32;
+        let line = call(c, CALC_FADE_VAL, &[0xBEBE, fade]);
+        let word = call(c, TEXT_WORD, &[text]);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), colour, 0, 0]);
+        let name = this.data(&mut c.m);
+        let len = sx(call(c, STRLEN, &[name]));
+        let longest = this.max_string_length(&mut c.m) as i32;
+        let left = tx.wrapping_add(78).wrapping_sub((longest as u32).wrapping_mul(10));
+        // the letters typed
+        for k in 0..(len as i32).max(0) as u32 {
+            let m = &mut c.m;
+            let name = this.data(m);
+            let ch = m.r8(name.wrapping_add(k));
+            m.w8(buf, ch);
+            call(c, fetextrender::full_text_rgb_entry, &[buf, sx(left.wrapping_add(k.wrapping_mul(20))), sx(ty.wrapping_add(17)), colour, 1, 0]);
+        }
+        // lines under the cells left
+        let mut k = len as u16 as u32;
+        while (sx(k) as i32) < this.max_string_length(&mut c.m) as i32 {
+            call_addr(c, DRAW_SQUARE, &[line, sx(left).wrapping_add(sx(k).wrapping_mul(20)), ty.wrapping_add(25), 17, 1]);
+            k = k.wrapping_add(1);
+        }
+        // the cursor, once faded in
         let m = &mut c.m;
-        let tx = m.r32(sp + 88);
-        let y1 = ty.wrapping_sub(3);
-        let end = tx.wrapping_add(156);
-        r.0[0] = y1;
-        r.0[1] = end;
-        let (w, fade) = (lh(m, shapes + 16), lh(m, this + 130));
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[30, 8, end.wrapping_sub(w), y1, fade, 0, 0], 0x8002_0624);
-        let m = &mut c.m;
-        let (w, h) = (lh(m, shapes + 16), lh(m, shapes + 18));
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, tx, y1, 156u32.wrapping_sub(w), h], 0x8002_0648);
-        let m = &mut c.m;
-        let y2 = ty.wrapping_add(12);
-        let shapes = m.r32(SHAPES).wrapping_add(1056);
-        r.0[0] = y2;
-        r.0[6] = shapes;
-        let (w, fade) = (lh(m, shapes + 16), lh(m, this + 130));
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[33, 8, end.wrapping_sub(w), y2, fade, 0, 0], 0x8002_0680);
-        let m = &mut c.m;
-        let (w, h) = (lh(m, shapes + 16), lh(m, shapes + 18));
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, tx, y2, 156u32.wrapping_sub(w), h], 0x8002_06a4);
-    })
+        let (col, row) = (this.current_column(m) as i32 as u32, this.current_row(m) as i32 as u32);
+        let cx = col.wrapping_mul(28);
+        let cy = (m.r16(NAME_GRID_TOP) as i16 as i32 as u32).wrapping_add(row.wrapping_mul(15));
+        if this.fade_val(m) == 0 {
+            let yellow = m.r32(PULSATE_YELLOW);
+            m.w32(buf + 12, yellow);
+            let letter = current_letter(m, this);
+            let shape = cursor_shape(m, letter);
+            call(c, DRAW_SHAPE_EXTENDED, &[shape, 16, cx.wrapping_add(253), cy.wrapping_sub(3), 0, 0, buf + 8]);
+        }
+    });
+    // the bars under its text and the name
+    let m = &mut c.m;
+    let (y1, end) = (ty.wrapping_sub(3), tx.wrapping_add(156));
+    let fade = this.fade_val(m) as i32 as u32;
+    let x = end.wrapping_sub(shape_w(m, bar));
+    call(c, DRAW_SHAPE_EXTENDED, &[BAR, 8, x, y1, fade, 0, 0]);
+    let m = &mut c.m;
+    let (w, h) = (shape_w(m, bar), shape_h(m, bar));
+    call_addr(c, DRAW_SQUARE, &[0, tx, y1, 156u32.wrapping_sub(w), h]);
+    let m = &mut c.m;
+    let y2 = ty.wrapping_add(12);
+    let name_bar = m.r32(SHAPES).wrapping_add(NAME_BAR * 32);
+    let fade = this.fade_val(m) as i32 as u32;
+    let x = end.wrapping_sub(shape_w(m, name_bar));
+    call(c, DRAW_SHAPE_EXTENDED, &[NAME_BAR, 8, x, y2, fade, 0, 0]);
+    let m = &mut c.m;
+    let (w, h) = (shape_w(m, name_bar), shape_h(m, name_bar));
+    call_addr(c, DRAW_SQUARE, &[0, tx, y2, 156u32.wrapping_sub(w), h]);
 }
 
 pub fn abi_user_name_draw(c: &mut Cpu) {
-    user_name_draw(c, c.r[4]);
+    user_name_draw(c, UserNameMenuItem(c.r[4]));
 }
 
 /// `tUserNameMenuItem::TransitionOff` (FEMENUOPTIONS.CPP, 0x800206d4): fading out.
 pub fn abi_user_name_transition_off(c: &mut Cpu) {
-    c.m.w16(c.r[4] + 132, 30);
+    UserNameMenuItem(c.r[4]).set_fade_dir(&mut c.m, FADE_STEP);
+}
+
+/// The front end's language (a byte).
+const LANGUAGE: u32 = FRONT_END + 0x340;
+/// Where the application keeps each player's pending speech (-1: none).
+const PENDING_SPEECH: u32 = 888;
+
+fn is_end_key(ch: u8) -> bool {
+    matches!(ch, b'!' | b'@')
 }
 
 /// `tUserNameMenuItem::TransitionOn` (FEMENUOPTIONS.CPP, 0x800206e0): the grid's rows from
 /// texts 508.., as many as the language has; the cursor on the end key (searched row by row
-/// along each row); fading in from 128, unselected; the player's pending speech played.
-pub fn user_name_transition_on(c: &mut Cpu, this: u32) {
-    abi::frame(c, 56, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        for k in 0..10u32 {
-            r.0[2] = k;
-            r.0[0] = k;
-            let word = r.call_leaving(c, TEXT_WORD, &[GRID_TEXTS + k], 0x8002_0710);
-            r.call_leaving(c, SPRINTF, &[cell(this, k, 0), word], 0x8002_0728);
-        }
-        r.0[2] = 10;
+/// along each row, from the current column on the first); fading in from 128, unselected; the
+/// player's pending speech played.
+pub fn user_name_transition_on(c: &mut Cpu, this: UserNameMenuItem) {
+    let row_at = |row: u32| cell(this.0, row, 0);
+    for k in 0..10u32 {
+        let word = call(c, TEXT_WORD, &[GRID_TEXTS + k]);
+        call(c, SPRINTF, &[row_at(k), word]);
+    }
+    let m = &mut c.m;
+    let language = m.r8(LANGUAGE) as u32;
+    let rows = m.r16(NAME_ROWS_BY_LANGUAGE + 2 * language);
+    m.w16(NAME_ROWS, rows);
+    this.set_current_row(m, 0);
+    let mut found = is_end_key(current_letter(m, this));
+    while !found && (this.current_row(&mut c.m) as i32) < c.m.r16(NAME_ROWS) as i16 as i32 {
         let m = &mut c.m;
-        let lang = m.r8(FRONT_END + 0x340) as u32;
-        for k in 0..12 {
-            let b = m.r8(NAME_ROWS_BY_LANGUAGE + k);
-            m.w8(sp + 16 + k, b);
-        }
-        let rows = m.r16(sp + 16 + 2 * lang);
-        m.w16(NAME_ROWS, rows);
-        r.0[3] = b'!' as u32;
-        m.w16(this + 36, 0);
-        let mut found = matches!(current_letter_at(m, this, 0), b'!' | b'@');
-        r.0[2] = b'@' as u32;
-        let mut row = 0u32;
-        while !found && (row as i32) < lh(&mut c.m, NAME_ROWS) as i32 {
-            let m = &mut c.m;
-            m.w16(this + 34, 0);
-            let r9 = lh(m, this + 36).wrapping_mul(9);
-            r.0[0] = 0;
-            if !matches!(m.r8(this.wrapping_add(r9).wrapping_add(38)), b'!' | b'@') {
-                loop {
-                    let r9 = lh(&mut c.m, this + 36).wrapping_mul(9);
-                    let len = r.call_leaving(c, STRLEN, &[this.wrapping_add(r9).wrapping_add(38)], 0x8002_0808);
-                    if (r.0[0] as i32) >= len as i32 {
-                        break;
-                    }
-                    let m = &mut c.m;
-                    let col = m.r16(this + 34).wrapping_add(1);
-                    let s0 = sx(col as u32);
-                    r.0[0] = s0;
-                    let r9 = lh(m, this + 36).wrapping_mul(9);
-                    m.w16(this + 34, col);
-                    if matches!(m.r8(this.wrapping_add(s0).wrapping_add(r9).wrapping_add(38)), b'!' | b'@') {
-                        break;
-                    }
+        this.set_current_column(m, 0);
+        let row = row_at(this.current_row(m) as i32 as u32);
+        if !is_end_key(m.r8(row)) {
+            loop {
+                let row = row_at(this.current_row(&mut c.m) as i32 as u32);
+                let len = call(c, STRLEN, &[row]) as i32;
+                let m = &mut c.m;
+                if this.current_column(m) as i32 >= len {
+                    break;
+                }
+                let col = this.current_column(m).wrapping_add(1);
+                this.set_current_column(m, col);
+                if is_end_key(m.r8(row.wrapping_add(col as i32 as u32))) {
+                    break;
                 }
             }
-            let m = &mut c.m;
-            let next = m.r16(this + 36).wrapping_add(1);
-            m.w16(this + 36, next);
-            row = sx(next as u32);
-            found = matches!(current_letter(m, this), b'!' | b'@');
         }
         let m = &mut c.m;
-        let row = m.r16(this + 36);
-        m.w16(this + 130, 128);
-        m.w16(this + 132, (-30i16) as u16);
-        let player = lh(m, this + 128);
-        r.0[2] = 0x8005_0000;
-        m.w16(this + 8, 0);
-        m.w16(this + 36, row.wrapping_sub(1));
-        let app = m.r32(FE_APP);
-        let speech = m.r32(app.wrapping_add(player << 2).wrapping_add(888));
-        r.0[0] = u32::MAX;
-        if speech != u32::MAX {
-            r.call_leaving(c, PLAY_SPEECH, &[2, speech], 0x8002_08e4);
-            let m = &mut c.m;
-            let player = lh(m, this + 128);
-            let app = m.r32(FE_APP);
-            m.w32(app.wrapping_add(player << 2).wrapping_add(888), u32::MAX);
-        }
-    })
-}
-
-/// Row `row`'s letter at the current column.
-fn current_letter_at(m: &mut Mem, this: u32, row: u32) -> u8 {
-    let col = lh(m, this + 34);
-    m.r8(this.wrapping_add(col).wrapping_add(row.wrapping_mul(9)).wrapping_add(38))
+        let next = this.current_row(m).wrapping_add(1);
+        this.set_current_row(m, next);
+        found = is_end_key(current_letter(m, this));
+    }
+    let m = &mut c.m;
+    let row = this.current_row(m);
+    this.set_fade_val(m, 128);
+    this.set_fade_dir(m, -FADE_STEP);
+    let player = this.player(m) as i32 as u32;
+    this.set_sel_fade(m, 0);
+    this.set_current_row(m, row.wrapping_sub(1));
+    let pending = m.r32(FE_APP).wrapping_add(player << 2).wrapping_add(PENDING_SPEECH);
+    let speech = m.r32(pending);
+    if speech != u32::MAX {
+        call(c, PLAY_SPEECH, &[2, speech]);
+        let m = &mut c.m;
+        let player = this.player(m) as i32 as u32;
+        let pending = m.r32(FE_APP).wrapping_add(player << 2).wrapping_add(PENDING_SPEECH);
+        m.w32(pending, u32::MAX);
+    }
 }
 
 pub fn abi_user_name_transition_on(c: &mut Cpu) {
-    user_name_transition_on(c, c.r[4]);
+    user_name_transition_on(c, UserNameMenuItem(c.r[4]));
 }
 
 /// `tUserNameMenuItem::TransitionIsFinished` (FEMENUOPTIONS.CPP, 0x80020914): the fade at its
 /// end (fading in, also while the memory card is busy).
 pub fn abi_user_name_transition_is_finished(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
-    let (fade, step) = (m.r16(this + 130) as i16, m.r16(this + 132) as i16);
+    let (m, this) = (&mut c.m, UserNameMenuItem(c.r[4]));
+    let (fade, step) = (this.fade_val(m), this.fade_dir(m));
     let fading = (step < 0 && fade > 0) || (step > 0 && (fade < 128 || m.r16(CARD_BUSY) != 0));
-    m.w32(this + 136, fading as u32);
-    c.r[2] = m.r32(this + 136) ^ 1;
+    this.set_in_transition(m, fading as u32);
+    c.r[2] = this.in_transition(m) ^ 1;
 }
 
 /// `tUserNameMenuItem::UpdateTransition` (FEMENUOPTIONS.CPP, 0x80020980).
 pub fn abi_user_name_update_transition(c: &mut Cpu) {
-    fade_update_transition(c, c.r[4], USER_NAME_FADE, c.r[5], [0x8002_09dc, 0x8002_09e8]);
+    let this = UserNameMenuItem(c.r[4]);
+    // (its fade's value and step are where the other items keep theirs, from +0x82)
+    fade_update_transition(c, this.base(), Fade(this.0 + 0x82), c.r[5]);
 }
 
-// tMemoryCardMenuItem: +40 its open state (0..256: opening while enabled, closing while not).
+// ---- tMemoryCardMenuItem: a button that opens (0..256) while enabled, closes while not.
 
 /// `tMemoryCardMenuItem::Draw(bool)` (FEMENUOPTIONS.CPP, 0x800209fc): opening or closing (8 a
 /// frame); unless faded out or closed, its text fading in over the second half, and its bar
 /// growing over the first half to 150 (by the fade).
-pub fn memory_card_draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 88, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        let m = &mut c.m;
-        let open = m.r16(this + 40);
-        let closing = m.r32(this) & ITEM_DISABLED != 0;
-        m.w16(this + 40, if closing { open.wrapping_sub(8) } else { open.wrapping_add(8) });
-        let v = (m.r16(this + 40) as i16).clamp(0, 256);
-        m.w16(this + 40, v as u16);
-        let v = v as i32;
-        let late = (v - 128).clamp(0, 128) as u32;
-        let early = v.clamp(0, 128) as u32;
-        r.0[0] = late;
-        r.0[3] = early;
-        if m.r16(this + FADE) == 128 {
-            return;
-        }
-        r.0[5] = 128;
-        if m.r16(this + 40) == 0 {
-            return;
-        }
-        let text = m.r32(this + 4);
-        let fade_in = 128 - late;
-        r.0[0] = fade_in;
-        let tx = r.call_leaving(c, WORD_X, &[text], 0x8002_0af8);
-        r.0[4] = tx;
-        let text = c.m.r32(this + 4);
-        let ty = r.call_leaving(c, WORD_Y, &[text], 0x8002_0b04);
-        r.0[6] = ty;
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let color = r.call_leaving(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade], 0x8002_0b18);
-        r.0[1] = color;
-        let m = &mut c.m;
-        let (sel, fade) = (lh(m, this + 8), lh(m, this + FADE));
-        let bar = r.call_leaving(c, CALC_FADE_VAL_FADED, &[0x00C8_3C1E, 0xBEBE, sel, fade], 0x8002_0b34);
-        let bar = r.call_leaving(c, CALC_FADE_VAL, &[bar, fade_in], 0x8002_0b40);
-        r.0[0] = bar;
-        let color = r.call_leaving(c, CALC_FADE_VAL, &[color, fade_in], 0x8002_0b50);
-        r.0[1] = color;
-        c.m.w32(sp + 36, bar);
-        if color != 0 {
-            let text = c.m.r32(this + 4);
-            let word = r.call_leaving(c, TEXT_WORD, &[text], 0x8002_0b68);
-            r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), color, 0, 0], 0x8002_0b8c);
-        }
-        let m = &mut c.m;
-        let grown = (early.wrapping_mul(150) as i32) / 128;
-        let len = (grown.wrapping_mul(128 - lh(m, this + FADE) as i32)) / 128;
-        let len = len as u32;
-        r.0[0] = len;
-        let by = ty.wrapping_sub(3);
-        r.0[2] = by;
-        let shapes = m.r32(SHAPES).wrapping_add(960);
-        r.0[1] = shapes;
-        let bx = tx.wrapping_add(len).wrapping_sub(lh(m, shapes + 16));
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[30, 8, bx, by, 0, 0, 0], 0x8002_0c00);
-        let m = &mut c.m;
-        let w = lh(m, shapes + 16);
-        if (w as i32) < len as i32 {
-            let h = lh(m, shapes + 18);
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[0, tx, by, len.wrapping_sub(w), h], 0x8002_0c2c);
-        }
-    })
+pub fn memory_card_draw(c: &mut Cpu, this: MemoryCardMenuItem) {
+    let m = &mut c.m;
+    let step = if this.flags(m) & ITEM_DISABLED != 0 { -8 } else { 8 };
+    let open = this.enable_val(m).wrapping_add(step).clamp(0, 256);
+    this.set_enable_val(m, open);
+    let (open, f) = (open as i32, Fade::of_button(this.base()));
+    let (late, early) = ((open - 128).clamp(0, 128) as u32, open.clamp(0, 128) as u32);
+    if f.value(m) == 128 || this.enable_val(m) == 0 {
+        return;
+    }
+    let text = this.text_description(m);
+    let fade_in = 128 - late;
+    let tx = call(c, WORD_X, &[text]);
+    let ty = call(c, WORD_Y, &[text]);
+    let faded = |c: &mut Cpu| (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
+    let (sel, fade) = faded(c);
+    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    let (sel, fade) = faded(c);
+    let bar_colour = call(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
+    call(c, CALC_FADE_VAL, &[bar_colour, fade_in]);
+    let colour = call(c, CALC_FADE_VAL, &[colour, fade_in]);
+    if colour != 0 {
+        let word = call(c, TEXT_WORD, &[text]);
+        call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), colour, 0, 0]);
+    }
+    let m = &mut c.m;
+    let grown = (early.wrapping_mul(150) as i32) / 128;
+    let len = (grown.wrapping_mul(128 - f.value(m) as i32) / 128) as u32;
+    let by = ty.wrapping_sub(3);
+    let bar = m.r32(SHAPES).wrapping_add(BAR * 32);
+    let bx = tx.wrapping_add(len).wrapping_sub(shape_w(m, bar));
+    call(c, DRAW_SHAPE_EXTENDED, &[BAR, 8, bx, by, 0, 0, 0]);
+    let m = &mut c.m;
+    let w = shape_w(m, bar);
+    if (w as i32) < len as i32 {
+        let h = shape_h(m, bar);
+        call_addr(c, DRAW_SQUARE, &[0, tx, by, len.wrapping_sub(w), h]);
+    }
 }
 
 pub fn abi_memory_card_draw(c: &mut Cpu) {
-    memory_card_draw(c, c.r[4]);
+    memory_card_draw(c, MemoryCardMenuItem(c.r[4]));
 }
+
+/// Where the controller screen notes that its settings changed (the help text's word's state
+/// +368).
+const CONTROLLER_CHANGED: u32 = 368;
 
 /// `tInsideBoxControllerLeftRightSlider::ProcessInput` (FEMENUOPTIONS.CPP, 0x80020c54): left,
 /// or right below the top, notes the controller changed; then the slider's.
-pub fn controller_slider_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..4].copy_from_slice(&[this, key, player, command]);
-        let k = c.m.r32(key);
-        if k == femenu::KEY_LEFT || k == femenu::KEY_RIGHT {
-            let mut changed = true;
-            if k == femenu::KEY_RIGHT {
-                let data = c.m.r32(this + 28);
-                let (obj, f) = method(&mut c.m, data, femenu::ITERATOR_VPTR, femenu::VALUE);
-                let v = r.call_ptr_leaving(c, f, &[obj, u32::MAX], 0x8002_0cc4);
-                let data = c.m.r32(this + 28);
-                changed = v & 0xFF != c.m.r8(data + 9) as u32;
-            }
-            if changed {
-                let state = c.m.r32(CALIBRATE_HELP_ARG);
-                c.m.w32(state + 368, 1);
-            }
+pub fn controller_slider_process_input(c: &mut Cpu, this: MenuItemLeftRightSlider, player: u32, key: u32) {
+    let k = c.m.r32(key);
+    if k == femenu::KEY_LEFT || k == femenu::KEY_RIGHT {
+        let changed = k == femenu::KEY_LEFT || {
+            let data = this.data(&mut c.m);
+            let v = call_virtual(c, data.0, femenu::ITERATOR_VPTR, femenu::VALUE, &[u32::MAX]);
+            let m = &mut c.m;
+            v & 0xFF != this.data(m).max_value(m) as u32
+        };
+        if changed {
+            let state = c.m.r32(CALIBRATE_HELP_ARG);
+            c.m.w32(state + CONTROLLER_CHANGED, 1);
         }
-        r.enter(c, 0x8002_4ba4, 0x8002_0cfc, |c| femenu::left_right_slider_process_input(c, crate::types::MenuItemLeftRightSlider(this), player, key));
-    })
+    }
+    femenu::left_right_slider_process_input(c, this, player, key);
 }
 
 pub fn abi_controller_slider_process_input(c: &mut Cpu) {
-    controller_slider_process_input(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+    controller_slider_process_input(c, MenuItemLeftRightSlider(c.r[4]), c.r[5], c.r[6]);
 }
 
 /// The destructors of the classes without one of their own: the base's, the vtable left.
@@ -3118,7 +2755,7 @@ mod tests {
         m.w32(menu + 108, pick(rng, 2));
         m.w8(menu + 112, [40, -40i32 as u32, pick(rng, 256)][pick(rng, 3) as usize] as u8);
         // (513 meets 552 a step of 40 past: the fade's clamp)
-        m.w32(menu + 116, [0, SCREEN_FADE_FULL, 513, pick(rng, 600) - 20][pick(rng, 4) as usize]);
+        m.w32(menu + 116, [0, SCREEN_FADE_FULL as u32, 513, pick(rng, 600) - 20][pick(rng, 4) as usize]);
         m.w32(menu + 120, [u32::MAX, pick(rng, 40)][pick(rng, 2) as usize]);
         m.w32(menu + 124, pick(rng, 6));
         m.w32(PHASE, [0, 30, 60, pick(rng, 80) - 10][pick(rng, 4) as usize]);

@@ -122,7 +122,12 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
   (pictures; cards that differ must load the same) and `tools/hookaudit.py`. The front end's
   stack tests are gone: they checked the fidelity this drops.
 
-Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP.
+Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP.
+
+Where an old port passed a virtual call only its object, the original relied on its own
+arguments still being in a1..a3 (`tInsideBoxMenu::ProcessInput` passes its first item the
+player, key and command that way). The scramble experiment kept registers a port set or
+didn't touch, so it didn't test those: a rewrite passes them as arguments.
 
 ## Checking
 
