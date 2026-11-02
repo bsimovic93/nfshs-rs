@@ -1,39 +1,54 @@
-//! SCREENUSERNAME.CPP: the name entry's screen (`tScreenUserName`): a grid of letters behind the
-//! name menu (each row a text, `-` a gap, `!#&@$^` the space, delete and done keys with their
-//! dividers), two subtractive boxes over and under it, lines drawn out along the grid as the
-//! options menu fades in, and 32 pictures.
+//! SCREENUSERNAME.CPP: the name entry's screen (`tScreenUserName`). It draws a grid of letters
+//! behind the name menu: each row a text, `-` a gap, and `!#&@$^` the space, delete and done
+//! keys with their dividers. Two subtractive boxes go over and under it, lines are drawn out
+//! along the grid as the options menu fades in, and 32 pictures are shown.
 //!
-//! `SubtractiveBox`, `PSXDrawSquare`: the host's (called by address).
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
+//! `SubtractiveBox` and `PSXDrawSquare` are the host's (called by address).
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr, with_buffer};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SPRINTF, TEXT_WORD};
 use crate::globals::FRONT_END;
-use crate::{fefades, felines, fescreen, fetextrender};
+use crate::types::Screen;
+use crate::{fefades, fescreen, fetextrender};
 use ps1rt::{Cpu, Mem};
 
-// The screen: a `tScreen`, then +100 the options menu that called it (+116 its fade), +104 the
-// letters' fade (0..128), +112 the rows (9 bytes each).
+/// The screen: a `tScreen`, then +100 the options menu that called it (+116 its fade), +104 the
+/// letters' fade (0..128), +112 the rows (9 bytes each).
 const MENU: u32 = 100;
 const MENU_FADE: u32 = 116;
 const TEXT_FADE: u32 = 104;
 const ROWS: u32 = 112;
 const ROW_SIZE: u32 = 9;
 
-/// The grid's rows and its first row's y.
+/// The grid's rows and its first row's y; its rows 15 apart, its letters 28 apart from x 258.
 const ROW_COUNT: u32 = 0x8005_2E40;
 const TOP: u32 = 0x8005_2E42;
-/// The permanent file's name; "zUser%d"; a letter's text (`" "`); the rows' texts (508 on); the
-/// keys' texts (space 518, delete 519, done 520).
+const ROW_HEIGHT: i32 = 15;
+const COLUMN_WIDTH: u32 = 28;
+const LEFT: u32 = 258;
+/// The permanent file's name; "zUser%d" (92 shapes); a letter's text (`" "`); the rows' texts
+/// (508 on); the keys' texts (space 518, delete 519, done 520).
 const FILE_NAME: u32 = 0x8005_2E48;
 const FILE_FORMAT: u32 = 0x8001_2590;
+const SHAPES: u16 = 92;
 const LETTER: u32 = 0x8001_2598;
 const ROW_TEXTS: u32 = 508;
+const SPACE: u32 = 518;
+const DELETE: u32 = 519;
+const DONE: u32 = 520;
 /// The main screen's number (`frontEnd + 0x340`).
 const MAIN_NUMBER: u32 = FRONT_END + 0x340;
+/// The colours: the letters' (faded in), the boxes' shade (dark, then grey), the lines'.
+const LETTER_COLOR: u32 = 0x00B5_4200;
+const DARK: u32 = 0x0008_0808;
+const GREY: u32 = 0x0050_5050;
+const LINE_COLOR: u32 = 0x0078_5A5A;
 
-/// `SubtractiveBox`, `PSXDrawSquare`: the host's.
+/// `SubtractiveBox`, `PSXDrawSquare`: the host's; `DrawBrightEndLine` (FELINES's port).
 const SUBTRACTIVE_BOX: u32 = 0x8001_C25C;
 const DRAW_SQUARE: u32 = 0x8004_F12C;
+const DRAW_BRIGHT_END_LINE: u32 = 0x8004_C018;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
@@ -43,75 +58,42 @@ fn lh(m: &mut Mem, at: u32) -> i32 {
     m.r16(at) as i16 as i32
 }
 
-/// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
-}
-
-/// A port with stack arguments: `args` 5 on written to the caller's outgoing slots first.
-fn port_stack(c: &mut Cpu, r: &Saved, sp: u32, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    for (k, &v) in args.iter().enumerate().skip(4) {
-        c.m.w32(sp + 4 * k as u32, v);
-    }
-    port(c, r, addr, ra, &args[..4], f)
-}
-
 /// `tScreenUserName::Initialize` (SCREENUSERNAME.CPP, 0x8004b468): the letters full; the grid
 /// centred about y 130, its rows' texts; the screen's files read.
+pub fn initialize(c: &mut Cpu, this: Screen) {
+    let m = &mut c.m;
+    m.w16(this.0 + TEXT_FADE, 128);
+    let n = lh(m, ROW_COUNT);
+    m.w16(TOP, (130 - ((n * ROW_HEIGHT) >> 1)) as u16);
+    let mut k = 0i32;
+    while k < lh(&mut c.m, ROW_COUNT) {
+        let w = call(c, TEXT_WORD, &[(k as u32).wrapping_add(ROW_TEXTS)]);
+        let row = this.0.wrapping_add((k as u32).wrapping_mul(ROW_SIZE)) + ROWS;
+        call(c, SPRINTF, &[row, w]);
+        k += 1;
+    }
+    fescreen::initialize(c, this);
+}
+
 pub fn abi_initialize(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        r.0[1] = 0;
-        let m = &mut c.m;
-        m.w16(this + TEXT_FADE, 128);
-        let n = lh(m, ROW_COUNT);
-        m.w16(TOP, (130 - ((n * 15) >> 1)) as u16);
-        // (a1 and a2 still the row globals' half address, which `sprintf` homes)
-        c.r[5] = 0x8005_0000;
-        c.r[6] = 0x8005_0000;
-        if n > 0 {
-            r.0[3] = 0x8005_0000;
-            loop {
-                let k = sx(r.0[1]);
-                r.0[0] = k;
-                let w = r.call_leaving(c, TEXT_WORD, &[k.wrapping_add(ROW_TEXTS)], 0x8004_b4cc);
-                let row = this.wrapping_add(k.wrapping_mul(ROW_SIZE)) + ROWS;
-                r.call_leaving(c, SPRINTF, &[row, w], 0x8004_b4e4);
-                r.0[1] = r.0[1].wrapping_add(1);
-                // (the loop's delay slot shifts s0 before its head sign-extends it)
-                r.0[0] = r.0[1] << 16;
-                if sx(r.0[1]) as i32 >= lh(&mut c.m, ROW_COUNT) {
-                    break;
-                }
-            }
-        }
-        port(c, &r, 0x8002_60cc, 0x8004_b50c, &[this], fescreen::abi_initialize);
-    })
+    initialize(c, Screen(c.r[4]));
 }
 
 /// `tScreenUserName::GetShapeInfo` (SCREENUSERNAME.CPP, 0x8004b528): 92 shapes of the main
 /// screen's "zUser%d", none swapped.
+pub fn get_shape_info(c: &mut Cpu, permanent: u32, swap: u32, name: u32, swap_name: u32) {
+    let m = &mut c.m;
+    m.w32(swap_name, 0);
+    m.w16(swap, 0);
+    m.w16(permanent, SHAPES);
+    let n = m.r8(MAIN_NUMBER) as u32;
+    call(c, SPRINTF, &[FILE_NAME, FILE_FORMAT, n]);
+    c.m.w32(name, FILE_NAME);
+}
+
 pub fn abi_get_shape_info(c: &mut Cpu) {
-    let (permanent, swap, name) = (c.r[5], c.r[6], c.r[7]);
-    let swap_name = abi::arg(c, 4);
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = name;
-        r.0[0] = FILE_NAME;
-        let m = &mut c.m;
-        m.w32(swap_name, 0);
-        m.w16(swap, 0);
-        m.w16(permanent, 92);
-        let n = m.r8(MAIN_NUMBER) as u32;
-        r.call_leaving(c, SPRINTF, &[FILE_NAME, FILE_FORMAT, n], 0x8004_b570);
-        c.m.w32(name, FILE_NAME);
-    })
+    let swap_name = crate::abi::arg(c, 4);
+    get_shape_info(c, c.r[5], c.r[6], c.r[7], swap_name);
 }
 
 /// A line's length: 0 to 64.
@@ -121,166 +103,122 @@ fn length(len: u32) -> u32 {
 
 /// `tScreenUserName::DrawVerticalLine` (SCREENUSERNAME.CPP, 0x8004b588): a line down from x, y,
 /// drawn out `len` sixty-fourths of its 162.
+pub fn draw_vertical_line(c: &mut Cpu, x: u32, y: u32, len: u32) {
+    let len = length(len);
+    call_addr(c, DRAW_BRIGHT_END_LINE, &[LINE_COLOR, sx(x), sx(y), 2, 162, 1, sx(len) << 1, 0]);
+}
+
 pub fn abi_draw_vertical_line(c: &mut Cpu) {
-    let (x, y, len) = (c.r[5], c.r[6], length(c.r[7]));
-    abi::frame(c, 40, |c, sp| {
-        let r = Saved::of(c);
-        port_stack(c, &r, sp, 0x8004_c018, 0x8004_b5f8, &[0x0078_5A5A, sx(x), sx(y), 2, 162, 1, sx(len) << 1, 0], felines::abi_draw_bright_end_line);
-    })
+    draw_vertical_line(c, c.r[5], c.r[6], c.r[7]);
 }
 
 /// `tScreenUserName::DrawHorizontalLine` (SCREENUSERNAME.CPP, 0x8004b608): a line right from
 /// x, y, drawn out `len` sixty-fourths of its 192.
-pub fn abi_draw_horizontal_line(c: &mut Cpu) {
-    let (x, y, len) = (c.r[5], c.r[6], length(c.r[7]));
-    abi::frame(c, 40, |c, sp| {
-        let r = Saved::of(c);
-        port_stack(c, &r, sp, 0x8004_c018, 0x8004_b67c, &[0x0078_5A5A, sx(x), sx(y), 192, 1, 2, sx(len) << 1, 12], felines::abi_draw_bright_end_line);
-    })
+pub fn draw_horizontal_line(c: &mut Cpu, x: u32, y: u32, len: u32) {
+    let len = length(len);
+    call_addr(c, DRAW_BRIGHT_END_LINE, &[LINE_COLOR, sx(x), sx(y), 192, 1, 2, sx(len) << 1, 12]);
 }
 
-/// A key's text (`id`) at `x` and its dividers: the 2 or 5 after the text 28 apart (a short
-/// key: the one at `x`).
-fn key(c: &mut Cpu, r: &mut Saved, id: u32, dx: u32, dividers: u32, ras: [u32; 3]) {
-    let w = r.call_leaving(c, TEXT_WORD, &[id], ras[0]);
-    let (x, y, color) = (r.0[1], ((r.0[4] as i32) >> 16) as u32, r.0[0]);
-    r.call_leaving(c, fetextrender::full_text_rgb_entry, &[w, sx(x.wrapping_add(dx)), y, color, 1, 2], ras[1]);
+pub fn abi_draw_horizontal_line(c: &mut Cpu) {
+    draw_horizontal_line(c, c.r[5], c.r[6], c.r[7]);
+}
+
+/// A key's text (`id`) `dx` right of the cell at `x`, and its dividers: `dividers` of them, 28
+/// apart (none: one, 22 right of the cell).
+fn key(c: &mut Cpu, id: u32, x: u32, row_y: u32, color: u32, dx: u32, dividers: u32) {
+    let w = call(c, TEXT_WORD, &[id]);
+    fetextrender::full_text_rgb(c, w, sx(x.wrapping_add(dx)), sx(row_y.wrapping_sub(1)), color, 1, 2);
+    let y = sx(row_y).wrapping_sub(2);
     if dividers == 0 {
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, sx(x).wrapping_add(22), r.0[3].wrapping_sub(2), 2, 14], ras[2]);
+        call_addr(c, DRAW_SQUARE, &[0, sx(x).wrapping_add(22), y, 2, 14]);
         return;
     }
-    r.0[0] = 1;
-    r.0[2] = sx(x);
-    loop {
-        let k = sx(r.0[0]);
-        let at = r.0[2].wrapping_add(k.wrapping_mul(28)).wrapping_sub(6);
-        r.call_ptr_leaving(c, DRAW_SQUARE, &[0, at, r.0[3].wrapping_sub(2), 2, 14], ras[2]);
-        r.0[0] = r.0[0].wrapping_add(1);
-        if sx(r.0[0]) as i32 >= dividers as i32 + 1 {
-            break;
-        }
+    for k in 1..=dividers {
+        call_addr(c, DRAW_SQUARE, &[0, sx(x).wrapping_add(k * COLUMN_WIDTH).wrapping_sub(6), y, 2, 14]);
     }
 }
 
-/// `tScreenUserName::DrawBackground` (SCREENUSERNAME.CPP, 0x8004b68c): the options menu's fade
+/// The two subtractive boxes, over and under the grid, in `shade`.
+fn boxes(c: &mut Cpu, shade: u32) {
+    call_addr(c, SUBTRACTIVE_BOX, &[240, 42, 194, 85, shade, shade, 0, 0]);
+    call_addr(c, SUBTRACTIVE_BOX, &[240, 127, 194, 85, 0, 0, shade, shade]);
+}
+
+/// `tScreenUserName::DrawBackground` (SCREENUSERNAME.CPP, 0x8004b68c). The options menu's fade
 /// gives the pictures' brightness (from half of it), the lines' length (a quarter) and the
-/// letters' fade; the boxes; the grid (each row's letters 28 apart, the keys); the boxes again
-/// in grey; the lines along the columns and under the rows; the pictures.
-pub fn abi_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 112, |c, sp| {
-        let mut r = Saved::of(c);
-        let m = &mut c.m;
-        m.w32(sp + 112, this);
-        let menu = m.r32(this + MENU);
-        let v = m.r32(menu + MENU_FADE);
-        let half = ((v as i16 as i32) >> 1) - 128;
-        m.w16(sp + 40, half.clamp(0, 128) as u16);
-        let quarter = (v as i16 as i32) >> 2;
-        m.w16(sp + 48, quarter.clamp(0, 128) as u16);
-        m.w16(this + TEXT_FADE, (v as i16 as i32).clamp(0, 128) as u16);
-        r.0[0] = 0x0008_0808;
-        let boxes = |c: &mut Cpu, r: &mut Saved, shade: u32, ras: [u32; 2]| {
-            r.call_ptr_leaving(c, SUBTRACTIVE_BOX, &[240, 42, 194, 85, shade, shade, 0, 0], ras[0]);
-            r.call_ptr_leaving(c, SUBTRACTIVE_BOX, &[240, 127, 194, 85, 0, 0, shade, shade], ras[1]);
-        };
-        boxes(c, &mut r, 0x0008_0808, [0x8004_b7a8, 0x8004_b7cc]);
-        // the grid
-        r.0[8] = 1;
-        r.0[7] = 2;
-        r.0[6] = 14;
-        r.0[5] = c.m.r16(TOP) as u32;
-        c.m.w16(sp + 56, 0);
+/// letters' fade. It draws the boxes; the grid (each row's letters 28 apart, and the keys); the
+/// boxes again in grey; the lines along the columns and under the rows; the pictures.
+pub fn draw_background(c: &mut Cpu, this: Screen) {
+    let m = &mut c.m;
+    let menu = m.r32(this.0 + MENU);
+    let fade = m.r32(menu + MENU_FADE) as i16 as i32;
+    let bright = ((fade >> 1) - 128).clamp(0, 128) as u32;
+    let lines = (fade >> 2).clamp(0, 128) as u32;
+    m.w16(this.0 + TEXT_FADE, fade.clamp(0, 128) as u16);
+    boxes(c, DARK);
+    // the grid
+    with_buffer(c, 8, |c, letter| {
         for k in 0..2 {
             let b = c.m.r8(LETTER + k);
-            c.m.w8(sp + 32 + k, b);
+            c.m.w8(letter + k, b);
         }
-        loop {
-            let row = lh(&mut c.m, sp + 56);
-            if row >= lh(&mut c.m, ROW_COUNT) {
-                break;
-            }
-            r.0[1] = 258;
-            c.m.w16(sp + 64, 0);
-            r.0[4] = r.0[5].wrapping_sub(1) << 16;
-            r.0[3] = sx(r.0[5]);
+        let mut row = 0i32;
+        let mut row_y = c.m.r16(TOP) as u32;
+        while row < lh(&mut c.m, ROW_COUNT) {
+            let mut col = 0u32;
+            let mut x = LEFT;
             loop {
-                let col = lh(&mut c.m, sp + 64) as u32;
-                let at = this.wrapping_add(col.wrapping_add((row as u32).wrapping_mul(ROW_SIZE))) + ROWS;
+                let at = this.0.wrapping_add(col.wrapping_add((row as u32).wrapping_mul(ROW_SIZE))) + ROWS;
                 let ch = c.m.r8(at);
                 if ch == 0 {
                     break;
                 }
-                c.m.w8(sp + 32, ch);
-                let fade = lh(&mut c.m, this + TEXT_FADE) as u32;
-                let color = port(c, &r, 0x8004_bd68, 0x8004_b880, &[0x00B5_4200, fade], fefades::abi_fade_out);
-                r.0[0] = color;
+                c.m.w8(letter, ch);
+                let text_fade = lh(&mut c.m, this.0 + TEXT_FADE) as u32;
+                let color = fefades::fade(LETTER_COLOR, 0, text_fade);
                 match ch {
-                    b'!' => key(c, &mut r, 518, 22, 0, [0x8004_b9e8, 0x8004_ba0c, 0x8004_ba2c]),
-                    b'#' => key(c, &mut r, 519, 22, 0, [0x8004_b9e8, 0x8004_ba0c, 0x8004_ba2c]),
-                    b'&' => key(c, &mut r, 520, 22, 0, [0x8004_b9e8, 0x8004_ba0c, 0x8004_ba2c]),
-                    b'@' => key(c, &mut r, 518, 36, 2, [0x8004_b8c4, 0x8004_b8e8, 0x8004_b924]),
-                    b'$' => key(c, &mut r, 519, 36, 2, [0x8004_b958, 0x8004_b97c, 0x8004_b9b8]),
-                    b'^' => key(c, &mut r, 520, 78, 5, [0x8004_ba3c, 0x8004_ba60, 0x8004_ba9c]),
+                    b'!' => key(c, SPACE, x, row_y, color, 22, 0),
+                    b'#' => key(c, DELETE, x, row_y, color, 22, 0),
+                    b'&' => key(c, DONE, x, row_y, color, 22, 0),
+                    b'@' => key(c, SPACE, x, row_y, color, 36, 2),
+                    b'$' => key(c, DELETE, x, row_y, color, 36, 2),
+                    b'^' => key(c, DONE, x, row_y, color, 78, 5),
                     b'-' => {}
-                    _ => {
-                        let (x, y) = (sx(r.0[1].wrapping_add(8)), ((r.0[4] as i32) >> 16) as u32);
-                        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[sp + 32, x, y, color, 1, 2], 0x8004_bae4);
-                    }
+                    _ => fetextrender::full_text_rgb(c, letter, sx(x.wrapping_add(8)), sx(row_y.wrapping_sub(1)), color, 1, 2),
                 }
-                let v = c.m.r16(sp + 64).wrapping_add(1);
-                r.0[1] = r.0[1].wrapping_add(28);
-                c.m.w16(sp + 64, v);
+                col = (col + 1) as u16 as i16 as i32 as u32;
+                x = x.wrapping_add(COLUMN_WIDTH);
             }
-            let v = c.m.r16(sp + 56).wrapping_add(1);
-            r.0[5] = r.0[5].wrapping_add(15);
-            c.m.w16(sp + 56, v);
+            row += 1;
+            row_y = row_y.wrapping_add(ROW_HEIGHT as u32);
         }
-        r.0[0] = 0x0050_5050;
-        boxes(c, &mut r, 0x0050_5050, [0x8004_bb38, 0x8004_bb5c]);
-        // the lines
-        let length_now = |m: &mut Mem| m.r16(sp + 48) as u32;
-        r.0[1] = 252;
-        r.0[0] = 0;
-        for k in 0..7u32 {
-            let len = sx(length_now(&mut c.m).wrapping_sub(k << 1));
-            port(c, &r, 0x8004_b588, 0x8004_bb90, &[this, sx(r.0[1]), 46, len], abi_draw_vertical_line);
-            r.0[0] = k + 1;
-            r.0[1] = r.0[1].wrapping_add(28);
-        }
-        r.0[0] = 0;
-        r.0[5] = (c.m.r16(TOP) as u32).wrapping_sub(3);
-        if lh(&mut c.m, ROW_COUNT) + 1 > 0 {
-            r.0[1] = 0x8005_0000;
-            loop {
-                let y = sx(r.0[5]);
-                r.0[5] = r.0[5].wrapping_add(15);
-                let k = sx(r.0[0]);
-                let n = lh(&mut c.m, ROW_COUNT) as u32;
-                let len = sx(length_now(&mut c.m).wrapping_sub(n.wrapping_sub(k) << 1));
-                port(c, &r, 0x8004_b608, 0x8004_bc10, &[this, 240, y, len], abi_draw_horizontal_line);
-                r.0[0] = r.0[0].wrapping_add(1);
-                if sx(r.0[0]) as i32 >= lh(&mut c.m, ROW_COUNT) + 1 {
-                    break;
-                }
-            }
-        }
-        // the pictures
-        let bright = lh(&mut c.m, sp + 40) as u32;
-        r.0[1] = bright;
-        for k in 0..32 {
-            r.0[0] = k;
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k, 0, 0, 0, bright, 0, 0], 0x8004_bc68);
-        }
-    })
+    });
+    boxes(c, GREY);
+    // the lines: down the columns, then under each row (the bottom one first out)
+    for k in 0..7u32 {
+        draw_vertical_line(c, 252 + k * COLUMN_WIDTH, 46, lines.wrapping_sub(k << 1));
+    }
+    let top = (c.m.r16(TOP) as u32).wrapping_sub(3);
+    let mut k = 0i32;
+    while k < lh(&mut c.m, ROW_COUNT) + 1 {
+        let n = lh(&mut c.m, ROW_COUNT);
+        let y = top.wrapping_add((ROW_HEIGHT * k) as u32);
+        draw_horizontal_line(c, 240, y, lines.wrapping_sub(((n - k) << 1) as u32));
+        k += 1;
+    }
+    // the pictures
+    for k in 0..32 {
+        call(c, DRAW_SHAPE_EXTENDED, &[k, 0, 0, 0, bright, 0, 0]);
+    }
+}
+
+pub fn abi_draw_background(c: &mut Cpu) {
+    draw_background(c, Screen(c.r[4]));
 }
 
 /// `tScreenUserName::~tScreenUserName` (SCREENUSERNAME.H, 0x8004bcb4): the screen's.
 pub fn abi_destructor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        port(c, &Saved::of(c), 0x8002_6098, 0x8004_bcc4, &[this, flags], fescreen::abi_screen_destructor);
-    })
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 #[cfg(test)]
