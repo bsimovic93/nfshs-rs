@@ -1,60 +1,55 @@
 //! SCREENDISPLAY.CPP: the display options' screen (`tScreenDisplay`): its 32 pictures drawn as
 //! bright as the options menu's fade.
+//!
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
 
-use crate::abi::{self, Saved};
+use crate::call::call;
 use crate::femenuextended::DRAW_SHAPE_EXTENDED;
-use crate::globals::SONGS_SCREEN;
 use crate::fescreen;
-use ps1rt::Cpu;
+use crate::globals::SONGS_SCREEN;
+use crate::types::Screen;
+use ps1rt::{Cpu, Mem};
 
 /// The options menu's fade, in the menus' block (`SONGS_SCREEN`'s).
 const OPTIONS_FADE: u32 = 10972;
-/// "zDsply".
+/// The screen's pictures (32 shapes from 11 of its 43) and its shape file, "zDsply".
+const FIRST_PICTURE: u32 = 11;
+const PICTURES: u32 = 32;
+const SHAPES: u16 = 43;
 const DISPLAY_NAME: u32 = 0x8001_2078;
 
-/// A call to a function that is ported too, as FEAPP's.
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
+/// `tScreenDisplay::DrawBackground` (SCREENDISPLAY.CPP, 0x80045d38): the pictures at half the
+/// options menu's fade (at most 128).
+pub fn draw_background(c: &mut Cpu) {
+    let menus = c.m.r32(SONGS_SCREEN);
+    let half = (c.m.r32(menus + OPTIONS_FADE) as i32 >> 1) as i16;
+    let bright = half.min(128) as i32 as u32;
+    for k in 0..PICTURES {
+        call(c, DRAW_SHAPE_EXTENDED, &[FIRST_PICTURE + k, 0, 0, 0, bright, 0, 0]);
+    }
 }
 
-/// `tScreenDisplay::DrawBackground` (SCREENDISPLAY.CPP, 0x80045d38): shapes 11 to 42 at half the
-/// options menu's fade (at most 128).
 pub fn abi_draw_background(c: &mut Cpu) {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        let menus = c.m.r32(SONGS_SCREEN);
-        let v = (c.m.r32(menus + OPTIONS_FADE) as i32 >> 1) as u32;
-        let bright = if (v as i16) >= 129 { 128 } else { v as i16 as i32 as u32 };
-        r.0[1] = bright;
-        for k in 0..32 {
-            r.0[0] = k;
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k + 11, 0, 0, 0, bright, 0, 0], 0x8004_5da0);
-        }
-    })
+    draw_background(c);
 }
 
 /// `tScreenDisplay::GetShapeInfo` (SCREENDISPLAY.CPP, 0x80045dc4): 43 shapes of "zDsply", none
 /// swapped.
-pub fn abi_get_shape_info(c: &mut Cpu) {
-    let swap_name = abi::arg(c, 4);
-    let (permanent, swap, name) = (c.r[5], c.r[6], c.r[7]);
-    let m = &mut c.m;
+pub fn get_shape_info(m: &mut Mem, permanent: u32, swap: u32, name: u32, swap_name: u32) {
     m.w32(swap_name, 0);
     m.w16(swap, 0);
-    m.w16(permanent, 43);
+    m.w16(permanent, SHAPES);
     m.w32(name, DISPLAY_NAME);
+}
+
+pub fn abi_get_shape_info(c: &mut Cpu) {
+    let swap_name = crate::abi::arg(c, 4);
+    get_shape_info(&mut c.m, c.r[5], c.r[6], c.r[7], swap_name);
 }
 
 /// `tScreenDisplay::~tScreenDisplay` (SCREENDISPLAY.H, 0x80045dec): the screen's.
 pub fn abi_destructor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        port(c, &Saved::of(c), 0x8002_6098, 0x8004_5dfc, &[this, flags], fescreen::abi_screen_destructor);
-    })
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 #[cfg(test)]
