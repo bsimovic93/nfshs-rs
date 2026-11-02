@@ -122,7 +122,12 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
   (pictures; cards that differ must load the same) and `tools/hookaudit.py`. The front end's
   stack tests are gone: they checked the fidelity this drops.
 
-Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP.
+Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP, FETEXTRENDER.CPP.
+
+The fuzz tests' RAM comparison leaves out the whole main stack (to 0x80200000, as
+`decomp-check`): the original homes its arguments in its caller's frame, which the rewritten
+code doesn't. Buffers a rewritten port copies texts into are larger than the original's, whose
+overruns stayed in its own deep frame.
 
 Where an old port passed a virtual call only its object, the original relied on its own
 arguments still being in a1..a3 (`tInsideBoxMenu::ProcessInput` passes its first item the

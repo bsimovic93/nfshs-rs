@@ -1910,9 +1910,11 @@ pub(crate) mod test_util {
     /// Where the test CPUs answer `PadInfoMode` from: the count, then seven modes.
     pub const PAD_MODES: u32 = 0x8014_8AD0;
 
-    /// The words where two RAM images differ, but for the dead stack below 0x801FFF00.
+    /// The words where two RAM images differ, but for the main stack (as `decomp-check`): the
+    /// dead stack, and the callers' frames, where the original homes its arguments and the
+    /// front end's rewritten code doesn't. (The stack tests check the race's fidelity there.)
     pub fn ram_diff(want: &[u8], got: &[u8]) -> Vec<usize> {
-        let dead = 0x1F_0000..0x1F_FF00;
+        let dead = 0x1F_0000..0x20_0000;
         (0..want.len()).step_by(4).filter(|a| !dead.contains(a) && want[*a..a + 4] != got[*a..a + 4]).collect()
     }
 
