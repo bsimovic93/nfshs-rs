@@ -1847,7 +1847,8 @@ pub(crate) mod test_util {
     /// The front end's shape emitter (0x8004e74c, under `DrawShapeExtended` and friends): in the
     /// game the host draws the shape itself and the original never runs (its code reads stack
     /// it never wrote: its results would hang on the callers' stack depth). The test CPU draws
-    /// nothing either, but logs what the host gets, for the tests to compare: a count, then 16
+    /// nothing either, but logs what the host gets, for the tests to compare: a count, a hash of
+    /// every entry so far (a draw scrolled out of the ring still counts), then the last 16
     /// entries of 9 words (a ring): the shape, the flags, x, y, the four corners' colours, the
     /// blending.
     pub const SHAPES_EMITTED: u32 = 0x8014_8800;
@@ -1857,13 +1858,16 @@ pub(crate) mod test_util {
         let sp = c.r[29];
         let (colours, abr) = (c.m.r32(sp + 16), c.m.r32(sp + 20));
         let n = c.m.r32(SHAPES_EMITTED);
-        let entry = SHAPES_EMITTED + 4 + 36 * (n % 16);
+        let entry = SHAPES_EMITTED + 8 + 36 * (n % 16);
         let mut words = vec![c.r[4], c.r[5], c.r[6], c.r[7]];
         words.extend((0..4).map(|k| c.m.r32(colours.wrapping_add(4 * k)) & 0xFF_FFFF));
         words.push(abr);
+        let mut hash = c.m.r32(SHAPES_EMITTED + 4);
         for (k, w) in words.into_iter().enumerate() {
             c.m.w32(entry + 4 * k as u32, w);
+            hash = (hash ^ w).wrapping_mul(0x0100_0193);
         }
+        c.m.w32(SHAPES_EMITTED + 4, hash);
         c.m.w32(SHAPES_EMITTED, n.wrapping_add(1));
         c.r[2] = 0;
     }
