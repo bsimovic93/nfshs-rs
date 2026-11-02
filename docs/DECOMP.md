@@ -2,9 +2,41 @@
 
 The game runs as the original's code statically recompiled from MIPS (`crates/nfs4rc`): exact,
 but machine code in Rust syntax. `crates/nfs4` replaces it function by function with readable
-Rust that gives the same results to the bit, checked against the recompiled original as it
-goes. The goal is the whole game: the car physics first, then the rest of the race (Newton,
-collisions, AI), then the front end.
+Rust, checked against the recompiled original as it goes. The race logic, the AI and the front
+end were first ported bit-exact (the original's stack and registers too); since 2026-11-02 the
+goal is readable Rust that no longer needs `ps1rt` at all (see "The plan").
+
+## The plan
+
+Decided 2026-11-02: no more bit-exact ports. What isn't decompiled yet is written readable
+from the start, the bit-exact ports are rewritten readable, and then the game leaves the PS1
+runtime subsystem by subsystem.
+
+**The rule: the game's state stays exact, the rest is free.** A port keeps the original's
+writes to the game's data (and their order where data can overlap) but not its stack layout,
+its registers' leftovers or its code's shape. The recompiled original stays the reference:
+fuzz tests and `decomp-check` lockstep runs compare against it, and they only work while the
+state matches. Deliberate changes to the game's behaviour come after a subsystem is native,
+as their own commits. Where the original's output only reaches the host (pictures, sound),
+the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
+
+1. **Finish the readable front end** (see "The readable front end"): the rest of the screens,
+   FRONT, FEMENUDEFS and the other bit-exact front-end ports.
+2. **The race's leftovers.** Run the race in lockstep with `NFSHS_DECOMP_SCRAMBLE=1` to find
+   every place the race's bit-exact code reads stack or register leftovers (the barrier
+   check's uninitialized wall normal is one), and make those values explicit, before readable
+   code changes the stack under them.
+3. **The rest of the game, readable from the start:** the HUD, the camera, the pause menu, the
+   replays, then the drawing (DRAW*, RENDER, R3DCAR, TRACK, OBJECT, FLARE, WEATHER, NIGHT,
+   TEXTURE*, HRZSKU, SKIDMARK, TRSPROJ) and the sound and speech (SPEECH, SPCHEVNT, AUDIO*,
+   COPSPEAK, TRGSFX). The drawing is checked by pictures and the primitives it emits.
+4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
+   the AI (what the planned changes touch first).
+5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
+   views become native structs, the files loaded with PS1 pointers inside (shapes, tracks)
+   are parsed into Rust types, the GTE's arithmetic becomes native integer code giving the
+   same results, primitives become calls into the renderer, and the SPU, CD, pads and memory
+   card become the host's. The front end can go first: it is all decompiled.
 
 ## How it fits together
 
@@ -100,7 +132,7 @@ collisions, AI), then the front end.
 
 ## The readable front end
 
-The front end is being rewritten as readable Rust (decided 2026-11-01), module by module:
+The front end is being rewritten as readable Rust (decided 2026-11-01; step 1 of "The plan"), module by module:
 the game's data in RAM stays exactly the original's, but the stack and the registers no longer
 reproduce the original's layout and leftovers. `NFSHS_DECOMP_SCRAMBLE=1` (below) measured what
 that costs: nothing the game does depends on them but three places, now handled (the controller
@@ -124,7 +156,8 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
 
 Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP, FETEXTRENDER.CPP, FEDIALOG.CPP,
 FEAPP.CPP, FESCREEN.CPP, SCREENDISPLAY.CPP, SCREENTROPHYINFO.CPP, SCREENTRACKINFO.CPP,
-SCREENUSERNAME.CPP, SCREENAUDIO.CPP, SCREENTRACKRECORDS.CPP, SCREENTROPHYROOM.CPP.
+SCREENUSERNAME.CPP, SCREENAUDIO.CPP, SCREENTRACKRECORDS.CPP, SCREENTROPHYROOM.CPP,
+SCREENTRACKS.CPP, SCREENTOURNSELECT.CPP, SCREENPINKSLIPS.CPP, SCREENPOST.CPP, SCREENMAIN.CPP.
 
 The fuzz tests' RAM comparison leaves out the whole main stack (to 0x80200000, as
 `decomp-check`): the original homes its arguments in its caller's frame, which the rewritten
