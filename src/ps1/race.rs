@@ -1007,6 +1007,8 @@ fn snapshot(c: &mut Cpu, frame: u32, info: super::host::FrameInfo, want_ram: boo
 pub struct RaceThread {
     input: mpsc::SyncSender<Option<FrameInput>>,
     output: mpsc::Receiver<Result<Snapshot, String>>,
+    /// RAM words to write before the next frame (`decomp-check`'s resync).
+    poke: mpsc::Sender<Vec<(u32, u32)>>,
     thread: Option<std::thread::JoinHandle<()>>,
     /// State after boot / the last step.
     pub last: Snapshot,
@@ -1027,6 +1029,7 @@ impl RaceThread {
     fn spawn(data_root: PathBuf, gamesetup: Option<Vec<u8>>) -> Result<Self> {
         let (in_tx, in_rx) = mpsc::sync_channel::<Option<FrameInput>>(1);
         let (out_tx, out_rx) = mpsc::sync_channel::<Result<Snapshot, String>>(1);
+        let (poke_tx, poke_rx) = mpsc::channel::<Vec<(u32, u32)>>();
         let thread = std::thread::Builder::new().name("nfs4-sim".into()).stack_size(256 << 20).spawn(move || {
             let booted = match &gamesetup {
                 Some(gs) => boot(&data_root, gs),
@@ -1083,6 +1086,11 @@ impl RaceThread {
                     quit = true;
                     return None;
                 };
+                while let Ok(words) = poke_rx.try_recv() {
+                    for (a, w) in words {
+                        c.m.w32(a, w);
+                    }
+                }
                 frame += 1;
                 want_ram = input.want_ram;
                 Some([super::host::Pad { buttons: input.buttons, sticks: input.sticks[0] }, super::host::Pad { buttons: input.buttons2, sticks: input.sticks[1] }])
@@ -1122,10 +1130,15 @@ impl RaceThread {
             Ok(Err(e)) => bail!("{e}"),
             Err(_) => bail!("simulation thread ended during boot"),
         };
-        Ok(Self { input: in_tx, output: out_rx, thread: Some(thread), last })
+        Ok(Self { input: in_tx, output: out_rx, poke: poke_tx, thread: Some(thread), last })
     }
 
     /// Run one 60 Hz frame with `input` held.
+    /// Write RAM `words` (address, value) before the next frame runs.
+    pub fn poke(&self, words: Vec<(u32, u32)>) {
+        let _ = self.poke.send(words);
+    }
+
     pub fn step(&mut self, input: FrameInput) -> Result<&Snapshot> {
         if self.input.send(Some(input)).is_err() {
             bail!("simulation stopped");

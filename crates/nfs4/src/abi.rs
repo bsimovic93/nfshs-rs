@@ -44,6 +44,7 @@ pub fn call_from(c: &mut Cpu, f: fn(&mut Cpu), args: &[u32], ra: u32, saved: &[u
 
 /// The arguments in a0..a3 and from the fifth on at sp+16, and the return address.
 fn set_args(c: &mut Cpu, args: &[u32], ra: u32) {
+    watch::observe(c, "call", ra);
     scramble::before_call(c);
     let sp = c.r[29];
     for (i, &a) in args.iter().enumerate() {
@@ -63,6 +64,7 @@ fn call_with(c: &mut Cpu, args: &[u32], ra: u32, saved: &[u32], run: impl FnOnce
     set_args(c, args, ra);
     let (hi, lo) = (c.hi, c.lo);
     run(c);
+    watch::observe(c, "ret", ra);
     let ret = c.r[2];
     (c.r, c.hi, c.lo) = (r, hi, lo);
     ret
@@ -111,6 +113,7 @@ impl Saved {
             c.run_cont();
         }
         scramble::after_call(c);
+        watch::observe(c, "ret", ra);
         // the callee-saved registers, gp, sp and the return address as before
         for k in (16..24).chain([28, 29, 30, 31]) {
             c.r[k] = r[k];
@@ -137,6 +140,7 @@ impl Saved {
         set_args(c, args, ra);
         c.call(addr);
         scramble::after_call(c);
+        watch::observe(c, "ret", ra);
         for k in (16..24).chain([28, 29, 30, 31]) {
             c.r[k] = r[k];
         }
@@ -281,8 +285,9 @@ pub fn rand(c: &mut Cpu) -> u32 {
     call(c, nfs4rc::f_800eb430, &[])
 }
 
-/// `NFSHS_DECOMP_SCRAMBLE=1`: an experiment for dropping the front end's stack and register
-/// fidelity. The leftovers a front-end port reproduces or leaves are made junk, so whatever
+/// `NFSHS_DECOMP_SCRAMBLE=1` (the front end's ports), `=race` (every other port) or `=all`: an
+/// experiment for dropping the ports' stack and register fidelity. The leftovers a port in
+/// scope reproduces or leaves are made junk, so whatever
 /// still matches the original doesn't depend on them: the scratch registers when it is entered,
 /// when a call it makes returns and when it returns (but v0, and its arguments on entry); the
 /// s-registers it mirrors from the original and the dead stack below sp when it calls out. What a
@@ -295,25 +300,58 @@ pub mod scramble {
 
     /// The front end's ports: FRONT.BIN, loaded below this.
     const FRONT_END_END: u32 = 0x8005_2000;
-    /// The main stack (the front end's) and how much below sp is scrambled.
+    /// The main stack and how much below sp is scrambled; the scratchpad's stack (the race's).
     const STACK: std::ops::Range<u32> = 0x801F_0000..0x8020_0000;
     const SPAN: u32 = 4096;
+    const SCRATCH: std::ops::Range<u32> = 0x1F80_0000..0x1F80_0400;
 
-    pub fn on() -> bool {
-        static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| std::env::var("NFSHS_DECOMP_SCRAMBLE").is_ok_and(|v| v == "1"))
+    /// What is scrambled: nothing, the front end's ports, the others, all.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Scope {
+        Off,
+        FrontEnd,
+        Race,
+        All,
     }
 
-    pub fn front_end(addr: u32) -> bool {
+    fn scope() -> Scope {
+        static SCOPE: OnceLock<Scope> = OnceLock::new();
+        *SCOPE.get_or_init(|| match std::env::var("NFSHS_DECOMP_SCRAMBLE").as_deref() {
+            Ok("1") => Scope::FrontEnd,
+            Ok("race") => Scope::Race,
+            Ok("all") => Scope::All,
+            _ => Scope::Off,
+        })
+    }
+
+    pub fn on() -> bool {
+        scope() != Scope::Off
+    }
+
+    fn front_end(addr: u32) -> bool {
         (0x8001_0000..FRONT_END_END).contains(&addr)
     }
 
-    /// Whether the innermost function running is a front-end port (or recompiled front-end code).
-    fn in_front_end(c: &Cpu) -> bool {
-        on() && c.stack.last().is_some_and(|&f| front_end(f))
+    /// Whether the code at `addr` is scrambled.
+    pub fn scoped(addr: u32) -> bool {
+        if !crate::scramble_allowed(addr) {
+            return false;
+        }
+        match scope() {
+            Scope::Off => false,
+            Scope::FrontEnd => front_end(addr),
+            Scope::Race => !front_end(addr),
+            Scope::All => true,
+        }
+    }
+
+    /// Whether the innermost function running is in scope (a port or recompiled code).
+    fn in_scope(c: &Cpu) -> bool {
+        on() && c.stack.last().is_some_and(|&f| scoped(f))
     }
 
     thread_local!(static SEED: Cell<u32> = const { Cell::new(0x9E37_79B9) });
+    thread_local!(static LOWEST: Cell<u32> = const { Cell::new(u32::MAX) });
 
     fn junk() -> u32 {
         SEED.with(|s| {
@@ -335,6 +373,21 @@ pub mod scramble {
 
     fn stack(c: &mut Cpu) {
         let sp = c.r[29];
+        if SCRATCH.contains(&sp) {
+            // (the scratchpad holds data below its stack: only what has been stack, from the
+            // lowest sp seen there)
+            let low = LOWEST.with(|l| {
+                let v = l.get().min(sp);
+                l.set(v);
+                v
+            });
+            let seed = junk();
+            let (a, b) = ((low - SCRATCH.start) as usize & !3, (sp - SCRATCH.start) as usize & !3);
+            for (k, w) in c.m.scratch[a..b].chunks_exact_mut(4).enumerate() {
+                w.copy_from_slice(&(seed ^ (k as u32).wrapping_mul(0x0101_0101)).to_le_bytes());
+            }
+            return;
+        }
         if !STACK.contains(&sp) {
             return;
         }
@@ -346,14 +399,14 @@ pub mod scramble {
         }
     }
 
-    /// A front-end port is entered from recompiled code (after its prologue's stores): the
+    /// A port in scope is entered from recompiled code (after its prologue's stores): the
     /// scratch registers but its arguments, and the dead stack.
     pub fn on_entry(c: &mut Cpu) {
         regs(c, [1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25].into_iter());
         stack(c);
     }
 
-    /// A front-end port has returned to recompiled code: the scratch registers but v0 and v1 (a
+    /// A port in scope has returned to recompiled code: the scratch registers but v0 and v1 (a
     /// double comes back in both), and the
     /// dead stack.
     pub fn after_return(c: &mut Cpu) {
@@ -361,18 +414,47 @@ pub mod scramble {
         stack(c);
     }
 
-    /// A front-end port calls out: the s-registers and fp it mirrors, and the dead stack.
+    /// A port in scope calls out: the s-registers and fp it mirrors, and the dead stack.
     pub fn before_call(c: &mut Cpu) {
-        if in_front_end(c) {
+        if in_scope(c) {
             regs(c, (16..24).chain([30]));
             stack(c);
         }
     }
 
-    /// A call a front-end port made has returned: the callee's scratch registers but v0 and v1.
+    /// A call a port in scope made has returned: the callee's scratch registers but v0 and v1.
     pub fn after_call(c: &mut Cpu) {
-        if in_front_end(c) {
+        if in_scope(c) {
             regs(c, [1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25].into_iter());
         }
+    }
+}
+
+/// `NFSHS_WATCH=addr` (hex; 12 bytes from it): which code changes a stack slot (for finding what
+/// a leftover the original reads comes from). The slot is read at every decompiled function's
+/// entry and exit and around every call a port makes; a change is logged with the two points
+/// it came between (a call's return address names the call site).
+pub mod watch {
+    use ps1rt::Cpu;
+    use std::cell::Cell;
+    use std::sync::OnceLock;
+
+    fn addr() -> Option<u32> {
+        static ADDR: OnceLock<Option<u32>> = OnceLock::new();
+        *ADDR.get_or_init(|| std::env::var("NFSHS_WATCH").ok().and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()))
+    }
+
+    thread_local!(static LAST: Cell<([u32; 3], &'static str, u32)> = const { Cell::new(([0; 3], "start", 0)) });
+
+    pub fn observe(c: &mut Cpu, what: &'static str, at: u32) {
+        let Some(a) = addr() else { return };
+        let v = [c.m.r32(a), c.m.r32(a + 4), c.m.r32(a + 8)];
+        let (was, wwhat, wat) = LAST.with(|l| l.get());
+        if v != was {
+            let tick = c.m.r32(crate::globals::GAME_TICKS);
+            let inside = c.stack.last().copied().unwrap_or(0);
+            eprintln!("watch {a:#x} [{:08x} {:08x} {:08x}] tick {tick}: between {wwhat} {wat:#x} and {what} {at:#x} (in {inside:#x})", v[0], v[1], v[2]);
+        }
+        LAST.with(|l| l.set((v, what, at)));
     }
 }

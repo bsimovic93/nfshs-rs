@@ -1649,6 +1649,15 @@ pub(crate) fn named_in(var: &str, extra: &[&str]) -> Option<Vec<usize>> {
     Some(out)
 }
 
+/// `NFSHS_DECOMP_SCRAMBLE_ONLY=Name,...`: the scramble (see [`abi::scramble`]) limited to those
+/// functions (for finding which one reads a leftover).
+pub(crate) fn scramble_allowed(addr: u32) -> bool {
+    static ONLY: OnceLock<Option<Vec<u32>>> = OnceLock::new();
+    ONLY.get_or_init(|| named_in("NFSHS_DECOMP_SCRAMBLE_ONLY", &[]).map(|v| v.into_iter().map(|i| FUNCS[i].addr).collect()))
+        .as_ref()
+        .is_none_or(|only| only.contains(&addr))
+}
+
 /// Per function: turned off by `NFSHS_DECOMP_OFF` or left out of `NFSHS_DECOMP_ONLY`.
 fn turned_off() -> &'static [bool] {
     static OFF: OnceLock<Vec<bool>> = OnceLock::new();
@@ -1727,7 +1736,8 @@ pub fn decomp(c: &mut Cpu, addr: u32) -> bool {
     count(i, |s| s.calls += 1);
     // the registers hold the caller's values, as the original's would
     abi::leave_prologue(c, FUNCS[i].addr, None, &[]);
-    let scrambled = abi::scramble::on() && abi::scramble::front_end(FUNCS[i].addr);
+    abi::watch::observe(c, "enter", FUNCS[i].addr);
+    let scrambled = abi::scramble::scoped(FUNCS[i].addr);
     if scrambled {
         abi::scramble::on_entry(c);
     }
@@ -1739,6 +1749,7 @@ pub fn decomp(c: &mut Cpu, addr: u32) -> bool {
             abi::scramble::after_return(c);
         }
     }
+    abi::watch::observe(c, "exit", FUNCS[i].addr);
     true
 }
 

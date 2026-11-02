@@ -29,6 +29,12 @@ pub fn check(root: PathBuf, setup: Option<&RaceSetup>, steps: &[(f32, u16, Optio
     let what = if gs.is_some() { "races" } else { "games (from power-on)" };
     println!("two {what} booted (the second {})", if both_original { "recompiled too" } else { "decompiled" });
     let mut frames = 0u32;
+    // NFSHS_DECOMP_RESYNC=1: a difference is reported (once per set of addresses), the
+    // decompiled run given the original's words, and the run goes on (for listing every
+    // leftover a scramble finds in one run)
+    let resync = std::env::var("NFSHS_DECOMP_RESYNC").is_ok_and(|v| v == "1");
+    let mut seen = std::collections::HashSet::new();
+    let mut diverged = 0u32;
     for &(secs, buttons, sticks) in steps {
         for _ in 0..(secs * 60.0).round() as u32 {
             let input = FrameInput { buttons, buttons2: 0, want_ram: true, sticks: [sticks, None] };
@@ -36,7 +42,18 @@ pub fn check(root: PathBuf, setup: Option<&RaceSetup>, steps: &[(f32, u16, Optio
             let rb = b.step(input)?.ram.clone().unwrap_or_default();
             frames += 1;
             let diffs = differences(&ra, &rb);
-            if !diffs.is_empty() {
+            if !diffs.is_empty() && resync {
+                diverged += 1;
+                let word = |r: &[u8], a: usize| u32::from_le_bytes(r[a..a + 4].try_into().unwrap());
+                if seen.insert(diffs.clone()) {
+                    println!("frame {frames}: {} words differ", diffs.len());
+                    for &a in diffs.iter().take(16) {
+                        let addr = 0x8000_0000 | a as u32;
+                        println!("  {addr:#010x} {}: original {:#010x} decompiled {:#010x}", nfs4::check::describe_in(&ra, addr), word(&ra, a), word(&rb, a));
+                    }
+                }
+                b.poke(diffs.iter().map(|&a| (0x8000_0000 | a as u32, word(&ra, a))).collect());
+            } else if !diffs.is_empty() {
                 println!("frame {frames}: {} words differ", diffs.len());
                 for &a in diffs.iter().take(32) {
                     let word = |r: &[u8]| u32::from_le_bytes(r[a..a + 4].try_into().unwrap());
@@ -46,6 +63,9 @@ pub fn check(root: PathBuf, setup: Option<&RaceSetup>, steps: &[(f32, u16, Optio
                 bail!("the decompiled code diverged at frame {frames}");
             }
         }
+    }
+    if diverged > 0 {
+        bail!("{frames} frames: {diverged} differed (resynced each time)");
     }
     println!("{frames} frames: the same RAM after every one");
     if std::env::var_os("NFSHS_DECOMP_STATS").is_none() {
