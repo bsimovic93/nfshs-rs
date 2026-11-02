@@ -4,9 +4,15 @@
 //! checksums), the card layer started and stopped around a save (the pads' timer off), the
 //! confirm dialogs, saving and loading a player's game and the pink slips' cars, with their
 //! messages.
+//!
+//! Written as FEMENU.CPP is (see there). The dialogs' `Display` and `Hide`, the application's
+//! frame and libmcrd are the host's or hooked (called by address); FRONT.CPP's functions too
+//! until it is rewritten.
 
-use crate::abi::{self, Saved};
-use crate::globals::{FE_APP, FRONT_END, GAME_TICKS, PATHS};
+use crate::call::{call, call_addr, with_buffer};
+use crate::globals::{FE_APP, FRONT_END, GAME_TICKS, PAD_INFO, PATHS};
+use crate::memcard;
+use crate::types::{CarManager, DialogInteractive, DialogYesNo, FEApplication, Screen};
 use ps1rt::Cpu;
 
 const FE: u32 = FRONT_END;
@@ -27,7 +33,7 @@ const ICON_FILE: u32 = 0x8001_1694;
 const ERROR_WORDS: u32 = 0x8005_1F0C;
 /// The managers, the records, the language, the effects' level; the front end's use; the
 /// memory card screen (its +1440 redraw flag).
-const CAR_MANAGER: u32 = 0x8011_552C;
+const CAR_MANAGER: CarManager = crate::globals::CAR_MANAGER;
 const TRACK_MANAGER: u32 = 0x8011_5D08;
 const TOURNAMENT_MANAGER: u32 = 0x8011_5D90;
 const TRACK_RECORDS: u32 = 0x8011_604C;
@@ -71,14 +77,74 @@ const FRAME: fn(&mut Cpu) = nfs4rc::f_800dcea4;
 const SYSTEM_TASK: u32 = 0x800E_77F0;
 const VSYNC: u32 = 0x800F_2C78;
 const REDRAW: u32 = 0x8001_3894;
+/// `tDialog::Display`, `Hide` (hooked); FRONT.CPP's `PlayerNameExist`, `PlayerName`,
+/// `SetPads`, `ResetPSXController`.
+const DISPLAY: u32 = 0x8001_8980;
+const HIDE: u32 = 0x8001_8A44;
+const PLAYER_NAME_EXIST: u32 = 0x8002_BA50;
+const PLAYER_NAME: u32 = 0x8002_BA7C;
+const SET_PADS: u32 = 0x8002_752C;
+const RESET_CONTROLLER: u32 = 0x8002_7104;
 
-/// A port called from a port.
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
+/// The save data's parts: its size, the bonuses, the front end's structure, the cars, the
+/// tracks, the tournaments, the records, a random id, the checksums.
+const DATA_SIZE: u32 = 5292;
+const BONUSES: u32 = 4;
+const FE_DATA: u32 = 8;
+const CARS: u32 = 1112;
+const TRACKS: u32 = 1336;
+const TOURNAMENTS: u32 = 1352;
+const RECORDS: u32 = 1528;
+const SAVE_ID: u32 = 5268;
+const CHECKSUMS: u32 = 5272;
+/// The card layer's file (`MCRD_FILEINFO`, 44 bytes) and options (36 bytes); the file's size, a
+/// new file.
+const FILE_INFO_SIZE: u32 = 44;
+const OPTIONS_SIZE: u32 = 36;
+const FILE_SIZE: u32 = 5376;
+const NEW_FILE: u32 = 0x200;
+/// A dialog: +96 its vtable, +100 its player, +132 shown, +144 its text; a message box's size,
+/// a yes-or-no's; the application's message (+568) and message box (+720); a message's room.
+const VPTR: u32 = 96;
+const DIALOG_PLAYER: u32 = 100;
+const SHOWN: u32 = 132;
+const TEXT: u32 = 144;
+const DIALOG_SIZE: u32 = 152;
+const YES_NO_SIZE: u32 = 168;
+const APP_MESSAGE: u32 = 568;
+const APP_MESSAGE_BOX: u32 = 720;
+const TEXT_SIZE: u32 = 504;
+/// The words (each the first player's; the second's follows): saving, saved, loaded, the card
+/// full, unformatted, the save failed, the load failed, the card pulled; the overwrite and
+/// format questions; "no".
+const SAVING: u32 = 631;
+const SAVED: u32 = 652;
+const LOADED: u32 = 654;
+const CARD_FULL: u32 = 670;
+const UNFORMATTED: u32 = 672;
+const SAVE_FAILED: u32 = 806;
+const LOAD_FAILED: u32 = 810;
+const PULLED: u32 = 812;
+const OVERWRITE_WORD: u32 = 804;
+const FORMAT_WORD: u32 = 808;
+const NO_WORD: u32 = 659;
+/// The front end's: the race type (+4), the pink slips' money (+76, by player), the players'
+/// names (+0x364, 8 bytes each), the effects' level (+834), the pads' modes (+866), the pink
+/// slips' save ids (+1084, by player), the pads' vibration (+1096, by player).
+const RACE_TYPE: u32 = 4;
+const PINKS_MONEY: u32 = 76;
+const PLAYER_NAMES: u32 = 0x364;
+const FE_SFX_LEVEL: u32 = 834;
+const PAD_MODES: u32 = 866;
+const PINKS_IDS: u32 = 1084;
+const VIBRATION: u32 = FE + 1096;
+/// A DualShock (a pad's kind); the memory card screen's redraw flag.
+const DUAL_SHOCK: u8 = 0x73;
+const SCREEN_REDRAW: u32 = 1440;
+
+/// The save's card for player `p`: 1 or 5.
+fn card_of(p: u32) -> u32 {
+    ((p << 16) as i32 >> 14) as u32 | 1
 }
 
 /// A word of the application's.
@@ -88,190 +154,205 @@ fn app_word(c: &mut Cpu, at: u32) -> u32 {
 }
 
 /// The application's frame (the host's hook).
-fn redraw(c: &mut Cpu, r: &Saved, ra: u32) {
+fn redraw(c: &mut Cpu) {
     let app = c.m.r32(FE_APP);
-    r.call_ptr_leaving(c, REDRAW, &[app], ra);
+    call_addr(c, REDRAW, &[app]);
+}
+
+/// `tDialog::Display` and `Hide` (hooked: the host notes the dialog).
+fn show(c: &mut Cpu, d: u32) {
+    call_addr(c, DISPLAY, &[d]);
+}
+
+fn hide(c: &mut Cpu, d: u32) {
+    call_addr(c, HIDE, &[d]);
 }
 
 /// A message box built in place at `d` (a screen first): the dialog's, the message's and the
 /// message box's fields in turn (288 wide, nothing shown, for either player).
-fn message_box(c: &mut Cpu, r: &Saved, d: u32, ra: u32) {
-    port(c, r, 0x8002_6040, ra, &[d], crate::fescreen::abi_screen);
+fn message_box(c: &mut Cpu, d: u32) {
+    crate::fescreen::screen(c, Screen(d));
     let m = &mut c.m;
-    m.w32(d + 96, DIALOG_VT);
+    m.w32(d + VPTR, DIALOG_VT);
     m.w32(d + 112, 0);
     for at in [110, 130, 126, 124, 108, 106, 104, 102] {
         m.w16(d + at, 0);
     }
     m.w16(d + 128, 288);
-    m.w16(d + 100, 0xFFFF);
-    m.w32(d + 96, MESSAGE_VT);
+    m.w16(d + DIALOG_PLAYER, 0xFFFF);
+    m.w32(d + VPTR, MESSAGE_VT);
     m.w16(d + 136, 0);
     m.w32(d + 120, 0);
     m.w32(d + 148, 0);
-    m.w32(d + 132, 0);
+    m.w32(d + SHOWN, 0);
     m.w32(d + 120, 0);
     m.w32(d + 140, 128);
-    m.w32(d + 96, MESSAGE_BOX_VT);
+    m.w32(d + VPTR, MESSAGE_BOX_VT);
 }
 
-/// Waits for a dialog's word `flag` to be 1, a frame drawn between tries (`ra` the loop's,
-/// `last` the frame after).
-fn wait_shown(c: &mut Cpu, r: &Saved, flag: impl Fn(&mut Cpu) -> u32, ra: u32, last: u32) {
+/// A dialog destroyed (its screen's destructor; not freed).
+fn destroy(c: &mut Cpu, d: u32) {
+    crate::fescreen::screen_destructor(c, Screen(d), 2);
+}
+
+/// Frames drawn until the dialog's word at `flag` is 1, and one more.
+fn wait_shown(c: &mut Cpu, flag: impl Fn(&mut Cpu) -> u32) {
     while flag(c) != 1 {
-        redraw(c, r, ra);
+        redraw(c);
     }
-    redraw(c, r, last);
+    redraw(c);
+}
+
+/// A message box shown with `word` (placed down the screen) until it's drawn.
+fn show_message(c: &mut Cpu, d: u32, word: u32, place: bool) {
+    let text = call(c, TEXT_WORD, &[word]);
+    let m = &mut c.m;
+    m.w32(d + TEXT, text);
+    if place {
+        m.w16(d + 124, 0);
+        m.w16(d + 126, 50);
+    }
+    show(c, d);
+    wait_shown(c, |c| c.m.r32(d + SHOWN));
 }
 
 /// The card's events polled until `event` (or another than `event` when `until_not`): a frame
 /// swapped and a vertical blank between tries.
-fn wait_event(c: &mut Cpu, r: &Saved, card: u32, event: u32, until_not: bool, ra: u32, frame_ra: u32, vsync_ra: u32) {
+fn wait_event(c: &mut Cpu, card: u32, event: u32, until_not: bool) {
     loop {
-        let v = port(c, r, 0x8005_0368, ra, &[card], crate::memcard::abi_handlecardevents);
+        let v = memcard::handlecardevents(c, card);
         if (v == event) != until_not {
             return;
         }
-        r.call_leaving(c, FRAME, &[], frame_ra);
-        r.call_ptr_leaving(c, VSYNC, &[0], vsync_ra);
+        call(c, FRAME, &[]);
+        call_addr(c, VSYNC, &[0]);
     }
 }
 
 /// One poll of the card's events in a save's loop: a frame, the events, the system's task,
 /// a vertical blank. The event.
-fn poll(c: &mut Cpu, r: &mut Saved, card: u32, ras: [u32; 4]) -> u32 {
-    r.call_leaving(c, FRAME, &[], ras[0]);
-    let v = port(c, r, 0x8005_0368, ras[1], &[card], crate::memcard::abi_handlecardevents);
-    r.0[0] = v;
-    r.call_ptr_leaving(c, SYSTEM_TASK, &[0], ras[2]);
-    r.call_ptr_leaving(c, VSYNC, &[0], ras[3]);
+fn poll(c: &mut Cpu, card: u32) -> u32 {
+    call(c, FRAME, &[]);
+    let v = memcard::handlecardevents(c, card);
+    call_addr(c, SYSTEM_TASK, &[0]);
+    call_addr(c, VSYNC, &[0]);
     v
 }
 
+/// The save data's parts (the front end's structure, the cars, the tracks, the tournaments, the
+/// records) with a checksum each.
+const PARTS: [(u32, u32); 5] = [(FE_DATA, 1104), (CARS, 224), (TRACKS, 16), (TOURNAMENTS, 176), (RECORDS, 3740)];
+
 /// `ChecksumData` (FEMEMCARD.CPP, 0x800343d0): the save data's size and its five checksums.
+pub fn checksum_data(c: &mut Cpu, d: u32) {
+    c.m.w32(d, DATA_SIZE);
+    for (k, (at, len)) in PARTS.into_iter().enumerate() {
+        let v = call(c, CHECKSUM, &[d + at, len]);
+        c.m.w32(d + CHECKSUMS + 4 * k as u32, v);
+    }
+}
+
 pub fn abi_checksum_data(c: &mut Cpu) {
-    let d = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = d;
-        c.m.w32(d, 5292);
-        let parts = [(8, 1104, 0x8003_43f4), (1112, 224, 0x8003_4404), (1336, 16, 0x8003_4414), (1352, 176, 0x8003_4424), (1528, 3740, 0x8003_4434)];
-        for (k, (at, len, ra)) in parts.into_iter().enumerate() {
-            let v = r.call_leaving(c, CHECKSUM, &[d + at, len], ra);
-            c.m.w32(d + 5272 + 4 * k as u32, v);
-        }
-    })
+    checksum_data(c, c.r[4]);
 }
 
 /// `VerifySuccessfulRead` (FEMEMCARD.CPP, 0x80034448): whether the read save data's size and
 /// checksums are right.
+pub fn verify_successful_read(c: &mut Cpu, d: u32) -> bool {
+    let mut ok = true;
+    for (k, (at, len)) in PARTS.into_iter().enumerate() {
+        let v = call(c, CHECKSUM, &[d + at, len]);
+        ok &= c.m.r32(d + CHECKSUMS + 4 * k as u32) == v;
+    }
+    ok && c.m.r32(d) == DATA_SIZE
+}
+
 pub fn abi_verify_successful_read(c: &mut Cpu) {
-    let d = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = d;
-        let parts = [(8, 1104, 0x8003_4468), (1112, 224, 0x8003_4480), (1336, 16, 0x8003_44a0), (1352, 176, 0x8003_44c0), (1528, 3740, 0x8003_44e0)];
-        let mut ok = 1u32;
-        for (k, (at, len, ra)) in parts.into_iter().enumerate() {
-            let v = r.call_leaving(c, CHECKSUM, &[d + at, len], ra);
-            ok &= (c.m.r32(d + 5272 + 4 * k as u32) == v) as u32;
-            r.0[0] = ok;
-        }
-        ok &= (c.m.r32(d) == 5292) as u32;
-        c.r[2] = ok;
-    })
+    c.r[2] = verify_successful_read(c, c.r[4]) as u32;
 }
 
 /// `MakeWayForMemoryCard` (FEMEMCARD.CPP, 0x80034520): the pads' timer stopped.
+pub fn make_way(c: &mut Cpu) {
+    call(c, DEL_TIMER, &[PAD_TIMER]);
+}
+
 pub fn abi_make_way(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| {
-        Saved::of(c).call_leaving(c, DEL_TIMER, &[PAD_TIMER], 0x8003_4534);
-    })
+    make_way(c);
 }
 
 /// `BringThatBeatBack` (FEMEMCARD.CPP, 0x80034544): the pads' timer back.
+pub fn bring_back(c: &mut Cpu) {
+    call(c, ADD_TIMER, &[PAD_TIMER]);
+}
+
 pub fn abi_bring_back(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| {
-        Saved::of(c).call_leaving(c, ADD_TIMER, &[PAD_TIMER], 0x8003_4558);
-    })
+    bring_back(c);
 }
 
 /// `Confirm` (FEMEMCARD.CPP, 0x80034568): a yes-or-no with the text `word` and the answers
 /// `answers` (the application's message box hidden meanwhile, shown again after): the answer
 /// (-1 the card pulled: told so). The card reached unless answered yes.
-pub fn abi_confirm(c: &mut Cpu) {
-    let (word, answers) = (c.r[4], c.r[5]);
-    abi::frame(c, 208, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[4]) = (word, answers);
-        r.enter_leaving(c, 0x8003_4544, 0x8003_4590, abi_bring_back);
-        let d = sp + 16;
-        r.0[0] = d;
-        port(c, &r, 0x8001_9bcc, 0x8003_4598, &[d], crate::fedialog::abi_yes_no);
-        r.0[1] = 0x8005_0000;
-        c.m.w32(d + 96, YES_NO_VT);
+pub fn confirm(c: &mut Cpu, word: u32, answers: u32) -> u32 {
+    bring_back(c);
+    with_buffer(c, YES_NO_SIZE, |c, d| {
+        crate::fedialog::yes_no(c, DialogYesNo(d));
+        c.m.w32(d + VPTR, YES_NO_VT);
         let app = c.m.r32(FE_APP);
-        r.0[3] = 0;
-        if c.m.r32(app + 720 + 112) != 0 {
-            r.0[3] = 1;
-            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_45cc);
+        let shown = c.m.r32(app + APP_MESSAGE_BOX + 112) != 0;
+        if shown {
+            hide(c, app + APP_MESSAGE_BOX);
         }
-        let text = r.call_leaving(c, TEXT_WORD, &[word], 0x8003_45d4);
+        let text = call(c, TEXT_WORD, &[word]);
         let m = &mut c.m;
-        m.w32(d + 144, text);
-        m.w32(d + 164, 659);
+        m.w32(d + TEXT, text);
+        m.w32(d + 164, NO_WORD);
         m.w32(d + 160, answers);
         m.w16(d + 136, 0);
         if m.r8(LANGUAGE) == 3 {
             m.w16(d + 124, 0);
             m.w16(d + 126, 10);
         }
-        let v = port(c, &r, 0x8001_9928, 0x8003_460c, &[d], crate::fedialog::abi_run) as u16 as i16 as i32 as u32;
-        r.0[2] = v;
-        let shown = r.0[3];
+        let v = crate::fedialog::run(c, DialogInteractive(d)) as u16 as i16 as i32 as u32;
         if v == u32::MAX {
+            // the card pulled
             let app = c.m.r32(FE_APP);
-            r.0[0] = app + 568;
             let player = c.m.r32(CARD_PLAYER);
-            let text = r.call_leaving(c, TEXT_WORD, &[player.wrapping_add(812)], 0x8003_4634);
+            let text = call(c, TEXT_WORD, &[player.wrapping_add(PULLED)]);
             let app2 = c.m.r32(FE_APP);
-            c.m.w32(app + 568 + 144, text);
-            r.call_ptr_leaving(c, 0x8001_8980, &[app2 + 568], 0x8003_4644);
-            wait_shown(c, &r, |c| app_word(c, 700), 0x8003_4668, 0x8003_4678);
+            c.m.w32(app + APP_MESSAGE + TEXT, text);
+            show(c, app2 + APP_MESSAGE);
+            wait_shown(c, |c| app_word(c, APP_MESSAGE + SHOWN));
             c.m.w32(CARD_DONE, 1);
         } else if v == 0 {
             c.m.w32(CARD_DONE, 1);
-        } else if shown != 0 {
-            r.0[0] = 0x8005_0000;
+        } else if shown {
             let app = c.m.r32(FE_APP);
-            r.call_ptr_leaving(c, 0x8001_8980, &[app + 720], 0x8003_46a8);
-            while app_word(c, 852) != 1 {
-                redraw(c, &r, 0x8003_46cc);
+            show(c, app + APP_MESSAGE_BOX);
+            while app_word(c, APP_MESSAGE_BOX + SHOWN) != 1 {
+                redraw(c);
             }
         }
-        redraw(c, &r, 0x8003_46e4);
-        r.enter_leaving(c, 0x8003_4520, 0x8003_46ec, abi_make_way);
-        port(c, &r, 0x8002_6098, 0x8003_46f8, &[d, 2], crate::fescreen::abi_screen_destructor);
-        c.r[2] = v;
+        redraw(c);
+        make_way(c);
+        destroy(c, d);
+        v
     })
 }
 
-/// `OverwriteConfirm` and `FormatConfirm` (FEMEMCARD.CPP, 0x8003471c, 0x80034750): the card
-/// player's question.
-fn confirm_word(c: &mut Cpu, at: u32, answers: u32, ra: u32) {
-    abi::frame(c, 24, |c, _| {
-        let r = Saved::of(c);
-        let word = c.m.r32(CARD_PLAYER).wrapping_add(at);
-        port(c, &r, 0x8003_4568, ra, &[word, answers], abi_confirm);
-    })
+pub fn abi_confirm(c: &mut Cpu) {
+    c.r[2] = confirm(c, c.r[4], c.r[5]);
 }
 
+/// `OverwriteConfirm` (FEMEMCARD.CPP, 0x8003471c): the card player's overwrite question.
 pub fn abi_overwrite_confirm(c: &mut Cpu) {
-    confirm_word(c, 804, 656, 0x8003_4738);
+    let word = c.m.r32(CARD_PLAYER).wrapping_add(OVERWRITE_WORD);
+    c.r[2] = confirm(c, word, 656);
 }
 
+/// `FormatConfirm` (FEMEMCARD.CPP, 0x80034750): the card player's format question.
 pub fn abi_format_confirm(c: &mut Cpu) {
-    confirm_word(c, 808, 657, 0x8003_476c);
+    let word = c.m.r32(CARD_PLAYER).wrapping_add(FORMAT_WORD);
+    c.r[2] = confirm(c, word, 657);
 }
 
 /// `OverwriteAlwaysYes` (FEMEMCARD.CPP, 0x80034748): yes.
@@ -284,11 +365,11 @@ pub fn abi_loading_proc(_c: &mut Cpu) {}
 
 /// `LoadingRedrawProc` and `SavingProc` (FEMEMCARD.CPP, 0x80034784, 0x800347ac): a frame.
 pub fn abi_loading_redraw_proc(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| redraw(c, &Saved::of(c), 0x8003_479c));
+    redraw(c);
 }
 
 pub fn abi_saving_proc(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| redraw(c, &Saved::of(c), 0x8003_47c4));
+    redraw(c);
 }
 
 /// Spins until `ticks` passed since now (the original's busy wait on the clock).
@@ -303,612 +384,510 @@ fn spin(c: &mut Cpu, ticks: i32) {
 /// stopped (in the front end), the pads stopped for a second, their timer off, the layer
 /// initialized with the game's code, the 512-by-256 icons' place, the confirm callbacks (the
 /// overwrite always yes when `always_yes`) and the wait callbacks (a frame drawn when
-/// `redraw`); the pads back.
-pub fn abi_init_memcard(c: &mut Cpu) {
-    let (redraw_cb, always_yes) = (c.r[4], c.r[5]);
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[1], r.0[0]) = (redraw_cb, always_yes);
-        if c.m.r32(INITED) != 0 {
-            return;
-        }
-        let front_end = c.m.r32(USE_FRONT_END);
-        c.m.w32(INITED, 1);
-        if front_end != 0 {
-            r.call_leaving(c, STOP_SONG, &[0], 0x8003_4814);
-            r.call_leaving(c, TIMED_WAIT, &[5], 0x8003_481c);
-        }
-        r.call_leaving(c, PAD_STOP, &[], 0x8003_4824);
-        spin(c, 60);
-        r.call_leaving(c, DEL_TIMER, &[PAD_TIMER], 0x8003_4854);
-        r.call_leaving(c, TIMED_WAIT, &[20], 0x8003_485c);
-        port(c, &r, 0x8004_f8c8, 0x8003_4864, &[0], crate::memcard::abi_init);
-        port(c, &r, 0x8004_fa04, 0x8003_486c, &[sp + 16], crate::memcard::abi_getopts);
+/// `redraw_cb`); the pads back.
+pub fn init_memcard(c: &mut Cpu, redraw_cb: bool, always_yes: bool) {
+    if c.m.r32(INITED) != 0 {
+        return;
+    }
+    let front_end = c.m.r32(USE_FRONT_END);
+    c.m.w32(INITED, 1);
+    if front_end != 0 {
+        call(c, STOP_SONG, &[0]);
+        call(c, TIMED_WAIT, &[5]);
+    }
+    call(c, PAD_STOP, &[]);
+    spin(c, 60);
+    call(c, DEL_TIMER, &[PAD_TIMER]);
+    call(c, TIMED_WAIT, &[20]);
+    memcard::init(c, 0);
+    with_buffer(c, OPTIONS_SIZE, |c, o| {
+        memcard::getopts(&mut c.m, o);
         let m = &mut c.m;
-        m.w32(sp + 20, GAME_CODE);
-        for (at, v) in [(28, 512), (30, 256), (32, 32), (34, 96)] {
-            m.w16(sp + at, v);
+        m.w32(o + 4, GAME_CODE);
+        for (at, v) in [(12, 512), (14, 256), (16, 32), (18, 96)] {
+            m.w16(o + at, v);
         }
-        m.w32(sp + 16, 0);
-        m.w32(sp + 24, 0);
-        m.w32(sp + 36, FORMAT_CONFIRM);
-        m.w32(sp + 40, if always_yes != 0 { OVERWRITE_ALWAYS_YES } else { OVERWRITE_CONFIRM });
-        m.w32(sp + 44, if redraw_cb != 0 { LOADING_REDRAW_PROC } else { LOADING_PROC });
-        m.w32(sp + 48, SAVING_PROC);
-        port(c, &r, 0x8004_fa7c, 0x8003_48f8, &[sp + 16], crate::memcard::abi_setopts);
-        r.call_leaving(c, ADD_TIMER, &[PAD_TIMER], 0x8003_4904);
-        r.call_leaving(c, TIMED_WAIT, &[20], 0x8003_490c);
-        r.call_leaving(c, PAD_INIT, &[], 0x8003_4914);
-        r.call_leaving(c, TIMED_WAIT, &[20], 0x8003_491c);
-        r.call_leaving(c, FRAME, &[], 0x8003_4924);
-    })
+        m.w32(o, 0);
+        m.w32(o + 8, 0);
+        m.w32(o + 20, FORMAT_CONFIRM);
+        m.w32(o + 24, if always_yes { OVERWRITE_ALWAYS_YES } else { OVERWRITE_CONFIRM });
+        m.w32(o + 28, if redraw_cb { LOADING_REDRAW_PROC } else { LOADING_PROC });
+        m.w32(o + 32, SAVING_PROC);
+        memcard::setopts(c, o);
+    });
+    call(c, ADD_TIMER, &[PAD_TIMER]);
+    call(c, TIMED_WAIT, &[20]);
+    call(c, PAD_INIT, &[]);
+    call(c, TIMED_WAIT, &[20]);
+    call(c, FRAME, &[]);
+}
+
+pub fn abi_init_memcard(c: &mut Cpu) {
+    init_memcard(c, c.r[4] != 0, c.r[5] != 0);
 }
 
 /// `DeInit_Memcard` (FEMEMCARD.CPP, 0x80034938): the card layer stopped, the pads' timer back,
 /// the pads stopped for 192 ticks and started; the front end's music back.
+pub fn deinit_memcard(c: &mut Cpu) {
+    if c.m.r32(INITED) == 0 {
+        return;
+    }
+    c.m.w32(INITED, 0);
+    call(c, DEL_TIMER, &[PAD_TIMER]);
+    memcard::restore(c);
+    call(c, ADD_TIMER, &[PAD_TIMER]);
+    call(c, PAD_STOP, &[]);
+    spin(c, 192);
+    call(c, PAD_INIT, &[]);
+    call(c, FRAME, &[]);
+    if c.m.r32(USE_FRONT_END) != 0 {
+        let app = c.m.r32(FE_APP);
+        crate::feapp::update_music(c, FEApplication(app));
+    }
+}
+
 pub fn abi_deinit_memcard(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        if c.m.r32(INITED) == 0 {
-            return;
-        }
-        r.0[0] = PAD_TIMER;
-        c.m.w32(INITED, 0);
-        r.call_leaving(c, DEL_TIMER, &[PAD_TIMER], 0x8003_4964);
-        r.enter_leaving(c, 0x8004_f9c0, 0x8003_496c, crate::memcard::abi_restore);
-        r.call_leaving(c, ADD_TIMER, &[PAD_TIMER], 0x8003_4974);
-        r.call_leaving(c, PAD_STOP, &[], 0x8003_497c);
-        spin(c, 192);
-        r.call_leaving(c, PAD_INIT, &[], 0x8003_49a8);
-        r.call_leaving(c, FRAME, &[], 0x8003_49b0);
-        if c.m.r32(USE_FRONT_END) != 0 {
-            let app = c.m.r32(FE_APP);
-            port(c, &r, 0x8001_3e34, 0x8003_49d0, &[app], crate::feapp::abi_update_music);
-        }
-    })
+    deinit_memcard(c);
 }
 
 /// `Init_MemcardFile` (FEMEMCARD.CPP, 0x800349e0): the save file `NFS4` of 5376 bytes, its
 /// title the player's (card 5 the second's: the word and the name, or the word for no name),
 /// none for the pink slips'.
-pub fn abi_init_memcard_file(c: &mut Cpu) {
-    let (file, card, pinks) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[1], r.0[0]) = (file, card, pinks);
-        r.call_leaving(c, BLOCKCLEAR, &[file, 44], 0x8003_4a08);
-        c.m.w32(file, FILE_NAME);
-        if pinks != 0 {
-            c.m.w8(SAVE_NAME, 0);
+pub fn init_memcard_file(c: &mut Cpu, file: u32, card: u32, pinks: bool) {
+    call(c, BLOCKCLEAR, &[file, FILE_INFO_SIZE]);
+    c.m.w32(file, FILE_NAME);
+    if pinks {
+        c.m.w8(SAVE_NAME, 0);
+    } else {
+        let player = (card as u16 as i16 == 5) as u32;
+        if call_addr(c, PLAYER_NAME_EXIST, &[player]) != 0 {
+            let word = call(c, TEXT_WORD, &[633]);
+            let name = call_addr(c, PLAYER_NAME, &[player]);
+            call(c, SPRINTF, &[SAVE_NAME, TWO_STRINGS, word, name]);
         } else {
-            let player = (card as u16 as i16 == 5) as u32;
-            r.0[0] = player;
-            if port(c, &r, 0x8002_ba50, 0x8003_4a3c, &[player], crate::front::abi_player_name_exist) != 0 {
-                let word = r.call_leaving(c, TEXT_WORD, &[633], 0x8003_4a4c);
-                let name = port(c, &r, 0x8002_ba7c, 0x8003_4a58, &[player], crate::front::abi_player_name);
-                r.0[0] = word;
-                r.call_leaving(c, SPRINTF, &[SAVE_NAME, TWO_STRINGS, word, name], 0x8003_4a74);
-            } else {
-                let word = r.call_leaving(c, TEXT_WORD, &[634], 0x8003_4a84);
-                r.call_leaving(c, SPRINTF, &[SAVE_NAME, word], 0x8003_4a94);
-            }
+            let word = call(c, TEXT_WORD, &[634]);
+            call(c, SPRINTF, &[SAVE_NAME, word]);
         }
-        let m = &mut c.m;
-        m.w32(file + 4, SAVE_NAME);
-        m.w32(file + 8, 5376);
-        m.w32(file + 12, 0);
-        m.w32(file + 16, 0);
+    }
+    let m = &mut c.m;
+    m.w32(file + 4, SAVE_NAME);
+    m.w32(file + 8, FILE_SIZE);
+    m.w32(file + 12, 0);
+    m.w32(file + 16, 0);
+}
+
+pub fn abi_init_memcard_file(c: &mut Cpu) {
+    init_memcard_file(c, c.r[4], c.r[5], c.r[6] != 0);
+}
+
+/// The application's message (+568) shown with word `word` until it's drawn.
+fn tell(c: &mut Cpu, word: u32) {
+    let app = c.m.r32(FE_APP);
+    let text = call(c, TEXT_WORD, &[word]);
+    let app2 = c.m.r32(FE_APP);
+    c.m.w32(app + APP_MESSAGE + TEXT, text);
+    show(c, app2 + APP_MESSAGE);
+    wait_shown(c, |c| app_word(c, APP_MESSAGE + SHOWN));
+}
+
+/// The icon file read (`zMem.psh`), and the save file's: a new file (its header) with the
+/// first shape as its icon.
+fn load_icon(c: &mut Cpu) -> u32 {
+    with_buffer(c, 64, |c, name| {
+        let path = c.m.r32(CD_PATH);
+        call(c, SPRINTF, &[name, ICON_FILE, path]);
+        call(c, LOAD_SHAPE, &[name, 0])
     })
 }
 
-/// The application's message box (+568) shown with word `word` until it's drawn.
-fn tell(c: &mut Cpu, r: &mut Saved, word: u32, ras: [u32; 4]) {
-    r.0[1] = 0x8005_0000;
-    let app = c.m.r32(FE_APP);
-    r.0[0] = app + 568;
-    let text = r.call_leaving(c, TEXT_WORD, &[word], ras[0]);
-    let app2 = c.m.r32(FE_APP);
-    c.m.w32(app + 568 + 144, text);
-    r.call_ptr_leaving(c, 0x8001_8980, &[app2 + 568], ras[1]);
-    wait_shown(c, r, |c| app_word(c, 700), ras[2], ras[3]);
+fn icon_file(c: &mut Cpu, info: u32, icon: u32) {
+    c.m.w32(info + 16, NEW_FILE);
+    let shape = call(c, SHAPE_POINTER, &[icon, 0]);
+    let m = &mut c.m;
+    m.w32(info + 24, shape);
+    m.w32(info + 28, 0);
+    m.w32(info + 32, 0);
 }
 
-/// The save's card for player `p`: 1 or 5.
-fn card_of(p: u32) -> u32 {
-    ((p << 16) as i32 >> 14) as u32 | 1
+/// A card's state (-1 none, -2 unformatted, -3 full).
+fn card_state(c: &mut Cpu, card: u32) -> i32 {
+    let at = memcard::getcard(&mut c.m, card);
+    c.m.r32(at) as i32
 }
 
 /// `SaveGame` (FEMEMCARD.CPP, 0x80034ac8): player `p`'s game saved on their card ("saving"
 /// shown): the pads' vibration noted, the save data made (the front end, tournaments, tracks,
 /// cars, records, a random id, the bonuses) and checksummed, the icon loaded; the card's events
 /// followed until the save is written or fails (a full card, none, an unformatted one: their
-/// messages). 1 written (or failed: the message shown), 0 not.
-pub fn abi_save_game(c: &mut Cpu) {
-    let p = c.r[4];
-    abi::frame(c, 5880, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[5] = p;
-        let p16 = p as u16 as i16 as i32 as u32;
-        c.m.w32(CARD_PLAYER, p16);
-        c.m.w32(CARD_ACTIVE, 1);
-        for k in 0..2u32 {
-            let info = crate::globals::PAD_INFO + (((k != 0) as u32) << 5);
-            c.m.w32(FE + 1096 + 4 * k, 1);
-            if c.m.r8(info + 5) != 0x73 {
-                c.m.w32(FE + 1096 + 4 * k, 0);
-            }
+/// messages). Whether it was written.
+pub fn save_game(c: &mut Cpu, p: u32) -> bool {
+    let p16 = p as u16 as i16 as i32 as u32;
+    c.m.w32(CARD_PLAYER, p16);
+    c.m.w32(CARD_ACTIVE, 1);
+    // (a pad vibrates if it's a DualShock)
+    for k in 0..2u32 {
+        let info = PAD_INFO + (k << 5);
+        c.m.w32(VIBRATION + 4 * k, 1);
+        if c.m.r8(info + 5) != DUAL_SHOCK {
+            c.m.w32(VIBRATION + 4 * k, 0);
         }
-        let d = sp + 5568;
-        r.0[0] = d;
-        message_box(c, &r, d, 0x8003_4b70);
-        let text = r.call_leaving(c, TEXT_WORD, &[p16.wrapping_add(631)], 0x8003_4bf4);
-        let m = &mut c.m;
-        m.w32(d + 144, text);
-        m.w16(d + 124, 0);
-        m.w16(d + 126, 50);
-        r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8003_4c0c);
-        r.0[0] = 0x8005_0000;
-        r.0[3] = 0;
-        while c.m.r32(d + 132) != 1 {
-            redraw(c, &r, 0x8003_4c30);
-        }
-        (r.0[6], r.0[2], r.0[1]) = (0, 652, 21);
-        redraw(c, &r, 0x8003_4c4c);
+    }
+    with_buffer(c, DATA_SIZE + DIALOG_SIZE + FILE_INFO_SIZE, |c, data| {
+        let (d, info) = (data + DATA_SIZE, data + DATA_SIZE + DIALOG_SIZE);
+        message_box(c, d);
+        show_message(c, d, p16.wrapping_add(SAVING), true);
         let card = card_of(p);
-        r.0[0] = card;
-        c.m.w16(sp + 5832, card as u16);
         c.m.w32(CARD_DONE, 0);
-        r.enter_leaving(c, 0x8003_4520, 0x8003_4c6c, abi_make_way);
-        r.0[0] = card << 16;
-        port(c, &r, 0x8003_49e0, 0x8003_4c80, &[sp + 5720, card, 0], abi_init_memcard_file);
-        c.m.w32(sp + 5740, sp + 16);
-        wait_event(c, &r, card, 21, true, 0x8003_4c90, 0x8003_4ca0, 0x8003_4ca8);
-        r.call_leaving(c, BLOCKMOVE, &[FE, sp + 24, 1104], 0x8003_4cc0);
-        port(c, &r, 0x8003_3638, 0x8003_4cd0, &[TOURNAMENT_MANAGER, sp + 1368], crate::fetourn::abi_save_tournament);
-        port(c, &r, 0x8002_1bdc, 0x8003_4ce0, &[TRACK_MANAGER, sp + 1352], crate::fetracks::abi_save_tracks);
-        port(c, &r, 0x8001_6c38, 0x8003_4cf0, &[CAR_MANAGER, sp + 1128], crate::fecars::abi_save_cars);
-        r.call_leaving(c, BLOCKMOVE, &[TRACK_RECORDS, sp + 1544, 3740], 0x8003_4d04);
-        let id = r.call_leaving(c, RAND, &[], 0x8003_4d0c);
-        c.m.w32(sp + 5284, id);
-        port(c, &r, 0x8002_3768, 0x8003_4d18, &[sp + 20], crate::fecheats::abi_save_bonus);
-        r.0[0] = sp + 5768;
-        let path = c.m.r32(CD_PATH);
-        r.call_leaving(c, SPRINTF, &[sp + 5768, ICON_FILE, path], 0x8003_4d3c);
-        r.0[1] = card << 16;
-        let icon = r.call_leaving(c, LOAD_SHAPE, &[sp + 5768, 0], 0x8003_4d48);
-        r.0[7] = icon;
-        c.m.w32(sp + 5736, 512);
-        let shape = r.call_leaving(c, SHAPE_POINTER, &[icon, 0], 0x8003_4d60);
-        c.m.w32(sp + 5744, shape);
-        c.m.w32(sp + 5748, 0);
-        c.m.w32(sp + 5752, 0);
-        port(c, &r, 0x8003_43d0, 0x8003_4d74, &[sp + 16], abi_checksum_data);
-        (r.0[8], r.0[4]) = (crate::memcard::STATE, ((p << 16) as i32 >> 14) as u32);
-        while r.0[3] == 0 {
-            let e = poll(c, &mut r, card, [0x8003_4d94, 0x8003_4d9c, 0x8003_4da8, 0x8003_4db0]);
-            r.0[0] = e.wrapping_sub(2);
-            match e {
+        make_way(c);
+        init_memcard_file(c, info, card, false);
+        c.m.w32(info + 20, data);
+        wait_event(c, card, 21, true);
+        call(c, BLOCKMOVE, &[FE, data + FE_DATA, 1104]);
+        crate::fetourn::save_tournament(&mut c.m, TOURNAMENT_MANAGER, data + TOURNAMENTS);
+        crate::fetracks::save_tracks(&mut c.m, TRACK_MANAGER, data + TRACKS);
+        crate::fecars::save_cars(c, CAR_MANAGER, data + CARS);
+        call(c, BLOCKMOVE, &[TRACK_RECORDS, data + RECORDS, 3740]);
+        let id = call(c, RAND, &[]);
+        c.m.w32(data + SAVE_ID, id);
+        crate::fecheats::save_bonus(&mut c.m, data + BONUSES);
+        let icon = load_icon(c);
+        icon_file(c, info, icon);
+        checksum_data(c, data);
+        // the card's events until the save is written or fails
+        let (word, written) = loop {
+            match poll(c, card) {
                 22 => {
-                    if c.m.r32(crate::memcard::STATE + 52) != 0 {
-                        port(c, &r, 0x8004_ff34, 0x8003_4df4, &[card, sp + 5720], crate::memcard::abi_savefile);
+                    if c.m.r32(memcard::STATE + 52) != 0 {
+                        memcard::savefile(c, card, info);
                     }
                 }
-                12 => {
-                    (r.0[2], r.0[3], r.0[6]) = (652, 1, 1);
-                }
+                12 => break (SAVED, true),
                 2 | 3 | 7 | 10 | 11 | 13 | 23 => {
-                    let at = port(c, &r, 0x8005_072c, 0x8003_4e14, &[r.0[4].wrapping_add(1)], crate::memcard::abi_getcard);
-                    r.0[2] = match c.m.r32(at) as i32 {
-                        -3 => 670,
-                        -1 => 812,
-                        _ => 806,
+                    let word = match card_state(c, card) {
+                        -3 => CARD_FULL,
+                        -1 => PULLED,
+                        _ => SAVE_FAILED,
                     };
-                    r.0[3] = 1;
+                    break (word, false);
                 }
                 _ => {}
             }
-        }
-        (r.0[1], r.0[0]) = (22, card << 16);
-        wait_event(c, &r, card, 22, false, 0x8003_4e50, 0x8003_4e60, 0x8003_4e68);
-        r.call_leaving(c, PURGE, &[icon], 0x8003_4e78);
-        r.enter_leaving(c, 0x8003_4544, 0x8003_4e80, abi_bring_back);
+        };
+        wait_event(c, card, 22, false);
+        call(c, PURGE, &[icon]);
+        bring_back(c);
         if c.m.r32(CARD_DONE) == 0 {
-            r.0[1] = 0x8005_0000;
             let app = c.m.r32(FE_APP);
-            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_4ea0);
-            let word = r.0[2].wrapping_add(p16);
-            tell(c, &mut r, word, [0x8003_4eb8, 0x8003_4ec8, 0x8003_4eec, 0x8003_4efc]);
+            hide(c, app + APP_MESSAGE_BOX);
+            tell(c, word.wrapping_add(p16));
         }
-        r.0[0] = d;
         let screen = c.m.r32(MEMCARD_SCREEN);
-        c.m.w32(screen + 1440, 1);
-        r.call_ptr_leaving(c, 0x8001_8a44, &[d], 0x8003_4f18);
-        redraw(c, &r, 0x8003_4f28);
+        c.m.w32(screen + SCREEN_REDRAW, 1);
+        hide(c, d);
+        redraw(c);
         c.m.w32(CARD_ACTIVE, 0);
-        port(c, &r, 0x8002_6098, 0x8003_4f3c, &[d, 2], crate::fescreen::abi_screen_destructor);
-        c.r[2] = r.0[6];
+        destroy(c, d);
+        written
     })
 }
 
+pub fn abi_save_game(c: &mut Cpu) {
+    c.r[2] = save_game(c, c.r[4]) as u32;
+}
+
 /// `LoadGame` (FEMEMCARD.CPP, 0x80034f70): player `p`'s game loaded from their card ("loading"
-/// shown unless `quiet` and not `pinks`), up to three tries (none with `pinks`): the save read
-/// and checked, then the first player's front end, tournaments, tracks, records and bonuses
-/// and each player's name and cars, or (`quiet`) their pink slips' cars, name and id; the pads
-/// set; the errors' messages (`pinks`). The result: 0 loaded, 1 bad, 2 none, 3 no card.
-pub fn abi_load_game(c: &mut Cpu) {
-    let (p, quiet, pinks) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 5832, |c, sp| {
-        let mut r = Saved::of(c);
-        let p16 = p as u16 as i16 as i32 as u32;
-        let card = (p16 << 2) | 1;
-        (r.0[1], r.0[4]) = (p16, card);
-        let d = sp + 5568;
-        r.0[0] = d;
-        c.m.w32(CARD_PLAYER, p16);
-        c.m.w32(CARD_ACTIVE, 1);
-        let language = c.m.r8(LANGUAGE) as u32;
-        c.m.w32(sp + 5836, quiet);
-        c.m.w32(sp + 5840, pinks);
-        c.m.w16(sp + 5768, p as u16);
-        c.m.w32(sp + 5776, language);
-        message_box(c, &r, d, 0x8003_4fe8);
-        if pinks != 0 || quiet != 0 {
-            let text = r.call_leaving(c, TEXT_WORD, &[p16.wrapping_add(631)], 0x8003_507c);
-            c.m.w32(d + 144, text);
-            if quiet == 0 {
-                c.m.w16(d + 124, 0);
-                c.m.w16(d + 126, 50);
-            }
-            r.call_ptr_leaving(c, 0x8001_8980, &[d], 0x8003_50a0);
-            r.0[0] = 0x8005_0000;
-            while c.m.r32(d + 132) != 1 {
-                redraw(c, &r, 0x8003_50c4);
-            }
-            redraw(c, &r, 0x8003_50d8);
+/// shown unless `quiet` and not `pinks`), up to three tries (none but with `pinks`): the save
+/// read and checked, then the first player's front end, tournaments, tracks, records and
+/// bonuses and each player's name and cars, or (`quiet`) their pink slips' cars, name and id;
+/// the pads set; the errors' messages (`pinks`). The result: 0 loaded, 1 bad, 2 none, 3 no
+/// card.
+pub fn load_game(c: &mut Cpu, p: u32, quiet: bool, pinks: bool) -> u32 {
+    let p16 = p as u16 as i16 as i32 as u32;
+    let card = (p16 << 2) | 1;
+    c.m.w32(CARD_PLAYER, p16);
+    c.m.w32(CARD_ACTIVE, 1);
+    let language = c.m.r8(LANGUAGE);
+    with_buffer(c, DATA_SIZE + DIALOG_SIZE + FILE_INFO_SIZE, |c, data| {
+        let (d, info) = (data + DATA_SIZE, data + DATA_SIZE + DIALOG_SIZE);
+        message_box(c, d);
+        if pinks || quiet {
+            show_message(c, d, p16.wrapping_add(SAVING), !quiet);
         }
-        (r.0[1], r.0[3]) = (0, 0);
-        c.m.w32(sp + 5780, if pinks != 0 { 0 } else { 44 });
+        let (mut done, mut result, mut word) = (false, 0, LOADED);
+        // (only the pink slips' load tries again)
+        let mut tries = if pinks { 0 } else { 44 };
         c.m.w32(CARD_DONE, 0);
-        r.0[2] = 654;
-        r.0[4] = card << 16;
-        c.m.w32(sp + 5784, p << 16);
         loop {
-            r.enter_leaving(c, 0x8003_4520, 0x8003_5118, abi_make_way);
-            let tries = c.m.r32(sp + 5780).wrapping_add(1);
-            c.m.w32(sp + 5780, tries);
-            port(c, &r, 0x8003_49e0, 0x8003_5134, &[sp + 5720, card, 1], abi_init_memcard_file);
-            wait_event(c, &r, card, 21, true, 0x8003_513c, 0x8003_5150, 0x8003_5158);
-            c.m.w32(sp + 5740, sp + 16);
-            c.m.w32(sp + 5736, 0);
-            let (fp, s6) = (p16 << 3, p16 << 2);
-            let s7 = s6.wrapping_add(FE);
-            (r.0[5], r.0[8], r.0[6], r.0[7]) = (p16, fp, s6, s7);
-            while r.0[1] == 0 {
-                r.0[0] = 22;
-                let e = poll(c, &mut r, card, [0x8003_5194, 0x8003_519c, 0x8003_51a8, 0x8003_51b0]);
-                r.0[0] = e.wrapping_sub(2);
-                let bad = |c: &mut Cpu, r: &mut Saved, ras: [u32; 2]| {
-                    let at = port(c, r, 0x8005_072c, ras[0], &[s6.wrapping_add(1)], crate::memcard::abi_getcard);
-                    r.0[0] = at;
+            make_way(c);
+            tries += 1;
+            init_memcard_file(c, info, card, true);
+            wait_event(c, card, 21, true);
+            c.m.w32(info + 20, data);
+            c.m.w32(info + 16, 0);
+            // (a retry polls nothing: done stays set)
+            while !done {
+                let e = poll(c, card);
+                let mut bad = |c: &mut Cpu| {
+                    let state = card_state(c, card);
                     let app = c.m.r32(FE_APP);
-                    r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], ras[1]);
-                    let state = c.m.r32(at);
-                    r.0[0] = state;
-                    let (s2, s3) = match state as i32 {
-                        -2 => (672, 2),
-                        -1 => (812, 3),
-                        _ => (810, 1),
+                    hide(c, app + APP_MESSAGE_BOX);
+                    (word, result) = match state {
+                        -2 => (UNFORMATTED, 2),
+                        -1 => (PULLED, 3),
+                        _ => (LOAD_FAILED, 1),
                     };
-                    (r.0[2], r.0[3], r.0[1]) = (s2, s3, 1);
+                    done = true;
                 };
                 match e {
-                    22 => {
-                        port(c, &r, 0x8004_fba0, 0x8003_51ec, &[card, sp + 5720, 0], crate::memcard::abi_loadfile);
-                    }
+                    22 => memcard::loadfile(c, card, info, false),
                     15 => {
-                        if port(c, &r, 0x8003_4448, 0x8003_51fc, &[sp + 16], abi_verify_successful_read) == 0 {
-                            bad(c, &mut r, [0x8003_52fc, 0x8003_5310]);
+                        if !verify_successful_read(c, data) {
+                            bad(c);
                             continue;
                         }
-                        r.0[3] = 0;
-                        if quiet != 0 {
-                            let id = c.m.r32(sp + 5284);
-                            c.m.w32(s7 + 1084, id);
-                            port(c, &r, 0x8001_6cb0, 0x8003_52c0, &[CAR_MANAGER, sp + 1128, p16], crate::fecars::abi_load_pink_slips_cars);
-                            r.call_leaving(c, SPRINTF, &[FE + 0x364 + fp, sp + 892], 0x8003_52d8);
-                            let v = c.m.r32(sp + 1368);
-                            c.m.w32(s7 + 76, v);
+                        result = 0;
+                        let name = FE + PLAYER_NAMES + (p16 << 3);
+                        if quiet {
+                            let id = c.m.r32(data + SAVE_ID);
+                            c.m.w32(FE + PINKS_IDS + (p16 << 2), id);
+                            crate::fecars::load_pink_slips_cars(c, CAR_MANAGER, data + CARS, p16);
+                            call(c, SPRINTF, &[name, data + FE_DATA + PLAYER_NAMES]);
+                            let money = c.m.r32(data + TOURNAMENTS);
+                            c.m.w32(FE + PINKS_MONEY + (p16 << 2), money);
                         } else {
                             if p16 != 0 {
-                                r.call_leaving(c, SPRINTF, &[FE + 0x364 + fp, sp + 892], 0x8003_5284);
+                                call(c, SPRINTF, &[name, data + FE_DATA + PLAYER_NAMES]);
                             } else {
-                                r.call_leaving(c, BLOCKMOVE, &[sp + 24, FE, 1104], 0x8003_522c);
-                                port(c, &r, 0x8003_3680, 0x8003_523c, &[TOURNAMENT_MANAGER, sp + 1368], crate::fetourn::abi_load_tournament);
-                                port(c, &r, 0x8002_1bb0, 0x8003_524c, &[TRACK_MANAGER, sp + 1352], crate::fetracks::abi_load_tracks);
-                                r.call_leaving(c, BLOCKMOVE, &[sp + 1544, TRACK_RECORDS, 3740], 0x8003_525c);
-                                port(c, &r, 0x8002_3778, 0x8003_5268, &[sp + 20], crate::fecheats::abi_load_bonus);
+                                call(c, BLOCKMOVE, &[data + FE_DATA, FE, 1104]);
+                                crate::fetourn::load_tournament(&mut c.m, TOURNAMENT_MANAGER, data + TOURNAMENTS);
+                                crate::fetracks::load_tracks(&mut c.m, TRACK_MANAGER, data + TRACKS);
+                                call(c, BLOCKMOVE, &[data + RECORDS, TRACK_RECORDS, 3740]);
+                                crate::fecheats::load_bonus(c, data + BONUSES);
                             }
-                            port(c, &r, 0x8001_6b9c, 0x8003_529c, &[CAR_MANAGER, sp + 1128, p16], crate::fecars::abi_load_cars);
+                            crate::fecars::load_cars(c, CAR_MANAGER, data + CARS, p16);
                         }
-                        r.0[2] = 654;
-                        r.enter_leaving(c, 0x8002_752c, 0x8003_52ec, crate::front::abi_set_pads);
-                        r.0[1] = 1;
+                        word = LOADED;
+                        call_addr(c, SET_PADS, &[]);
+                        done = true;
                     }
-                    2 | 3 | 7 | 10 | 11 | 16 | 23 => bad(c, &mut r, [0x8003_5338, 0x8003_534c]),
+                    2 | 3 | 7 | 10 | 11 | 16 | 23 => bad(c),
                     _ => {}
                 }
             }
-            r.0[0] = 22;
-            wait_event(c, &r, card, 22, false, 0x8003_5390, 0x8003_53a0, 0x8003_53a8);
-            r.enter_leaving(c, 0x8003_4544, 0x8003_53b8, abi_bring_back);
-            // (a retry polls nothing: the done flag stays set)
-            if r.0[2] == 654 || (c.m.r32(sp + 5780) as i32) >= 3 {
+            wait_event(c, card, 22, false);
+            bring_back(c);
+            if word == LOADED || tries as i32 >= 3 {
                 break;
             }
         }
-        if pinks != 0 && c.m.r32(CARD_DONE) == 0 {
-            r.0[1] = 0x8005_0000;
+        if pinks && c.m.r32(CARD_DONE) == 0 {
             let app = c.m.r32(FE_APP);
-            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_5408);
+            hide(c, app + APP_MESSAGE_BOX);
             let app = c.m.r32(FE_APP);
-            r.call_ptr_leaving(c, 0x8001_8a44, &[app + 568], 0x8003_5414);
-            let word = r.0[2].wrapping_add(p16);
-            tell(c, &mut r, word, [0x8003_5430, 0x8003_5440, 0x8003_5464, 0x8003_5474]);
+            hide(c, app + APP_MESSAGE);
+            tell(c, word.wrapping_add(p16));
         }
-        r.0[0] = FE;
-        let mode = c.m.r8(p16.wrapping_add(FE) + 866) as u32;
-        port(c, &r, 0x8002_7104, 0x8003_5498, &[p16, mode], crate::front::abi_reset_psx_controller);
-        if quiet == 0 {
-            if c.m.r8(FE + 4) == 6 {
-                c.m.w8(FE + 4, 0);
+        let mode = c.m.r8(p16.wrapping_add(FE) + PAD_MODES) as u32;
+        call_addr(c, RESET_CONTROLLER, &[p16, mode]);
+        if !quiet {
+            if c.m.r8(FE + RACE_TYPE) == 6 {
+                c.m.w8(FE + RACE_TYPE, 0);
             }
-            let sfx = c.m.r8(FE + 834) as u32;
+            let sfx = c.m.r8(FE + FE_SFX_LEVEL) as u32;
             c.m.w32(SFX_LEVEL, sfx);
         }
-        if pinks != 0 || quiet != 0 {
-            r.call_ptr_leaving(c, 0x8001_8a44, &[d], 0x8003_54f0);
+        if pinks || quiet {
+            hide(c, d);
         }
-        if pinks != 0 {
-            redraw(c, &r, 0x8003_550c);
+        if pinks {
+            redraw(c);
         }
         c.m.w32(CARD_ACTIVE, 0);
         let screen = c.m.r32(MEMCARD_SCREEN);
         let front_end2 = c.m.r32(USE_FRONT_END2);
-        c.m.w32(screen + 1440, 1);
+        c.m.w32(screen + SCREEN_REDRAW, 1);
         if front_end2 != 0 {
-            let language = c.m.r8(sp + 5776);
             c.m.w8(LANGUAGE, language);
         }
-        port(c, &r, 0x8002_6098, 0x8003_554c, &[d, 2], crate::fescreen::abi_screen_destructor);
-        c.r[2] = r.0[3];
+        destroy(c, d);
+        result
     })
+}
+
+pub fn abi_load_game(c: &mut Cpu) {
+    c.r[2] = load_game(c, c.r[4], c.r[5] != 0, c.r[6] != 0);
 }
 
 /// `SavePinkSlipsCars` (FEMEMCARD.CPP, 0x80035580): player `p`'s pink slips' cars (`which`)
 /// saved into their save: the save read and checked (its id must be the player's), the cars
 /// put in, checksummed and written. 0 done, else the error: 1 another save, 2 none or bad, 3
 /// an error, 4 no card, 5 unformatted, 6 full.
-pub fn abi_save_pink_slips_cars(c: &mut Cpu) {
-    let (p, which) = (c.r[4], c.r[5]);
-    abi::frame(c, 5744, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[0], r.0[7]) = (p, p);
-        c.m.w16(sp + 5680, which as u16);
-        r.enter_leaving(c, 0x8003_4520, 0x8003_55bc, abi_make_way);
-        let p16 = p as u16 as i16 as i32 as u32;
-        let card = (p16 << 2).wrapping_add(1);
-        (r.0[0], r.0[3], r.0[5], r.0[2], r.0[1]) = (p16, 0, 0, 0, sp + 5568);
-        c.m.w16(sp + 5688, card as u16);
-        (r.0[4], r.0[6]) = (card << 16, 21);
-        let path = c.m.r32(CD_PATH);
-        c.m.w32(CARD_PLAYER, p16);
-        c.m.w32(CARD_ACTIVE, 1);
-        c.m.w32(CARD_DONE, 0);
-        r.call_leaving(c, SPRINTF, &[sp + 5568, ICON_FILE, path], 0x8003_5620);
-        let icon = r.call_leaving(c, LOAD_SHAPE, &[sp + 5568, 0], 0x8003_562c);
-        r.0[8] = icon;
-        port(c, &r, 0x8003_49e0, 0x8003_5640, &[sp + 5632, card as u16 as i16 as i32 as u32, 1], abi_init_memcard_file);
-        let card = card as u16 as i16 as i32 as u32;
-        wait_event(c, &r, card, 21, true, 0x8003_5648, 0x8003_5658, 0x8003_5660);
-        let s4 = p16 << 2;
-        (r.0[7], r.0[4]) = (p16, s4);
-        c.m.w32(sp + 5696, s4.wrapping_add(FE));
-        c.m.w32(sp + 5652, sp + 16);
-        c.m.w32(sp + 5648, 0);
-        r.0[1] = card << 16;
-        while r.0[3] == 0 {
-            let e = poll(c, &mut r, card, [0x8003_56a4, 0x8003_56ac, 0x8003_56b8, 0x8003_56c0]);
-            let bad = |c: &mut Cpu, r: &mut Saved| {
-                let at = port(c, r, 0x8005_072c, 0x8003_587c, &[s4.wrapping_add(1)], crate::memcard::abi_getcard);
-                r.0[2] = match c.m.r32(at) as i32 {
-                    -2 => 5,
-                    -1 => 4,
-                    _ => 2,
-                };
-                r.0[3] = 1;
-            };
-            match e {
-                22 => {
-                    port(c, &r, 0x8004_fba0, 0x8003_56fc, &[card, sp + 5632, 0], crate::memcard::abi_loadfile);
-                }
+pub fn save_pink_slips_cars(c: &mut Cpu, p: u32, which: u32) -> u32 {
+    make_way(c);
+    let p16 = p as u16 as i16 as i32 as u32;
+    let card = (p16 << 2).wrapping_add(1) as u16 as i16 as i32 as u32;
+    c.m.w32(CARD_PLAYER, p16);
+    c.m.w32(CARD_ACTIVE, 1);
+    c.m.w32(CARD_DONE, 0);
+    let icon = load_icon(c);
+    let result = with_buffer(c, DATA_SIZE + FILE_INFO_SIZE, |c, data| {
+        let info = data + DATA_SIZE;
+        init_memcard_file(c, info, card, true);
+        wait_event(c, card, 21, true);
+        c.m.w32(info + 20, data);
+        c.m.w32(info + 16, 0);
+        loop {
+            match poll(c, card) {
+                22 => memcard::loadfile(c, card, info, false),
                 15 => {
-                    if port(c, &r, 0x8003_4448, 0x8003_570c, &[sp + 16], abi_verify_successful_read) == 0 {
-                        bad(c, &mut r);
-                        continue;
+                    if !verify_successful_read(c, data) {
+                        break match card_state(c, card) {
+                            -2 => 5,
+                            -1 => 4,
+                            _ => 2,
+                        };
                     }
-                    r.0[3] = 1;
-                    let fe = c.m.r32(sp + 5696);
-                    if c.m.r32(fe + 1084) != c.m.r32(sp + 5284) {
-                        r.0[2] = 1;
-                        continue;
+                    if c.m.r32(FE + PINKS_IDS + (p16 << 2)) != c.m.r32(data + SAVE_ID) {
+                        break 1;
                     }
-                    let which = c.m.r16(sp + 5680) as i16 as i32 as u32;
-                    port(c, &r, 0x8001_6d54, 0x8003_5758, &[CAR_MANAGER, sp + 1128, p16, which], crate::fecars::abi_save_pink_slips_cars);
-                    r.0[0] = 21;
-                    wait_event(c, &r, card, 21, true, 0x8003_5764, 0x8003_5774, 0x8003_577c);
-                    c.m.w32(sp + 5648, 512);
-                    let shape = r.call_leaving(c, SHAPE_POINTER, &[icon, 0], 0x8003_5794);
-                    c.m.w32(sp + 5656, shape);
-                    c.m.w32(sp + 5660, 0);
-                    c.m.w32(sp + 5664, 0);
-                    port(c, &r, 0x8003_43d0, 0x8003_57a8, &[sp + 16], abi_checksum_data);
-                    (r.0[6], r.0[3]) = (0x8001_17A8, crate::memcard::STATE);
-                    while r.0[5] == 0 {
-                        let e = poll(c, &mut r, card, [0x8003_57c8, 0x8003_57d0, 0x8003_57dc, 0x8003_57e4]);
-                        r.0[0] = e.wrapping_sub(2);
-                        match e {
+                    let which = which as u16 as i16 as i32 as u32;
+                    crate::fecars::save_pink_slips_cars(c, CAR_MANAGER, data + CARS, p16, which);
+                    wait_event(c, card, 21, true);
+                    icon_file(c, info, icon);
+                    checksum_data(c, data);
+                    // written
+                    break loop {
+                        match poll(c, card) {
                             22 => {
-                                if c.m.r32(crate::memcard::STATE + 52) != 0 {
-                                    port(c, &r, 0x8004_ff34, 0x8003_5820, &[card, sp + 5632], crate::memcard::abi_savefile);
+                                if c.m.r32(memcard::STATE + 52) != 0 {
+                                    memcard::savefile(c, card, info);
                                 }
                             }
-                            12 => {
-                                (r.0[5], r.0[2]) = (1, 0);
-                            }
+                            12 => break 0,
                             2 | 3 | 7 | 10 | 11 | 13 | 23 => {
                                 let app = c.m.r32(FE_APP);
-                                r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_5844);
-                                let at = port(c, &r, 0x8005_072c, 0x8003_584c, &[s4.wrapping_add(1)], crate::memcard::abi_getcard);
-                                r.0[2] = match c.m.r32(at) as i32 {
+                                hide(c, app + APP_MESSAGE_BOX);
+                                break match card_state(c, card) {
                                     -3 => 6,
                                     -1 => 4,
                                     _ => 3,
                                 };
-                                r.0[5] = 1;
                             }
                             _ => {}
                         }
-                    }
-                    r.0[3] = 1;
+                    };
                 }
-                2 | 16 => bad(c, &mut r),
-                3 | 7 | 10 | 11 | 23 => {
-                    (r.0[3], r.0[2]) = (1, 2);
+                2 | 16 => {
+                    break match card_state(c, card) {
+                        -2 => 5,
+                        -1 => 4,
+                        _ => 2,
+                    };
                 }
+                3 | 7 | 10 | 11 | 23 => break 2,
                 _ => {}
             }
         }
-        (r.0[1], r.0[0]) = (22, card << 16);
-        wait_event(c, &r, card, 22, false, 0x8003_58c4, 0x8003_58d4, 0x8003_58dc);
-        r.call_leaving(c, PURGE, &[icon], 0x8003_58ec);
-        r.enter_leaving(c, 0x8003_4544, 0x8003_58f4, abi_bring_back);
-        c.m.w32(CARD_ACTIVE, 0);
-        c.r[2] = r.0[2];
-    })
+    });
+    wait_event(c, card, 22, false);
+    call(c, PURGE, &[icon]);
+    bring_back(c);
+    c.m.w32(CARD_ACTIVE, 0);
+    result
+}
+
+pub fn abi_save_pink_slips_cars(c: &mut Cpu) {
+    c.r[2] = save_pink_slips_cars(c, c.r[4], c.r[5]);
 }
 
 /// `SavePinkSlipsCarsWithErrorDialogs` (FEMEMCARD.CPP, 0x80035930): the pink slips' cars
 /// saved ("saving" shown, up to three tries a moment apart); on an error its message (with the
 /// winner's or loser's name, `kind` 1 or 2) and a retry asked. The result.
-pub fn abi_save_pink_slips_with_dialogs(c: &mut Cpu) {
-    let (p, kind, which) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 1536, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[2], r.0[1], r.0[8]) = (p, which, kind);
-        let ask = sp + 16;
-        port(c, &r, 0x8001_9bcc, 0x8003_5970, &[ask], crate::fedialog::abi_yes_no);
-        let note = sp + 184;
-        r.0[0] = note;
-        message_box(c, &r, note, 0x8003_597c);
-        let p16 = p as u16 as i16 as i32 as u32;
-        (r.0[6], r.0[3], r.0[4], r.0[5], r.0[7]) = (0, 0x8005_0000, sp + 1344, p16, which << 16);
+pub fn save_pink_slips_with_dialogs(c: &mut Cpu, p: u32, kind: u32, which: u32) -> u32 {
+    let p16 = p as u16 as i16 as i32 as u32;
+    with_buffer(c, YES_NO_SIZE + 2 * DIALOG_SIZE + 2 * TEXT_SIZE, |c, ask| {
+        let note = ask + YES_NO_SIZE;
+        let saving = note + DIALOG_SIZE;
+        let (message, line) = (saving + DIALOG_SIZE, saving + DIALOG_SIZE + TEXT_SIZE);
+        crate::fedialog::yes_no(c, DialogYesNo(ask));
+        message_box(c, note);
         let m = &mut c.m;
         m.w32(ask + 160, 658);
-        m.w32(ask + 164, 659);
+        m.w32(ask + 164, NO_WORD);
         m.w16(ask + 136, 1);
-        m.w16(ask + 100, p as u16);
+        m.w16(ask + DIALOG_PLAYER, p as u16);
+        let mut answer = 0;
         loop {
             let app = c.m.r32(FE_APP);
-            r.call_ptr_leaving(c, 0x8001_8980, &[app + 720], 0x8003_5a34);
-            while app_word(c, 852) != 1 {
-                redraw(c, &r, 0x8003_5a58);
+            show(c, app + APP_MESSAGE_BOX);
+            while app_word(c, APP_MESSAGE_BOX + SHOWN) != 1 {
+                redraw(c);
             }
-            r.0[0] = 0;
-            redraw(c, &r, 0x8003_5a68);
-            let saving = sp + 1344;
-            message_box(c, &r, saving, 0x8003_5a70);
-            let text = r.call_leaving(c, TEXT_WORD, &[p16.wrapping_add(631)], 0x8003_5aec);
-            let m = &mut c.m;
-            m.w32(saving + 144, text);
-            m.w16(saving + 124, 0);
-            m.w16(saving + 126, 50);
-            r.call_ptr_leaving(c, 0x8001_8980, &[saving], 0x8003_5b04);
-            while c.m.r32(saving + 132) != 1 {
-                redraw(c, &r, 0x8003_5b24);
-            }
-            redraw(c, &r, 0x8003_5b38);
+            redraw(c);
+            message_box(c, saving);
+            show_message(c, saving, p16.wrapping_add(SAVING), true);
             let which16 = which as u16 as i16 as i32 as u32;
             let mut result;
-            let mut k = 0u32;
+            let mut k = 0;
             loop {
-                result = r.enter_leaving(c, 0x8003_5580, 0x8003_5b44, |c| {
-                    (c.r[4], c.r[5]) = (p16, which16);
-                    abi_save_pink_slips_cars(c);
-                    c.r[2]
-                });
-                r.0[2] = result;
+                result = save_pink_slips_cars(c, p16, which16);
                 if result != 0 {
-                    r.call_leaving(c, TIMED_WAIT, &[5], 0x8003_5b58);
+                    call(c, TIMED_WAIT, &[5]);
                 }
                 k += 1;
-                r.0[0] = k;
                 if result == 0 || k >= 3 {
                     break;
                 }
             }
-            r.call_ptr_leaving(c, 0x8001_8a44, &[saving], 0x8003_5b74);
-            redraw(c, &r, 0x8003_5b80);
+            hide(c, saving);
+            redraw(c);
             if result != 0 {
+                // the error, with the player's name; a retry asked
                 let app = c.m.r32(FE_APP);
-                r.call_ptr_leaving(c, 0x8001_8a44, &[app + 720], 0x8003_5b94);
+                hide(c, app + APP_MESSAGE_BOX);
                 let word = c.m.r32(ERROR_WORDS + (result << 2)).wrapping_add(p16);
-                let text = r.call_leaving(c, TEXT_WORD, &[word], 0x8003_5bb0);
-                r.call_leaving(c, SPRINTF, &[sp + 336, text], 0x8003_5bbc);
+                let text = call(c, TEXT_WORD, &[word]);
+                call(c, SPRINTF, &[message, text]);
                 let kind16 = kind as u16 as i16;
                 if kind16 != 0 {
-                    let word = if kind16 == 2 { 666 } else { 665 };
-                    let format = r.call_leaving(c, TEXT_WORD, &[word], 0x8003_5be0);
-                    r.0[0] = format;
-                    let name = port(c, &r, 0x8002_ba7c, 0x8003_5bec, &[p16], crate::front::abi_player_name);
-                    r.0[1] = sp + 840;
-                    r.call_leaving(c, SPRINTF, &[sp + 840, format, name], 0x8003_5c00);
+                    let format = call(c, TEXT_WORD, &[if kind16 == 2 { 666 } else { 665 }]);
+                    let name = call_addr(c, PLAYER_NAME, &[p16]);
+                    call(c, SPRINTF, &[line, format, name]);
                     let m = &mut c.m;
-                    m.w32(note + 144, sp + 840);
-                    m.w16(sp + 308, 0);
-                    m.w16(sp + 310, (-60i16) as u16);
-                    r.call_ptr_leaving(c, 0x8001_8980, &[note], 0x8003_5c18);
+                    m.w32(note + TEXT, line);
+                    m.w16(note + 124, 0);
+                    m.w16(note + 126, (-60i16) as u16);
+                    show(c, note);
                 }
-                c.m.w32(ask + 144, sp + 336);
-                let answer = port(c, &r, 0x8001_9928, 0x8003_5c28, &[ask], crate::fedialog::abi_run) as u16 as i16 as i32 as u32;
-                r.0[6] = answer;
-                r.call_ptr_leaving(c, 0x8001_8a44, &[note], 0x8003_5c38);
+                c.m.w32(ask + TEXT, message);
+                answer = crate::fedialog::run(c, DialogInteractive(ask)) as u16 as i16 as i32 as u32;
+                hide(c, note);
             }
-            port(c, &r, 0x8002_6098, 0x8003_5c44, &[saving, 2], crate::fescreen::abi_screen_destructor);
-            if result == 0 || r.0[6] == 0 {
-                port(c, &r, 0x8002_6098, 0x8003_5c5c, &[note, 2], crate::fescreen::abi_screen_destructor);
-                port(c, &r, 0x8002_6098, 0x8003_5c68, &[ask, 2], crate::fescreen::abi_screen_destructor);
-                c.r[2] = result;
-                return;
+            destroy(c, saving);
+            if result == 0 || answer == 0 {
+                destroy(c, note);
+                destroy(c, ask);
+                return result;
             }
         }
     })
 }
 
-/// FEMEMCARD.CPP's ports entered as the original's callers `jal` them.
-macro_rules! entries {
-    ($($entry:ident = $addr:expr, $f:ident;)*) => {
-        $(pub(crate) fn $entry(c: &mut Cpu) {
-            abi::leave_prologue(c, $addr, None, &[]);
-            $f(c);
-        })*
-    };
+pub fn abi_save_pink_slips_with_dialogs(c: &mut Cpu) {
+    c.r[2] = save_pink_slips_with_dialogs(c, c.r[4], c.r[5], c.r[6]);
 }
 
-entries! {
-    init_memcard_entry = 0x8003_47d4, abi_init_memcard;
-    deinit_memcard_entry = 0x8003_4938, abi_deinit_memcard;
-    load_game_entry = 0x8003_4f70, abi_load_game;
-    save_pink_slips_with_dialogs_entry = 0x8003_5930, abi_save_pink_slips_with_dialogs;
+/// For callers not rewritten yet.
+pub(crate) fn init_memcard_entry(c: &mut Cpu) {
+    abi_init_memcard(c);
+}
+
+pub(crate) fn deinit_memcard_entry(c: &mut Cpu) {
+    abi_deinit_memcard(c);
+}
+
+pub(crate) fn save_pink_slips_with_dialogs_entry(c: &mut Cpu) {
+    abi_save_pink_slips_with_dialogs(c);
 }
 
 #[cfg(test)]
