@@ -43,7 +43,7 @@ const SCREEN_TRANSITION_IS_FINISHED: u32 = 64;
 const SCREEN_PROCESS_INPUT: u32 = 72;
 
 /// `tScreen`'s functions (ported in FESCREEN, called by address): the constructor and
-/// destructor, `UpdateTransition`, `Draw(foreground)`, `TransitionOff` and `TransitionOn` (with
+/// destructor, `UpdateTransition`, `Draw(background)`, `TransitionOff` and `TransitionOn` (with
 /// the transition type, always 2, and no menu).
 const SCREEN_CTOR: u32 = 0x8002_6040;
 const SCREEN_DTOR: u32 = 0x8002_6098;
@@ -410,8 +410,9 @@ fn pad_out_item(c: &mut Cpu, this: FEApplication, out: bool, item: u32, key: u32
 
 /// `tFEApplication::Redraw` (FEAPP.CPP, 0x80013894): a frame. The dialogs, the help's icons,
 /// the main menu's items needing a pad that is out; then each player's half, the second's first:
-/// its menus' and screen's transitions, a sub-menu, the screen's background, the menu (unless
-/// waiting for the other player, but going on) and the parent menu, the screen's foreground; the
+/// its menus' and screen's transitions; then, front to back (the ordering table draws what is
+/// added later under what came before): a sub-menu, the screen's foreground, the menu (unless
+/// waiting for the other player, but going on) and the parent menu, the screen's background; the
 /// frame shown.
 pub fn redraw(c: &mut Cpu, this: FEApplication) {
     let was = this.player(&mut c.m);
@@ -448,7 +449,7 @@ pub fn redraw(c: &mut Cpu, this: FEApplication) {
         if screen.0 != 0 {
             call_addr(c, SCREEN_UPDATE_TRANSITION, &[screen.0]);
         }
-        // the drawing
+        // the drawing, front to back
         let menu = current_menu(&mut c.m, this);
         if menu.0 != 0 && menu_fn(c, menu, MENU_IS_SUB_MENU) != 0 {
             let menu = current_menu(&mut c.m, this);

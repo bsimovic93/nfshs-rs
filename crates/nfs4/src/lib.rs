@@ -1844,6 +1844,30 @@ pub(crate) mod test_util {
     /// What the videos answer in the tests: their state, a frame shown, a new video's handle.
     pub const VIDEO_ANSWERS: u32 = 0x8014_8AF0;
 
+    /// The front end's shape emitter (0x8004e74c, under `DrawShapeExtended` and friends): in the
+    /// game the host draws the shape itself and the original never runs (its code reads stack
+    /// it never wrote: its results would hang on the callers' stack depth). The test CPU draws
+    /// nothing either, but logs what the host gets, for the tests to compare: a count, then 16
+    /// entries of 9 words (a ring): the shape, the flags, x, y, the four corners' colours, the
+    /// blending.
+    pub const SHAPES_EMITTED: u32 = 0x8014_8800;
+    const SHAPE_EMITTER: u32 = 0x8004_E74C;
+
+    fn emit_shape(c: &mut Cpu) {
+        let sp = c.r[29];
+        let (colours, abr) = (c.m.r32(sp + 16), c.m.r32(sp + 20));
+        let n = c.m.r32(SHAPES_EMITTED);
+        let entry = SHAPES_EMITTED + 4 + 36 * (n % 16);
+        let mut words = vec![c.r[4], c.r[5], c.r[6], c.r[7]];
+        words.extend((0..4).map(|k| c.m.r32(colours.wrapping_add(4 * k)) & 0xFF_FFFF));
+        words.push(abr);
+        for (k, w) in words.into_iter().enumerate() {
+            c.m.w32(entry + 4 * k as u32, w);
+        }
+        c.m.w32(SHAPES_EMITTED, n.wrapping_add(1));
+        c.r[2] = 0;
+    }
+
     /// The game's host answers the library calls that aren't recompiled (pads, VSync, CD:
     /// from 0x800e0000 on, `src/ps1/host/system.rs`), and the race RAM's pointers into them
     /// are unset here; so is the pause menu's vtable when its race isn't paused. Such calls
@@ -1854,8 +1878,12 @@ pub(crate) mod test_util {
     /// routines among their structures (0x80140000 on). The front end's videos
     /// (`VIDEO_create` .. `VIDEO_updateframexy`) are the host's too: `VIDEO_state`,
     /// `VIDEO_updateframexy` and `VIDEO_create` answer what the tests put at [`VIDEO_ANSWERS`],
-    /// the others 0.
+    /// the others 0. The front end's shape emitter is the host's as well (see [`SHAPES_EMITTED`]).
     fn no_host(c: &mut Cpu, addr: u32) -> bool {
+        if addr == SHAPE_EMITTER {
+            emit_shape(c);
+            return true;
+        }
         if (0x8005_11B0..=0x8005_1528).contains(&addr) {
             c.r[2] = match addr {
                 0x8005_1480 => c.m.r32(VIDEO_ANSWERS),

@@ -1409,6 +1409,22 @@ mod tests {
         }
     }
 
+    /// With no car to show (`GetCar` failing: an empty garage), `DrawOverlay`'s marks (overlay
+    /// kinds 4 and 5) test bits of the car it didn't get: the original reads its stack's leftover
+    /// there (the background strips' last `y`, homed by `DrawShapeExtended`), which the readable
+    /// FESCREEN no longer leaves. Such overlays are made a kind drawing nothing without a car.
+    fn marks_need_a_car(c: &mut Cpu) {
+        if crate::abi::call(c, nfs4rc::f_8003c530, &[SCREEN, OUTS + 0x40]) != 0 {
+            return;
+        }
+        for k in 0..7 {
+            let kind = SCREEN + 100 + 24 * k + 22;
+            if matches!(c.m.r16(kind), 4 | 5) {
+                c.m.w16(kind, 0);
+            }
+        }
+    }
+
     fn cases() -> Vec<Case> {
         vec![
             ("TransformVector", 0x8003_ab80, nfs4rc::f_8003ab80, |_, _| vec![VEC, VEC + 16, OUTS]),
@@ -1419,7 +1435,8 @@ mod tests {
             }),
             ("tScreenCarSelect", 0x8003_ae58, nfs4rc::f_8003ae58, |_, _| vec![OUTS + 0x100]),
             ("~tScreenCarSelect", 0x8003_af68, nfs4rc::f_8003af68, |_, r| vec![SCREEN, 2 * pick(r, 2)]),
-            ("tScreenCarSelect::DrawOverlay", 0x8003_afd8, nfs4rc::f_8003afd8, |_, r| {
+            ("tScreenCarSelect::DrawOverlay", 0x8003_afd8, nfs4rc::f_8003afd8, |c, r| {
+                marks_need_a_car(c);
                 vec![SCREEN, [0, SCREEN + 100 + 24 * pick(r, 7)][(pick(r, 8) != 0) as usize]]
             }),
             ("tScreenCarSelect::SetState", 0x8003_b874, nfs4rc::f_8003b874, |_, r| vec![SCREEN, [0, 1, 2, 3, 4, 7][pick(r, 6) as usize]]),
@@ -1444,11 +1461,17 @@ mod tests {
                 c.m.w32(OUTS, [8, 16, 1, 4][pick(r, 4) as usize]);
                 vec![SCREEN, 0, OUTS, OUTS + 4]
             }),
-            ("tScreenCarSelect::DrawVideoWall", 0x8003_c424, nfs4rc::f_8003c424, |_, _| vec![SCREEN, 0]),
+            ("tScreenCarSelect::DrawVideoWall", 0x8003_c424, nfs4rc::f_8003c424, |c, _| {
+                marks_need_a_car(c);
+                vec![SCREEN, 0]
+            }),
             ("tScreenCarSelect::GetCar", 0x8003_c530, nfs4rc::f_8003c530, |_, _| vec![SCREEN, OUTS + 0x40]),
             ("tScreenCarSelect::SetBrightness", 0x8003_c7b0, nfs4rc::f_8003c7b0, |_, r| vec![SCREEN, pick(r, 200), pick(r, 2)]),
             ("tScreenCarSelect::UpdateBrightness", 0x8003_c7c4, nfs4rc::f_8003c7c4, |_, r| vec![SCREEN, pick(r, 2)]),
-            ("tScreenCarSelect::DrawBackground", 0x8003_c848, nfs4rc::f_8003c848, |_, _| vec![SCREEN]),
+            ("tScreenCarSelect::DrawBackground", 0x8003_c848, nfs4rc::f_8003c848, |c, _| {
+                marks_need_a_car(c);
+                vec![SCREEN]
+            }),
             ("tScreenCarSelect::DrawSliders", 0x8003_c978, nfs4rc::f_8003c978, |c, r| {
                 let car = OUTS + 0x40;
                 for k in 0..200 {

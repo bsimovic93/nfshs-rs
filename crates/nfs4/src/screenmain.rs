@@ -222,7 +222,7 @@ pub fn swap_background(c: &mut Cpu, this: u32, which: u32) {
         };
         let cur = c.m.r32(this + CUR);
         let info = back(this, cur);
-        r.enter_leaving(c, 0x8002_6260, 0x8003_727c, |c| fescreen::async_load_shape_file(c, this, file, info));
+        r.enter_leaving(c, 0x8002_6260, 0x8003_727c, |c| fescreen::async_load_shape_file(c, crate::types::Screen(this), file, crate::types::ShapeInformation(info)));
         let (state, cur) = (c.m.r32(this + STATE), c.m.r32(this + CUR));
         c.m.w32(this + STATE, 0);
         c.m.w32(this + CUR, 1u32.wrapping_sub(cur));
@@ -448,7 +448,7 @@ pub fn abi_draw_background(c: &mut Cpu) {
             r.0[2] = k;
             r.0[0] = 40 * k;
             let info = back(this, k);
-            r.enter_leaving(c, 0x8002_5e2c, 0x8003_7c20, |c| fescreen::is_shape_file_loaded(c, this, info));
+            r.enter_leaving(c, 0x8002_5e2c, 0x8003_7c20, |c| fescreen::is_shape_file_loaded(c, crate::types::Screen(this), crate::types::ShapeInformation(info)) as u32);
             r.0[0] = this + 40 * k;
             if c.m.r32(info + DATA) == 0 {
                 continue;
@@ -465,7 +465,7 @@ pub fn abi_draw_background(c: &mut Cpu) {
             if shown {
                 c.m.w32(sp + 16, 16);
                 c.m.w32(sp + 20, 0);
-                r.enter_leaving(c, 0x8002_6614, 0x8003_7d00, |c| fescreen::upload_shapes(c, this, info, sx(166 * k), 0, 16, 0));
+                r.enter_leaving(c, 0x8002_6614, 0x8003_7d00, |c| fescreen::upload_shapes(c, crate::types::Screen(this), crate::types::ShapeInformation(info), sx(166 * k), 0, 16, 0));
             }
         }
         r.0[2] = 2;
@@ -559,7 +559,7 @@ pub fn abi_draw_background(c: &mut Cpu) {
                 port(c, &r, 0x8002_5dd8, 0x8003_8394, &[this, name], fescreen::abi_async_load_swap_shape_file);
             }
         }
-        r.enter_leaving(c, 0x8002_5e2c, 0x8003_83a0, |c| fescreen::is_shape_file_loaded(c, this, this + SWAP));
+        r.enter_leaving(c, 0x8002_5e2c, 0x8003_83a0, |c| fescreen::is_shape_file_loaded(c, crate::types::Screen(this), crate::types::ShapeInformation(this + SWAP)) as u32);
         if c.m.r32(this + SWAP + DATA) != 0 {
             c.m.w16(this + SWAP + COUNT, 10);
             port(c, &r, 0x8002_5ff0, 0x8003_83c0, &[this, 10], fescreen::abi_upload_swap_shapes);
@@ -821,7 +821,7 @@ pub fn abi_initialize(c: &mut Cpu) {
             r.0[2] = k;
             let info = back(this, k);
             c.m.w32(info + TABLE, 0);
-            r.enter_leaving(c, 0x8002_640c, 0x8003_89bc, |c| fescreen::initialize_shapes(c, info, 16));
+            r.enter_leaving(c, 0x8002_640c, 0x8003_89bc, |c| fescreen::initialize_shapes(c, crate::types::ShapeInformation(info), 16));
         }
         r.0[2] = 2;
         r.0[0] = 0x9249_0000;
@@ -841,7 +841,7 @@ pub fn abi_initialize(c: &mut Cpu) {
             r.call_leaving(c, SPRINTF, &[file, BACK_FORMAT, n], 0x8003_8aa4);
             r.0[0] = BACKS + 40 * k;
             let info = back(this, k);
-            r.enter_leaving(c, 0x8002_6260, 0x8003_8ac0, |c| fescreen::async_load_shape_file(c, this, file, info));
+            r.enter_leaving(c, 0x8002_6260, 0x8003_8ac0, |c| fescreen::async_load_shape_file(c, crate::types::Screen(this), file, crate::types::ShapeInformation(info)));
         }
         r.0[2] = 2;
         let (first, second) = (back(this, 0), back(this, 1));
@@ -849,22 +849,22 @@ pub fn abi_initialize(c: &mut Cpu) {
         r.0[1] = 16;
         loop {
             r.call_leaving(c, SYSTEM_TASK, &[0], 0x8003_8af4);
-            let loaded = r.enter_leaving(c, 0x8002_5e2c, 0x8003_8b00, |c| fescreen::is_shape_file_loaded(c, this, first));
+            let loaded = r.enter_leaving(c, 0x8002_5e2c, 0x8003_8b00, |c| fescreen::is_shape_file_loaded(c, crate::types::Screen(this), crate::types::ShapeInformation(first)) as u32);
             r.0[4] = loaded;
             if c.m.r32(first + DATA) != 0 {
                 c.m.w32(sp + 16, 16);
                 c.m.w32(sp + 20, 0);
-                r.enter_leaving(c, 0x8002_6614, 0x8003_8b2c, |c| fescreen::upload_shapes(c, this, first, 0, 0, 16, 0));
+                r.enter_leaving(c, 0x8002_6614, 0x8003_8b2c, |c| fescreen::upload_shapes(c, crate::types::Screen(this), crate::types::ShapeInformation(first), 0, 0, 16, 0));
             }
             let mut both = 0;
             if loaded != 0 {
-                both = (r.enter_leaving(c, 0x8002_5e2c, 0x8003_8b40, |c| fescreen::is_shape_file_loaded(c, this, second)) != 0) as u32;
+                both = (r.enter_leaving(c, 0x8002_5e2c, 0x8003_8b40, |c| fescreen::is_shape_file_loaded(c, crate::types::Screen(this), crate::types::ShapeInformation(second)) as u32) != 0) as u32;
             }
             r.0[4] = both;
             if c.m.r32(second + DATA) != 0 {
                 c.m.w32(sp + 16, 16);
                 c.m.w32(sp + 20, 0);
-                r.enter_leaving(c, 0x8002_6614, 0x8003_8b70, |c| fescreen::upload_shapes(c, this, second, 166, 0, 16, 0));
+                r.enter_leaving(c, 0x8002_6614, 0x8003_8b70, |c| fescreen::upload_shapes(c, crate::types::Screen(this), crate::types::ShapeInformation(second), 166, 0, 16, 0));
             }
             if both != 0 {
                 break;
@@ -922,7 +922,7 @@ pub fn abi_cleanup(c: &mut Cpu) {
         for k in 0..2 {
             r.0[1] = k;
             r.0[0] = BACKS + 40 * k;
-            r.enter_leaving(c, 0x8002_64b4, 0x8003_8d0c, |c| fescreen::free_shapes(c, this, back(this, k)));
+            r.enter_leaving(c, 0x8002_64b4, 0x8003_8d0c, |c| fescreen::free_shapes(c, crate::types::Screen(this), crate::types::ShapeInformation(back(this, k))));
         }
         r.0[1] = 2;
         r.0[0] = BACKS + 80;

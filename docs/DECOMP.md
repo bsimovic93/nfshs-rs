@@ -123,7 +123,7 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
   stack tests are gone: they checked the fidelity this drops.
 
 Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP, FETEXTRENDER.CPP, FEDIALOG.CPP,
-FEAPP.CPP.
+FEAPP.CPP, FESCREEN.CPP.
 
 The fuzz tests' RAM comparison leaves out the whole main stack (to 0x80200000, as
 `decomp-check`): the original homes its arguments in its caller's frame, which the rewritten
@@ -139,6 +139,16 @@ Two of the game's values hang on the stack's layout, and so differ now: the pink
 message is printed on `MainLoop`'s stack and its address kept in the no-input dialog (`gFEApp + 864`),
 and `RunPostGame` reads the record lap's car (`StatChk_IsRecordLapTime`'s `*car`, written only when a
 car is checked) from whatever its stack holds otherwise; the rewrite starts it at 0.
+The car select's marks (`tScreenCarSelect::DrawOverlay`, overlay kinds 4 and 5) test bits of a car
+`GetCar` may not have filled in (an empty garage): the original then reads the stack's leftover,
+the last `y` `DrawShapeExtended` homed while FESCREEN drew the background strips. The rewritten
+FESCREEN leaves something else there, so which marks light up on such a screen may differ; the
+car select's fuzz test keeps out of that state.
+
+The test CPUs stand in for the host's shape emitter (0x8004e74c, under `DrawShapeExtended`): in
+the game the host draws the shape and the original never runs, and the original reads stack it
+never wrote. Instead of running it, the test CPU logs what the host would get (shape, flags,
+position, the four colours, blending) at `test_util::SHAPES_EMITTED`, which the tests compare.
 
 The menus' key and command names follow the pad and `MainLoop`'s jump table (0x80010070): key 16 is
 back (Triangle) and 8192 start (Start); commands 1 to 8 are go to, go to with the back stack emptied,
