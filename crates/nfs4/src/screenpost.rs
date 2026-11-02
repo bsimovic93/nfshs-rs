@@ -1,23 +1,25 @@
-//! SCREENPOST.CPP: the screens after a race. `DrawMoney` (an amount and its currency word);
-//! the tournament's standings (`tScreenTournamentStandings`, and the three-item one): each
-//! racer's place, name and points (or knock-out mark), the track and the tournament, the money
-//! won, the damage billed and the bonus counted down into the total; the pink slips' standings
-//! (`tScreenPinkSlipStandings`): the tracks raced (the one chosen lit) with their winners, the
-//! two players' wins.
+//! SCREENPOST.CPP: the screens after a race.
+//! - `DrawMoney`: an amount and its currency word.
+//! - The tournament's standings (`tScreenTournamentStandings`, and the three-item one): each
+//!   racer's place, name and points (or knock-out mark), the track and the tournament, the
+//!   money won, the damage billed and the bonus counted down into the total.
+//! - The pink slips' standings (`tScreenPinkSlipStandings`): the tracks raced (the one chosen
+//!   lit) with their winners, and the two players' wins.
 //!
-//! `PSXDrawSquare`: the host's (called by address).
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
+//! `PSXDrawSquare` is the host's (called by address).
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr, with_buffer};
 use crate::femenu::{KEY_ACCEPT, KEY_NONE, PLAY_FE_SFX};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SPRINTF, TEXT_PIXELS, TEXT_WORD};
 use crate::globals::{FRONT_END, GAME_TICKS, SONGS_SCREEN, TOURNAMENT_MANAGER, TRACK_MANAGER};
-use crate::{fefades, felines, fescreen, fetextrender, fetools, fetourn, fetracks};
+use crate::types::{AwardInformation, DrawShapeExtended, Screen, TextureShapeInfo, TrackInformation};
+use crate::{fefades, fescreen, fetextrender, fetourn};
 use ps1rt::{Cpu, Mem};
 
-// The standings: a `tScreen` (+92 its fade), then +100 the final money, +104 the money won, +108
-// the damage billed, +112 the bonus, +116 the tick it came up, +120 money won, +124 a bonus, +128
-// billed, +132 the money shown, +136 counted down, +140 the countdown started, +144 its speed.
-const FADE: u32 = 92;
+/// The standings: a `tScreen`, then +100 the final money, +104 the money won, +108 the damage
+/// billed, +112 the bonus, +116 the tick it came up, +120 money won, +124 a bonus, +128 billed,
+/// +132 the money shown, +136 counted down, +140 the countdown started, +144 its speed.
 const FINAL: u32 = 100;
 const AWARDED: u32 = 104;
 const DAMAGE: u32 = 108;
@@ -30,6 +32,10 @@ const DRAW_MONEY_ON: u32 = 132;
 const COUNTED_DOWN: u32 = 136;
 const COUNTDOWN_NOW: u32 = 140;
 const COUNT_SPEED: u32 = 144;
+/// The countdown's steps; the money shown on its own after this long (ticks); the tick sound.
+const COUNT_STEPS: i32 = 24;
+const MONEY_AFTER: i32 = 1001;
+const SOUND_TICK: u32 = 21;
 
 /// The tournament manager: +4 the tier, +8 the tournament, +16 the racers, +20 the money, +24
 /// the definition (each tier's first tournament at +2 of its 12 bytes; tournaments from +36, 84
@@ -39,6 +45,7 @@ const TOURNAMENT: u32 = 8;
 const RACERS: u32 = 16;
 const MONEY: u32 = 20;
 const DEFINITION: u32 = 24;
+const KNOCKOUT: u32 = 5;
 const COMPETITORS: u32 = 280;
 /// The front end: the pink slips' tracks (`+0x23`), the one chosen (`+0x46`), how many
 /// (`+0x47`), each track's winner (`+12`, `short`s: -1 none), the players' wins (`+0x48`); the
@@ -49,25 +56,67 @@ const PINK_COUNT: u32 = FRONT_END + 0x47;
 const PINK_WINNERS: u32 = FRONT_END + 12;
 const PINK_WINS: u32 = FRONT_END + 0x48;
 const FE_TIER: u32 = FRONT_END + 0x122;
+/// A track's description (`tTrackInformation`, 48 bytes).
+const TRACK_SIZE: u32 = 48;
 /// In the menus' block: the tournaments' iterators (a tier's, the others').
 const TIER_ITERATOR: u32 = 1932;
 const ITERATOR: u32 = 1704;
-/// The vtables; "zTrnSt1", "zTrnStd", "%d %s"; the colours' table and the money's colour's
-/// index; the permanent shapes' table now.
+/// The vtables; "zTrnSt1", "zTrnStd" (41 shapes each), "%d %s"; the colours' table and the
+/// money's colour's index; the permanent shapes' table now; the title's mark (shape 39: its
+/// width at +16, its centre at +20) and its halves (40).
 const STANDINGS_VT: u32 = 0x8001_19F0;
 const STANDINGS_NAME: u32 = 0x8001_1934;
 const STANDINGS3_NAME: u32 = 0x8001_193C;
+const SHAPES: u16 = 41;
 const POINTS_FORMAT: u32 = 0x8001_1944;
 const COLORS: u32 = 0x8005_1B50;
 const MONEY_COLOR: u32 = 0x8005_1AE7;
 const PERMANENT_SHAPES: u32 = 0x8005_1C54;
+const MARK: u32 = 39;
+const MARK_HALF: u32 = 40;
+/// The texts' places (`TextSys_WordX`/`Y`'s ids): the title's x (759), the rows' place, name and
+/// value columns (760, 761, 764), the money's labels' column (763); the rows (767 on), the
+/// title's y (765), the track's (766); the players' wins' rows (788 on).
+const TITLE_X: u32 = 759;
+const PLACE_X: u32 = 760;
+const NAME_X: u32 = 761;
+const LABEL_X: u32 = 763;
+const VALUE_X: u32 = 764;
+const TITLE_Y: u32 = 765;
+const TRACK_Y: u32 = 766;
+const ROWS: u32 = 767;
+const WINS_ROWS: u32 = 788;
+/// The texts: the places (600 on), the tracks' names (214 on), the tournaments' (their text
+/// value + 19); survived, out (796, 797), "points" (798); the money's labels (won 787, billed
+/// 788, bonus 789, total 790); no winner (782); the wins (799 "%d wins", 800 one); the pink
+/// slips' title (706); the currency words (135, 136, 137, by money kind 3, 6, 9).
+const PLACES: u32 = 600;
+const TRACK_NAMES: u32 = 214;
+const TOURNAMENT_NAMES: u32 = 19;
+const SURVIVED: u32 = 796;
+const KNOCKED_OUT: u32 = 797;
+const POINTS: u32 = 798;
+const WON: u32 = 787;
+const BILLED: u32 = 788;
+const BONUS_TEXT: u32 = 789;
+const TOTAL: u32 = 790;
+const NO_WINNER: u32 = 782;
+const WINS: u32 = 799;
+const ONE_WIN: u32 = 800;
+const PINK_TITLE: u32 = 706;
+/// The money's kinds: an amount, a total.
+const AMOUNT: u32 = 6;
+const TOTAL_KIND: u32 = 9;
+/// The colours: the lines' shade, the mark's band's grey.
+const SHADE: u32 = 0x0023_2323;
+const BAND: u32 = 0x0028_2828;
 
 /// `PSXDrawSquare`: the host's.
 const DRAW_SQUARE: u32 = 0x8004_F12C;
 /// FETOURN's `GetAwardInformation`, `CalcTrackFinishDamageBill`, `PlayerRanking`,
 /// `TournPointTotal`, `tListIteratorTournament::TextValue` (ported); FRONT's
-/// `Front_GetTrackRaced`, `PlayerName`; a competitor's name (0x8004b428): still recompiled. `TextSys_WordX`,
-/// `TextSys_WordY`.
+/// `Front_GetTrackRaced`, `PlayerName`; a competitor's name (0x8004b428): still recompiled.
+/// `TextSys_WordX`, `TextSys_WordY`.
 const GET_AWARD: fn(&mut Cpu) = fetourn::get_award_information_entry;
 const DAMAGE_BILL: fn(&mut Cpu) = fetourn::calc_track_finish_damage_bill_entry;
 const PLAYER_RANKING: fn(&mut Cpu) = fetourn::player_ranking_entry;
@@ -78,6 +127,11 @@ const PLAYER_NAME: fn(&mut Cpu) = crate::front::player_name_entry;
 const COMPETITOR_NAME: fn(&mut Cpu) = nfs4rc::f_8004b428;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
+/// Ports called by address: FETOOLS' `FormatMoney`, FETRACKS' `GetTrack`, FELINES'
+/// `DrawBrightEndLine`.
+const FORMAT_MONEY: u32 = 0x8002_6D00;
+const GET_TRACK: u32 = 0x8002_1C04;
+const DRAW_BRIGHT_END_LINE: u32 = 0x8004_C018;
 
 fn lh(m: &mut Mem, at: u32) -> i32 {
     m.r16(at) as i16 as i32
@@ -87,362 +141,312 @@ fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
 }
 
-/// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
+fn word_x(c: &mut Cpu, k: u32) -> u32 {
+    call(c, WORD_X, &[k])
+}
+
+fn word_y(c: &mut Cpu, k: u32) -> u32 {
+    call(c, WORD_Y, &[k])
+}
+
+/// The screen's fade.
+fn fade(m: &mut Mem, this: u32) -> u32 {
+    Screen(this).screen_fade_val(m) as i32 as u32
 }
 
 /// `DrawMoney` (SCREENPOST.CPP, 0x80039a80): `amount` formatted at x, y in `color`, and over it
-/// the currency word of `kind` (3, 6, 9; others none) in `word_color`.
+/// the currency word of `kind` (3, 6, 9) in `word_color`. (For other kinds the original draws
+/// its stack's leftover as the word, which the game never asks for; none here.)
 #[allow(clippy::too_many_arguments)]
 pub fn draw_money(c: &mut Cpu, x: u32, y: u32, kind: u32, amount: u32, color: u32, word_color: u32) {
-    abi::frame(c, 160, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = x;
-        r.0[3] = y;
-        r.0[2] = amount;
-        let word = sp + 24;
-        let money = sp + 80;
-        // (s0 the money's text already, from the kind's branches' delay slots, but for 6)
-        if kind != 6 {
-            r.0[0] = money;
-        }
+    with_buffer(c, 128, |c, at| {
+        let (word, money) = (at, at + 64);
+        // (each kind's format given as many zeros as the original passes)
         match kind {
             3 => {
-                let w = r.call_leaving(c, TEXT_WORD, &[135], 0x8003_9ae4);
-                r.call_leaving(c, SPRINTF, &[word, w, 0], 0x8003_9af4);
+                let w = call(c, TEXT_WORD, &[135]);
+                call(c, SPRINTF, &[word, w, 0]);
             }
             6 => {
-                let w = r.call_leaving(c, TEXT_WORD, &[136], 0x8003_9b04);
-                r.call_leaving(c, SPRINTF, &[word, w, 0, 0], 0x8003_9b18);
+                let w = call(c, TEXT_WORD, &[136]);
+                call(c, SPRINTF, &[word, w, 0, 0]);
             }
             9 => {
-                let w = r.call_leaving(c, TEXT_WORD, &[137], 0x8003_9b28);
-                c.m.w32(sp + 16, 0);
-                r.call_leaving(c, SPRINTF, &[word, w, 0, 0], 0x8003_9b40);
+                let w = call(c, TEXT_WORD, &[137]);
+                call(c, SPRINTF, &[word, w, 0, 0, 0]);
             }
-            _ => {}
+            _ => c.m.w8(word, 0),
         }
-        r.0[0] = money;
-        port(c, &r, 0x8002_6d00, 0x8003_9b50, &[money, amount], fetools::abi_format_money);
-        r.0[1] = sx(x);
-        r.0[0] = sx(y);
-        r.0[2] = 1;
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[money, sx(x), sx(y), color, 0, 1], 0x8003_9b80);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(x), sx(y), word_color, 0, 1], 0x8003_9b9c);
+        call_addr(c, FORMAT_MONEY, &[money, amount]);
+        fetextrender::full_text_rgb(c, money, sx(x), sx(y), color, 0, 1);
+        fetextrender::full_text_rgb(c, word, sx(x), sx(y), word_color, 0, 1);
     })
 }
 
 pub fn abi_draw_money(c: &mut Cpu) {
-    let (color, word_color) = (abi::arg(c, 4), abi::arg(c, 5));
+    let (color, word_color) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5));
     draw_money(c, c.r[4], c.r[5], c.r[6], c.r[7], color, word_color);
 }
 
 /// `tScreenTournamentStandings::tScreenTournamentStandings` (SCREENPOST.CPP, 0x80039bb8): no
 /// money shown.
-pub fn abi_screen_tournament_standings(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        port(c, &r, 0x8002_6040, 0x8003_9bcc, &[this], fescreen::abi_screen);
-        c.m.w32(this + 96, STANDINGS_VT);
-        c.m.w32(this + DRAW_MONEY_ON, 0);
-        c.r[2] = this;
-    })
+pub fn screen_tournament_standings(c: &mut Cpu, this: Screen) -> Screen {
+    fescreen::screen(c, this);
+    this.set_vtable(&mut c.m, STANDINGS_VT);
+    c.m.w32(this.0 + DRAW_MONEY_ON, 0);
+    this
 }
 
-/// `tScreenTournamentStandings::Initialize` (SCREENPOST.CPP, 0x80039bf0): the screen's files;
-/// the award; with the money shown, what was won, billed and given as a bonus (counted down 24
-/// steps of the largest), the money before them; else the money before the tournament's.
-pub fn abi_initialize(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 104, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        port(c, &r, 0x8002_60cc, 0x8003_9c08, &[this], fescreen::abi_initialize);
-        r.0[1] = TOURNAMENT_MANAGER;
-        let award = sp + 16;
-        r.call_leaving(c, GET_AWARD, &[TOURNAMENT_MANAGER, award], 0x8003_9c1c);
+pub fn abi_screen_tournament_standings(c: &mut Cpu) {
+    c.r[2] = screen_tournament_standings(c, Screen(c.r[4])).0;
+}
+
+/// `tScreenTournamentStandings::Initialize` (SCREENPOST.CPP, 0x80039bf0). The screen's files
+/// are read and the award asked for. With the money shown: what was won, billed and given as a
+/// bonus (counted down in 24 steps of the largest), and the money before them (and before a
+/// full garage's bonus); else the money before the tournament's.
+pub fn initialize(c: &mut Cpu, this: Screen) {
+    fescreen::initialize(c, this);
+    let this = this.0;
+    with_buffer(c, AwardInformation::SIZE, |c, at| {
+        let award = AwardInformation(at);
+        call(c, GET_AWARD, &[TOURNAMENT_MANAGER, at]);
         let m = &mut c.m;
         m.w32(this + GOT_MONEY, 0);
         m.w32(this + GOT_BONUS, 0);
         m.w32(this + GOT_BILLED, 0);
-        let before = m.r32(TOURNAMENT_MANAGER + MONEY).wrapping_sub(m.r32(award + 4));
-        if m.r32(this + DRAW_MONEY_ON) != 0 {
-            let won = m.r32(award);
-            if won != 0 {
-                m.w32(this + GOT_MONEY, 1);
-            }
+        let before = m.r32(TOURNAMENT_MANAGER + MONEY).wrapping_sub(award.tourn_money(m) as u32);
+        if m.r32(this + DRAW_MONEY_ON) == 0 {
             m.w32(this + FINAL, before);
-            if m.r32(award + 60) != 0 {
-                let v = before.wrapping_sub(m.r32(award + 64));
-                m.w32(this + FINAL, v);
-            }
-            m.w32(this + AWARDED, won);
-            r.call_leaving(c, DAMAGE_BILL, &[TOURNAMENT_MANAGER, 0, this + DAMAGE, this + BONUS], 0x8003_9c90);
-            let m = &mut c.m;
-            if (m.r32(this + BONUS) as i32) > 0 {
-                m.w32(this + GOT_BONUS, 1);
-            }
-            if (m.r32(this + DAMAGE) as i32) > 0 {
-                m.w32(this + GOT_BILLED, 1);
-            }
-            m.w32(this + COUNTED_DOWN, 0);
-            if m.r32(this + BONUS) == 0 && m.r32(this + DAMAGE) == 0 && m.r32(this + AWARDED) == 0 {
-                m.w32(this + COUNTED_DOWN, 1);
-            }
-            m.w32(this + COUNTDOWN_NOW, 0);
-            let largest = (m.r32(this + BONUS) as i32).max(m.r32(award) as i32).max(m.r32(this + DAMAGE) as i32);
-            m.w32(this + COUNT_SPEED, (largest / 24) as u32);
-        } else {
-            m.w32(this + FINAL, before);
+            return;
         }
-        let ticks = c.m.r32(GAME_TICKS);
-        c.m.w32(this + START, ticks);
-    })
+        let won = award.money(m) as u32;
+        if won != 0 {
+            m.w32(this + GOT_MONEY, 1);
+        }
+        m.w32(this + FINAL, before);
+        if award.completed_garage_full(m) != 0 {
+            let v = before.wrapping_sub(award.completed_bonus_money(m) as u32);
+            m.w32(this + FINAL, v);
+        }
+        m.w32(this + AWARDED, won);
+        call(c, DAMAGE_BILL, &[TOURNAMENT_MANAGER, 0, this + DAMAGE, this + BONUS]);
+        let m = &mut c.m;
+        if (m.r32(this + BONUS) as i32) > 0 {
+            m.w32(this + GOT_BONUS, 1);
+        }
+        if (m.r32(this + DAMAGE) as i32) > 0 {
+            m.w32(this + GOT_BILLED, 1);
+        }
+        m.w32(this + COUNTED_DOWN, 0);
+        if m.r32(this + BONUS) == 0 && m.r32(this + DAMAGE) == 0 && m.r32(this + AWARDED) == 0 {
+            m.w32(this + COUNTED_DOWN, 1);
+        }
+        m.w32(this + COUNTDOWN_NOW, 0);
+        let largest = (m.r32(this + BONUS) as i32).max(award.money(m)).max(m.r32(this + DAMAGE) as i32);
+        m.w32(this + COUNT_SPEED, (largest / COUNT_STEPS) as u32);
+    });
+    let ticks = c.m.r32(GAME_TICKS);
+    c.m.w32(this + START, ticks);
+}
+
+pub fn abi_initialize(c: &mut Cpu) {
+    initialize(c, Screen(c.r[4]));
 }
 
 /// `tScreenTournamentStandings::Cleanup` (SCREENPOST.CPP, 0x80039d7c): no money shown; the
 /// screen's.
-pub fn abi_cleanup(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        c.m.w32(this + DRAW_MONEY_ON, 0);
-        port(c, &Saved::of(c), 0x8002_61c0, 0x8003_9d8c, &[this], fescreen::abi_cleanup);
-    })
+pub fn cleanup(c: &mut Cpu, this: Screen) {
+    c.m.w32(this.0 + DRAW_MONEY_ON, 0);
+    fescreen::cleanup(c, this);
 }
 
-/// A standings screen's shapes: 41 of `name`, none swapped.
-fn shape_info(c: &mut Cpu, name_text: u32) {
-    let swap_name = abi::arg(c, 4);
-    let (permanent, swap, name) = (c.r[5], c.r[6], c.r[7]);
-    let m = &mut c.m;
+pub fn abi_cleanup(c: &mut Cpu) {
+    cleanup(c, Screen(c.r[4]));
+}
+
+/// A standings screen's shapes: 41 of `file`, none swapped.
+fn shape_info(m: &mut Mem, file: u32, permanent: u32, swap: u32, name: u32, swap_name: u32) {
     m.w16(swap, 0);
     m.w32(swap_name, 0);
-    m.w16(permanent, 41);
-    m.w32(name, name_text);
+    m.w16(permanent, SHAPES);
+    m.w32(name, file);
 }
 
 /// `tScreenTournamentStandings::GetShapeInfo` (SCREENPOST.CPP, 0x80039d9c): "zTrnSt1".
 pub fn abi_get_shape_info(c: &mut Cpu) {
-    shape_info(c, STANDINGS_NAME);
+    let swap_name = crate::abi::arg(c, 4);
+    shape_info(&mut c.m, STANDINGS_NAME, c.r[5], c.r[6], c.r[7], swap_name);
 }
 
 /// `tScreenTournamentStandings3item::GetShapeInfo` (SCREENPOST.CPP, 0x80039dc0): "zTrnStd".
 pub fn abi_get_shape_info3(c: &mut Cpu) {
-    shape_info(c, STANDINGS3_NAME);
+    let swap_name = crate::abi::arg(c, 4);
+    shape_info(&mut c.m, STANDINGS3_NAME, c.r[5], c.r[6], c.r[7], swap_name);
 }
 
 /// `tScreenTournamentStandings::ProcessInput` (SCREENPOST.CPP, 0x80039de4): accept before the
 /// money is counted down starts the countdown instead.
-pub fn abi_process_input(c: &mut Cpu) {
-    let (this, key) = (c.r[4], c.r[6]);
-    let m = &mut c.m;
-    if m.r32(key) == KEY_ACCEPT && m.r32(this + COUNTED_DOWN) == 0 {
+pub fn process_input(m: &mut Mem, this: Screen, key: u32) {
+    if m.r32(key) == KEY_ACCEPT && m.r32(this.0 + COUNTED_DOWN) == 0 {
         m.w32(key, KEY_NONE);
-        m.w32(this + COUNTDOWN_NOW, 1);
+        m.w32(this.0 + COUNTDOWN_NOW, 1);
     }
 }
 
-/// The money's mark sliding to and fro under the title (shape 39's width) and its two halves
-/// (shape 40), as both standings draw it: the slide and the middle.
+pub fn abi_process_input(c: &mut Cpu) {
+    process_input(&mut c.m, Screen(c.r[4]), c.r[6]);
+}
+
+/// The title's mark sliding to and fro under it (`MARK`'s width): the slide and the middle.
 fn slide(m: &mut Mem) -> (i32, i32) {
-    let shape = m.r32(PERMANENT_SHAPES) + 1248;
-    let w = lh(m, shape + 16);
+    let mark = TextureShapeInfo(m.r32(PERMANENT_SHAPES)).at(MARK).0;
+    let w = lh(m, mark + 16);
     assert!(w != 0, "a mark 0 wide (the original's division `break`s)");
     let mut slide = (m.r32(GAME_TICKS) as i32).wrapping_rem(w);
     if w / 2 < slide {
         slide = w - slide;
     }
-    (slide, ((w >> 1) - 2).wrapping_sub(lh(m, shape + 20)))
+    (slide, ((w >> 1) - 2).wrapping_sub(lh(m, mark + 20)))
 }
 
-/// `tScreenTournamentStandings::DrawBackground` (SCREENPOST.CPP, 0x80039e14): each racer's
-/// place, name (the player's lit) and points (or, knocking out, survived or out); the track and
-/// the tournament (boxed, a mark sliding under them); a line; with the money shown (after 1000
-/// ticks or once asked), what was won, billed and the bonus counted down; the final money; the
-/// picture.
-pub fn abi_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 248, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[7] = this;
-        r.0[4] = 0;
-        let m = &mut c.m;
-        let fade = lh(m, this + FADE) as u32;
-        r.0[8] = fade;
-        m.w32(sp + 188, fade);
-        let definition = m.r32(TOURNAMENT_MANAGER + DEFINITION);
-        let tier = m.r32(TOURNAMENT_MANAGER + TIER);
-        let first = m.r8(definition.wrapping_add(tier.wrapping_mul(12)) + 2) as u32;
-        let t = definition.wrapping_add(first.wrapping_add(m.r32(TOURNAMENT_MANAGER + TOURNAMENT)).wrapping_mul(84)) + 36;
-        r.0[6] = 767;
-        m.w32(sp + 192, t);
-        let knockout = m.r8(t + 5) != 0;
-        let n = sx((m.r16(TOURNAMENT_MANAGER + RACERS) as u32).wrapping_add(knockout as u32));
-        m.w32(sp + 196, n);
-        m.w32(sp + 200, n.wrapping_sub(1));
-        // the racers
-        let ftf = |c: &mut Cpu, r: &Saved, args: [u32; 7], ra: u32| r.call_leaving(c, fetextrender::full_text_fade_entry, &args, ra);
-        loop {
-            let k = r.0[4];
-            if (k as i32) >= c.m.r32(sp + 196) as i32 {
-                break;
-            }
-            let place = sx(r.call_leaving(c, PLAYER_RANKING, &[TOURNAMENT_MANAGER, sx(k + 1)], 0x8003_9eec));
-            r.0[3] = place;
-            r.0[5] = if place == 0 { 2 } else { 1 };
-            r.0[2] = if place == 0 { 2 } else { 0 };
-            let w = r.call_leaving(c, TEXT_WORD, &[k + 600], 0x8003_9f14);
-            r.0[1] = w;
-            let x = sx(r.call_leaving(c, WORD_X, &[760], 0x8003_9f20));
-            r.0[0] = x;
-            let y = r.call_leaving(c, WORD_Y, &[r.0[6]], 0x8003_9f30);
-            ftf(c, &r, [r.0[8], w, x, sx(y), 11, r.0[2], 0], 0x8003_9f58);
-            let name = if place == 0 {
-                r.call_leaving(c, PLAYER_NAME, &[0], 0x8003_9f68)
-            } else {
-                let id = c.m.r32(TOURNAMENT_MANAGER.wrapping_add(place << 4) + COMPETITORS);
-                r.call_leaving(c, COMPETITOR_NAME, &[id], 0x8003_9f88)
-            };
-            r.0[1] = name;
-            let x = sx(r.call_leaving(c, WORD_X, &[761], 0x8003_9f94));
-            r.0[0] = x;
-            let y = r.call_leaving(c, WORD_Y, &[r.0[6]], 0x8003_9fa4);
-            ftf(c, &r, [r.0[8], name, x, sx(y), 11, r.0[5], 0], 0x8003_9fcc);
-            let text = sp + 32;
-            c.m.w16(sp + 184, place as u16);
-            let t = c.m.r32(sp + 192);
-            if c.m.r8(t + 5) != 0 {
-                let id = if k == c.m.r32(sp + 200) { 797 } else { 796 };
-                let w = r.call_leaving(c, TEXT_WORD, &[id], 0x8003_a000);
-                r.call_leaving(c, SPRINTF, &[text, w], 0x8003_a00c);
-            } else {
-                let points = sx(r.call_leaving(c, POINT_TOTAL, &[TOURNAMENT_MANAGER, sp + 184], 0x8003_a020));
-                r.0[0] = points;
-                let w = r.call_leaving(c, TEXT_WORD, &[798], 0x8003_a030);
-                r.call_leaving(c, SPRINTF, &[text, POINTS_FORMAT, points, w], 0x8003_a048);
-            }
-            let x = sx(r.call_leaving(c, WORD_X, &[764], 0x8003_a050));
-            r.0[0] = x;
-            let y = r.call_leaving(c, WORD_Y, &[r.0[6]], 0x8003_a060);
-            ftf(c, &r, [r.0[8], text, x, sx(y), 11, r.0[5], 1], 0x8003_a08c);
-            r.0[6] = r.0[6].wrapping_add(1);
-            r.0[4] = k + 1;
+/// The title's mark: its halves sliding apart and back, then the band under the title.
+fn title_mark(c: &mut Cpu, this: u32) {
+    let (s, mid) = slide(&mut c.m);
+    for x in [mid.wrapping_add(s), mid.wrapping_sub(s)] {
+        let y = word_y(c, TITLE_Y);
+        let f = fade(&mut c.m, this);
+        call(c, DRAW_SHAPE_EXTENDED, &[MARK_HALF, 0, x as u32, y.wrapping_add(1), f, 1, 0]);
+    }
+    with_buffer(c, DrawShapeExtended::SIZE, |c, options| {
+        DrawShapeExtended(options).set_tint(&mut c.m, 0, BAND as i32);
+        let f = fade(&mut c.m, this);
+        call(c, DRAW_SHAPE_EXTENDED, &[MARK, 0x400, 0, u32::MAX, f, 0, options]);
+    });
+}
+
+/// A title's box: a black box the text `id`'s width under it, centred on the title's place.
+fn boxed_title(c: &mut Cpu, id: u32) {
+    let w = call(c, TEXT_WORD, &[id]);
+    let px = call(c, TEXT_PIXELS, &[w]);
+    let x = word_x(c, TITLE_X).wrapping_sub(((px as i32) >> 1) as u32);
+    let y = word_y(c, TITLE_Y);
+    call_addr(c, DRAW_SQUARE, &[0, x, y.wrapping_sub(1), px, 9]);
+}
+
+/// `tScreenTournamentStandings::DrawBackground` (SCREENPOST.CPP, 0x80039e14). It draws each
+/// racer's place, name (the player's lit) and points (or, knocking out, survived or out); the
+/// track and the tournament, boxed, with a mark sliding under them; a line. With the money
+/// shown (after 1000 ticks, or once asked), what was won, billed and the bonus count down. Then
+/// the final money and the picture.
+pub fn draw_background(c: &mut Cpu, this: Screen) {
+    let this = this.0;
+    let m = &mut c.m;
+    let f = fade(m, this);
+    let definition = m.r32(TOURNAMENT_MANAGER + DEFINITION);
+    let tier = m.r32(TOURNAMENT_MANAGER + TIER);
+    let first = m.r8(definition.wrapping_add(tier.wrapping_mul(12)) + 2) as u32;
+    let t = definition.wrapping_add(first.wrapping_add(m.r32(TOURNAMENT_MANAGER + TOURNAMENT)).wrapping_mul(84)) + 36;
+    // a knock-out tournament's rows: the racers and the one knocked out
+    let knockout = m.r8(t + KNOCKOUT) != 0;
+    let n = sx((m.r16(TOURNAMENT_MANAGER + RACERS) as u32).wrapping_add(knockout as u32));
+    let mut k = 0u32;
+    while (k as i32) < n as i32 {
+        draw_racer(c, f, t, k, n);
+        k += 1;
+    }
+    // the track and the tournament
+    let track = call(c, TRACK_RACED, &[]);
+    // (the track's description read, and not used: as the original)
+    with_buffer(c, TRACK_SIZE, |c, info| call_addr(c, GET_TRACK, &[TRACK_MANAGER, sx(track), info]));
+    let track = call(c, TRACK_RACED, &[]);
+    let w = call(c, TEXT_WORD, &[sx(track).wrapping_add(TRACK_NAMES)]);
+    let x = sx(word_x(c, TITLE_X));
+    let y = word_y(c, TRACK_Y);
+    fetextrender::full_text_fade(c, f, w, x, sx(y), 11, 2, 2);
+    let m = &mut c.m;
+    let it = m.r32(SONGS_SCREEN) + if m.r8(FE_TIER) != 0 { TIER_ITERATOR } else { ITERATOR };
+    let name = sx(call(c, TOURNAMENT_TEXT, &[it, u32::MAX])).wrapping_add(TOURNAMENT_NAMES);
+    let x = sx(word_x(c, TITLE_X));
+    let y = word_y(c, TITLE_Y);
+    fetextrender::menu_text_positioned_justify_fade(c, f, sx(name), x, sx(y), 2, 2, 11);
+    boxed_title(c, name);
+    title_mark(c, this);
+    // a line
+    let x = word_x(c, TITLE_X).wrapping_sub(150);
+    let y = word_y(c, TRACK_Y);
+    call_addr(c, DRAW_BRIGHT_END_LINE, &[SHADE, x, y.wrapping_add(10), 300, 1, 3, f, 30]);
+    // the money: counted down once shown
+    let m = &mut c.m;
+    let k = m.r8(MONEY_COLOR) as u32;
+    let colours = (fefades::fade(m.r32(COLORS + 4 * k), 0, f), fefades::fade(SHADE, 0, f));
+    let late = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + START)) as i32 >= MONEY_AFTER;
+    if late || m.r32(this + COUNTDOWN_NOW) != 0 {
+        if (m.r32(this + AWARDED) as i32) > 0 || (m.r32(this + DAMAGE) as i32) > 0 || (m.r32(this + BONUS) as i32) > 0 {
+            call(c, PLAY_FE_SFX, &[SOUND_TICK]);
         }
-        // the track and the tournament
-        let track = r.call_leaving(c, TRACK_RACED, &[], 0x8003_a0a0);
-        port(c, &r, 0x8002_1c04, 0x8003_a0b8, &[TRACK_MANAGER, sx(track), sp + 112], fetracks::abi_get_track);
-        let track = r.call_leaving(c, TRACK_RACED, &[], 0x8003_a0c0);
-        let w = r.call_leaving(c, TEXT_WORD, &[sx(track).wrapping_add(214)], 0x8003_a0d0);
-        r.0[1] = w;
-        let x = sx(r.call_leaving(c, WORD_X, &[759], 0x8003_a0dc));
-        r.0[0] = x;
-        let y = r.call_leaving(c, WORD_Y, &[766], 0x8003_a0ec);
-        ftf(c, &r, [r.0[8], w, x, sx(y), 11, 2, 2], 0x8003_a118);
-        let it = {
-            let m = &mut c.m;
-            m.r32(SONGS_SCREEN) + if m.r8(FE_TIER) != 0 { TIER_ITERATOR } else { ITERATOR }
-        };
-        let name = sx(r.call_leaving(c, TOURNAMENT_TEXT, &[it, u32::MAX], 0x8003_a150)).wrapping_add(19);
-        r.0[4] = name;
-        let x = sx(r.call_leaving(c, WORD_X, &[759], 0x8003_a164));
-        r.0[0] = x;
-        let y = r.call_leaving(c, WORD_Y, &[765], 0x8003_a174);
-        r.call_leaving(c, fetextrender::menu_text_positioned_justify_fade_entry, &[r.0[8], sx(name), x, sx(y), 2, 2, 11], 0x8003_a1a4);
-        boxed_title(c, &mut r, sp, name, [0x8003_a1ac, 0x8003_a1b4, 0x8003_a1c0, 0x8003_a1d0, 0x8003_a1ec]);
-        // the mark
-        let (s, mid) = slide(&mut c.m);
-        r.0[4] = 0x8014_0000;
-        r.0[0] = s as u32;
-        r.0[2] = mid as u32;
-        let y = r.call_leaving(c, WORD_Y, &[765], 0x8003_a268);
-        r.0[1] = 1;
-        let fade = lh(&mut c.m, this + FADE) as u32;
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[40, 0, mid.wrapping_add(s) as u32, y.wrapping_add(1), fade, 1, 0], 0x8003_a290);
-        let y = r.call_leaving(c, WORD_Y, &[765], 0x8003_a298);
-        let fade = lh(&mut c.m, this + FADE) as u32;
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[40, 0, mid.wrapping_sub(s) as u32, y.wrapping_add(1), fade, 1, 0], 0x8003_a2bc);
-        c.m.w32(sp + 164, 0x0028_2828);
-        let fade = lh(&mut c.m, this + FADE) as u32;
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[39, 1024, 0, u32::MAX, fade, 0, sp + 160], 0x8003_a2f0);
-        // a line
-        let x = r.call_leaving(c, WORD_X, &[759], 0x8003_a2f8);
-        r.0[0] = x.wrapping_sub(150);
-        let y = r.call_leaving(c, WORD_Y, &[766], 0x8003_a304);
-        let fade = c.m.r32(sp + 188);
-        for (k, v) in [1, 3, fade, 30].into_iter().enumerate() {
-            c.m.w32(sp + 16 + 4 * k as u32, v);
+        count_down(&mut c.m, this);
+    }
+    if c.m.r32(this + DRAW_MONEY_ON) != 0 {
+        for (id, got, amount) in [(WON, GOT_MONEY, AWARDED), (BILLED, GOT_BILLED, DAMAGE), (BONUS_TEXT, GOT_BONUS, BONUS)] {
+            let w = call(c, TEXT_WORD, &[id]);
+            let x = sx(word_x(c, LABEL_X));
+            let y = word_y(c, id);
+            let state = (c.m.r32(this + got) != 0) as u32;
+            fetextrender::full_text_fade(c, f, w, x, sx(y), 11, state, 1);
+            let (x, y) = (word_x(c, VALUE_X), word_y(c, id));
+            let value = c.m.r32(this + amount);
+            draw_money(c, x, y, AMOUNT, value, colours.0, colours.1);
         }
-        port(c, &r, 0x8004_c018, 0x8003_a338, &[0x0023_2323, r.0[0], y.wrapping_add(10), 300], felines::abi_draw_bright_end_line);
-        // the money
-        let base = {
-            let m = &mut c.m;
-            let k = m.r8(MONEY_COLOR) as u32;
-            m.r32(COLORS + (k << 2))
-        };
-        let gold = port(c, &r, 0x8004_bd68, 0x8003_a35c, &[base, r.0[8]], fefades::abi_fade_out);
-        r.0[3] = gold;
-        let shade = port(c, &r, 0x8004_bd68, 0x8003_a370, &[0x0023_2323, r.0[8]], fefades::abi_fade_out);
-        r.0[2] = shade;
-        let m = &mut c.m;
-        let late = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + START)) as i32 >= 1001;
-        if late || m.r32(this + COUNTDOWN_NOW) != 0 {
-            if (m.r32(this + AWARDED) as i32) > 0 || (m.r32(this + DAMAGE) as i32) > 0 || (m.r32(this + BONUS) as i32) > 0 {
-                r.call_leaving(c, PLAY_FE_SFX, &[21], 0x8003_a3d4);
-            }
-            count_down(&mut c.m, this);
+    }
+    // the final money: what is left to count down taken off
+    let w = call(c, TEXT_WORD, &[TOTAL]);
+    let x = sx(word_x(c, LABEL_X));
+    let y = word_y(c, TOTAL);
+    fetextrender::full_text_fade(c, f, w, x, sx(y), 11, 2, 1);
+    let (x, y) = (word_x(c, VALUE_X), word_y(c, TOTAL));
+    let m = &mut c.m;
+    let total = m.r32(this + FINAL).wrapping_sub(m.r32(this + AWARDED)).wrapping_add(m.r32(this + DAMAGE)).wrapping_sub(m.r32(this + BONUS));
+    draw_money(c, x, y, TOTAL_KIND, total, colours.0, colours.1);
+    let table = TextureShapeInfo(c.m.r32(PERMANENT_SHAPES));
+    fescreen::draw_background_image(c, Screen(this), 10, 29, table, 0);
+}
+
+/// Row `k` of the standings (of `n`) in tournament `t`, faded by `f`: the place, the racer
+/// there (the player's lit), its points (or, knocking out, survived or out: the last row).
+fn draw_racer(c: &mut Cpu, f: u32, t: u32, k: u32, n: u32) {
+    let place = sx(call(c, PLAYER_RANKING, &[TOURNAMENT_MANAGER, sx(k + 1)]));
+    let player = place == 0;
+    let w = call(c, TEXT_WORD, &[k + PLACES]);
+    let x = sx(word_x(c, PLACE_X));
+    let y = word_y(c, ROWS + k);
+    fetextrender::full_text_fade(c, f, w, x, sx(y), 11, if player { 2 } else { 0 }, 0);
+    let state = if player { 2 } else { 1 };
+    let name = if player {
+        call(c, PLAYER_NAME, &[0])
+    } else {
+        let id = c.m.r32(TOURNAMENT_MANAGER.wrapping_add(place << 4) + COMPETITORS);
+        call(c, COMPETITOR_NAME, &[id])
+    };
+    let x = sx(word_x(c, NAME_X));
+    let y = word_y(c, ROWS + k);
+    fetextrender::full_text_fade(c, f, name, x, sx(y), 11, state, 0);
+    // the points (the place given by address), or the knock-out mark
+    with_buffer(c, 136, |c, at| {
+        let (racer, text) = (at, at + 8);
+        c.m.w16(racer, place as u16);
+        if c.m.r8(t + KNOCKOUT) != 0 {
+            let w = call(c, TEXT_WORD, &[if k == n.wrapping_sub(1) { KNOCKED_OUT } else { SURVIVED }]);
+            call(c, SPRINTF, &[text, w]);
+        } else {
+            let points = sx(call(c, POINT_TOTAL, &[TOURNAMENT_MANAGER, racer]));
+            let w = call(c, TEXT_WORD, &[POINTS]);
+            call(c, SPRINTF, &[text, POINTS_FORMAT, points, w]);
         }
-        if c.m.r32(this + DRAW_MONEY_ON) != 0 {
-            let lines = [
-                (787, GOT_MONEY, AWARDED, [0x8003_a438, 0x8003_a444, 0x8003_a454, 0x8003_a498, 0x8003_a4a0, 0x8003_a4ac, 0x8003_a4c8]),
-                (788, GOT_BILLED, DAMAGE, [0x8003_a4d0, 0x8003_a4dc, 0x8003_a4ec, 0x8003_a52c, 0x8003_a534, 0x8003_a540, 0x8003_a55c]),
-                (789, GOT_BONUS, BONUS, [0x8003_a564, 0x8003_a570, 0x8003_a580, 0x8003_a5c0, 0x8003_a5c8, 0x8003_a5d4, 0x8003_a5f0]),
-            ];
-            for (id, flag, amount, ras) in lines {
-                let w = r.call_leaving(c, TEXT_WORD, &[id], ras[0]);
-                r.0[1] = w;
-                let x = sx(r.call_leaving(c, WORD_X, &[763], ras[1]));
-                r.0[0] = x;
-                let y = r.call_leaving(c, WORD_Y, &[id], ras[2]);
-                let state = (c.m.r32(this + flag) != 0) as u32;
-                if id != 789 {
-                    r.0[4] = 1;
-                }
-                ftf(c, &r, [r.0[8], w, x, sx(y), 11, state, 1], ras[3]);
-                let x = r.call_leaving(c, WORD_X, &[764], ras[4]);
-                r.0[0] = x;
-                let y = r.call_leaving(c, WORD_Y, &[id], ras[5]);
-                let value = c.m.r32(this + amount);
-                c.m.w32(sp + 16, gold);
-                c.m.w32(sp + 20, shade);
-                port(c, &r, 0x8003_9a80, ras[6], &[x, y, 6, value], abi_draw_money);
-            }
-        }
-        // the final money
-        let w = r.call_leaving(c, TEXT_WORD, &[790], 0x8003_a5f8);
-        r.0[1] = w;
-        let x = sx(r.call_leaving(c, WORD_X, &[763], 0x8003_a604));
-        r.0[0] = x;
-        let y = r.call_leaving(c, WORD_Y, &[790], 0x8003_a614);
-        ftf(c, &r, [r.0[8], w, x, sx(y), 11, 2, 1], 0x8003_a644);
-        let x = r.call_leaving(c, WORD_X, &[764], 0x8003_a64c);
-        r.0[0] = x;
-        let y = r.call_leaving(c, WORD_Y, &[790], 0x8003_a658);
-        let m = &mut c.m;
-        let total = m.r32(this + FINAL).wrapping_sub(m.r32(this + AWARDED)).wrapping_add(m.r32(this + DAMAGE)).wrapping_sub(m.r32(this + BONUS));
-        m.w32(sp + 16, gold);
-        m.w32(sp + 20, shade);
-        port(c, &r, 0x8003_9a80, 0x8003_a68c, &[x, y, 9, total], abi_draw_money);
-        let table = c.m.r32(PERMANENT_SHAPES);
-        c.m.w32(sp + 16, 0);
-        port(c, &r, 0x8002_5ce8, 0x8003_a6a8, &[this, 10, 29, table], fescreen::abi_draw_background_image);
-    })
+        let x = sx(word_x(c, VALUE_X));
+        let y = word_y(c, ROWS + k);
+        fetextrender::full_text_fade(c, f, text, x, sx(y), 11, state, 1);
+    });
 }
 
 /// The money counted down a step: what was won first, then the damage billed, then the bonus
@@ -468,153 +472,90 @@ fn count_down(m: &mut Mem, this: u32) {
     m.w32(this + BONUS, (bonus as i32).max(0) as u32);
 }
 
-/// A title's box: the text `id`'s width, a black box under it centred on the title's place.
-fn boxed_title(c: &mut Cpu, r: &mut Saved, _sp: u32, id: u32, ras: [u32; 5]) {
-    let w = r.call_leaving(c, TEXT_WORD, &[id], ras[0]);
-    let px = r.call_leaving(c, TEXT_PIXELS, &[w], ras[1]);
-    r.0[1] = px;
-    let x = r.call_leaving(c, WORD_X, &[759], ras[2]);
-    r.0[0] = x.wrapping_sub(((px as i32) >> 1) as u32);
-    let y = r.call_leaving(c, WORD_Y, &[765], ras[3]);
-    r.call_ptr_leaving(c, DRAW_SQUARE, &[0, r.0[0], y.wrapping_sub(1), px, 9], ras[4]);
+pub fn abi_draw_background(c: &mut Cpu) {
+    draw_background(c, Screen(c.r[4]));
 }
 
 /// `tScreenPinkSlipStandings::DrawBackground` (SCREENPOST.CPP, 0x8003a6d8): the tracks raced
 /// (the one chosen lit, those before it half) and their winners (or none); the two players'
 /// wins; the title boxed, a mark sliding under it; the picture.
-pub fn abi_pink_slip_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 208, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[8] = this;
-        r.0[6] = 11;
-        r.0[2] = 0;
-        r.0[3] = FRONT_END;
-        r.0[1] = 767;
-        let fade = lh(&mut c.m, this + FADE) as u32;
-        r.0[5] = fade;
-        let ftf = |c: &mut Cpu, r: &Saved, args: [u32; 7], ra: u32| r.call_leaving(c, fetextrender::full_text_fade_entry, &args, ra);
-        let info = sp + 88;
-        loop {
-            let k = r.0[2];
-            r.0[4] = 2;
+pub fn pink_slip_draw_background(c: &mut Cpu, this: Screen) {
+    let this = this.0;
+    let f = fade(&mut c.m, this);
+    let text_at = |c: &mut Cpu, text: u32, row: u32, state: u32| {
+        let x = sx(word_x(c, VALUE_X));
+        let y = word_y(c, row);
+        fetextrender::full_text_fade(c, f, text, x, sx(y), 11, state, 1);
+    };
+    with_buffer(c, TRACK_SIZE + 128, |c, at| {
+        let (info, text) = (TrackInformation(at), at + TRACK_SIZE);
+        let mut k = 0u32;
+        while (k as i32) < c.m.r8(PINK_COUNT) as i32 {
             let m = &mut c.m;
-            if (k as i32) >= m.r8(PINK_COUNT) as i32 {
-                break;
-            }
             let chosen = m.r8(PINK_CHOSEN) as u32;
-            if k != chosen {
-                r.0[4] = ((k as i32) < chosen as i32) as u32;
-            }
+            let state = if k == chosen { 2 } else { ((k as i32) < chosen as i32) as u32 };
             let id = m.r8(PINK_TRACKS.wrapping_add(k)) as u32;
-            port(c, &r, 0x8002_1c04, 0x8003_a760, &[TRACK_MANAGER, id, info], fetracks::abi_get_track);
-            let x = sx(r.call_leaving(c, WORD_X, &[760], 0x8003_a768));
-            r.0[0] = x;
-            let y = r.call_leaving(c, WORD_Y, &[r.0[1]], 0x8003_a778);
+            call_addr(c, GET_TRACK, &[TRACK_MANAGER, id, info.0]);
+            let x = sx(word_x(c, PLACE_X));
+            let y = word_y(c, ROWS + k);
             let m = &mut c.m;
-            let fade = lh(m, this + FADE) as u32;
-            let name = sx((m.r8(info) as i8 as i32 as u32).wrapping_add(214));
-            r.call_leaving(c, fetextrender::menu_text_positioned_justify_fade_entry, &[fade, name, x, sx(y), 0, r.0[4], 11], 0x8003_a7b0);
+            let name = sx((info.track_id(m) as i32 as u32).wrapping_add(TRACK_NAMES));
+            let f = fade(m, this);
+            fetextrender::menu_text_positioned_justify_fade(c, f, name, x, sx(y), 0, state, 11);
             let winner = lh(&mut c.m, PINK_WINNERS.wrapping_add(k << 1));
-            let text = sp + 136;
-            let w = if winner == -1 {
-                r.call_leaving(c, TEXT_WORD, &[782], 0x8003_a7d0)
-            } else {
-                r.call_leaving(c, PLAYER_NAME, &[winner as u32], 0x8003_a7e0)
-            };
-            r.call_leaving(c, SPRINTF, &[text, w], 0x8003_a7ec);
-            let x = sx(r.call_leaving(c, WORD_X, &[764], 0x8003_a7f4));
-            r.0[0] = x;
-            let y = r.call_leaving(c, WORD_Y, &[r.0[1]], 0x8003_a804);
-            ftf(c, &r, [r.0[5], text, x, sx(y), 11, r.0[4], 1], 0x8003_a82c);
-            r.0[1] = r.0[1].wrapping_add(1);
-            r.0[2] = k + 1;
+            let w = if winner == -1 { call(c, TEXT_WORD, &[NO_WINNER]) } else { call(c, PLAYER_NAME, &[winner as u32]) };
+            call(c, SPRINTF, &[text, w]);
+            text_at(c, text, ROWS + k, state);
+            k += 1;
         }
         // the players' wins
-        r.0[2] = 0;
-        r.0[7] = 1;
-        r.0[3] = 788;
-        let ras = [[0x8003_a84c, 0x8003_a858, 0x8003_a868, 0x8003_a88c], [0x8003_a84c, 0x8003_a858, 0x8003_a868, 0x8003_a88c]];
-        for (k, ras) in ras.into_iter().enumerate() {
-            let k = k as u32;
-            let name = r.call_leaving(c, PLAYER_NAME, &[k], ras[0]);
-            r.0[1] = name;
-            let x = sx(r.call_leaving(c, WORD_X, &[761], ras[1]));
-            r.0[0] = x;
-            let y = r.call_leaving(c, WORD_Y, &[r.0[3]], ras[2]);
-            ftf(c, &r, [r.0[5], name, x, sx(y), 11, r.0[4], 0], ras[3]);
-            let text = sp + 32;
-            r.0[0] = FRONT_END + k;
+        for k in 0..2u32 {
+            let name = call(c, PLAYER_NAME, &[k]);
+            let x = sx(word_x(c, NAME_X));
+            let y = word_y(c, WINS_ROWS + k);
+            fetextrender::full_text_fade(c, f, name, x, sx(y), 11, 2, 0);
             let wins = c.m.r8(PINK_WINS + k) as u32;
             if wins == 1 {
-                let w = r.call_leaving(c, TEXT_WORD, &[800], 0x8003_a8b0);
-                r.call_leaving(c, SPRINTF, &[text, w], 0x8003_a8bc);
+                let w = call(c, TEXT_WORD, &[ONE_WIN]);
+                call(c, SPRINTF, &[text, w]);
             } else {
-                let w = r.call_leaving(c, TEXT_WORD, &[799], 0x8003_a8cc);
-                r.call_leaving(c, SPRINTF, &[text, w, wins], 0x8003_a8dc);
+                let w = call(c, TEXT_WORD, &[WINS]);
+                call(c, SPRINTF, &[text, w, wins]);
             }
-            let x = sx(r.call_leaving(c, WORD_X, &[764], 0x8003_a8e4));
-            r.0[0] = x;
-            let y = r.call_leaving(c, WORD_Y, &[r.0[3]], 0x8003_a8f4);
-            ftf(c, &r, [r.0[5], text, x, sx(y), 11, r.0[4], 1], 0x8003_a918);
-            r.0[2] = k + 1;
-            r.0[3] = r.0[3].wrapping_add(1);
+            text_at(c, text, WINS_ROWS + k, 2);
         }
-        // the title, the mark, the picture
-        let x = sx(r.call_leaving(c, WORD_X, &[759], 0x8003_a930));
-        r.0[0] = x;
-        let y = r.call_leaving(c, WORD_Y, &[765], 0x8003_a940);
-        r.call_leaving(c, fetextrender::menu_text_positioned_justify_fade_entry, &[r.0[5], 706, x, sx(y), 2, 2, 11], 0x8003_a968);
-        boxed_title(c, &mut r, sp, 706, [0x8003_a970, 0x8003_a978, 0x8003_a984, 0x8003_a994, 0x8003_a9b0]);
-        r.0[3] = 0x8005_0000;
-        let (s, mid) = slide(&mut c.m);
-        r.0[1] = s as u32;
-        r.0[2] = mid as u32;
-        c.m.w32(sp + 92, 0x0028_2828);
-        let y = r.call_leaving(c, WORD_Y, &[765], 0x8003_aa38);
-        r.0[0] = 1;
-        let fade = lh(&mut c.m, this + FADE) as u32;
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[40, 0, mid.wrapping_add(s) as u32, y.wrapping_add(1), fade, 1, 0], 0x8003_aa60);
-        let y = r.call_leaving(c, WORD_Y, &[765], 0x8003_aa68);
-        let fade = lh(&mut c.m, this + FADE) as u32;
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[40, 0, mid.wrapping_sub(s) as u32, y.wrapping_add(1), fade, 1, 0], 0x8003_aa8c);
-        let fade = lh(&mut c.m, this + FADE) as u32;
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[39, 1024, 0, u32::MAX, fade, 0, sp + 88], 0x8003_aab4);
-        let table = c.m.r32(PERMANENT_SHAPES);
-        c.m.w32(sp + 16, 0);
-        port(c, &r, 0x8002_5ce8, 0x8003_aacc, &[this, 10, 29, table], fescreen::abi_draw_background_image);
-    })
+    });
+    // the title, the mark, the picture
+    let x = sx(word_x(c, TITLE_X));
+    let y = word_y(c, TITLE_Y);
+    fetextrender::menu_text_positioned_justify_fade(c, f, PINK_TITLE, x, sx(y), 2, 2, 11);
+    boxed_title(c, PINK_TITLE);
+    title_mark(c, this);
+    let table = TextureShapeInfo(c.m.r32(PERMANENT_SHAPES));
+    fescreen::draw_background_image(c, Screen(this), 10, 29, table, 0);
 }
 
-/// `tScreenPinkSlipStandings::ProcessInput` (SCREENPOST.CPP, 0x8003aafc): the screen's.
-pub fn abi_pink_slip_process_input(c: &mut Cpu) {
-    let args = [c.r[4], c.r[5], c.r[6], c.r[7]];
-    abi::frame(c, 24, |c, _| {
-        port(c, &Saved::of(c), 0x8002_68f8, 0x8003_ab0c, &args, fescreen::abi_process_input);
-    })
+pub fn abi_pink_slip_draw_background(c: &mut Cpu) {
+    pink_slip_draw_background(c, Screen(c.r[4]));
 }
 
-/// The standings' destructors (SCREENPOST.H): the screen's.
-fn destructor(c: &mut Cpu, ra: u32) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        port(c, &Saved::of(c), 0x8002_6098, ra, &[this, flags], fescreen::abi_screen_destructor);
-    })
-}
+/// `tScreenPinkSlipStandings::ProcessInput` (SCREENPOST.CPP, 0x8003aafc): the screen's (which
+/// does nothing).
+pub fn abi_pink_slip_process_input(_: &mut Cpu) {}
 
-/// `tScreenPinkSlipStandings::~tScreenPinkSlipStandings` (0x8003ab1c).
+/// `tScreenPinkSlipStandings::~tScreenPinkSlipStandings` (0x8003ab1c),
+/// `tScreenTournamentStandings3item::~...` (0x8003ab3c), `tScreenTournamentStandings::~...`
+/// (0x8003ab5c), all SCREENPOST.H: the screen's.
 pub fn abi_pink_slip_destructor(c: &mut Cpu) {
-    destructor(c, 0x8003_ab2c);
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
-/// `tScreenTournamentStandings3item::~tScreenTournamentStandings3item` (0x8003ab3c).
 pub fn abi_destructor3(c: &mut Cpu) {
-    destructor(c, 0x8003_ab4c);
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
-/// `tScreenTournamentStandings::~tScreenTournamentStandings` (0x8003ab5c).
 pub fn abi_destructor(c: &mut Cpu) {
-    destructor(c, 0x8003_ab6c);
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 #[cfg(test)]
@@ -622,6 +563,9 @@ mod tests {
     use super::*;
     use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, pick, player, via_abi};
     use crate::test_util::{Rng, against_original_in, fe_ram};
+
+    /// The screen's fade.
+    const FADE: u32 = 92;
 
     /// The game's standings screens (the tournament's, the three-item one, the pink slips');
     /// the outputs of `GetShapeInfo`.
@@ -696,7 +640,9 @@ mod tests {
 
     fn cases() -> Vec<Case> {
         vec![
-            ("DrawMoney", 0x8003_9a80, nfs4rc::f_80039a80, |_, r| vec![pick(r, 400), pick(r, 240), [3, 6, 9, 0, 5][pick(r, 5) as usize], [0, 1, 999, 1_000_000, (-5000i32) as u32, r.next() as u32][pick(r, 6) as usize], 0xBEBE, 0x0023_2323]),
+            // (only the kinds with a currency word: for others the original draws its stack
+            // leftover, and the game never asks for them)
+            ("DrawMoney", 0x8003_9a80, nfs4rc::f_80039a80, |_, r| vec![pick(r, 400), pick(r, 240), [3, 6, 9][pick(r, 3) as usize], [0, 1, 999, 1_000_000, (-5000i32) as u32, r.next() as u32][pick(r, 6) as usize], 0xBEBE, 0x0023_2323]),
             ("tScreenTournamentStandings", 0x8003_9bb8, nfs4rc::f_80039bb8, |_, _| vec![OUT + 0x100]),
             ("tScreenTournamentStandings::Initialize", 0x8003_9bf0, nfs4rc::f_80039bf0, |_, r| vec![[STANDINGS, STANDINGS3][pick(r, 2) as usize]]),
             ("tScreenTournamentStandings::Cleanup", 0x8003_9d7c, nfs4rc::f_80039d7c, |_, _| vec![STANDINGS]),

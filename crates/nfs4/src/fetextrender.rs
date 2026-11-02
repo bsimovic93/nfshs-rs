@@ -185,10 +185,6 @@ pub fn abi_full_text_fade(c: &mut Cpu) {
     full_text_fade(c, c.r[4], c.r[5], c.r[6], c.r[7], ty, state, justify);
 }
 
-pub(crate) fn full_text_fade_entry(c: &mut Cpu) {
-    abi_full_text_fade(c);
-}
-
 /// A text type: `ty`, or text `id`'s own for `TYPE_FROM_TEXT`.
 fn text_type(c: &mut Cpu, id: u32, ty: u32) -> u32 {
     if ty == TYPE_FROM_TEXT { call(c, WORD_FLAGS, &[sx(id)]) } else { ty }
@@ -261,10 +257,6 @@ pub fn menu_text_positioned_justify_fade(c: &mut Cpu, fade: u32, id: u32, x: u32
 pub fn abi_menu_text_positioned_justify_fade(c: &mut Cpu) {
     let (justify, state, ty) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
     menu_text_positioned_justify_fade(c, c.r[4], c.r[5], c.r[6], c.r[7], justify, state, ty);
-}
-
-pub(crate) fn menu_text_positioned_justify_fade_entry(c: &mut Cpu) {
-    abi_menu_text_positioned_justify_fade(c);
 }
 
 /// A line's height in each font: 8 for font 0, 10 for font 1, 16 for the others.
