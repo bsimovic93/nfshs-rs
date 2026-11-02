@@ -1,22 +1,22 @@
-//! SCREENTRACKINFO.CPP: a tournament's track screen (`tScreenTrackInfo`): the tournament's
-//! tracks listed (the one to race lit), four headings, the track's direction, mirroring, time
-//! of day and weather, its country, the background picture, and a wall of ten TVs showing the
-//! track (`TR%02d%c`, by time of day and weather) turned on one by one. Start turns the wall off
-//! and, on the tournament's first race, adds the race's entry fee to the money paid.
+//! SCREENTRACKINFO.CPP: a tournament's track screen (`tScreenTrackInfo`). It lists the
+//! tournament's tracks (the one to race lit), four headings, the track's direction, mirroring,
+//! time of day and weather, its country, the background picture, and a wall of ten TVs showing
+//! the track (`TR%02d%c`, by time of day and weather) turned on one by one. Back turns the wall
+//! off and, before the tournament's first race, gives its entry fee back.
 //!
-//! The squares are the host's (called by address).
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr};
 use crate::femenu::KEY_BACK;
 use crate::femenuextended::{SET_ABR_MODE, SPRINTF};
 use crate::globals::{FRONT_END, TOURNAMENT_MANAGER, TRACK_MANAGER};
-use crate::{fescreen, fetextrender, fetourn, fetracks, fevideowall};
+use crate::types::{Screen, TextureShapeInfo};
+use crate::{fescreen, fetextrender, fetourn};
 use ps1rt::{Cpu, Mem};
 
-// The screen: a `tScreen` (+0 its permanent shapes' table, +40 its swapped ones'), then +100 the
-// track to race (`tTrackInfo`: +100 its number, +101 its direction, +102 mirrored, +103 its
-// time of day, +104 its weather), +140 the wall's ten TVs (FETV's), +620 the wall
-// (`tVideoWall`).
+/// The screen: a `tScreen`, then +100 the track to race (`tTrackInfo`: +100 its number, +101
+/// its direction, +102 mirrored, +103 its time of day, +104 its weather), +140 the wall's ten
+/// TVs (FETV's), +620 the wall (`tVideoWall`).
 const TRACK: u32 = 100;
 const DIRECTION: u32 = 101;
 const MIRRORED: u32 = 102;
@@ -24,17 +24,19 @@ const TIME_OF_DAY: u32 = 103;
 const WEATHER: u32 = 104;
 const TVS: u32 = 140;
 const WALL: u32 = 620;
+const WALL_TVS: u32 = 10;
 
-// The tournament manager: +4 the tier, +8 the tournament within it, +12 the race (from 0), +20
-// the money, +24 the definition (each tier's first tournament at +2 of its 12 bytes; the
-// tournaments from +36, 84 bytes each, +48 the entry fee).
+/// The tournament manager: +4 the tier, +8 the tournament within it, +12 the race (from 0), +20
+/// the money, +24 the definition (each tier's first tournament at +2 of its 12 bytes; the
+/// tournaments from +36, 84 bytes each, +48 the entry fee).
 const MANAGER_TIER: u32 = 4;
 const TOURNAMENT: u32 = 8;
 const RACE: u32 = 12;
 const MONEY: u32 = 20;
 const DEFINITION: u32 = 24;
+const ENTRY_FEE: u32 = 36 + 48;
 
-/// The front end's tournament (`frontEnd + 0x122`: a tier, or 0) and its kind's for a tier or
+/// The front end's tournament (`frontEnd + 0x122`: a tier, or 0) and its kind's, for a tier or
 /// none (`+0x121`, `+0x120`).
 const TIER: u32 = FRONT_END + 0x122;
 const TIER_KIND: u32 = FRONT_END + 0x121;
@@ -46,25 +48,28 @@ const DIRECTIONS: u32 = 0x8005_1E14;
 const SETTINGS: u32 = 0x8005_1DFC;
 const WALL_ORDER: u32 = 0x8005_2548;
 const COUNTRIES: u32 = 67;
-/// "TR%02d%c", "zInfo"; the swapped file's name.
+const COUNTRY: u32 = 42;
+/// "TR%02d%c", "zInfo" (43 shapes; the track's 10 pictures); the swapped file's name.
 const SWAP_FORMAT: u32 = 0x8001_1F10;
 const INFO_NAME: u32 = 0x8001_1F08;
+const SHAPES: u16 = 43;
 const SWAP_NAME: u32 = 0x8005_3148;
 
 /// `PSXDrawTransSquare`: the host's.
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
-/// `tTournamentManager::GetTrackToRace`, `::GetTrackList` (FETOURN.CPP's ports).
+/// `tTournamentManager::GetTrackToRace`, `::GetTrackList` (FETOURN.CPP's ports);
+/// `tTrackManager::GetTrackByID`.
 const GET_TRACK_TO_RACE: fn(&mut Cpu) = fetourn::get_track_to_race_entry;
 const GET_TRACK_LIST: fn(&mut Cpu) = fetourn::get_track_list_entry;
-
-/// A call to a function that is ported too, as FEAPP's (a0..a3; the caller writes the stack's).
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
-}
+const GET_TRACK_BY_ID: u32 = 0x8002_1E60;
+/// The video wall's (FEVIDEOWALL's ports): `Initialize`, `UpdateImages`, `TurnOn`,
+/// `TurnOffInstant`, `Update`, `Draw`.
+const WALL_INITIALIZE: u32 = 0x8003_6988;
+const WALL_UPDATE_IMAGES: u32 = 0x8003_6A38;
+const WALL_TURN_ON: u32 = 0x8003_70F0;
+const WALL_TURN_OFF_INSTANT: u32 = 0x8003_7074;
+const WALL_UPDATE: u32 = 0x8003_6BDC;
+const WALL_DRAW: u32 = 0x8003_6DAC;
 
 /// The text at `table`'s entry `k` (a `short`).
 fn text(m: &mut Mem, table: u32, k: u32) -> u32 {
@@ -73,158 +78,115 @@ fn text(m: &mut Mem, table: u32, k: u32) -> u32 {
 
 /// `tScreenTrackInfo::GetShapeInfo` (SCREENTRACKINFO.CPP, 0x800425d8): 43 shapes of "zInfo",
 /// 10 of the track to race's pictures for its time of day and weather.
+pub fn get_shape_info(c: &mut Cpu, this: Screen, permanent: u32, swap: u32, name: u32, swap_name: u32) {
+    c.m.w16(permanent, SHAPES);
+    c.m.w16(swap, WALL_TVS as u16);
+    call(c, GET_TRACK_TO_RACE, &[TOURNAMENT_MANAGER, this.0 + TRACK]);
+    let m = &mut c.m;
+    m.w32(name, INFO_NAME);
+    let number = m.r8(this.0 + TRACK) as i8 as i32 as u32;
+    let letter = 2 * m.r8(this.0 + TIME_OF_DAY) as u32 + m.r8(this.0 + WEATHER) as u32 + b'a' as u32;
+    call(c, SPRINTF, &[SWAP_NAME, SWAP_FORMAT, number, letter]);
+    c.m.w32(swap_name, SWAP_NAME);
+}
+
 pub fn abi_get_shape_info(c: &mut Cpu) {
-    let (this, permanent, swap, name) = (c.r[4], c.r[5], c.r[6], c.r[7]);
-    let swap_name = abi::arg(c, 4);
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[3] = swap_name;
-        c.m.w16(permanent, 43);
-        r.0[2] = name;
-        c.m.w16(swap, 10);
-        r.call_leaving(c, GET_TRACK_TO_RACE, &[TOURNAMENT_MANAGER, this + TRACK], 0x8004_261c);
-        r.0[0] = SWAP_NAME;
-        let m = &mut c.m;
-        m.w32(name, INFO_NAME);
-        let number = m.r8(this + TRACK) as i8 as i32 as u32;
-        let letter = ((m.r8(this + TIME_OF_DAY) as u32) << 1) + m.r8(this + WEATHER) as u32 + 97;
-        r.call_leaving(c, SPRINTF, &[SWAP_NAME, SWAP_FORMAT, number, letter], 0x8004_2658);
-        c.m.w32(swap_name, SWAP_NAME);
-    })
+    let swap_name = crate::abi::arg(c, 4);
+    get_shape_info(c, Screen(c.r[4]), c.r[5], c.r[6], c.r[7], swap_name);
 }
 
 /// `tScreenTrackInfo::DrawBackground` (SCREENTRACKINFO.CPP, 0x80042678): the tournament's
 /// tracks (the race's lit), the headings, the track's settings and country, the picture, a
 /// band, the wall turning and drawn.
+pub fn draw_background(c: &mut Cpu, this: Screen) {
+    let number = c.m.r8(this.0 + TRACK) as i8 as i32 as u32;
+    let track = call_addr(c, GET_TRACK_BY_ID, &[TRACK_MANAGER, number]);
+    let m = &mut c.m;
+    let tier = m.r8(TIER) as u32;
+    let kind = m.r8(if tier != 0 { TIER_KIND } else { KIND }) as u32;
+    // the tournament's tracks (a list of text ids ending in 0)
+    let list = call(c, GET_TRACK_LIST, &[TOURNAMENT_MANAGER, tier, kind]);
+    let mut k = 0;
+    loop {
+        let id = text(&mut c.m, list, k);
+        if id == 0 {
+            break;
+        }
+        let state = if k == c.m.r32(TOURNAMENT_MANAGER + RACE) { 2 } else { 1 };
+        fetextrender::menu_text_positioned(c, id, 170, 143 + 9 * k, state, 4);
+        k += 1;
+    }
+    for k in 0..4 {
+        let id = text(&mut c.m, HEADINGS, k);
+        fetextrender::menu_text_positioned(c, id, 340, 143 + 18 * k, 1, 4);
+    }
+    // the track's settings
+    let setting = |c: &mut Cpu, table: u32, field: u32, y: u32| {
+        let k = c.m.r8(this.0 + field) as u32;
+        let id = text(&mut c.m, table, k);
+        fetextrender::menu_text_positioned_justify(c, id, 480, y, 1, 2, 4);
+    };
+    setting(c, DIRECTIONS, DIRECTION, 152);
+    setting(c, SETTINGS, MIRRORED, 170);
+    setting(c, SETTINGS, TIME_OF_DAY, 188);
+    setting(c, SETTINGS, WEATHER, 206);
+    let country = c.m.r8(track + COUNTRY) as u32 + COUNTRIES;
+    fetextrender::menu_text_positioned_justify(c, country, 478, 33, 1, 0, 11);
+    // the picture, the band, the wall
+    let table = this.perm_shapes().shapes(&mut c.m);
+    fescreen::draw_background_image(c, this, 0, 33, table, 0);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, 320, 30, 160, 10, 1]);
+    call(c, SET_ABR_MODE, &[0]);
+    call_addr(c, WALL_UPDATE, &[this.0 + WALL]);
+    call_addr(c, WALL_DRAW, &[this.0 + WALL]);
+}
+
 pub fn abi_draw_background(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 64, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[3] = this;
-        for k in 0..8 {
-            let b = c.m.r8(HEADINGS + k);
-            c.m.w8(sp + 24 + k, b);
-        }
-        let number = c.m.r8(this + TRACK) as i8 as i32 as u32;
-        let track = port(c, &r, 0x8002_1e60, 0x8004_26d4, &[TRACK_MANAGER, number], fetracks::abi_get_track_by_id);
-        r.0[5] = track;
-        let (tier, kind) = {
-            let m = &mut c.m;
-            let tier = m.r8(TIER) as u32;
-            (tier, m.r8(if tier != 0 { TIER_KIND } else { KIND }) as u32)
-        };
-        r.0[0] = 0;
-        let mut list = r.call_leaving(c, GET_TRACK_LIST, &[TOURNAMENT_MANAGER, tier, kind], 0x8004_270c);
-        // the tournament's tracks
-        r.0[4] = TOURNAMENT_MANAGER;
-        r.0[2] = 0x8F_0000;
-        r.0[1] = list;
-        loop {
-            let id = c.m.r16(list) as i16 as i32 as u32;
-            if id == 0 {
-                break;
-            }
-            let state = if r.0[0] == c.m.r32(TOURNAMENT_MANAGER + RACE) { 2 } else { 1 };
-            let y = ((r.0[2] as i32) >> 16) as u32;
-            r.call_leaving(c, fetextrender::menu_text_positioned_entry, &[id, 170, y, state, 4], 0x8004_2754);
-            r.0[2] = r.0[2].wrapping_add(0x9_0000);
-            list += 2;
-            r.0[1] = list;
-            r.0[0] += 1;
-        }
-        // the headings
-        r.0[0] = 0;
-        r.0[4] = 4;
-        r.0[2] = 0x8F_0000;
-        r.0[1] = sp + 24;
-        while r.0[0] < 4 {
-            let y = ((r.0[2] as i32) >> 16) as u32;
-            let id = text(&mut c.m, r.0[1], 0);
-            r.0[1] += 2;
-            r.0[0] += 1;
-            r.call_leaving(c, fetextrender::menu_text_positioned_entry, &[id, 340, y, 1, 4], 0x8004_2794);
-            r.0[2] = r.0[2].wrapping_add(0x12_0000);
-        }
-        // the track's settings
-        r.0[2] = 2;
-        r.0[1] = 4;
-        let id = {
-            let k = c.m.r8(this + DIRECTION) as u32;
-            text(&mut c.m, DIRECTIONS, k)
-        };
-        r.call_leaving(c, fetextrender::menu_text_positioned_justify_entry, &[id, 480, 152, 1, 2, 4], 0x8004_27e0);
-        r.0[0] = SETTINGS;
-        for (field, y, ra) in [(MIRRORED, 170, 0x8004_2810), (TIME_OF_DAY, 188, 0x8004_2838), (WEATHER, 206, 0x8004_2860)] {
-            let k = c.m.r8(this + field) as u32;
-            let id = text(&mut c.m, SETTINGS, k);
-            r.call_leaving(c, fetextrender::menu_text_positioned_justify_entry, &[id, 480, y, 1, 2, 4], ra);
-        }
-        let country = (c.m.r8(track + 42) as u32) + COUNTRIES;
-        r.call_leaving(c, fetextrender::menu_text_positioned_justify_entry, &[country, 478, 33, 1, 0, 11], 0x8004_2884);
-        // the picture, the band, the wall
-        let table = c.m.r32(this);
-        c.m.w32(sp + 16, 0);
-        port(c, &r, 0x8002_5ce8, 0x8004_289c, &[this, 0, 33, table], fescreen::abi_draw_background_image);
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, 320, 30, 160, 10, 1], 0x8004_28c0);
-        r.call_leaving(c, SET_ABR_MODE, &[0], 0x8004_28c8);
-        let wall = this + WALL;
-        r.0[0] = wall;
-        port(c, &r, 0x8003_6bdc, 0x8004_28d4, &[wall], fevideowall::abi_update);
-        port(c, &r, 0x8003_6dac, 0x8004_28dc, &[wall], fevideowall::abi_draw);
-    })
+    draw_background(c, Screen(c.r[4]));
 }
 
 /// `tScreenTrackInfo::Initialize` (SCREENTRACKINFO.CPP, 0x80042900): the screen's files read;
 /// the wall of ten TVs set from the track's pictures and turning on.
-pub fn abi_initialize(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 48, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        port(c, &r, 0x8002_60cc, 0x8004_2918, &[this], fescreen::abi_initialize);
-        let wall = this + WALL;
-        r.0[1] = wall;
-        let table = c.m.r32(this + 40);
-        for (k, v) in [10, WALL_ORDER, 0].into_iter().enumerate() {
-            c.m.w32(sp + 16 + 4 * k as u32, v);
-        }
-        port(c, &r, 0x8003_6988, 0x8004_2948, &[wall, this + TVS, table, 0], fevideowall::abi_initialize);
-        port(c, &r, 0x8003_6a38, 0x8004_2950, &[wall], fevideowall::abi_update_images);
-        port(c, &r, 0x8003_70f0, 0x8004_2958, &[wall], fevideowall::abi_turn_on);
-    })
+pub fn initialize(c: &mut Cpu, this: Screen) {
+    fescreen::initialize(c, this);
+    let wall = this.0 + WALL;
+    let table: TextureShapeInfo = this.swap_shapes().shapes(&mut c.m);
+    call_addr(c, WALL_INITIALIZE, &[wall, this.0 + TVS, table.0, 0, WALL_TVS, WALL_ORDER, 0]);
+    call_addr(c, WALL_UPDATE_IMAGES, &[wall]);
+    call_addr(c, WALL_TURN_ON, &[wall]);
 }
 
-/// `tScreenTrackInfo::ProcessInput` (SCREENTRACKINFO.CPP, 0x8004296c): start turns the wall
-/// off; on the tournament's first race its entry fee is added to the money.
+pub fn abi_initialize(c: &mut Cpu) {
+    initialize(c, Screen(c.r[4]));
+}
+
+/// `tScreenTrackInfo::ProcessInput` (SCREENTRACKINFO.CPP, 0x8004296c): back turns the wall
+/// off; before the tournament's first race its entry fee is given back.
+pub fn process_input(c: &mut Cpu, this: Screen, key: u32) {
+    if c.m.r32(key) != KEY_BACK {
+        return;
+    }
+    call_addr(c, WALL_TURN_OFF_INSTANT, &[this.0 + WALL]);
+    let (m, t) = (&mut c.m, TOURNAMENT_MANAGER);
+    if m.r32(t + RACE) != 0 {
+        return;
+    }
+    let definition = m.r32(t + DEFINITION);
+    let tier = m.r32(t + MANAGER_TIER);
+    let first = m.r8(definition.wrapping_add(tier.wrapping_mul(12)) + 2) as u32;
+    let k = first.wrapping_add(m.r32(t + TOURNAMENT));
+    let fee = m.r32(definition.wrapping_add(k.wrapping_mul(84)) + ENTRY_FEE);
+    let money = m.r32(t + MONEY).wrapping_add(fee);
+    m.w32(t + MONEY, money);
+}
+
 pub fn abi_process_input(c: &mut Cpu) {
-    let (this, key) = (c.r[4], c.r[6]);
-    abi::frame(c, 24, |c, _| {
-        if c.m.r32(key) != KEY_BACK {
-            return;
-        }
-        port(c, &Saved::of(c), 0x8003_7074, 0x8004_298c, &[this + WALL], fevideowall::abi_turn_off_instant);
-        let m = &mut c.m;
-        let t = TOURNAMENT_MANAGER;
-        if m.r32(t + RACE) != 0 {
-            return;
-        }
-        let definition = m.r32(t + DEFINITION);
-        let tier = m.r32(t + MANAGER_TIER);
-        let first = m.r8(definition.wrapping_add(tier.wrapping_mul(12)) + 2) as u32;
-        let k = first.wrapping_add(m.r32(t + TOURNAMENT));
-        let fee = m.r32(definition.wrapping_add(k.wrapping_mul(84)) + 84);
-        let money = m.r32(t + MONEY).wrapping_add(fee);
-        m.w32(t + MONEY, money);
-    })
+    process_input(c, Screen(c.r[4]), c.r[6]);
 }
 
 /// `tScreenTrackInfo::~tScreenTrackInfo` (SCREENTRACKINFO.H, 0x80042a08): the screen's.
 pub fn abi_destructor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        port(c, &Saved::of(c), 0x8002_6098, 0x8004_2a18, &[this, flags], fescreen::abi_screen_destructor);
-    })
+    fescreen::screen_destructor(c, Screen(c.r[4]), c.r[5]);
 }
 
 #[cfg(test)]
