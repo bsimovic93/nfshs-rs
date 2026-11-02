@@ -2,14 +2,18 @@
 //! between them, highlighted or shaded, a title over it), the NFS4 rectangle (its four corner
 //! shapes, its edges shading in and its body) and a translucent framed one.
 //! `DrawShape_SubtractNFS4RectEdges` stays recompiled (the host captures its primitives).
+//!
+//! Written as FEMENU.CPP is (see there). The squares are the host's (called by address). The
+//! corner shapes are the help's (`HELP` in their flags), which read no options: the original
+//! passes its frame's leftovers as them, the rewrite none.
 
-use crate::abi::{self, Saved};
+use crate::call::{call, call_addr};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SET_ABR_MODE};
 use crate::globals::SHAPES;
+use crate::types::TextureShapeInfo;
 use ps1rt::{Cpu, Mem};
 
-/// `PSXDrawSquare`, `PSXDrawTransSquare`, `PSXDrawTransGouraudSquare` (the host captures their
-/// primitives: called by address).
+/// `PSXDrawSquare`, `PSXDrawTransSquare`, `PSXDrawTransGouraudSquare`.
 const DRAW_SQUARE: u32 = 0x8004_F12C;
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 const DRAW_TRANS_GOURAUD_SQUARE: u32 = 0x8004_F2B4;
@@ -20,141 +24,115 @@ const RECT_TOP: u32 = 0x0015_0800;
 const RECT_BOTTOM: u32 = 0x007B_2908;
 const RECT_SIDE_TOP: u32 = 0x0029_1000;
 const RECT_SIDE_BOTTOM: u32 = 0x004A_1900;
+/// The help's shapes: the rounded end (41), the rectangle's corners (42 top left, 43 top right,
+/// 44 bottom left, 45 bottom right).
+const ROUND_END: u32 = 41;
+const TOP_LEFT: u32 = 42;
+const TOP_RIGHT: u32 = 43;
+const BOTTOM_LEFT: u32 = 44;
+const BOTTOM_RIGHT: u32 = 45;
+/// The drawing's flags: semi-transparent, mirrored, the help's shapes.
+const SEMI: u32 = 1;
+const MIRROR: u32 = 4;
+const HELP: u32 = 8;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
 }
 
-fn lh(m: &mut Mem, at: u32) -> u32 {
-    m.r16(at) as i16 as i32 as u32
+/// A `RECT` (four `short`s), sign-extended.
+#[derive(Clone, Copy)]
+struct Rect {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
 }
 
-/// A shape's width and height (its +16, +18).
-fn size(m: &mut Mem, shape: u32) -> (u32, u32) {
-    (lh(m, shape + 16), lh(m, shape + 18))
+impl Rect {
+    fn read(m: &mut Mem, at: u32) -> Rect {
+        let mut f = |k: u32| m.r16(at + k) as i16 as i32 as u32;
+        Rect { x: f(0), y: f(2), w: f(4), h: f(6) }
+    }
 }
 
-/// `DrawShape_NFS4RoundRectangle` (DRAWSHP.CPP, 0x8004c490): text `title` (none for -1)
-/// centred over `rect`; the rounded rectangle's ends (shape 41 and its mirror), its top line and
-/// body between them, solid when `highlight` (else shaded).
+/// Help shape `k` and its size.
+fn help_shape(m: &mut Mem, k: u32) -> (u32, u32) {
+    let shape = TextureShapeInfo(m.r32(SHAPES)).at(k);
+    (shape.width(m) as i32 as u32, shape.height(m) as i32 as u32)
+}
+
+fn draw_shape(c: &mut Cpu, k: u32, flags: u32, x: u32, y: u32) {
+    call(c, DRAW_SHAPE_EXTENDED, &[k, flags, x, y, 0, 0, 0]);
+}
+
+fn square(c: &mut Cpu, color: u32, x: u32, y: u32, w: u32, h: u32) {
+    call_addr(c, DRAW_SQUARE, &[color, x, y, w, h]);
+}
+
+fn trans_square(c: &mut Cpu, color: u32, x: u32, y: u32, w: u32, h: u32, abr: u32) {
+    call_addr(c, DRAW_TRANS_SQUARE, &[color, x, y, w, h, abr]);
+}
+
+/// `DrawShape_NFS4RoundRectangle` (DRAWSHP.CPP, 0x8004c490): text `title` (none when
+/// negative) centred over `rect`; the rounded rectangle's ends (the end shape and its mirror),
+/// its top line and the body between them: solid when `highlight`, else translucent.
 pub fn round_rectangle(c: &mut Cpu, title: u32, rect: u32, highlight: u32) {
-    let corner = c.m.r32(SHAPES).wrapping_add(1312);
-    abi::frame(c, 80, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = rect;
-        r.0[0] = highlight;
-        r.0[3] = 0;
-        r.0[2] = corner;
-        if (title as i32) >= 0 {
-            let m = &mut c.m;
-            let half = ((m.r16(rect + 4) as i16) >> 1) as i32 as u32;
-            let x = sx((m.r16(rect) as u32).wrapping_add(half));
-            let y = sx((m.r16(rect + 2) as u32).wrapping_add(4));
-            r.call_leaving(c, crate::fetextrender::menu_text_positioned_justify_entry, &[sx(title), x, y, 2, 1, 3], 0x8004_c514);
-        }
-        let on = sx(highlight);
-        r.0[4] = on;
-        if on == 0 {
-            r.0[3] = 1;
-        }
-        let place = sp + 32;
-        r.0[0] = place;
-        let m = &mut c.m;
-        let (x, y) = (lh(m, rect), lh(m, rect + 2));
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[41, r.0[3] | 8, x, y, 0, 0, place], 0x8004_c548);
-        let m = &mut c.m;
-        let (x, w, y) = (lh(m, rect), lh(m, rect + 4), lh(m, rect + 2));
-        let (cw, ch) = size(m, corner);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[41, r.0[3] | 0xC, x.wrapping_add(w).wrapping_sub(cw), y, 0, 0, place], 0x8004_c578);
-        let m = &mut c.m;
-        let (x, y, w) = (lh(m, rect), lh(m, rect + 2), lh(m, rect + 4));
-        let between = w.wrapping_sub(cw << 1).wrapping_add(1);
-        let (left, top) = (x.wrapping_add(cw), y.wrapping_add(ch).wrapping_sub(1));
-        if on != 0 {
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[TOP_COLOR, left, top, between, 1], 0x8004_c5bc);
-            let m = &mut c.m;
-            let (x, y, w) = (lh(m, rect), lh(m, rect + 2), lh(m, rect + 4));
-            let (cw, ch) = size(m, corner);
-            r.call_ptr_leaving(c, DRAW_SQUARE, &[0, x.wrapping_add(cw), y, w.wrapping_sub(cw << 1).wrapping_add(1), ch.wrapping_sub(1)], 0x8004_c5f0);
-            return;
-        }
-        r.0[0] = 1;
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[TOP_COLOR, left, top, between, 1, 1], 0x8004_c63c);
-        let m = &mut c.m;
-        let (x, y, w) = (lh(m, rect), lh(m, rect + 2), lh(m, rect + 4));
-        let (cw, ch) = size(m, corner);
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(cw), y, w.wrapping_sub(cw << 1).wrapping_add(1), ch.wrapping_sub(1), 1], 0x8004_c674);
-        r.call_leaving(c, SET_ABR_MODE, &[0], 0x8004_c67c);
-    })
+    let r = Rect::read(&mut c.m, rect);
+    if (title as i32) >= 0 {
+        let half = ((c.m.r16(rect + 4) as i16) >> 1) as i32 as u32;
+        let x = sx((c.m.r16(rect) as u32).wrapping_add(half));
+        let y = sx((c.m.r16(rect + 2) as u32).wrapping_add(4));
+        call(c, crate::fetextrender::menu_text_positioned_justify_entry, &[sx(title), x, y, 2, 1, 3]);
+    }
+    let solid = sx(highlight) != 0;
+    let semi = if solid { 0 } else { SEMI };
+    let (end_w, end_h) = help_shape(&mut c.m, ROUND_END);
+    draw_shape(c, ROUND_END, semi | HELP, r.x, r.y);
+    draw_shape(c, ROUND_END, semi | HELP | MIRROR, r.x.wrapping_add(r.w).wrapping_sub(end_w), r.y);
+    let (left, between) = (r.x.wrapping_add(end_w), r.w.wrapping_sub(end_w << 1).wrapping_add(1));
+    let top = r.y.wrapping_add(end_h).wrapping_sub(1);
+    if solid {
+        square(c, TOP_COLOR, left, top, between, 1);
+        square(c, 0, left, r.y, between, end_h.wrapping_sub(1));
+    } else {
+        trans_square(c, TOP_COLOR, left, top, between, 1, 1);
+        trans_square(c, 0, left, r.y, between, end_h.wrapping_sub(1), 1);
+        call(c, SET_ABR_MODE, &[0]);
+    }
 }
 
 pub fn abi_round_rectangle(c: &mut Cpu) {
     round_rectangle(c, c.r[4], c.r[5], c.r[6]);
 }
 
-/// `DrawShape_NFS4Rectangle` (DRAWSHP.CPP, 0x8004c69c): `rect`'s four corner shapes (42..45),
-/// its top and bottom edges, its sides shading down, the dark between the corners, its body.
+/// `DrawShape_NFS4Rectangle` (DRAWSHP.CPP, 0x8004c69c): `rect`'s four corner shapes, its top
+/// and bottom edges, its sides shading down (2 wide), the dark between the side corners, its
+/// body; all translucent.
 pub fn rectangle(c: &mut Cpu, rect: u32) {
-    abi::frame(c, 96, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = rect;
-        let m = &mut c.m;
-        m.w32(sp + 48, RECT_TOP);
-        m.w32(sp + 56, RECT_SIDE_BOTTOM);
-        m.w32(sp + 44, RECT_BOTTOM);
-        m.w32(sp + 52, RECT_SIDE_TOP);
-        let shapes = m.r32(SHAPES);
-        let place = sp + 40;
-        let (tl, tr, bl, br) = (shapes + 1344, shapes + 1376, shapes + 1408, shapes + 1440);
-        r.0[..6].copy_from_slice(&[rect, place, br, tr, bl, tl]);
-        let g = |m: &mut Mem, k: u32| lh(m, rect + k);
-        let (x, y) = (g(m, 0), g(m, 2));
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[42, 9, x, y, 0, 0, place], 0x8004_c72c);
-        let m = &mut c.m;
-        let (x, w, tr_w, y) = (g(m, 0), g(m, 4), lh(m, tr + 16), g(m, 2));
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[43, 9, x.wrapping_add(w).wrapping_sub(tr_w), y, 0, 0, place], 0x8004_c75c);
-        let m = &mut c.m;
-        let (x, y, h, bl_h) = (g(m, 0), g(m, 2), g(m, 6), lh(m, bl + 18));
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[44, 9, x, y.wrapping_add(h).wrapping_sub(bl_h), 0, 0, place], 0x8004_c78c);
-        let m = &mut c.m;
-        let (x, w, y, h) = (g(m, 0), g(m, 4), g(m, 2), g(m, 6));
-        let (br_w, br_h) = size(m, br);
-        r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[45, 9, x.wrapping_add(w).wrapping_sub(br_w), y.wrapping_add(h).wrapping_sub(br_h), 0, 0, place], 0x8004_c7cc);
-        r.0[1] = 1;
-        let m = &mut c.m;
-        let (x, y, w) = (g(m, 0), g(m, 2), g(m, 4));
-        let (tl_w, tr_w, top) = (lh(m, tl + 16), lh(m, tr + 16), m.r32(sp + 48));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[top, x.wrapping_add(tl_w), y, w.wrapping_sub(tl_w).wrapping_sub(tr_w), 1, 1], 0x8004_c800);
-        let m = &mut c.m;
-        let (x, y, h, w) = (g(m, 0), g(m, 2), g(m, 6), g(m, 4));
-        let (bl_w, br_w, bottom) = (lh(m, bl + 16), lh(m, br + 16), m.r32(sp + 44));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[bottom, x.wrapping_add(bl_w), y.wrapping_add(h).wrapping_sub(1), w.wrapping_sub(bl_w).wrapping_sub(br_w), 1, 1], 0x8004_c83c);
-        let m = &mut c.m;
-        let (x, y, h) = (g(m, 0), g(m, 2), g(m, 6));
-        let (tl_h, bl_h, a, b) = (lh(m, tl + 18), lh(m, bl + 18), m.r32(sp + 52), m.r32(sp + 56));
-        r.call_ptr_leaving(c, DRAW_TRANS_GOURAUD_SQUARE, &[x, y.wrapping_add(tl_h), 2, h.wrapping_sub(tl_h).wrapping_sub(bl_h), 1, a, a, b, b], 0x8004_c880);
-        let m = &mut c.m;
-        let (x, w, y, h) = (g(m, 0), g(m, 4), g(m, 2), g(m, 6));
-        let (tr_h, br_h, a, b) = (lh(m, tr + 18), lh(m, br + 18), m.r32(sp + 52), m.r32(sp + 56));
-        let args = [x.wrapping_add(w).wrapping_sub(2), y.wrapping_add(tr_h), 2, h.wrapping_sub(tr_h).wrapping_sub(br_h), 1, a, a, b, b];
-        r.call_ptr_leaving(c, DRAW_TRANS_GOURAUD_SQUARE, &args, 0x8004_c8d0);
-        let m = &mut c.m;
-        let (x, y, h) = (g(m, 0), g(m, 2), g(m, 6));
-        let (tl_w, tl_h, bl_h) = (lh(m, tl + 16), lh(m, tl + 18), lh(m, bl + 18));
-        let args = [0, x.wrapping_add(2), y.wrapping_add(tl_h), tl_w.wrapping_sub(2), h.wrapping_sub(tl_h).wrapping_sub(bl_h), 1];
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &args, 0x8004_c90c);
-        let m = &mut c.m;
-        let (x, w, y, h) = (g(m, 0), g(m, 4), g(m, 2), g(m, 6));
-        let (tr_w, tr_h, br_h) = (lh(m, tr + 16), lh(m, tr + 18), lh(m, br + 18));
-        let args = [0, x.wrapping_add(w).wrapping_sub(2), y.wrapping_add(tr_h), 2u32.wrapping_sub(tr_w), h.wrapping_sub(tr_h).wrapping_sub(br_h), 1];
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &args, 0x8004_c954);
-        let m = &mut c.m;
-        let (x, y, w, h) = (g(m, 0), g(m, 2), g(m, 4), g(m, 6));
-        let (tl_w, tr_w) = (lh(m, tl + 16), lh(m, tr + 16));
-        let args = [0, x.wrapping_add(tl_w), y.wrapping_add(1), w.wrapping_sub(tl_w).wrapping_sub(tr_w), h.wrapping_sub(2), 1];
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &args, 0x8004_c990);
-        r.call_leaving(c, SET_ABR_MODE, &[0], 0x8004_c998);
-    })
+    let r = Rect::read(&mut c.m, rect);
+    let m = &mut c.m;
+    let (tl_w, tl_h) = help_shape(m, TOP_LEFT);
+    let (tr_w, tr_h) = help_shape(m, TOP_RIGHT);
+    let (bl_w, bl_h) = help_shape(m, BOTTOM_LEFT);
+    let (br_w, br_h) = help_shape(m, BOTTOM_RIGHT);
+    let (right, bottom) = (r.x.wrapping_add(r.w), r.y.wrapping_add(r.h));
+    draw_shape(c, TOP_LEFT, HELP | SEMI, r.x, r.y);
+    draw_shape(c, TOP_RIGHT, HELP | SEMI, right.wrapping_sub(tr_w), r.y);
+    draw_shape(c, BOTTOM_LEFT, HELP | SEMI, r.x, bottom.wrapping_sub(bl_h));
+    draw_shape(c, BOTTOM_RIGHT, HELP | SEMI, right.wrapping_sub(br_w), bottom.wrapping_sub(br_h));
+    trans_square(c, RECT_TOP, r.x.wrapping_add(tl_w), r.y, r.w.wrapping_sub(tl_w).wrapping_sub(tr_w), 1, 1);
+    trans_square(c, RECT_BOTTOM, r.x.wrapping_add(bl_w), bottom.wrapping_sub(1), r.w.wrapping_sub(bl_w).wrapping_sub(br_w), 1, 1);
+    let (a, b) = (RECT_SIDE_TOP, RECT_SIDE_BOTTOM);
+    let left_h = r.h.wrapping_sub(tl_h).wrapping_sub(bl_h);
+    let right_h = r.h.wrapping_sub(tr_h).wrapping_sub(br_h);
+    call_addr(c, DRAW_TRANS_GOURAUD_SQUARE, &[r.x, r.y.wrapping_add(tl_h), 2, left_h, 1, a, a, b, b]);
+    call_addr(c, DRAW_TRANS_GOURAUD_SQUARE, &[right.wrapping_sub(2), r.y.wrapping_add(tr_h), 2, right_h, 1, a, a, b, b]);
+    trans_square(c, 0, r.x.wrapping_add(2), r.y.wrapping_add(tl_h), tl_w.wrapping_sub(2), left_h, 1);
+    // (the right one's width as the original has it: 2 - the corner's)
+    trans_square(c, 0, right.wrapping_sub(2), r.y.wrapping_add(tr_h), 2u32.wrapping_sub(tr_w), right_h, 1);
+    trans_square(c, 0, r.x.wrapping_add(tl_w), r.y.wrapping_add(1), r.w.wrapping_sub(tl_w).wrapping_sub(tr_w), r.h.wrapping_sub(2), 1);
+    call(c, SET_ABR_MODE, &[0]);
 }
 
 pub fn abi_rectangle(c: &mut Cpu) {
@@ -164,30 +142,16 @@ pub fn abi_rectangle(c: &mut Cpu) {
 /// `DrawShape_NFS4TransRectangle` (DRAWSHP.CPP, 0x8004c9bc): `rect`'s frame (the sides 4 wide,
 /// the top and bottom 2 high, in blending `abr * 2`) and its inside (in `abr`).
 pub fn trans_rectangle(c: &mut Cpu, rect: u32, abr: u32) {
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        let edge = sx(abr << 1);
-        r.0[..3].copy_from_slice(&[rect, edge, abr]);
-        let g = |m: &mut Mem, k: u32| lh(m, rect + k);
-        let m = &mut c.m;
-        let (x, y, h) = (g(m, 0), g(m, 2), g(m, 6));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x, y, 4, h, edge], 0x8004_ca04);
-        let m = &mut c.m;
-        let (x, w, y, h) = (g(m, 0), g(m, 4), g(m, 2), g(m, 6));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(w).wrapping_sub(4), y, 4, h, edge], 0x8004_ca30);
-        r.0[3] = 2;
-        let m = &mut c.m;
-        let (x, y, w) = (g(m, 0), g(m, 2), g(m, 4));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y, w.wrapping_sub(8), 2, edge], 0x8004_ca58);
-        let m = &mut c.m;
-        let (x, y, h, w) = (g(m, 0), g(m, 2), g(m, 6), g(m, 4));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y.wrapping_add(h).wrapping_sub(2), w.wrapping_sub(8), 2, edge], 0x8004_ca88);
-        r.0[2] = sx(abr);
-        let m = &mut c.m;
-        let (x, y, w, h) = (g(m, 0), g(m, 2), g(m, 4), g(m, 6));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y.wrapping_add(2), w.wrapping_sub(8), h.wrapping_sub(4), sx(abr)], 0x8004_cac0);
-        r.call_leaving(c, SET_ABR_MODE, &[0], 0x8004_cac8);
-    })
+    let r = Rect::read(&mut c.m, rect);
+    let edge = sx(abr << 1);
+    let (right, bottom) = (r.x.wrapping_add(r.w), r.y.wrapping_add(r.h));
+    let inner_w = r.w.wrapping_sub(8);
+    trans_square(c, 0, r.x, r.y, 4, r.h, edge);
+    trans_square(c, 0, right.wrapping_sub(4), r.y, 4, r.h, edge);
+    trans_square(c, 0, r.x.wrapping_add(4), r.y, inner_w, 2, edge);
+    trans_square(c, 0, r.x.wrapping_add(4), bottom.wrapping_sub(2), inner_w, 2, edge);
+    trans_square(c, 0, r.x.wrapping_add(4), r.y.wrapping_add(2), inner_w, r.h.wrapping_sub(4), sx(abr));
+    call(c, SET_ABR_MODE, &[0]);
 }
 
 pub fn abi_trans_rectangle(c: &mut Cpu) {
