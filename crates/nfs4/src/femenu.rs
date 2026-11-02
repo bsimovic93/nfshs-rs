@@ -52,37 +52,42 @@ pub(crate) const DRAW: u32 = 32;
 pub(crate) const DRAW_AT: u32 = 48;
 pub(crate) const UPDATE_TRANSITION: u32 = 80;
 
-/// The input keys a menu reacts to (`tInputKeyType`).
+/// The input keys a menu reacts to (`tInputKeyType`): back is Triangle, start is Start.
 pub(crate) const KEY_NONE: u32 = 1;
 pub(crate) const KEY_ACCEPT: u32 = 2;
 pub(crate) const KEY_HELP: u32 = 4;
 pub(crate) const KEY_OPTIONS: u32 = 8;
-pub(crate) const KEY_START: u32 = 16;
+pub(crate) const KEY_BACK: u32 = 16;
 pub(crate) const KEY_UP: u32 = 512;
 pub(crate) const KEY_DOWN: u32 = 1024;
 pub(crate) const KEY_LEFT: u32 = 2048;
 pub(crate) const KEY_RIGHT: u32 = 4096;
-pub(crate) const KEY_BACK: u32 = 8192;
-/// A menu command's types (`tMenuCommandType`): go to a menu, go to it as an accept, the
-/// start, back, back out.
+pub(crate) const KEY_START: u32 = 8192;
+/// A menu command's types (`tMenuCommandType`, FEAPP's `MainLoop` runs them): go to a menu
+/// (pushed on the back stack); go to it with the stack emptied; go to it with the second
+/// player's menu (its child) up beside it; back; race; race once both players are ready; race
+/// (a second command doing the same); quit the front end.
 pub(crate) const COMMAND_GO_TO: u32 = 1;
-const COMMAND_ACCEPT: u32 = 2;
-pub(crate) const COMMAND_START: u32 = 4;
-pub(crate) const COMMAND_BACK: u32 = 5;
-pub(crate) const COMMAND_EXIT: u32 = 6;
+pub(crate) const COMMAND_GO_TO_RESET: u32 = 2;
+pub(crate) const COMMAND_GO_TO_WITH_SECOND: u32 = 3;
+pub(crate) const COMMAND_BACK: u32 = 4;
+pub(crate) const COMMAND_RACE: u32 = 5;
+pub(crate) const COMMAND_RACE_WHEN_BOTH_READY: u32 = 6;
+pub(crate) const COMMAND_RACE_TOO: u32 = 7;
+pub(crate) const COMMAND_QUIT: u32 = 8;
 
-/// A menu item's flags: disabled; a button whose menu is gone to as an accept (else a go-to);
+/// A menu item's flags: disabled; a button whose menu is gone to with the back stack emptied;
 /// a slider; a left-right choice.
 pub(crate) const ITEM_DISABLED: u32 = 1;
-const ITEM_GO_AS_ACCEPT: u32 = 0x40;
+const ITEM_GO_RESETS: u32 = 0x40;
 const ITEM_SLIDER: u32 = 0x80;
 const ITEM_LEFT_RIGHT: u32 = 0x400;
-/// A menu's flags: back goes back, or backs out of the menus; back is taken as accept; accept
-/// as back.
-const MENU_BACK: u32 = 1;
-const MENU_EXIT: u32 = 2;
-const MENU_BACK_ACCEPTS: u32 = 4;
-const MENU_ACCEPT_BACKS: u32 = 0x1_0000;
+/// A menu's flags: start races, or races once both players are ready; start is taken as accept;
+/// accept as start.
+const MENU_START_RACES: u32 = 1;
+const MENU_START_RACES_WHEN_BOTH_READY: u32 = 2;
+const MENU_START_ACCEPTS: u32 = 4;
+const MENU_ACCEPT_STARTS: u32 = 0x1_0000;
 
 /// The front end's sounds: up, down, left, right (`AudioCmn_PlayFESFX`); the slider's tick
 /// (`AudioCmn_PlayFESFXVol`, hooked by the host: called by address).
@@ -815,8 +820,8 @@ pub fn abi_go_to_menu_button_dtor(c: &mut Cpu) {
 }
 
 /// `tMenuItemGoToMenuButton::ProcessInput` (FEMENU.CPP, 0x800253c4): accept on an enabled
-/// button goes to its menu (as an accept or a go-to, by its flags) and calls its function; the
-/// key is used up.
+/// button goes to its menu (with the back stack emptied or not, by its flags) and calls its
+/// function; the key is used up.
 pub fn go_to_menu_button_process_input(c: &mut Cpu, this: MenuItemGoToMenuButton, key: u32, command: MenuCommand) {
     let m = &mut c.m;
     let flags = this.flags(m);
@@ -824,7 +829,7 @@ pub fn go_to_menu_button_process_input(c: &mut Cpu, this: MenuItemGoToMenuButton
         return;
     }
     if this.new_menu(m).0 != 0 {
-        let kind = if flags & ITEM_GO_AS_ACCEPT != 0 { COMMAND_ACCEPT } else { COMMAND_GO_TO };
+        let kind = if flags & ITEM_GO_RESETS != 0 { COMMAND_GO_TO_RESET } else { COMMAND_GO_TO };
         command.set_type_(m, kind as i32);
         let menu = this.new_menu(m);
         command.set_next_menu(m, menu);
@@ -895,7 +900,7 @@ pub fn abi_menu_constructor(c: &mut Cpu) {
 /// `tMenu::tMenu` (FEMENU.CPP, 0x8002548c): a menu of `screen`, its flags, the menus after it
 /// and for options, the function for back, its title.
 #[allow(clippy::too_many_arguments)]
-pub fn menu(m: &mut Mem, this: Menu, flags: u32, screen: u32, next: u32, options: u32, on_back: u32, title: u32) -> u32 {
+pub fn menu(m: &mut Mem, this: Menu, flags: u32, screen: u32, next: u32, options: u32, on_start: u32, title: u32) -> u32 {
     this.set_vtable(m, MENU_VT);
     this.set_flags(m, flags);
     this.set_current_item(m, 0);
@@ -904,14 +909,14 @@ pub fn menu(m: &mut Mem, this: Menu, flags: u32, screen: u32, next: u32, options
     this.set_never_any_enabled(m, 0);
     this.set_child_menu(m, Menu(0));
     this.set_options_menu(m, Menu(options));
-    this.set_on_button_press(m, on_back);
+    this.set_on_button_press(m, on_start);
     this.set_title(m, title as i16);
     this.0
 }
 
 pub fn abi_menu(c: &mut Cpu) {
-    let (options, on_back, title) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
-    c.r[2] = menu(&mut c.m, Menu(c.r[4]), c.r[5], c.r[6], c.r[7], options, on_back, title);
+    let (options, on_start, title) = (crate::abi::arg(c, 4), crate::abi::arg(c, 5), crate::abi::arg(c, 6));
+    c.r[2] = menu(&mut c.m, Menu(c.r[4]), c.r[5], c.r[6], c.r[7], options, on_start, title);
 }
 
 /// `tMenu::~tMenu` (FEMENU.CPP, 0x800254d0).
@@ -978,15 +983,15 @@ fn move_down(m: &mut Mem, this: Menu) {
 
 /// `tMenu::ProcessInput` (FEMENU.CPP, 0x80025598): the current item's input first; then up and
 /// down move the current item (with a sound when it moves), accept goes to the menu after,
-/// back calls the menu's function (or goes back, or backs out), options goes to the options
-/// menu, help shows the help, start starts. A key the menu takes is used up.
+/// back goes back, start calls the menu's function (or races, or races once both players are
+/// ready), options goes to the options menu, help shows the help. A key the menu takes is used up.
 pub fn process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: MenuCommand) {
     let m = &mut c.m;
-    if this.flags(m) & MENU_BACK_ACCEPTS != 0 && m.r32(key) == KEY_BACK {
+    if this.flags(m) & MENU_START_ACCEPTS != 0 && m.r32(key) == KEY_START {
         m.w32(key, KEY_ACCEPT);
     }
-    if this.flags(m) & MENU_ACCEPT_BACKS != 0 && m.r32(key) == KEY_ACCEPT {
-        m.w32(key, KEY_BACK);
+    if this.flags(m) & MENU_ACCEPT_STARTS != 0 && m.r32(key) == KEY_ACCEPT {
+        m.w32(key, KEY_START);
     }
     let k = current(m, this);
     let it = item(m, this, k);
@@ -1006,7 +1011,7 @@ pub fn process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: Me
         m.w32(key, KEY_NONE);
     };
     match m.r32(key) {
-        KEY_START => take(m, COMMAND_START),
+        KEY_BACK => take(m, COMMAND_BACK),
         KEY_UP | KEY_DOWN => {
             let (was, up) = (current(m, this), m.r32(key) == KEY_UP);
             if up { move_up(m, this) } else { move_down(m, this) }
@@ -1016,15 +1021,15 @@ pub fn process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: Me
             c.m.w32(key, KEY_NONE);
         }
         KEY_ACCEPT if this.next_menu(m).0 != 0 => go_to(m, Menu::next_menu),
-        KEY_BACK => {
-            let on_back = this.on_button_press(m);
-            if on_back != 0 {
-                call_addr(c, on_back, &[command.0]);
+        KEY_START => {
+            let on_start = this.on_button_press(m);
+            if on_start != 0 {
+                call_addr(c, on_start, &[command.0]);
                 c.m.w32(key, KEY_NONE);
-            } else if this.flags(m) & MENU_BACK != 0 {
-                take(m, COMMAND_BACK);
-            } else if this.flags(m) & MENU_EXIT != 0 {
-                take(m, COMMAND_EXIT);
+            } else if this.flags(m) & MENU_START_RACES != 0 {
+                take(m, COMMAND_RACE);
+            } else if this.flags(m) & MENU_START_RACES_WHEN_BOTH_READY != 0 {
+                take(m, COMMAND_RACE_WHEN_BOTH_READY);
             }
         }
         KEY_HELP => {
@@ -1253,7 +1258,7 @@ pub(crate) mod tests {
         let first = m.r32(MENU2 + 16);
         let flags = m.r32(first);
         m.w32(first, flags & !ITEM_DISABLED);
-        let keys = [KEY_NONE, KEY_ACCEPT, KEY_HELP, KEY_OPTIONS, KEY_START, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_BACK, 32];
+        let keys = [KEY_NONE, KEY_ACCEPT, KEY_HELP, KEY_OPTIONS, KEY_BACK, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_START, 32];
         m.w32(KEY, keys[pick(rng, keys.len() as u32) as usize]);
         m.w32(COMMAND, 0);
         m.w32(COMMAND + 4, 0);

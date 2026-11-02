@@ -122,7 +122,8 @@ sounds, now found through `tDialog::Display`/`Hide`'s hooks).
   (pictures; cards that differ must load the same) and `tools/hookaudit.py`. The front end's
   stack tests are gone: they checked the fidelity this drops.
 
-Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP, FETEXTRENDER.CPP, FEDIALOG.CPP.
+Rewritten so far: FEMENU.CPP, FEMENUEXTENDED.CPP, FEMENUOPTIONS.CPP, FETEXTRENDER.CPP, FEDIALOG.CPP,
+FEAPP.CPP.
 
 The fuzz tests' RAM comparison leaves out the whole main stack (to 0x80200000, as
 `decomp-check`): the original homes its arguments in its caller's frame, which the rewritten
@@ -133,6 +134,17 @@ Where an old port passed a virtual call only its object, the original relied on 
 arguments still being in a1..a3 (`tInsideBoxMenu::ProcessInput` passes its first item the
 player, key and command that way). The scramble experiment kept registers a port set or
 didn't touch, so it didn't test those: a rewrite passes them as arguments.
+
+Two of the game's values hang on the stack's layout, and so differ now: the pink slips' second-card
+message is printed on `MainLoop`'s stack and its address kept in the no-input dialog (`gFEApp + 864`),
+and `RunPostGame` reads the record lap's car (`StatChk_IsRecordLapTime`'s `*car`, written only when a
+car is checked) from whatever its stack holds otherwise; the rewrite starts it at 0.
+
+The menus' key and command names follow the pad and `MainLoop`'s jump table (0x80010070): key 16 is
+back (Triangle) and 8192 start (Start); commands 1 to 8 are go to, go to with the back stack emptied,
+go to with the second player's menu, back, race, race when both players are ready, race, quit.
+`tMenu`'s vtable slot 56 is `TransitionIsFinished` and 64 `IsSubMenu` (the old FEAPP port had them as
+"in transition" and "transition is finished").
 
 ## Checking
 

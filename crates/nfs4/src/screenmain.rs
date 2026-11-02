@@ -9,7 +9,7 @@
 //! host's (called by address).
 
 use crate::abi::{self, Saved};
-use crate::femenu::KEY_START;
+use crate::femenu::KEY_BACK;
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SET_ABR_MODE, SPRINTF, TEXT_WORD};
 use crate::globals::{FE_APP, FRONT_END, GAME_TICKS, PATHS, SONGS_SCREEN};
 use crate::{fecredits, fefades, fescreen, fetextrender, fetv};
@@ -387,7 +387,7 @@ pub fn abi_process_input(c: &mut Cpu) {
     abi::frame(c, 24, |c, _| {
         let mut r = Saved::of(c);
         r.0[0] = 0x8005_0000;
-        if c.m.r32(key) != KEY_START {
+        if c.m.r32(key) != KEY_BACK {
             return;
         }
         let app = c.m.r32(FE_APP);
@@ -1085,7 +1085,7 @@ pub(crate) mod tests {
             ("InitDynamicImages", 0x8003_7624, nfs4rc::f_80037624, |_, _| vec![SCREEN]),
             ("tScreenMain::ProcessInput", 0x8003_7990, nfs4rc::f_80037990, |c, r| {
                 if pick(r, 2) == 0 {
-                    c.m.w32(KEY, KEY_START);
+                    c.m.w32(KEY, KEY_BACK);
                 }
                 vec![SCREEN, player(r), KEY, COMMAND]
             }),

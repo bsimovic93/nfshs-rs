@@ -1144,7 +1144,7 @@ pub fn abi_menu_options_transition_is_finished(c: &mut Cpu) {
 /// `tMenuNFS4`'s.
 pub fn menu_options_process_input(c: &mut Cpu, this: u32, player: u32, key: u32, command: u32) {
     if c.m.r32(key) == femenu::KEY_OPTIONS {
-        c.m.w32(key, femenu::KEY_START);
+        c.m.w32(key, femenu::KEY_BACK);
     }
     menu_nfs4_process_input(c, this, player, key, command);
 }

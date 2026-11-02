@@ -7,7 +7,7 @@
 //! The squares are the host's (called by address).
 
 use crate::abi::{self, Saved};
-use crate::femenu::KEY_START;
+use crate::femenu::KEY_BACK;
 use crate::femenuextended::{SET_ABR_MODE, SPRINTF};
 use crate::globals::{FRONT_END, TOURNAMENT_MANAGER, TRACK_MANAGER};
 use crate::{fescreen, fetextrender, fetourn, fetracks, fevideowall};
@@ -200,7 +200,7 @@ pub fn abi_initialize(c: &mut Cpu) {
 pub fn abi_process_input(c: &mut Cpu) {
     let (this, key) = (c.r[4], c.r[6]);
     abi::frame(c, 24, |c, _| {
-        if c.m.r32(key) != KEY_START {
+        if c.m.r32(key) != KEY_BACK {
             return;
         }
         port(c, &Saved::of(c), 0x8003_7074, 0x8004_298c, &[this + WALL], fevideowall::abi_turn_off_instant);
@@ -302,7 +302,7 @@ mod tests {
             ("tScreenTrackInfo::Initialize", 0x8004_2900, nfs4rc::f_80042900, |_, _| vec![SCREEN]),
             ("tScreenTrackInfo::ProcessInput", 0x8004_296c, nfs4rc::f_8004296c, |c, r| {
                 if pick(r, 2) == 0 {
-                    c.m.w32(KEY, KEY_START);
+                    c.m.w32(KEY, KEY_BACK);
                 }
                 vec![SCREEN, player(r), KEY, COMMAND]
             }),

@@ -12,7 +12,7 @@
 //! `CalculateDimensions` and `Draw` are virtual. Written as FEMENU.CPP is (see there).
 
 use crate::call::{call, call_addr, call_virtual, with_buffer};
-use crate::femenu::{ITEM_DISABLED, KEY_ACCEPT, KEY_BACK, KEY_HELP, KEY_LEFT, KEY_NONE, KEY_RIGHT, KEY_START, PLAY_FE_SFX, PROCESS_INPUT};
+use crate::femenu::{ITEM_DISABLED, KEY_ACCEPT, KEY_START, KEY_HELP, KEY_LEFT, KEY_NONE, KEY_RIGHT, KEY_BACK, PLAY_FE_SFX, PROCESS_INPUT};
 use crate::femenuextended::{DRAW_TRANS_SQUARE, MENU_VPTR, SET_ABR_MODE, STRLEN, TEXT_PIXELS, TEXT_WORD};
 use crate::fetextrender;
 use crate::globals::{FE_APP, GAME_TICKS, PAD_INFO, SCREEN_WIDTH, SHAPES, TEXT_COLORS, TEXT_STYLES};
@@ -94,7 +94,7 @@ const APP_NO_INPUT: u32 = 456;
 /// A menu's flags the help reads: back goes to the parent; start goes on; its items' kinds.
 const MENU_BACK_PARENT: u32 = 0x800;
 const MENU_START_CONTINUES: u32 = 0x3_0000;
-const MENU_BACK_ACCEPTS: u32 = 4;
+const MENU_START_ACCEPTS: u32 = 4;
 const ITEM_LEFT_RIGHT: u32 = 0x400;
 /// The front end's sounds: a dialog opening, closing; left, right, accept.
 const SOUND_OPEN: u32 = 15;
@@ -352,7 +352,7 @@ pub fn calculate_dimensions_help(c: &mut Cpu, this: DialogHelp) {
         let flags = menu.flags(m);
         if flags & MENU_BACK_PARENT != 0 {
             line(c, (HELP_BACK, HELP_BACK_BUTTON));
-        } else if menu.next_menu(m).0 != 0 || flags & ITEM_LEFT_RIGHT != 0 || menu.on_button_press(m) != 0 || menu.flags(m) & MENU_BACK_ACCEPTS != 0 {
+        } else if menu.next_menu(m).0 != 0 || flags & ITEM_LEFT_RIGHT != 0 || menu.on_button_press(m) != 0 || menu.flags(m) & MENU_START_ACCEPTS != 0 {
             line(c, (HELP_SELECT_OR_PAGE, HELP_BACK_BUTTON));
         }
     }
@@ -601,7 +601,7 @@ pub fn abi_process_input_back_up_only(c: &mut Cpu) {
         return;
     }
     match c.m.r32(key) {
-        KEY_START => {
+        KEY_BACK => {
             call_addr(c, HIDE, &[this.0]);
         }
         KEY_HELP => {}
@@ -771,7 +771,7 @@ pub fn process_input_yes_no(c: &mut Cpu, this: DialogInteractive, player: u32, k
             call(c, PLAY_FE_SFX, &[6]);
             this.set_return_value(&mut c.m, 0);
         }
-        KEY_ACCEPT | KEY_BACK => {
+        KEY_ACCEPT | KEY_START => {
             call(c, PLAY_FE_SFX, &[0]);
             this.set_ready_to_return_value(&mut c.m, 1);
             call_addr(c, HIDE, &[this.0]);
@@ -812,7 +812,7 @@ pub fn abi_process_input_yes_no_mem(c: &mut Cpu) {
 /// yes-or-no's.
 pub fn abi_process_input_yes_no_tri(c: &mut Cpu) {
     let (this, player, key) = (DialogInteractive(c.r[4]), c.r[5], c.r[6]);
-    if c.m.r32(key) == KEY_START {
+    if c.m.r32(key) == KEY_BACK {
         cancel(&mut c.m, this);
     } else {
         process_input_yes_no(c, this, player, key);
@@ -1070,7 +1070,7 @@ mod tests {
             let d = if k < n { dialog(pick(rng, VTS.len() as u32)) } else { 0 };
             m.w32(DIALOGS + 4 * k, d);
         }
-        let keys = [0, KEY_NONE, KEY_ACCEPT, KEY_HELP, KEY_OPTIONS, KEY_START, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_BACK];
+        let keys = [0, KEY_NONE, KEY_ACCEPT, KEY_HELP, KEY_OPTIONS, KEY_BACK, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_START];
         m.w32(KEY, keys[pick(rng, keys.len() as u32) as usize]);
     }
 

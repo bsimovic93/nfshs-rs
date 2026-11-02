@@ -11,7 +11,7 @@
 //! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`.
 
 use crate::call::{call, call_addr, call_virtual, with_buffer};
-use crate::femenu::{self, ITEM_DISABLED, ITEM_VPTR, KEY_DOWN, KEY_HELP, KEY_NONE, KEY_START, KEY_UP};
+use crate::femenu::{self, ITEM_DISABLED, ITEM_VPTR, KEY_DOWN, KEY_HELP, KEY_NONE, KEY_BACK, KEY_UP};
 use crate::femenuextended::{
     self, CALC_ON_OFF_FADE, CALC_TEXT_FADE_SEL_TO_HI, DRAW_SHAPE_EXTENDED, DRAW_SQUARE, GET_DRAWENV, ITEM_DRAW_AT, ITEM_TRANSITION_IS_FINISHED, ITEM_TRANSITION_OFF, ITEM_TRANSITION_ON,
     ITEM_UPDATE_TRANSITION, MENU_TRANSITION_IS_FINISHED, MENU_VPTR, SET_DRAW_AREA, SPRINTF, STRLEN, TEXT_WORD,
@@ -354,10 +354,10 @@ pub fn abi_options_menu(c: &mut Cpu) {
     let this = OptionsMenu(c.r[4]);
     let (flags, screen, next) = (c.r[5], c.r[6], c.r[7]);
     let arg = |c: &mut Cpu, n| crate::abi::arg(c, n);
-    let (options, on_back, title) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)));
+    let (options, on_start, title) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)));
     let (first_frame, frames, first, rest) = (arg(c, 7), arg(c, 8), arg(c, 9), stack_arg(c, 10));
     let menu = this.base();
-    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_back, title);
+    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_start, title);
     let m = &mut c.m;
     this.set_vtable(m, OPTIONS_MENU_VT);
     femenu::menu_constructor(m, menu, first, rest);
@@ -581,7 +581,7 @@ pub fn options_menu_process_input(c: &mut Cpu, this: Menu, player: u32, key: u32
     if femenu::get_number_enabled_items(m, this) & 0xFFFF == 0 {
         this.set_current_item(m, 0);
         let k = m.r32(key);
-        if k != KEY_START && k != KEY_HELP {
+        if k != KEY_BACK && k != KEY_HELP {
             m.w32(key, KEY_NONE);
         }
     }
@@ -601,9 +601,9 @@ pub fn abi_inside_box_menu(c: &mut Cpu) {
     let this = InsideBoxMenu(c.r[4]);
     let (flags, screen, next) = (c.r[5], c.r[6], c.r[7]);
     let arg = |c: &mut Cpu, n| crate::abi::arg(c, n);
-    let (options, on_back, title, first, rest) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)), arg(c, 7), stack_arg(c, 8));
+    let (options, on_start, title, first, rest) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)), arg(c, 7), stack_arg(c, 8));
     let menu = this.base();
-    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_back, title);
+    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_start, title);
     let m = &mut c.m;
     this.set_vtable(m, INSIDE_BOX_MENU_VT);
     femenu::menu_constructor(m, menu, first, rest);
@@ -1138,7 +1138,7 @@ pub fn sliding_activated_process_input(c: &mut Cpu, this: MenuItemSlidingActivat
         let list = call(c, LOAD_SONG_LIST, &[SONG_LIST_FILE, 0]);
         let state = c.m.r32(MUSIC_STATE);
         c.m.w32(state + 120, list);
-    } else if k == KEY_START && this.active(&mut c.m) != 0 {
+    } else if k == KEY_BACK && this.active(&mut c.m) != 0 {
         call(c, femenu::PLAY_FE_SFX, &[SOUND_BACK]);
         this.set_active(&mut c.m, 0);
         c.m.w32(key, KEY_NONE);
@@ -1453,9 +1453,9 @@ pub fn abi_song_menu(c: &mut Cpu) {
     let this = InsideBoxSongMenu(c.r[4]);
     let (flags, screen, next) = (c.r[5], c.r[6], c.r[7]);
     let arg = |c: &mut Cpu, n| crate::abi::arg(c, n);
-    let (options, on_back, title, first, rest) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)), arg(c, 7), stack_arg(c, 8));
+    let (options, on_start, title, first, rest) = (arg(c, 4), arg(c, 5), sx(arg(c, 6)), arg(c, 7), stack_arg(c, 8));
     let menu = Menu(this.0);
-    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_back, title);
+    femenu::menu(&mut c.m, menu, flags, screen, next, options, on_start, title);
     let m = &mut c.m;
     this.set_vtable(m, SONG_MENU_VT);
     for k in 0..5 {
@@ -2023,8 +2023,8 @@ pub fn abi_check_for_cheats(c: &mut Cpu) {
     c.r[2] = check_for_cheats(c, c.r[4]);
 }
 
-/// The menu flag that ends the name with start (else back).
-const MENU_NAME_ENDS_WITH_START: u32 = 0x100;
+/// The menu flag that ends the name with back (else start).
+const MENU_NAME_ENDS_WITH_BACK: u32 = 0x100;
 /// The user name's sounds: a letter typed or deleted, refused or done.
 const SOUND_LETTER: u32 = 21;
 const SOUND_REFUSED: u32 = 1;
@@ -2102,7 +2102,7 @@ pub fn user_name_process_input(c: &mut Cpu, this: UserNameMenuItem, key: u32) {
                     } else {
                         let m = &mut c.m;
                         let menu = FEApplication(m.r32(FE_APP)).current_menu(m, 0);
-                        let k = if menu.flags(m) & MENU_NAME_ENDS_WITH_START != 0 { KEY_START } else { femenu::KEY_BACK };
+                        let k = if menu.flags(m) & MENU_NAME_ENDS_WITH_BACK != 0 { KEY_BACK } else { femenu::KEY_START };
                         m.w32(key, k);
                         call(c, femenu::PLAY_FE_SFX, &[SOUND_REFUSED]);
                     }
@@ -2905,7 +2905,7 @@ mod tests {
                 // (not the keys that switch the music: its library waits on the sound hardware)
                 let active = c.m.r32(sliding_of(1) + 68) != 0;
                 let k = c.m.r32(KEY);
-                if (k == femenu::KEY_ACCEPT && !active) || (k == femenu::KEY_START && active) {
+                if (k == femenu::KEY_ACCEPT && !active) || (k == femenu::KEY_BACK && active) {
                     c.m.w32(KEY, femenu::KEY_UP);
                 }
                 vec![sliding_of(1), player(r), KEY, COMMAND]

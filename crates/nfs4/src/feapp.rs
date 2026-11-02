@@ -1,1343 +1,1298 @@
-//! FEAPP.CPP: the front-end application (`tFEApplication`, `gFEApp`): its four dialogs, each
-//! player's menu and screen (the ones being left and the next), the menus' stack to go back
-//! through, the music each menu plays, the help's icons at the bottom, a frame drawn (each
-//! player's half: menus' and screens' transitions, their drawing, the dialogs), and the main
-//! loop that runs the front end until a race starts.
+//! FEAPP.CPP: the front-end application (`tFEApplication`, `gFEApp`). It holds:
+//! - its four dialogs (a message, the help, a timed message, one taking no input);
+//! - each player's menu and screen, the ones being gone to, and the parent menu a sub-menu is
+//!   drawn over;
+//! - each player's stack of menus to go back through.
 //!
-//! Menus and screens are called through their vtables (a menu's vptr at +104, a screen's at
-//! +96), with the registers the original has at its `jalr`.
+//! It also chooses the music each menu plays and draws the help's icons at the bottom. A frame
+//! is drawn one half per player: the menus' and screens' transitions, then their drawing, and
+//! the dialogs. The main loop runs the front end until a race starts or the game quits.
+//!
+//! Written as FEMENU.CPP is (see there): typed views, calls through `crate::call`. The player
+//! being run or drawn (`fPlayer`) is read again after each call, as the original does: menus'
+//! code reads it, and may change it.
 
-use crate::abi::{self, Saved};
-use crate::femenu::{PLAY_FE_SFX, method};
+use crate::call::{call, call_addr, call_virtual, with_buffer};
+use crate::femenu::{
+    COMMAND_BACK, COMMAND_GO_TO, COMMAND_GO_TO_RESET, COMMAND_GO_TO_WITH_SECOND, COMMAND_QUIT, COMMAND_RACE, COMMAND_RACE_TOO, COMMAND_RACE_WHEN_BOTH_READY,
+    KEY_DOWN, KEY_HELP, KEY_NONE, KEY_UP, PLAY_FE_SFX,
+};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, GET_DRAWENV, SET_DRAW_AREA, SPRINTF, STRLEN, TEXT_PIXELS, TEXT_WORD, add_prim};
 use crate::fetextrender;
 use crate::globals::{FE_APP, FLIP, FRONT_END, GAME_TICKS, PAD_INFO, PLAYER1_VIEW, SCREEN_HEIGHT, SHAPES, SONGS_SCREEN};
+use crate::types::{CarInfo, DRAWENV, DialogBase, DialogMessageString, FEApplication, Menu, MenuCommand, MenuItem, RECT, Screen};
 use ps1rt::{Cpu, Mem};
 
-// The application: +0 the music's menu flags (0xf000 of the first player's menu's), +4 each
-// player's menu, +12 each one's screen, +20 the menu each goes to next, +28 the screen, +36 the
-// menu being left, +44 a message dialog, +196 each player's menus gone through (16 each), +324
-// how many, +332 each one's last key, +340 the half drawn's top, +344 the help dialog, +556 the
-// player being run or drawn, +557 the player whose key came last, +560 each one's menu to be
-// drawn over the one left, +568 the timed message dialog, +720 the message without input.
-const MUSIC_FLAGS: u32 = 0;
-const MENUS: u32 = 4;
-const SCREENS: u32 = 12;
-const LEAVING: u32 = 36;
-const MESSAGE: u32 = 44;
-const HALF_TOP: u32 = 340;
-const HELP: u32 = 344;
-const PLAYER: u32 = 556;
-const OVERLAID: u32 = 560;
-const TIMED_MESSAGE: u32 = 568;
-const NO_INPUT_MESSAGE: u32 = 720;
-
-/// A menu's vptr and its virtual calls used here (`TransitionOff` at 40, `IsTransitionOn` 56,
-/// `TransitionIsFinished` 64, `Draw` 72, `UpdateTransition` 80); a screen's vptr, its `Cleanup`.
+/// A menu's vtable pointer and its virtual functions (their vtable entries' offsets).
 const MENU_VPTR: u32 = 104;
+const MENU_INITIALIZE: u32 = 16;
+const MENU_PROCESS_INPUT: u32 = 24;
+const MENU_DEBOUNCE_KEYS: u32 = 32;
 const MENU_TRANSITION_OFF: u32 = 40;
-const MENU_IN_TRANSITION: u32 = 56;
-const MENU_TRANSITION_IS_FINISHED: u32 = 64;
+const MENU_TRANSITION_ON: u32 = 48;
+const MENU_TRANSITION_IS_FINISHED: u32 = 56;
+const MENU_IS_SUB_MENU: u32 = 64;
 const MENU_DRAW: u32 = 72;
 const MENU_UPDATE_TRANSITION: u32 = 80;
+/// A screen's (and so a dialog's): `Initialize`, `Cleanup`, `TransitionIsFinished`,
+/// `ProcessInput`.
 const SCREEN_VPTR: u32 = 96;
+const SCREEN_INITIALIZE: u32 = 48;
 const SCREEN_CLEANUP: u32 = 56;
+const SCREEN_TRANSITION_IS_FINISHED: u32 = 64;
+const SCREEN_PROCESS_INPUT: u32 = 72;
 
-/// The dialogs' vtables: the base's, a message's, the help's, a message with a timeout, one
-/// taking no input.
+/// `tScreen`'s functions (ported in FESCREEN, called by address): the constructor and
+/// destructor, `UpdateTransition`, `Draw(foreground)`, `TransitionOff` and `TransitionOn` (with
+/// the transition type, always 2, and no menu).
+const SCREEN_CTOR: u32 = 0x8002_6040;
+const SCREEN_DTOR: u32 = 0x8002_6098;
+const SCREEN_UPDATE_TRANSITION: u32 = 0x8002_6868;
+const SCREEN_DRAW: u32 = 0x8002_620C;
+const SCREEN_TRANSITION_OFF: u32 = 0x8002_6824;
+const SCREEN_TRANSITION_ON: u32 = 0x8002_6844;
+const TRANSITION: u32 = 2;
+/// `operator delete`.
+const DELETE: fn(&mut Cpu) = nfs4rc::f_800a4910;
+
+/// The dialogs' vtables: the base's, a message's, the help's, a message timing out, one taking
+/// no input.
 const DIALOG_VT: u32 = 0x8001_05A8;
 const MESSAGE_VT: u32 = 0x8001_04E8;
 const HELP_VT: u32 = 0x8001_0548;
 const TIMED_MESSAGE_VT: u32 = 0x8001_0090;
 const NO_INPUT_VT: u32 = 0x8001_0428;
+/// The dialogs' functions: the top-most one shown; `Display` and `Hide` (hooked by the host:
+/// called by address).
+const GET_TOP_MOST_DIALOG: u32 = 0x8001_8970;
+const DISPLAY: u32 = 0x8001_8980;
+const HIDE: u32 = 0x8001_8A44;
 
-/// The music's volume (0x8007bc44), its songs (`AudioMus_PlaySong`, called by address: the host
-/// logs it) by the menus' flags, and stopped; the front end's music volume (`frontEnd + 833`).
+/// The music's volume (0x8007bc44), from the front end's setting (`frontEnd + 833`); a song
+/// (`AudioMus_PlaySong`, called by address: the host logs it) for each of the menus' music flags
+/// (the menus', the garage's, the showcase's, victory's), and the song stopped.
 const MUSIC_VOLUME: fn(&mut Cpu) = nfs4rc::f_8007bc44;
+const VOLUME: u32 = FRONT_END + 833;
+const MUSIC_FLAGS: u32 = 0xF000;
+const SONGS: [(u32, u32); 4] = [(0x1000, 0x8001_0044), (0x2000, 0x8001_004C), (0x4000, 0x8001_0054), (0x8000, 0x8001_0060)];
 const PLAY_SONG: u32 = 0x8007_B9C4;
 const STOP_SONG: fn(&mut Cpu) = nfs4rc::f_8007b798;
-const SONGS: [(u32, u32, u32); 4] = [(0x1000, 0x8001_0044, 0x8001_3e80), (0x2000, 0x8001_004C, 0x8001_3e9c), (0x4000, 0x8001_0054, 0x8001_3eb8), (0x8000, 0x8001_0060, 0x8001_3ed4)];
-const VOLUME: u32 = FRONT_END + 833;
 /// The clock's start and end; whether frames wait for the vertical blank (`Draw_gDoVSync`).
 const CLOCK_START: fn(&mut Cpu) = nfs4rc::f_8008c4d4;
 const CLOCK_END: fn(&mut Cpu) = nfs4rc::f_8008c530;
 const DO_VSYNC: u32 = 0x8013_EA90;
 
-/// The help's icons: their colour, the help text, the options text; the pads' buttons' shapes
-/// (the PlayStation pad's and the NeGcon's help and options buttons).
+/// The help's icons: their colour, the help and options texts, their shapes (the PlayStation
+/// pad's help and options buttons, the NeGcon's) and the shapes' flags.
 const ICON_COLOR: u32 = 0x0078_6E14;
 const HELP_TEXT: u32 = 253;
 const OPTIONS_TEXT: u32 = 254;
+const PAD_HELP: u32 = 53;
+const NEGCON_HELP: u32 = 54;
+const PAD_OPTIONS: u32 = 55;
+const NEGCON_OPTIONS: u32 = 56;
+const ICON_FLAGS: u32 = 24;
+/// The pads (`PAD_INFO`, 32 bytes each): +4 the status (0 plugged in), +5 the kind.
+const PAD_STATUS: u32 = 4;
+const PAD_KIND: u32 = 5;
+const PAD_SIZE: u32 = 32;
 const NEGCON: u32 = 0x23;
 
-/// The help's shapes (59 of them, the front end's shapes table) and `Texture_MenuReleaseClutId`.
+/// The front end's shapes (`SHAPES`, 32 bytes each, a CLUT id at +4): the help's are the first
+/// 59; `Texture_MenuReleaseClutId`.
 const HELP_SHAPES: u32 = 59;
+const SHAPE_SIZE: u32 = 32;
+const SHAPE_CLUT: u32 = 4;
 const RELEASE_CLUT: fn(&mut Cpu) = nfs4rc::f_800e05b0;
 
-/// The frame's drawing (`FeAudio_systemtask`, `Draw_StartFrameRender`,
-/// `Draw_StartRenderingView`, `Draw_StopRenderingView`, the frame shown).
+/// A frame's drawing: `FeAudio_systemtask`, `Draw_StartFrameRender`, `Draw_StartRenderingView`,
+/// `Draw_StopRenderingView`, the frame shown.
 const SYSTEM_TASK: fn(&mut Cpu) = crate::feaudio::systemtask_entry;
 const START_FRAME: fn(&mut Cpu) = nfs4rc::f_800bf044;
 const START_VIEW: fn(&mut Cpu) = nfs4rc::f_800bedac;
 const STOP_VIEW: fn(&mut Cpu) = nfs4rc::f_800bee9c;
 const SHOW_FRAME: fn(&mut Cpu) = nfs4rc::f_800bf0f0;
-/// The front end's menus (`*0x80051ee0`): +0 the "pad 1 out" menu item, +44 the "a pad out"
-/// one, +176 the main menu.
-const FE_MENUS: u32 = SONGS_SCREEN;
-const PAD_OUT_ITEM: u32 = 0;
-const A_PAD_OUT_ITEM: u32 = 44;
+/// `Redraw` itself: hooked (the host autosaves between front-end frames), so called by address.
+const REDRAW: u32 = 0x8001_3894;
+/// The front end's menus (`*0x80051ee0`, FEMENUDEFS's): the main menu at +176; two of its
+/// items, disabled while a pad is out: one needing the first pad (+0), one needing both (+44).
+const MENU_DEFS: u32 = SONGS_SCREEN;
 const MAIN_MENU: u32 = 176;
-const NFS4_MENU: u32 = 176;
-/// The keys those items get (down, up).
-const KEY_DOWN: u32 = 1024;
-const KEY_UP: u32 = 512;
+const ITEM_NEEDS_FIRST_PAD: u32 = 0;
+const ITEM_NEEDS_BOTH_PADS: u32 = 44;
+const ITEM_DISABLED: u32 = 1;
+/// The main menu's `ProcessInput` (`tMenuNFS4`'s): moved off an item disabled.
+const MAIN_MENU_PROCESS_INPUT: fn(&mut Cpu, u32, u32, u32, u32) = crate::femenuextended::menu_nfs4_process_input;
+
+/// The front end's sounds: accept, back.
+const SOUND_ACCEPT: u32 = 0;
+const SOUND_BACK: u32 = 1;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
 }
 
-fn lh(m: &mut Mem, at: u32) -> u32 {
-    m.r16(at) as i16 as i32 as u32
+/// The player being run or drawn.
+fn player(m: &mut Mem, this: FEApplication) -> u32 {
+    this.player(m) as u8 as u32
 }
 
-/// Player `p`'s word at `field`.
-fn of(this: u32, field: u32, p: u32) -> u32 {
-    this.wrapping_add(p << 2).wrapping_add(field)
+/// That player's menu, screen and parent menu.
+fn current_menu(m: &mut Mem, this: FEApplication) -> Menu {
+    let p = player(m, this);
+    this.current_menu(m, p)
 }
 
-/// The word at `field` of the player being run or drawn (`+556`).
-fn current(m: &mut Mem, this: u32, field: u32) -> u32 {
-    let p = m.r8(this + PLAYER) as u32;
-    m.r32(of(this, field, p))
+fn current_screen(m: &mut Mem, this: FEApplication) -> Screen {
+    let p = player(m, this);
+    this.current_screen(m, p)
 }
 
-/// A call to a function that is ported too (its port entered as the original's caller enters
-/// it): `f`, the original at `addr`, with `args` in a0.. (four at most), returning to `ra`.
-/// `Redraw`: hooked (the host autosaves between front-end frames), so called by address;
-/// `Cpu::call` routes it to the port after the host.
-const REDRAW: u32 = 0x8001_3894;
-
-fn port(c: &mut Cpu, r: &Saved, addr: u32, ra: u32, args: &[u32], f: fn(&mut Cpu)) -> u32 {
-    r.enter_leaving(c, addr, ra, |c| {
-        c.r[4..4 + args.len()].copy_from_slice(args);
-        f(c);
-        c.r[2]
-    })
+fn current_parent(m: &mut Mem, this: FEApplication) -> Menu {
+    let p = player(m, this);
+    this.parent_menu(m, p)
 }
 
-/// A dialog as the dialogs' constructors leave it: for either player, 288 wide, hidden.
-fn dialog(m: &mut Mem, d: u32) {
-    m.w32(d + 96, DIALOG_VT);
-    m.w32(d + 112, 0);
-    for f in [110, 130, 126, 124, 108, 106, 104, 102] {
-        m.w16(d + f, 0);
-    }
-    m.w16(d + 128, 288);
-    m.w16(d + 100, u16::MAX);
-    m.w16(d + 136, 0);
-    m.w32(d + 120, 0);
+/// A menu's virtual function at `slot` (none takes arguments); its result.
+fn menu_fn(c: &mut Cpu, menu: Menu, slot: u32) -> u32 {
+    call_virtual(c, menu.0, MENU_VPTR, slot, &[])
 }
 
-/// A message dialog (its text unfaded, on more than a line).
-fn message(m: &mut Mem, d: u32) {
-    m.w32(d + 96, MESSAGE_VT);
-    m.w32(d + 148, 0);
-    m.w32(d + 132, 0);
-    m.w32(d + 120, 0);
-    m.w32(d + 140, 128);
+/// A screen's.
+fn screen_fn(c: &mut Cpu, screen: Screen, slot: u32) -> u32 {
+    call_virtual(c, screen.0, SCREEN_VPTR, slot, &[])
+}
+
+/// A dialog as `tDialogBase`'s constructor leaves it (its `tScreen` made first): for either
+/// player, 288 wide at most, hidden, no timeout.
+fn dialog_base(m: &mut Mem, d: DialogBase) {
+    d.set_vtable(m, DIALOG_VT);
+    d.set_currently_on(m, 0);
+    d.set_reservedheight(m, 0);
+    d.set_max_h(m, 0);
+    d.set_offset_y(m, 0);
+    d.set_offset_x(m, 0);
+    d.set_height(m, 0);
+    d.set_width(m, 0);
+    d.set_top(m, 0);
+    d.set_left(m, 0);
+    d.set_max_w(m, 288);
+    d.set_specific_player(m, -1);
+    d.set_default(m, 0);
+    d.set_time_out_ticks(m, 0);
+}
+
+/// A message dialog (`tDialogMessageString`): not centred, its text unfaded.
+fn message(m: &mut Mem, d: DialogMessageString) {
+    dialog_base(m, *d);
+    d.set_vtable(m, MESSAGE_VT);
+    d.set_centerit(m, 0);
+    d.set_fully_open(m, 0);
+    d.set_time_out_ticks(m, 0);
+    d.set_fade_text(m, 128);
 }
 
 /// `tFEApplication::tFEApplication` (FEAPP.CPP, 0x800130f8): its four dialogs made (a message,
-/// the help timing out after 1400 ticks, a message timing out after 1152, one taking no
-/// input), no keys, no top times.
-pub fn fe_application(c: &mut Cpu, this: u32) -> u32 {
-    abi::frame(c, 56, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[7] = this;
-        let (d0, d1, d2, d3) = (this + MESSAGE, this + HELP, this + TIMED_MESSAGE, this + NO_INPUT_MESSAGE);
-        r.0[0] = d0;
-        r.enter_leaving(c, 0x8002_6040, 0x8001_3130, |c| crate::fescreen::screen(c, d0));
-        r.0[1] = d1;
-        r.0[2] = DIALOG_VT;
-        r.0[5] = 288;
-        r.0[4] = u32::MAX;
-        r.0[3] = MESSAGE_VT;
-        r.0[6] = 128;
-        // (each dialog's fields set before the next one's screen is made, as the original
-        // does)
-        dialog(&mut c.m, d0);
-        message(&mut c.m, d0);
-        r.enter_leaving(c, 0x8002_6040, 0x8001_31a4, |c| crate::fescreen::screen(c, d1));
-        r.0[0] = d2;
-        let m = &mut c.m;
-        dialog(m, d1);
-        m.w32(d1 + 96, HELP_VT);
-        m.w16(d1 + 144, u16::MAX);
-        m.w32(d1 + 120, 1400);
-        r.enter_leaving(c, 0x8002_6040, 0x8001_3200, |c| crate::fescreen::screen(c, d2));
-        r.0[1] = d3;
-        let m = &mut c.m;
-        dialog(m, d2);
-        message(m, d2);
-        m.w32(d2 + 96, TIMED_MESSAGE_VT);
-        m.w32(d2 + 120, 1152);
-        r.enter_leaving(c, 0x8002_6040, 0x8001_326c, |c| crate::fescreen::screen(c, d3));
-        let m = &mut c.m;
-        dialog(m, d3);
-        message(m, d3);
-        m.w32(d3 + 96, NO_INPUT_VT);
-        for p in 0..2 {
-            m.w32(of(this, 872, p), 0);
-            m.w32(of(this, 880, p), 0);
-            m.w32(of(this, 888, p), u32::MAX);
-        }
-        this
-    })
+/// the help timing out after 1400 ticks, a message timing out after 1152, one taking no input),
+/// no names got or needed, no speech to play.
+pub fn fe_application(c: &mut Cpu, this: FEApplication) -> FEApplication {
+    let screen = |c: &mut Cpu, d: u32| call_addr(c, SCREEN_CTOR, &[d]);
+    // (each dialog's fields set before the next one's screen is made, as the original does)
+    let d = this.message_popup();
+    screen(c, d.0);
+    message(&mut c.m, d);
+    let d = this.help_popup();
+    screen(c, d.0);
+    let m = &mut c.m;
+    dialog_base(m, *d);
+    d.set_vtable(m, HELP_VT);
+    d.set_variant(m, -1);
+    d.set_time_out_ticks(m, 1400);
+    let d = this.mem_card_dialog();
+    screen(c, d.0);
+    let m = &mut c.m;
+    message(m, *d);
+    d.set_vtable(m, TIMED_MESSAGE_VT);
+    d.set_time_out_ticks(m, 1152);
+    let d = this.no_input_mem_card_dialog();
+    screen(c, d.0);
+    let m = &mut c.m;
+    message(m, *d);
+    d.set_vtable(m, NO_INPUT_VT);
+    for p in 0..2 {
+        this.set_got_name(m, p, 0);
+        this.set_need_name(m, p, 0);
+        this.set_speech_to_play(m, p, -1);
+    }
+    this
 }
 
 pub fn abi_fe_application(c: &mut Cpu) {
-    c.r[2] = fe_application(c, c.r[4]);
+    c.r[2] = fe_application(c, FEApplication(c.r[4])).0;
 }
 
-/// `tFEApplication::~tFEApplication` (FEAPP.CPP, 0x8001331c): its dialogs' screens destroyed,
-/// it deleted when asked.
+/// `tFEApplication::~tFEApplication` (FEAPP.CPP, 0x8001331c): its dialogs destroyed (the last
+/// first), it deleted when `flags` asks.
+pub fn fe_application_dtor(c: &mut Cpu, this: FEApplication, flags: u32) {
+    for d in [this.no_input_mem_card_dialog().0, this.mem_card_dialog().0, this.help_popup().0, this.message_popup().0] {
+        call_addr(c, SCREEN_DTOR, &[d, 2]);
+    }
+    if flags & 1 != 0 {
+        call(c, DELETE, &[this.0]);
+    }
+}
+
 pub fn abi_fe_application_dtor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..2].copy_from_slice(&[flags, this]);
-        for (d, ra) in [(NO_INPUT_MESSAGE, 0x8001_3340), (TIMED_MESSAGE, 0x8001_334c), (HELP, 0x8001_3358), (MESSAGE, 0x8001_3364)] {
-            r.enter_leaving(c, 0x8002_6098, ra, |c| {
-                c.r[4] = this + d;
-                c.r[5] = 2;
-                crate::fescreen::abi_screen_destructor(c)
-            });
-        }
-        r.0[0] = flags & 1;
-        if flags & 1 != 0 {
-            r.call_leaving(c, nfs4rc::f_800a4910, &[this], 0x8001_3378);
-        }
-    })
+    fe_application_dtor(c, FEApplication(c.r[4]), c.r[5]);
 }
 
 /// The music's volume, from the front end's setting (`* 35 / 64`).
 fn music_volume(m: &mut Mem) -> u32 {
     let v = m.r8(VOLUME) as u32;
-    (v.wrapping_mul(35) as i32 >> 6) as u32
+    (v * 35) >> 6
 }
 
-/// `tFEApplication::PerformMenuInitialization` (FEAPP.CPP, 0x8001338c): no music flags, the
-/// music's volume, no dialogs, the clock started, frames waiting for the vertical blank, the
-/// text's blending off.
+/// `tFEApplication::PerformMenuInitialization` (FEAPP.CPP, 0x8001338c): no music, the music's
+/// volume, no dialogs, the clock started, frames waiting for the vertical blank, the text's
+/// blending off.
+pub fn perform_menu_initialization(c: &mut Cpu, this: FEApplication) {
+    this.set_current_music(&mut c.m, 0);
+    let volume = music_volume(&mut c.m);
+    call(c, MUSIC_VOLUME, &[volume]);
+    crate::fedialog::abi_initialize_class(c);
+    call(c, CLOCK_START, &[]);
+    c.m.w32(DO_VSYNC, 1);
+    fetextrender::set_abr(c, 0, 0);
+}
+
 pub fn abi_perform_menu_initialization(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let r = Saved::of(c);
-        c.m.w32(this + MUSIC_FLAGS, 0);
-        let volume = music_volume(&mut c.m);
-        r.call_leaving(c, MUSIC_VOLUME, &[volume], 0x8001_33bc);
-        r.enter_leaving(c, 0x8001_8840, 0x8001_33c4, crate::fedialog::abi_initialize_class);
-        r.call_leaving(c, CLOCK_START, &[], 0x8001_33cc);
-        c.m.w32(DO_VSYNC, 1);
-        r.call_leaving(c, fetextrender::set_abr_entry, &[0, 0], 0x8001_33e4);
-    })
+    perform_menu_initialization(c, FEApplication(c.r[4]));
 }
 
 /// `tFEApplication::PerformMenuDestruction` (FEAPP.CPP, 0x800133f4): the clock ended, each
 /// player's screen cleaned up and gone, the music stopped, frames not waiting, the text's
 /// blending off.
-pub fn perform_menu_destruction(c: &mut Cpu, this: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        r.call_leaving(c, CLOCK_END, &[], 0x8001_3410);
-        for p in 0..2 {
-            r.0[1] = p;
-            let at = of(this, 0, p);
-            r.0[0] = at;
-            let screen = c.m.r32(at + SCREENS);
-            if screen != 0 {
-                let (obj, f) = method(&mut c.m, screen, SCREEN_VPTR, SCREEN_CLEANUP);
-                r.call_ptr_leaving(c, f, &[obj], 0x8001_344c);
-            }
-            c.m.w32(at + SCREENS, 0);
+pub fn perform_menu_destruction(c: &mut Cpu, this: FEApplication) {
+    call(c, CLOCK_END, &[]);
+    for p in 0..2 {
+        let screen = this.current_screen(&mut c.m, p);
+        if screen.0 != 0 {
+            screen_fn(c, screen, SCREEN_CLEANUP);
         }
-        r.0[1] = 2;
-        r.call_leaving(c, STOP_SONG, &[1000], 0x8001_3470);
-        c.m.w32(DO_VSYNC, 0);
-        r.call_leaving(c, fetextrender::set_abr_entry, &[0, 0], 0x8001_3484);
-    })
+        this.set_current_screen(&mut c.m, p, Screen(0));
+    }
+    call(c, STOP_SONG, &[1000]);
+    c.m.w32(DO_VSYNC, 0);
+    fetextrender::set_abr(c, 0, 0);
 }
 
 pub fn abi_perform_menu_destruction(c: &mut Cpu) {
-    perform_menu_destruction(c, c.r[4]);
+    perform_menu_destruction(c, FEApplication(c.r[4]));
 }
 
-/// Whether either pad is plugged in and not a NeGcon (`not` false), or either is a NeGcon.
+/// Whether a pad of either player is plugged in and is not a NeGcon (`negcon` false), or is a
+/// NeGcon (`negcon` true: plugged in or not).
 fn pads(m: &mut Mem, negcon: bool) -> bool {
-    if negcon {
-        return m.r8(PAD_INFO + 5) as u32 == NEGCON || m.r8(PAD_INFO + 37) as u32 == NEGCON;
-    }
-    (m.r8(PAD_INFO + 4) == 0 && m.r8(PAD_INFO + 5) as u32 != NEGCON) || (m.r8(PAD_INFO + 36) == 0 && m.r8(PAD_INFO + 37) as u32 != NEGCON)
+    (0..2).any(|p| {
+        let pad = PAD_INFO + PAD_SIZE * p;
+        let is_negcon = m.r8(pad + PAD_KIND) as u32 == NEGCON;
+        if negcon { is_negcon } else { m.r8(pad + PAD_STATUS) == 0 && !is_negcon }
+    })
 }
 
 /// `tFEApplication::DrawHelpIcons` (FEAPP.CPP, 0x8001349c): at the bottom left, the help
-/// button (the PlayStation pad's and the NeGcon's) and "help", then the options button and
-/// "options" when a player's menu has options; for a vertical menu (+100), "help" written
-/// down the side a letter at a time, its buttons under it.
-pub fn draw_help_icons(c: &mut Cpu, this: u32) {
-    abi::frame(c, 112, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        r.0[5] = ICON_COLOR;
-        r.0[3] = 14;
-        c.m.w32(sp + 36, ICON_COLOR);
-        r.0[2] = c.m.r32(SCREEN_HEIGHT).wrapping_sub(25);
-        let menu = c.m.r32(this + MENUS);
-        let place = sp + 32;
-        let shape = |c: &mut Cpu, r: &Saved, k: u32, x: u32, y: u32, ra: u32| {
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k, 24, x, y, 0, 0, place], ra);
-        };
-        if menu != 0 && c.m.r16(menu + 100) != 0 {
-            // down the side
-            c.m.w8(sp + 73, 0);
-            let word = r.call_leaving(c, TEXT_WORD, &[HELP_TEXT], 0x8001_3500);
-            let text = sp + 56;
-            r.0[1] = text;
-            r.call_leaving(c, SPRINTF, &[text, word], 0x8001_3514);
-            let n = r.call_leaving(c, STRLEN, &[text], 0x8001_351c);
-            r.0[0] = n.wrapping_sub(1);
-            if (r.0[0] as i32) >= 0 {
-                r.0[4] = 0xE_0000;
-                loop {
-                    let y = sx(r.0[2]);
-                    r.0[2] = r.0[2].wrapping_sub(8);
-                    let b = c.m.r8(text.wrapping_add(r.0[0]));
-                    r.0[0] = r.0[0].wrapping_sub(1);
-                    c.m.w8(sp + 72, b);
-                    r.call_leaving(c, fetextrender::full_text_rgb_entry, &[sp + 72, 14, y, ICON_COLOR, 0, 0], 0x8001_3560);
-                    if (r.0[0] as i32) < 0 {
-                        break;
-                    }
-                }
+/// button (the PlayStation pad's and the NeGcon's, for the pads there are) and "help", then the
+/// options button and "options" when either player's menu has options. For a menu with its
+/// help down the side, "help" is written up the side a letter at a time, its buttons above it.
+pub fn draw_help_icons(c: &mut Cpu, this: FEApplication) {
+    // the shapes' options (only their colour, at +4, set), a letter, a text
+    with_buffer(c, 96, |c, at| {
+        let (options, letter, text) = (at, at + 24, at + 32);
+        c.m.w32(options + 4, ICON_COLOR);
+        let shape = |c: &mut Cpu, k: u32, x: u32, y: u32| call(c, DRAW_SHAPE_EXTENDED, &[k, ICON_FLAGS, x, y, 0, 0, options]);
+        let text_at = |c: &mut Cpu, text: u32, x: u32, y: u32| fetextrender::full_text_rgb(c, text, sx(x), sx(y), ICON_COLOR, 0, 0);
+        let mut y = c.m.r32(SCREEN_HEIGHT).wrapping_sub(25);
+        let menu = this.current_menu(&mut c.m, 0);
+        if menu.0 != 0 && menu.vert_help(&mut c.m) != 0 {
+            // up the side: the last letter lowest
+            c.m.w8(letter + 1, 0);
+            let word = call(c, TEXT_WORD, &[HELP_TEXT]);
+            call(c, SPRINTF, &[text, word]);
+            let n = call(c, STRLEN, &[text]);
+            for k in (0..n).rev() {
+                let b = c.m.r8(text + k);
+                c.m.w8(letter, b);
+                text_at(c, letter, 14, y);
+                y = y.wrapping_sub(8);
             }
-            r.0[2] = r.0[2].wrapping_add(8);
+            y = y.wrapping_add(8);
             if pads(&mut c.m, false) {
-                r.0[2] = r.0[2].wrapping_sub(8);
-                shape(c, &r, 53, r.0[3], r.0[2], 0x8001_35d8);
+                y = y.wrapping_sub(8);
+                shape(c, PAD_HELP, 14, y);
             }
             if pads(&mut c.m, true) {
-                shape(c, &r, 54, r.0[3].wrapping_sub(1), r.0[2].wrapping_sub(9), 0x8001_3624);
+                shape(c, NEGCON_HELP, 13, y.wrapping_sub(9));
             }
             return;
         }
-        if pads(&mut c.m, false) {
-            shape(c, &r, 53, r.0[3], r.0[2], 0x8001_3698);
-            r.0[3] = r.0[3].wrapping_add(14);
-        }
-        if pads(&mut c.m, true) {
-            shape(c, &r, 54, r.0[3], r.0[2], 0x8001_36e8);
-            r.0[3] = r.0[3].wrapping_add(15);
-        }
-        let word = r.call_leaving(c, TEXT_WORD, &[HELP_TEXT], 0x8001_36f4);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(r.0[3]), sx(r.0[2]), ICON_COLOR, 0, 0], 0x8001_3718);
-        let word = r.call_leaving(c, TEXT_WORD, &[HELP_TEXT], 0x8001_3720);
-        let w = r.call_leaving(c, TEXT_PIXELS, &[word], 0x8001_3728);
-        r.0[0] = w;
-        let word = r.call_leaving(c, TEXT_WORD, &[HELP_TEXT], 0x8001_3734);
-        let len = r.call_leaving(c, STRLEN, &[word], 0x8001_373c);
-        r.0[0] = w.wrapping_sub(len);
-        r.0[3] = r.0[3].wrapping_add(5).wrapping_add(r.0[0]);
+        let mut x = 14u32;
+        let buttons = |c: &mut Cpu, x: &mut u32, (pad, negcon): (u32, u32)| {
+            if pads(&mut c.m, false) {
+                shape(c, pad, *x, y);
+                *x += 14;
+            }
+            if pads(&mut c.m, true) {
+                shape(c, negcon, *x, y);
+                *x += 15;
+            }
+        };
+        buttons(c, &mut x, (PAD_HELP, NEGCON_HELP));
+        let word = call(c, TEXT_WORD, &[HELP_TEXT]);
+        text_at(c, word, x, y);
+        // past the text: its width in pixels less its length, and 5
+        let word = call(c, TEXT_WORD, &[HELP_TEXT]);
+        let w = call(c, TEXT_PIXELS, &[word]);
+        let word = call(c, TEXT_WORD, &[HELP_TEXT]);
+        let len = call(c, STRLEN, &[word]);
+        x = x.wrapping_add(5).wrapping_add(w.wrapping_sub(len));
         let m = &mut c.m;
-        let menu = m.r32(this + MENUS);
-        let other = m.r32(this + MENUS + 4);
-        let options = m.r32(menu + 92) != 0 || (other != 0 && m.r32(other + 92) != 0);
+        let (first, second) = (this.current_menu(m, 0), this.current_menu(m, 1));
+        let options = first.options_menu(m).0 != 0 || (second.0 != 0 && second.options_menu(m).0 != 0);
         if !options {
             return;
         }
-        if pads(&mut c.m, false) {
-            shape(c, &r, 55, r.0[3], r.0[2], 0x8001_37f0);
-            r.0[3] = r.0[3].wrapping_add(14);
-        }
-        if pads(&mut c.m, true) {
-            shape(c, &r, 56, r.0[3], r.0[2], 0x8001_3840);
-            r.0[3] = r.0[3].wrapping_add(15);
-        }
-        let word = r.call_leaving(c, TEXT_WORD, &[OPTIONS_TEXT], 0x8001_384c);
-        r.call_leaving(c, fetextrender::full_text_rgb_entry, &[word, sx(r.0[3]), sx(r.0[2]), ICON_COLOR, 0, 0], 0x8001_3870);
+        buttons(c, &mut x, (PAD_OPTIONS, NEGCON_OPTIONS));
+        let word = call(c, TEXT_WORD, &[OPTIONS_TEXT]);
+        text_at(c, word, x, y);
     })
 }
 
 pub fn abi_draw_help_icons(c: &mut Cpu) {
-    draw_help_icons(c, c.r[4]);
+    draw_help_icons(c, FEApplication(c.r[4]));
 }
 
-/// The draw area for a half of the screen (from `top`, `h` high) linked into the ordering
-/// table.
-fn draw_area(c: &mut Cpu, r: &Saved, sp: u32, env: u32, top: u32, h: u32, ra: u32) {
-    let m = &mut c.m;
-    m.w16(sp + 16, 0);
-    let y = (m.r16(env + 2) as u32).wrapping_add(top);
-    m.w16(sp + 20, 512);
-    m.w16(sp + 22, h as u16);
-    m.w16(sp + 18, y as u16);
-    let prim = add_prim(m);
-    r.call_ptr_leaving(c, SET_DRAW_AREA, &[prim, sp + 16], ra);
-}
-
-/// `tFEApplication::Redraw` (FEAPP.CPP, 0x80013894): a frame: the dialogs, the help's icons,
-/// a pad out told (its menu item given a key); each player's half from the second's up (its
-/// menus' and screen's transitions, the screen's background, the menu or the one left under
-/// the next, the screen's foreground), the frame shown.
-pub fn redraw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let was = c.m.r8(this + PLAYER) as u32;
-        r.0[6] = was;
-        r.call_leaving(c, SYSTEM_TASK, &[0], 0x8001_38c8);
-        r.0[0] = 0x8014_0000;
-        r.call_leaving(c, START_FRAME, &[], 0x8001_38d0);
-        let view = c.m.r32(PLAYER1_VIEW);
-        r.call_leaving(c, START_VIEW, &[view], 0x8001_38dc);
-        let (view, flip) = (c.m.r32(PLAYER1_VIEW), c.m.r32(FLIP));
-        let env = r.call_leaving(c, GET_DRAWENV, &[view, flip], 0x8001_38f0);
-        r.0[5] = env;
-        r.0[4] = if c.m.r32(this + MENUS + 4) != 0 {
-            let h = c.m.r32(SCREEN_HEIGHT);
-            h.wrapping_add(h >> 31) >> 1
-        } else {
-            c.m.r16(SCREEN_HEIGHT) as u32
-        };
-        r.enter_leaving(c, 0x8001_8860, 0x8001_392c, crate::fedialog::abi_draw_all_dialogs);
-        r.enter_leaving(c, 0x8001_349c, 0x8001_3934, |c| draw_help_icons(c, this));
-        // a pad out: the items that tell it set going
-        let fe = c.m.r32(FE_MENUS);
-        if c.m.r8(PAD_INFO + 4) != 0 || c.m.r8(PAD_INFO + 36) != 0 {
-            let v = c.m.r32(fe + A_PAD_OUT_ITEM) | 1;
-            c.m.w32(fe + A_PAD_OUT_ITEM, v);
-            let menu = c.m.r32(this + MENUS);
-            c.m.w32(sp + 32, KEY_UP);
-            let k = c.m.r32(menu + 8);
-            let item = c.m.r32(menu.wrapping_add(k << 2).wrapping_add(16));
-            if item == fe + A_PAD_OUT_ITEM {
-                port(c, &r, 0x8001_b390, 0x8001_39b4, &[fe + NFS4_MENU, 0, sp + 32, sp + 24], crate::femenuextended::abi_menu_nfs4_process_input);
-            }
-        } else {
-            let v = c.m.r32(fe + A_PAD_OUT_ITEM) & !1;
-            c.m.w32(fe + A_PAD_OUT_ITEM, v);
-        }
-        let fe = c.m.r32(FE_MENUS);
-        if c.m.r8(PAD_INFO + 4) != 0 {
-            let v = c.m.r32(fe + PAD_OUT_ITEM) | 1;
-            c.m.w32(fe + PAD_OUT_ITEM, v);
-            let menu = c.m.r32(this + MENUS);
-            let k = c.m.r32(menu + 8);
-            let item = c.m.r32(menu.wrapping_add(k << 2).wrapping_add(16));
-            c.m.w32(sp + 36, KEY_DOWN);
-            if item == fe {
-                port(c, &r, 0x8001_b390, 0x8001_3a3c, &[item + MAIN_MENU, 0, sp + 36, sp + 24], crate::femenuextended::abi_menu_nfs4_process_input);
-            }
-        } else {
-            let v = c.m.r32(fe + PAD_OUT_ITEM) & !1;
-            c.m.w32(fe + PAD_OUT_ITEM, v);
-        }
-        r.0[3] = 1;
-        r.0[2] = 0x00FF_FFFF;
-        let h = c.m.r16(SCREEN_HEIGHT) as u32;
-        draw_area(c, &r, sp, env, 0, h, 0x8001_3ae4);
-        // each player's half, the second's first
-        loop {
-            let p = r.0[3] & 0xFF;
-            c.m.w8(this + PLAYER, r.0[3] as u8);
-            let top = p.wrapping_mul(sx(r.0[4]));
-            c.m.w16(this + HALF_TOP, top as u16);
-            let player = |m: &mut Mem| m.r8(this + PLAYER) as u32;
-            let menu = c.m.r32(of(this, MENUS, p));
-            if menu != 0 {
-                let (obj, f) = method(&mut c.m, menu, MENU_VPTR, MENU_UPDATE_TRANSITION);
-                r.call_ptr_leaving(c, f, &[obj], 0x8001_3b38);
-            }
-            let p = player(&mut c.m);
-            let leaving = c.m.r32(of(this, LEAVING, p));
-            if leaving != 0 {
-                let (obj, f) = method(&mut c.m, leaving, MENU_VPTR, MENU_UPDATE_TRANSITION);
-                r.call_ptr_leaving(c, f, &[obj], 0x8001_3b74);
-            }
-            let p = player(&mut c.m);
-            let screen = c.m.r32(of(this, SCREENS, p));
-            if screen != 0 {
-                port(c, &r, 0x8002_6868, 0x8001_3b9c, &[screen], crate::fescreen::abi_update_transition);
-            }
-            let p = player(&mut c.m);
-            let menu = c.m.r32(of(this, MENUS, p));
-            if menu != 0 {
-                let (obj, f) = method(&mut c.m, menu, MENU_VPTR, MENU_TRANSITION_IS_FINISHED);
-                if r.call_ptr_leaving(c, f, &[obj], 0x8001_3bd8) != 0 {
-                    let p = player(&mut c.m);
-                    let menu = c.m.r32(of(this, MENUS, p));
-                    let (obj, f) = method(&mut c.m, menu, MENU_VPTR, MENU_DRAW);
-                    r.call_ptr_leaving(c, f, &[obj], 0x8001_3c14);
-                }
-            }
-            let p = player(&mut c.m);
-            let screen = c.m.r32(of(this, SCREENS, p));
-            if screen != 0 {
-                port(c, &r, 0x8002_620c, 0x8001_3c3c, &[screen, 0], crate::fescreen::abi_draw);
-            }
-            let p = player(&mut c.m);
-            let at = of(this, 0, p);
-            let menu = c.m.r32(at + MENUS);
-            if menu != 0 {
-                let mut draw = true;
-                if c.m.r32(at + OVERLAID) != 0 {
-                    r.0[0] = 0;
-                    let (obj, f) = method(&mut c.m, menu, MENU_VPTR, MENU_IN_TRANSITION);
-                    if r.call_ptr_leaving(c, f, &[obj], 0x8001_3c88) == 0 {
-                        let p = player(&mut c.m);
-                        let menu = c.m.r32(of(this, MENUS, p));
-                        let (obj, f) = method(&mut c.m, menu, MENU_VPTR, MENU_TRANSITION_IS_FINISHED);
-                        let finished = r.call_ptr_leaving(c, f, &[obj], 0x8001_3cc4);
-                        r.0[0] = (finished == 0) as u32;
-                    }
-                    draw = r.0[0] != 0;
-                } else {
-                    r.0[0] = 0;
-                }
-                if draw {
-                    let p = player(&mut c.m);
-                    let menu = c.m.r32(of(this, MENUS, p));
-                    let (obj, f) = method(&mut c.m, menu, MENU_VPTR, MENU_DRAW);
-                    r.call_ptr_leaving(c, f, &[obj], 0x8001_3d04);
-                }
-                let p = player(&mut c.m);
-                let leaving = c.m.r32(of(this, LEAVING, p));
-                if leaving != 0 {
-                    let (obj, f) = method(&mut c.m, leaving, MENU_VPTR, MENU_DRAW);
-                    r.call_ptr_leaving(c, f, &[obj], 0x8001_3d40);
-                }
-            }
-            let p = player(&mut c.m);
-            let screen = c.m.r32(of(this, SCREENS, p));
-            if screen != 0 {
-                port(c, &r, 0x8002_620c, 0x8001_3d68, &[screen, 1], crate::fescreen::abi_draw);
-            }
-            let top = c.m.r16(this + HALF_TOP) as u32;
-            draw_area(c, &r, sp, env, top, r.0[4], 0x8001_3ddc);
-            r.0[3] = r.0[3].wrapping_sub(1);
-            if (sx(r.0[3]) as i32) < 0 {
-                break;
-            }
-        }
-        c.m.w8(this + PLAYER, was as u8);
-        let view = c.m.r32(PLAYER1_VIEW);
-        r.call_leaving(c, STOP_VIEW, &[view], 0x8001_3e04);
-        r.call_leaving(c, SHOW_FRAME, &[], 0x8001_3e0c);
+/// The draw area set to the screen's width from `top` down, `h` high (in the draw environment
+/// `env`), as a primitive in the ordering table.
+fn draw_area(c: &mut Cpu, env: DRAWENV, top: u32, h: u32) {
+    with_buffer(c, 8, |c, at| {
+        let (rect, m) = (RECT(at), &mut c.m);
+        let y = (env.clip().y(m) as u16 as u32).wrapping_add(top);
+        rect.set_x(m, 0);
+        rect.set_y(m, y as i16);
+        rect.set_w(m, 512);
+        rect.set_h(m, h as i16);
+        let prim = add_prim(m);
+        call_addr(c, SET_DRAW_AREA, &[prim, at]);
     })
+}
+
+/// A pad out: the main menu's item needing it disabled (else enabled), and the main menu moved
+/// off it (sent `key`) when it is the first player's current item.
+fn pad_out_item(c: &mut Cpu, this: FEApplication, out: bool, item: u32, key: u32) {
+    let item = MenuItem(c.m.r32(MENU_DEFS).wrapping_add(item));
+    let m = &mut c.m;
+    if !out {
+        item.update_flags(m, |f| f & !ITEM_DISABLED);
+        return;
+    }
+    item.update_flags(m, |f| f | ITEM_DISABLED);
+    let menu = this.current_menu(m, 0);
+    let k = menu.current_item(m) as u32;
+    if menu.item_list(m, k) == item {
+        let main = m.r32(MENU_DEFS).wrapping_add(MAIN_MENU);
+        // the key and a command to take what the menu does with it
+        with_buffer(c, 16, |c, at| {
+            c.m.w32(at + 8, key);
+            MAIN_MENU_PROCESS_INPUT(c, main, 0, at + 8, at);
+        });
+    }
+}
+
+/// `tFEApplication::Redraw` (FEAPP.CPP, 0x80013894): a frame. The dialogs, the help's icons,
+/// the main menu's items needing a pad that is out; then each player's half, the second's first:
+/// its menus' and screen's transitions, a sub-menu, the screen's background, the menu (unless
+/// waiting for the other player, but going on) and the parent menu, the screen's foreground; the
+/// frame shown.
+pub fn redraw(c: &mut Cpu, this: FEApplication) {
+    let was = this.player(&mut c.m);
+    call(c, SYSTEM_TASK, &[0]);
+    call(c, START_FRAME, &[]);
+    let view = c.m.r32(PLAYER1_VIEW);
+    call(c, START_VIEW, &[view]);
+    let (view, flip) = (c.m.r32(PLAYER1_VIEW), c.m.r32(FLIP));
+    let env = DRAWENV(call(c, GET_DRAWENV, &[view, flip]));
+    let m = &mut c.m;
+    let half = if this.current_menu(m, 1).0 != 0 { (m.r32(SCREEN_HEIGHT) as i32 / 2) as u32 } else { m.r16(SCREEN_HEIGHT) as u32 };
+    crate::fedialog::abi_draw_all_dialogs(c);
+    draw_help_icons(c, this);
+    let (first, second) = (c.m.r8(PAD_INFO + PAD_STATUS) != 0, c.m.r8(PAD_INFO + PAD_SIZE + PAD_STATUS) != 0);
+    pad_out_item(c, this, first || second, ITEM_NEEDS_BOTH_PADS, KEY_UP);
+    let first = c.m.r8(PAD_INFO + PAD_STATUS) != 0;
+    pad_out_item(c, this, first, ITEM_NEEDS_FIRST_PAD, KEY_DOWN);
+    let h = c.m.r16(SCREEN_HEIGHT) as u32;
+    draw_area(c, env, 0, h);
+    for p in [1u32, 0] {
+        let m = &mut c.m;
+        this.set_player(m, p as i8);
+        this.set_y_offset(m, (p * half) as i16);
+        // the transitions
+        let menu = this.current_menu(m, p);
+        if menu.0 != 0 {
+            menu_fn(c, menu, MENU_UPDATE_TRANSITION);
+        }
+        let parent = current_parent(&mut c.m, this);
+        if parent.0 != 0 {
+            menu_fn(c, parent, MENU_UPDATE_TRANSITION);
+        }
+        let screen = current_screen(&mut c.m, this);
+        if screen.0 != 0 {
+            call_addr(c, SCREEN_UPDATE_TRANSITION, &[screen.0]);
+        }
+        // the drawing
+        let menu = current_menu(&mut c.m, this);
+        if menu.0 != 0 && menu_fn(c, menu, MENU_IS_SUB_MENU) != 0 {
+            let menu = current_menu(&mut c.m, this);
+            menu_fn(c, menu, MENU_DRAW);
+        }
+        let screen = current_screen(&mut c.m, this);
+        if screen.0 != 0 {
+            call_addr(c, SCREEN_DRAW, &[screen.0, 0]);
+        }
+        let menu = current_menu(&mut c.m, this);
+        if menu.0 != 0 {
+            let p = player(&mut c.m, this);
+            let draw = this.waiting_for_other_player(&mut c.m, p) == 0
+                || (menu_fn(c, menu, MENU_TRANSITION_IS_FINISHED) == 0 && {
+                    let menu = current_menu(&mut c.m, this);
+                    menu_fn(c, menu, MENU_IS_SUB_MENU) == 0
+                });
+            if draw {
+                let menu = current_menu(&mut c.m, this);
+                menu_fn(c, menu, MENU_DRAW);
+            }
+            let parent = current_parent(&mut c.m, this);
+            if parent.0 != 0 {
+                menu_fn(c, parent, MENU_DRAW);
+            }
+        }
+        let screen = current_screen(&mut c.m, this);
+        if screen.0 != 0 {
+            call_addr(c, SCREEN_DRAW, &[screen.0, 1]);
+        }
+        let top = this.y_offset(&mut c.m) as u16 as u32;
+        draw_area(c, env, top, half);
+    }
+    this.set_player(&mut c.m, was);
+    let view = c.m.r32(PLAYER1_VIEW);
+    call(c, STOP_VIEW, &[view]);
+    call(c, SHOW_FRAME, &[]);
 }
 
 pub fn abi_redraw(c: &mut Cpu) {
-    redraw(c, c.r[4]);
+    redraw(c, FEApplication(c.r[4]));
 }
 
-/// `tFEApplication::UpdateMusic` (FEAPP.CPP, 0x80013e34): the music's volume, the song the
-/// menus' flags ask for (the menu's, the garage's, the showcase's, victory's), else none.
-pub fn update_music(c: &mut Cpu, this: u32) {
+/// `tFEApplication::UpdateMusic` (FEAPP.CPP, 0x80013e34): the music's volume; the song the
+/// menus' music flags ask for, else none.
+pub fn update_music(c: &mut Cpu, this: FEApplication) {
     let volume = music_volume(&mut c.m);
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.call_leaving(c, MUSIC_VOLUME, &[volume], 0x8001_3e64);
-        let flags = c.m.r32(this + MUSIC_FLAGS);
-        r.0[0] = flags;
-        match SONGS.iter().find(|s| flags & s.0 != 0) {
-            Some(&(_, song, ra)) => {
-                r.call_ptr_leaving(c, PLAY_SONG, &[song], ra);
-            }
-            None => {
-                r.call_leaving(c, STOP_SONG, &[1000], 0x8001_3ee4);
-            }
-        }
-    })
+    call(c, MUSIC_VOLUME, &[volume]);
+    let flags = this.current_music(&mut c.m);
+    match SONGS.iter().find(|&&(flag, _)| flags & flag != 0) {
+        Some(&(_, song)) => call_addr(c, PLAY_SONG, &[song]),
+        None => call(c, STOP_SONG, &[1000]),
+    };
 }
 
 pub fn abi_update_music(c: &mut Cpu) {
-    update_music(c, c.r[4]);
+    update_music(c, FEApplication(c.r[4]));
 }
 
 /// `tFEApplication::SetMenu` (FEAPP.CPP, 0x80013ef4): `player`'s next menu (the first player's
-/// changing the music when its flags do); the menu now going off unless already finished; the
-/// menu's screen next.
-pub fn set_menu(c: &mut Cpu, this: u32, player: u32, menu: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..3].copy_from_slice(&[menu, this, player]);
-        let p = sx(player);
-        if menu == c.m.r32(of(this, MENUS, p)) {
-            return;
+/// changing the music when its music flags do). The menu now goes off, unless the next one is a
+/// sub-menu drawn over it. The menu's screen is next.
+pub fn set_menu(c: &mut Cpu, this: FEApplication, player: u32, menu: Menu) {
+    let p = sx(player);
+    if menu == this.current_menu(&mut c.m, p) {
+        return;
+    }
+    if p == 0 {
+        let flags = menu.flags(&mut c.m) & MUSIC_FLAGS;
+        if flags != this.current_music(&mut c.m) {
+            this.set_current_music(&mut c.m, flags);
+            update_music(c, this);
         }
-        if p == 0 {
-            let flags = c.m.r32(menu) & 0xF000;
-            if flags != c.m.r32(this + MUSIC_FLAGS) {
-                c.m.w32(this + MUSIC_FLAGS, flags);
-                r.enter_leaving(c, 0x8001_3e34, 0x8001_3f54, |c| update_music(c, this));
-            }
-        }
-        let (obj, f) = method(&mut c.m, menu, MENU_VPTR, MENU_TRANSITION_IS_FINISHED);
-        let finished = r.call_ptr_leaving(c, f, &[obj], 0x8001_3f70);
-        let at = of(this, 0, sx(player));
-        if finished != 1 {
-            let now = c.m.r32(at + MENUS);
-            c.m.w32(at + 20, menu);
-            if now != 0 && menu != 0 {
-                let (obj, f) = method(&mut c.m, now, MENU_VPTR, MENU_TRANSITION_OFF);
-                r.call_ptr_leaving(c, f, &[obj], 0x8001_3fb8);
-            }
-        } else {
-            c.m.w32(at + 20, menu);
-        }
-        let screen = c.m.r32(menu + 80);
-        r.enter_leaving(c, 0x8001_3ff8, 0x8001_3fe0, |c| set_screen(c, this, sx(player), screen));
-    })
+    }
+    let sub = menu_fn(c, menu, MENU_IS_SUB_MENU) == 1;
+    let now = this.current_menu(&mut c.m, p);
+    this.set_transition_to_menu(&mut c.m, p, menu);
+    if !sub && now.0 != 0 && menu.0 != 0 {
+        menu_fn(c, now, MENU_TRANSITION_OFF);
+    }
+    let screen = menu.screen(&mut c.m);
+    set_screen(c, this, p, screen);
 }
 
 pub fn abi_set_menu(c: &mut Cpu) {
-    set_menu(c, c.r[4], c.r[5], c.r[6]);
+    set_menu(c, FEApplication(c.r[4]), c.r[5], Menu(c.r[6]));
 }
 
-/// `tFEApplication::SetScreen` (FEAPP.CPP, 0x80013ff8): `player`'s next screen, the screen now
+/// `tFEApplication::SetScreen` (FEAPP.CPP, 0x80013ff8): `player`'s next screen; the screen now
 /// going off.
-pub fn set_screen(c: &mut Cpu, this: u32, player: u32, screen: u32) {
-    abi::frame(c, 24, |c, _| {
-        let at = of(this, 0, sx(player));
-        let now = c.m.r32(at + SCREENS);
-        if screen == now {
-            return;
-        }
-        c.m.w32(at + 28, screen);
-        if now == 0 || screen == 0 {
-            return;
-        }
-        port(c, &Saved::of(c), 0x8002_6824, 0x8001_4038, &[now, 2, 0], crate::fescreen::abi_transition_off);
-    })
+pub fn set_screen(c: &mut Cpu, this: FEApplication, player: u32, screen: Screen) {
+    let p = sx(player);
+    let now = this.current_screen(&mut c.m, p);
+    if screen == now {
+        return;
+    }
+    this.set_transition_to_screen(&mut c.m, p, screen);
+    if now.0 != 0 && screen.0 != 0 {
+        call_addr(c, SCREEN_TRANSITION_OFF, &[now.0, TRANSITION, 0]);
+    }
 }
 
 pub fn abi_set_screen(c: &mut Cpu) {
-    set_screen(c, c.r[4], c.r[5], c.r[6]);
+    set_screen(c, FEApplication(c.r[4]), c.r[5], Screen(c.r[6]));
 }
 
 /// `tFEApplication::DisplayHelp` (FEAPP.CPP, 0x80014048): the help shown on `page`.
+pub fn display_help(c: &mut Cpu, this: FEApplication, page: u32) {
+    let help = this.help_popup();
+    help.set_variant(&mut c.m, page as i16);
+    call_addr(c, DISPLAY, &[help.0]);
+}
+
 pub fn abi_display_help(c: &mut Cpu) {
-    let (this, page) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        let help = this + HELP;
-        c.m.w16(help + 144, page as u16);
-        Saved::of(c).call_ptr_leaving(c, 0x8001_8980, &[help], 0x8001_405c);
-    })
+    display_help(c, FEApplication(c.r[4]), c.r[5]);
 }
 
 /// `FreeHelpShapeCluts` (FEAPP.CPP, 0x8001406c): the help shapes' CLUTs freed.
-pub fn abi_free_help_shape_cluts(c: &mut Cpu) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = 0x8005_0000;
-        for k in 0..HELP_SHAPES {
-            r.0[0] = k;
-            let at = k << 5;
-            r.0[1] = at;
-            let shape = c.m.r32(SHAPES).wrapping_add(at);
-            if c.m.r32(shape + 4) != 0 {
-                let clut = lh(&mut c.m, shape + 4);
-                r.call_leaving(c, RELEASE_CLUT, &[clut], 0x8001_40b0);
-                let shape = c.m.r32(SHAPES).wrapping_add(at);
-                c.m.w32(shape + 4, 0);
-            }
+pub fn free_help_shape_cluts(c: &mut Cpu) {
+    for k in 0..HELP_SHAPES {
+        let shape = c.m.r32(SHAPES).wrapping_add(k * SHAPE_SIZE);
+        if c.m.r32(shape + SHAPE_CLUT) != 0 {
+            let clut = c.m.r16(shape + SHAPE_CLUT) as i16 as i32 as u32;
+            call(c, RELEASE_CLUT, &[clut]);
+            let shape = c.m.r32(SHAPES).wrapping_add(k * SHAPE_SIZE);
+            c.m.w32(shape + SHAPE_CLUT, 0);
         }
-    })
+    }
+}
+
+pub fn abi_free_help_shape_cluts(c: &mut Cpu) {
+    free_help_shape_cluts(c);
 }
 
 /// `tFEApplication::RunFrontEnd` (FEAPP.CPP, 0x8001585c): the main loop from the main menu.
+pub fn run_front_end(c: &mut Cpu, this: FEApplication) -> u32 {
+    let main = Menu(c.m.r32(MENU_DEFS).wrapping_add(MAIN_MENU));
+    main_loop(c, this, main)
+}
+
 pub fn abi_run_front_end(c: &mut Cpu) {
-    let this = c.r[4];
-    let main = c.m.r32(FE_MENUS).wrapping_add(MAIN_MENU);
-    abi::frame(c, 24, |c, _| {
-        c.r[2] = Saved::of(c).enter_leaving(c, 0x8001_43c8, 0x8001_5874, |c| main_loop(c, this, main));
-    })
+    c.r[2] = run_front_end(c, FEApplication(c.r[4]));
 }
 
-/// A menu's or screen's virtual call: `obj`'s method at `slot` (its vptr at `vptr`) with `args`
-/// after the object, returning to `ra`.
-fn vcall(c: &mut Cpu, r: &Saved, obj: u32, vptr: u32, slot: u32, args: &[u32], ra: u32) -> u32 {
-    let (this, f) = method(&mut c.m, obj, vptr, slot);
-    let mut a = vec![this];
-    a.extend_from_slice(args);
-    r.call_ptr_leaving(c, f, &a, ra)
-}
-
-/// A screen's virtual `Initialize` and `ProcessInput`; a menu's `Initialize`, `TransitionOn`,
-/// key mask and `ProcessInput`.
-const SCREEN_INITIALIZE: u32 = 48;
-const SCREEN_PROCESS_INPUT: u32 = 72;
-const SCREEN_TRANSITION_IS_FINISHED: u32 = 64;
-const MENU_INITIALIZE: u32 = 16;
-const MENU_TRANSITION_ON: u32 = 48;
-const MENU_KEY_MASK: u32 = 32;
-const MENU_PROCESS_INPUT: u32 = 24;
-const DIALOG_PROCESS_INPUT: u32 = 72;
-
-/// The memory left (`largestunused`, kept at 0x800519a0); `memset`; the race's start
-/// (`GameSetup_gData + 0x24`: 0 a race, 2 quit).
+/// The memory left (`largestunused`, kept at 0x800519a0). The race's start (`GameSetup_gData + 0x24`: 0 a race, 2 quit).
 const LARGEST_UNUSED: fn(&mut Cpu) = nfs4rc::f_800e5e70;
 const MEMORY_LEFT: u32 = 0x8005_19A0;
-const MEMSET: fn(&mut Cpu) = nfs4rc::f_800e4f04;
 const GAME_START: u32 = 0x8011_44C8;
-/// The commands' jump table (a menu command's type, 1..8) and its targets: to a menu (pushed
-/// on the stack), to a menu (the stack emptied), to the second player's menu, back, a race,
-/// the two players' race (pink slips saved first), a race, quit.
-const COMMANDS: u32 = 0x8001_0070;
-const GO_TO_PUSH: u32 = 0x8001_4D60;
-const GO_TO_RESET: u32 = 0x8001_4DB8;
-const GO_TO_SECOND: u32 = 0x8001_4DF8;
-const BACK: u32 = 0x8001_4E88;
-const RACE: u32 = 0x8001_5398;
-const TWO_PLAYERS: u32 = 0x8001_51F4;
-const QUIT: u32 = 0x8001_54A0;
-/// The race type (`frontEnd + 4`: 6 pink slips), whether the player's car is from the garage
-/// (`+298`), the cars chosen (stock `+92`, garage `+291`, pink slips `+293`), the car manager;
-/// the pink slips' saving (its dialogs, the second card's message, `PlayerName`), the
-/// memory card's start and end (0x800347d4, 0x80034938).
+/// The players' keys: `FEInput_GetKeyFromPlayer`; a key repeats after 16 ticks.
+const GET_KEY_FROM_PLAYER: u32 = 0x8002_3CA8;
+const KEY_REPEAT: u32 = 16;
+/// Whether two players are racing (`frontEnd + 3`); the race type (`+4`: 6 pink slips), whether
+/// the player's car is from the garage (`+298`); the cars chosen (stock `+92`, garage `+291`,
+/// pink slips `+293`, one byte for each player); the car manager and its cars (`GetStockCar`,
+/// `GetGarageCar`, `GetPinkSlipsCar`).
+const TWO_PLAYERS: u32 = FRONT_END + 3;
 const RACE_TYPE: u32 = FRONT_END + 4;
 const PINK_SLIPS: u32 = 6;
+const GARAGE_CAR: u32 = FRONT_END + 298;
+const STOCK_CARS: u32 = FRONT_END + 92;
+const GARAGE_CARS: u32 = FRONT_END + 291;
+const PINK_SLIPS_CARS: u32 = FRONT_END + 293;
 const CAR_MANAGER: u32 = 0x8011_552C;
+const GET_STOCK_CAR: u32 = 0x8001_6FD8;
+const GET_GARAGE_CAR: u32 = 0x8001_7094;
+const GET_PINK_SLIPS_CAR: u32 = 0x8001_71A0;
+/// The pink slips' saving: a car saved with its dialogs, the second card's player's name; the
+/// memory cards' start and end; the texts (saving to the first card and the second, the other
+/// player's card).
 const SAVE_PINK_SLIPS: fn(&mut Cpu) = crate::fememcard::save_pink_slips_with_dialogs_entry;
 const PLAYER_NAME: fn(&mut Cpu) = crate::front::player_name_entry;
 const CARD_START: fn(&mut Cpu) = crate::fememcard::init_memcard_entry;
 const CARD_END: fn(&mut Cpu) = crate::fememcard::deinit_memcard_entry;
-const RUN_DEMO_VIDEO: fn(&mut Cpu) = run_demo_video_entry;
+const SAVING_TEXT: u32 = 662;
+const OTHER_CARD_TEXT: u32 = 664;
 /// The front end idle this long (ticks) runs the demo video.
 const IDLE: i32 = 3840;
+/// A menu's flags choosing whose keys it takes: both players' (also with two players racing,
+/// unless it takes only its own player's); the player who pressed a key last; the first's; the
+/// second's.
+const MENU_BOTH_PLAYERS_KEYS: u32 = 0x10;
+const MENU_OWN_PLAYERS_KEYS: u32 = 0x08;
+const MENU_INPUT_PLAYERS_KEYS: u32 = 0x20;
+const MENU_FIRST_PLAYERS_KEYS: u32 = 0x40;
+const MENU_SECOND_PLAYERS_KEYS: u32 = 0x80;
 
-/// `tFEApplication::MainLoop` (FEAPP.CPP, 0x800143c8): the front end from `first`: each frame,
-/// for each player, the next menu taken when the one going off is done (or the screen's), the
-/// second player's menu gone when the first's comes back, the next screen when the one going
-/// off is done (cleaned up, the next initialised, coming on); the player's key (the help
-/// dialog hidden by help; the top dialog's, the screen's, the menu's input), its command; the
-/// frame drawn; the demo after a minute idle. Returns 0 for a race, 2 to quit.
-pub fn main_loop(c: &mut Cpu, this: u32, first: u32) -> u32 {
-    abi::frame(c, 408, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        r.0[0] = first;
-        let (stamps, commands, keys) = (sp + 16, sp + 104, sp + 120);
-        let (depth_at, push_at, draw_at, frame_at, active_at, mask_at, keys_at) = (sp + 336, sp + 344, sp + 348, sp + 352, sp + 356, sp + 360, sp + 364);
-        c.m.w16(depth_at, u16::MAX);
-        c.m.w32(push_at, 0);
-        r.call_leaving(c, MEMSET, &[stamps, 0, 8], 0x8001_4418);
-        c.m.w8(this + 557, 0);
-        r.enter_leaving(c, 0x8001_338c, 0x8001_4424, abi_perform_menu_initialization);
-        let ticks = c.m.r32(GAME_TICKS);
-        c.m.w32(active_at, ticks);
-        c.m.w32(FLIP, 0);
-        c.m.w8(this + PLAYER, 0);
-        loop {
-            let p = c.m.r8(this + PLAYER) as u32;
-            for f in [324, MENUS, SCREENS, 20, 28, OVERLAID, 332, LEAVING] {
-                let p = c.m.r8(this + PLAYER) as u32;
-                c.m.w32(of(this, f, p), 0);
-            }
-            let next = (p + 1) as u8;
-            c.m.w8(this + PLAYER, next);
-            if next >= 2 {
-                break;
-            }
+/// `MainLoop`'s locals the game takes by address: each player's command (8 bytes) and key, the
+/// car raced (a `tCarInfo`), the pink slips' message.
+#[derive(Clone, Copy)]
+struct Locals(u32);
+
+impl Locals {
+    const SIZE: u32 = 512;
+
+    fn command(self, k: u32) -> MenuCommand {
+        MenuCommand(self.0 + 8 * k)
+    }
+
+    fn key(self, k: u32) -> u32 {
+        self.0 + 16 + 4 * k
+    }
+
+    fn car(self) -> CarInfo {
+        CarInfo(self.0 + 24)
+    }
+
+    fn text(self) -> u32 {
+        self.0 + 24 + ((CarInfo::SIZE + 7) & !7)
+    }
+}
+
+/// What `MainLoop` keeps from frame to frame.
+struct Loop {
+    this: FEApplication,
+    locals: Locals,
+    /// When each player's key was last taken.
+    key_times: [u32; 2],
+    /// The first player's back depth when the second player's menu came up beside it (-1: none
+    /// up).
+    second_depth: i16,
+    /// The second player's menu to come up once the first's is on.
+    second_pending: bool,
+    /// Whether the frame is drawn.
+    draw: bool,
+    /// The frame's start, and the last time a player did something.
+    frame_start: u32,
+    last_active: u32,
+}
+
+/// `tFEApplication::MainLoop` (FEAPP.CPP, 0x800143c8): the front end from `first`. Each frame,
+/// for each player: the next menu, once the one going off is done; the second player's menu
+/// gone once it is off; the next screen, once the one going off is done; the keys of the
+/// players the menu listens to, and their commands. Then the frame is drawn, and the demo video
+/// runs after a minute idle. Returns 0 for a race, 2 to quit.
+pub fn main_loop(c: &mut Cpu, this: FEApplication, first: Menu) -> u32 {
+    with_buffer(c, Locals::SIZE, |c, at| {
+        let mut s = Loop {
+            this,
+            locals: Locals(at),
+            key_times: [0; 2],
+            second_depth: -1,
+            second_pending: false,
+            draw: false,
+            frame_start: 0,
+            last_active: 0,
+        };
+        this.set_input_player(&mut c.m, 0);
+        perform_menu_initialization(c, this);
+        let m = &mut c.m;
+        s.last_active = m.r32(GAME_TICKS);
+        m.w32(FLIP, 0);
+        for p in 0..2 {
+            this.set_back_depth(m, p, 0);
+            this.set_current_menu(m, p, Menu(0));
+            this.set_current_screen(m, p, Screen(0));
+            this.set_transition_to_menu(m, p, Menu(0));
+            this.set_transition_to_screen(m, p, Screen(0));
+            this.set_waiting_for_other_player(m, p, 0);
+            this.set_last_key_pressed(m, p, 0);
+            this.set_parent_menu(m, p, Menu(0));
         }
-        r.enter_leaving(c, 0x8001_3ef4, 0x8001_450c, |c| set_menu(c, this, 0, first));
-        r.0[7] = commands;
-        let player = |m: &mut Mem| m.r8(this + PLAYER) as u32;
+        this.set_player(m, 2);
+        set_menu(c, this, 0, first);
         loop {
-            let ticks = c.m.r32(GAME_TICKS);
-            c.m.w32(draw_at, 1);
-            c.m.w32(keys_at, keys);
-            c.m.w32(frame_at, ticks);
-            c.m.w8(this + PLAYER, 0);
-            while player(&mut c.m) < 2 {
-                let p = player(&mut c.m);
-                let at = of(this, 0, p);
-                // the next menu, once the one going off is done
-                if c.m.r32(at + 20) != 0 {
-                    let now = c.m.r32(at + MENUS);
-                    r.0[0] = 0;
-                    let mut ready = true;
-                    if now != 0 {
-                        if vcall(c, &r, now, MENU_VPTR, MENU_IN_TRANSITION, &[], 0x8001_4590) != 0 {
-                            let screen = current(&mut c.m, this, SCREENS);
-                            if screen != 0 {
-                                let v = vcall(c, &r, screen, SCREEN_VPTR, SCREEN_TRANSITION_IS_FINISHED, &[], 0x8001_45d4);
-                                r.0[0] = (v != 0) as u32;
-                            }
-                        }
-                        ready = r.0[0] != 0;
-                        if ready {
-                            let now = current(&mut c.m, this, MENUS);
-                            r.0[0] = 0;
-                            if now != 0 {
-                                r.0[0] = vcall(c, &r, now, MENU_VPTR, MENU_TRANSITION_IS_FINISHED, &[], 0x8001_461c);
-                            }
-                        }
-                    }
-                    if ready {
-                        let p = player(&mut c.m);
-                        let next = c.m.r32(of(this, 20, p));
-                        let finished = vcall(c, &r, next, MENU_VPTR, MENU_TRANSITION_IS_FINISHED, &[], 0x8001_4654);
-                        let p = player(&mut c.m);
-                        let leaving = if finished != 0 { c.m.r32(of(this, MENUS, p)) } else { 0 };
-                        c.m.w32(of(this, LEAVING, p), leaving);
-                        let p = player(&mut c.m);
-                        let next = c.m.r32(of(this, 20, p));
-                        c.m.w32(of(this, MENUS, p), next);
-                        let p = player(&mut c.m);
-                        let menu = c.m.r32(of(this, MENUS, p));
-                        vcall(c, &r, menu, MENU_VPTR, MENU_INITIALIZE, &[], 0x8001_46dc);
-                        let p = player(&mut c.m);
-                        c.m.w32(of(this, 20, p), 0);
-                        if r.0[0] != 0 && c.m.r32(this + 28) == 0 {
-                            let at = of(this, 324, p);
-                            let depth = c.m.r32(at).wrapping_sub(1);
-                            c.m.w32(draw_at, 0);
-                            c.m.w32(at, depth);
-                        } else {
-                            let menu = c.m.r32(of(this, MENUS, p));
-                            vcall(c, &r, menu, MENU_VPTR, MENU_TRANSITION_ON, &[], 0x8001_475c);
-                            if c.m.r32(push_at) != 0 {
-                                let menu = current(&mut c.m, this, MENUS);
-                                let second = c.m.r32(menu + 88);
-                                c.m.w32(push_at, 0);
-                                r.enter_leaving(c, 0x8001_3ef4, 0x8001_4794, |c| set_menu(c, this, 1, second));
-                            }
-                        }
-                        let ticks = c.m.r32(GAME_TICKS);
-                        c.m.w32(active_at, ticks);
-                    }
+            s.draw = true;
+            s.frame_start = c.m.r32(GAME_TICKS);
+            this.set_player(&mut c.m, 0);
+            while player(&mut c.m, this) < 2 {
+                next_menu(c, &mut s);
+                if player(&mut c.m, this) == 1 {
+                    second_menu_gone(c, &s);
                 }
-                // the second player's menu gone when the first's has come back
-                if player(&mut c.m) == 1 {
-                    let menu = c.m.r32(this + MENUS + 4);
-                    if menu != 0
-                        && vcall(c, &r, menu, MENU_VPTR, MENU_IN_TRANSITION, &[], 0x8001_47e8) != 0
-                        && (c.m.r16(depth_at) as i16) < 0
-                    {
-                        let leaving = current(&mut c.m, this, LEAVING);
-                        if leaving == 0 || vcall(c, &r, leaving, MENU_VPTR, MENU_IN_TRANSITION, &[], 0x8001_4840) != 0 {
-                            let p = player(&mut c.m);
-                            c.m.w32(of(this, MENUS, p), 0);
-                            let p = player(&mut c.m);
-                            let screen = c.m.r32(of(this, SCREENS, p));
-                            if screen != 0 {
-                                vcall(c, &r, screen, SCREEN_VPTR, SCREEN_CLEANUP, &[], 0x8001_4898);
-                            }
-                            let p = player(&mut c.m);
-                            c.m.w32(of(this, SCREENS, p), 0);
-                        }
-                    }
+                next_screen(c, this);
+                if let Some(result) = input(c, &mut s) {
+                    return result;
                 }
-                // the next screen, once the one going off is done
-                let p = player(&mut c.m);
-                let at = of(this, 0, p);
-                if c.m.r32(at + 28) != 0 {
-                    let screen = c.m.r32(at + SCREENS);
-                    let mut take = true;
-                    if screen != 0 {
-                        take = vcall(c, &r, screen, SCREEN_VPTR, SCREEN_TRANSITION_IS_FINISHED, &[], 0x8001_48f8) != 0;
-                        if take {
-                            let at = of(this, 0, player(&mut c.m));
-                            take = c.m.r32(at + 20) == 0;
-                            let screen = c.m.r32(at + SCREENS);
-                            if take && screen != 0 {
-                                vcall(c, &r, screen, SCREEN_VPTR, SCREEN_CLEANUP, &[], 0x8001_494c);
-                            }
-                        }
-                    }
-                    if take {
-                        let p = player(&mut c.m);
-                        let next = c.m.r32(of(this, 28, p));
-                        c.m.w32(of(this, SCREENS, p), next);
-                        let left = r.call_leaving(c, LARGEST_UNUSED, &[], 0x8001_4968);
-                        c.m.w32(MEMORY_LEFT, left);
-                        let screen = current(&mut c.m, this, SCREENS);
-                        vcall(c, &r, screen, SCREEN_VPTR, SCREEN_INITIALIZE, &[], 0x8001_49a4);
-                        let p = player(&mut c.m);
-                        c.m.w32(of(this, 28, p), 0);
-                        let screen = current(&mut c.m, this, SCREENS);
-                        port(c, &r, 0x8002_6844, 0x8001_49d4, &[screen, 2, 0], crate::fescreen::abi_transition_on);
-                    }
-                }
-                // the player's keys and command
-                let menu = current(&mut c.m, this, MENUS);
-                if menu != 0 {
-                    let flags = c.m.r32(menu);
-                    r.0[8] = player(&mut c.m);
-                    r.0[1] = r.0[8];
-                    let both = flags & 0x10 != 0 || (c.m.r8(FRONT_END + 3) == 1 && flags & 8 == 0);
-                    if both {
-                        r.0[1] = 0;
-                        r.0[8] = 1;
-                    }
-                    let menu = current(&mut c.m, this, MENUS);
-                    let flags = c.m.r32(menu);
-                    if flags & 0x20 != 0 {
-                        r.0[8] = c.m.r8(this + 557) as u32;
-                        r.0[1] = r.0[8];
-                    }
-                    if flags & 0x40 != 0 {
-                        r.0[8] = 0;
-                        r.0[1] = 0;
-                    }
-                    if flags & 0x80 != 0 {
-                        r.0[8] = 1;
-                        r.0[1] = 1;
-                    }
-                    r.0[0] = 0;
-                    if vcall(c, &r, menu, MENU_VPTR, MENU_IN_TRANSITION, &[], 0x8001_4abc) != 0 {
-                        let screen = current(&mut c.m, this, SCREENS);
-                        if screen != 0 {
-                            let v = vcall(c, &r, screen, SCREEN_VPTR, SCREEN_TRANSITION_IS_FINISHED, &[], 0x8001_4b00);
-                            r.0[0] = (v != 0) as u32;
-                        }
-                    }
-                    r.0[6] = r.0[1];
-                    if r.0[0] != 0 {
-                        let menu = current(&mut c.m, this, MENUS);
-                        let mask = vcall(c, &r, menu, MENU_VPTR, MENU_KEY_MASK, &[], 0x8001_4b40);
-                        c.m.w32(mask_at, mask);
-                        if let Some(code) = run_keys(c, &mut r, this, sp) {
-                            return code;
-                        }
-                    }
-                }
-                let next = (player(&mut c.m) + 1) as u8;
-                c.m.w8(this + PLAYER, next);
+                let p = player(&mut c.m, this);
+                this.set_player(&mut c.m, (p + 1) as i8);
             }
-            if c.m.r32(draw_at) != 0 {
-                r.call_ptr_leaving(c, REDRAW, &[this], 0x8001_54f0);
+            if s.draw {
+                call_addr(c, REDRAW, &[this.0]);
             }
-            let idle = c.m.r32(frame_at).wrapping_sub(c.m.r32(active_at)) as i32;
-            if idle > IDLE {
-                r.call_leaving(c, RUN_DEMO_VIDEO, &[this], 0x8001_5514);
-                let ticks = c.m.r32(GAME_TICKS);
-                c.m.w32(active_at, ticks);
+            if s.frame_start.wrapping_sub(s.last_active) as i32 > IDLE {
+                run_demo_video(c, this);
+                s.last_active = c.m.r32(GAME_TICKS);
             }
         }
     })
 }
 
 pub fn abi_main_loop(c: &mut Cpu) {
-    c.r[2] = main_loop(c, c.r[4], c.r[5]);
+    c.r[2] = main_loop(c, FEApplication(c.r[4]), Menu(c.r[5]));
 }
 
-/// `MainLoop`'s keys (from the first player its menu's flags allow to the last) and their
-/// commands for the player being run: `Some` the loop's result when a race starts or the front
-/// end is quit.
-fn run_keys(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> Option<u32> {
-    let (stamps, commands) = (sp + 16, sp + 104);
-    let (depth_at, push_at, frame_at, active_at, mask_at, keys_at) = (sp + 336, sp + 344, sp + 352, sp + 356, sp + 360, sp + 364);
-    let player = |m: &mut Mem| m.r8(this + PLAYER) as u32;
-    loop {
-        let k = sx(r.0[6]);
-        r.0[0] = k;
-        if (r.0[8] as i32) < (k as i32) {
-            return None;
-        }
-        // the key
-        c.m.w32(commands.wrapping_add(k << 3), 0);
-        let mask = c.m.r32(mask_at);
-        let key = r.enter_leaving(c, 0x8002_3ca8, 0x8001_4b6c, |c| crate::feinput::get_key_from_player(c, k, mask));
-        let keys = c.m.r32(keys_at);
-        let at = keys.wrapping_add(k << 2);
-        c.m.w32(at, key);
-        if key != 0 {
-            c.m.w8(this + 557, r.0[6] as u8);
-        }
-        let elapsed = c.m.r32(GAME_TICKS).wrapping_sub(c.m.r32(stamps.wrapping_add(k << 2)));
-        if elapsed >= 16 || mask & c.m.r32(at) == 0 {
-            let v = c.m.r32(at);
-            c.m.w32(this.wrapping_add(k << 2).wrapping_add(332), v);
-        }
-        let off = sx(r.0[6]) << 2;
-        r.0[0] = off;
-        let key_at = c.m.r32(keys_at).wrapping_add(off);
-        r.0[1] = key_at;
-        if c.m.r32(key_at) != 0 {
-            let top = port(c, r, 0x8001_8970, 0x8001_4bf4, &[], crate::fedialog::abi_get_top_most_dialog);
-            let now = c.m.r32(frame_at);
-            r.0[0] = top;
-            c.m.w32(active_at, now);
-            c.m.w32(stamps.wrapping_add(off), now);
-            let help = this + HELP;
-            if c.m.r32(key_at) == 4 && c.m.r32(help + 112) != 0 {
-                c.m.w32(key_at, 1);
-                r.call_ptr_leaving(c, 0x8001_8a44, &[help], 0x8001_4c30);
-            }
-            let k = sx(r.0[6]);
-            let (key, cmd) = (c.m.r32(keys_at).wrapping_add(k << 2), commands.wrapping_add(k << 3));
-            if top != 0 && c.m.r32(key) != 4 {
-                vcall(c, r, top, SCREEN_VPTR, DIALOG_PROCESS_INPUT, &[k, key, cmd], 0x8001_4c74);
-            }
-            let screen = current(&mut c.m, this, SCREENS);
-            if screen != 0 {
-                let key = c.m.r32(keys_at).wrapping_add(k << 2);
-                vcall(c, r, screen, SCREEN_VPTR, SCREEN_PROCESS_INPUT, &[k, key, cmd], 0x8001_4cc4);
-            }
-            let key = c.m.r32(keys_at).wrapping_add(k << 2);
-            if c.m.r32(key) != 1 {
-                let menu = current(&mut c.m, this, MENUS);
-                vcall(c, r, menu, MENU_VPTR, MENU_PROCESS_INPUT, &[k, key, cmd], 0x8001_4d1c);
-            }
-        }
-        // its command
-        let cmd = commands.wrapping_add(sx(r.0[6]) << 3);
-        let kind = c.m.r32(cmd).wrapping_sub(1);
-        let target = if kind < 8 { c.m.r32(COMMANDS + 4 * kind) } else { 0 };
-        let p = player(&mut c.m);
-        let push = |c: &mut Cpu, p: u32| {
-            let m = &mut c.m;
-            let depth = m.r32(of(this, 324, p));
-            let menu = m.r32(of(this, MENUS, p));
-            m.w32(this.wrapping_add((depth << 2).wrapping_add(p << 6)).wrapping_add(196), menu);
+/// `MainLoop`'s next menu for the player, once the menu now is done going off (and its screen),
+/// or at once with none. A sub-menu leaving without a new screen leaves the back stack one
+/// shorter and the frame undrawn; otherwise the next menu comes on (with the second player's
+/// beside it, when one is pending). The new menu's parent is the old one when it is a sub-menu.
+fn next_menu(c: &mut Cpu, s: &mut Loop) {
+    let this = s.this;
+    let p = player(&mut c.m, this);
+    if this.transition_to_menu(&mut c.m, p).0 == 0 {
+        return;
+    }
+    let now = this.current_menu(&mut c.m, p);
+    let mut sub = false;
+    if now.0 != 0 {
+        let off = menu_fn(c, now, MENU_TRANSITION_IS_FINISHED) != 0 && {
+            let screen = current_screen(&mut c.m, this);
+            screen.0 != 0 && screen_fn(c, screen, SCREEN_TRANSITION_IS_FINISHED) != 0
         };
-        match target {
-            GO_TO_PUSH | GO_TO_RESET => {
-                let ra = if target == GO_TO_PUSH { 0x8001_4d68 } else { 0x8001_4dc0 };
-                r.call_leaving(c, PLAY_FE_SFX, &[0], ra);
-                let p = player(&mut c.m);
-                if target == GO_TO_PUSH {
-                    push(c, p);
-                    let p = player(&mut c.m);
-                    let v = c.m.r32(of(this, 324, p)).wrapping_add(1);
-                    c.m.w32(of(this, 324, p), v);
-                } else {
-                    c.m.w32(of(this, 324, p), 0);
-                }
-                let p = player(&mut c.m);
-                let menu = c.m.r32(cmd + 4);
-                r.enter_leaving(c, 0x8001_3ef4, 0x8001_4df0, |c| set_menu(c, this, p, menu));
-            }
-            GO_TO_SECOND => {
-                r.call_leaving(c, PLAY_FE_SFX, &[0], 0x8001_4e00);
-                let p = player(&mut c.m);
-                push(c, p);
-                let p = player(&mut c.m);
-                c.m.w32(push_at, 1);
-                let v = c.m.r32(of(this, 324, p)).wrapping_add(1);
-                c.m.w32(of(this, 324, p), v);
-                let (p, menu) = (player(&mut c.m), c.m.r32(cmd + 4));
-                let depth = c.m.r16(of(this, 324, p));
-                c.m.w16(depth_at, depth);
-                r.enter_leaving(c, 0x8001_3ef4, 0x8001_4e80, |c| set_menu(c, this, p, menu));
-                c.m.w32(this + 328, 0);
-            }
-            BACK => back(c, r, this, sp),
-            TWO_PLAYERS => {
-                let other = of(this, OVERLAID, 1u32.wrapping_sub(p));
-                if c.m.r32(other) == 0 {
-                    c.m.w32(of(this, OVERLAID, p), 1);
-                } else {
-                    c.m.w32(other, 0);
-                    if c.m.r8(RACE_TYPE) as u32 != PINK_SLIPS || !save_pink_slips(c, r, this, sp) {
-                        return Some(start_race(c, r, this, sp));
-                    }
-                }
-            }
-            RACE => return Some(start_race(c, r, this, sp)),
-            QUIT => {
-                c.m.w32(GAME_START, 2);
-                r.enter_leaving(c, 0x8001_33f4, 0x8001_54b4, |c| perform_menu_destruction(c, this));
-                return Some(2);
-            }
-            _ => {}
+        if !off {
+            return;
         }
-        r.0[6] = r.0[6].wrapping_add(1);
+        let now = current_menu(&mut c.m, this);
+        sub = now.0 != 0 && menu_fn(c, now, MENU_IS_SUB_MENU) != 0;
+    }
+    let p = player(&mut c.m, this);
+    let next = this.transition_to_menu(&mut c.m, p);
+    let next_is_sub = menu_fn(c, next, MENU_IS_SUB_MENU) != 0;
+    let m = &mut c.m;
+    let p = player(m, this);
+    let parent = if next_is_sub { this.current_menu(m, p) } else { Menu(0) };
+    this.set_parent_menu(m, p, parent);
+    let next = this.transition_to_menu(m, p);
+    this.set_current_menu(m, p, next);
+    menu_fn(c, next, MENU_INITIALIZE);
+    let m = &mut c.m;
+    let p = player(m, this);
+    this.set_transition_to_menu(m, p, Menu(0));
+    // (the first player's screen checked, whichever player this is: as the original does)
+    if sub && this.transition_to_screen(m, 0).0 == 0 {
+        this.update_back_depth(m, p, |d| d - 1);
+        s.draw = false;
+    } else {
+        let menu = this.current_menu(m, p);
+        menu_fn(c, menu, MENU_TRANSITION_ON);
+        if s.second_pending {
+            let second = current_menu(&mut c.m, this).child_menu(&mut c.m);
+            s.second_pending = false;
+            set_menu(c, this, 1, second);
+        }
+    }
+    s.last_active = c.m.r32(GAME_TICKS);
+}
+
+/// `MainLoop`'s second player's menu gone (and its screen cleaned up) once it is off, when it
+/// is no longer up beside the first's, and its parent is off too.
+fn second_menu_gone(c: &mut Cpu, s: &Loop) {
+    let this = s.this;
+    let menu = this.current_menu(&mut c.m, 1);
+    if menu.0 == 0 || menu_fn(c, menu, MENU_TRANSITION_IS_FINISHED) == 0 || s.second_depth >= 0 {
+        return;
+    }
+    let parent = current_parent(&mut c.m, this);
+    if parent.0 != 0 && menu_fn(c, parent, MENU_TRANSITION_IS_FINISHED) == 0 {
+        return;
+    }
+    let p = player(&mut c.m, this);
+    this.set_current_menu(&mut c.m, p, Menu(0));
+    let screen = current_screen(&mut c.m, this);
+    if screen.0 != 0 {
+        screen_fn(c, screen, SCREEN_CLEANUP);
+    }
+    let p = player(&mut c.m, this);
+    this.set_current_screen(&mut c.m, p, Screen(0));
+}
+
+/// `MainLoop`'s next screen for the player, once the screen now is done going off (cleaned up,
+/// unless a menu is still to come), or at once with none: initialised (the memory left noted
+/// first) and coming on.
+fn next_screen(c: &mut Cpu, this: FEApplication) {
+    let p = player(&mut c.m, this);
+    if this.transition_to_screen(&mut c.m, p).0 == 0 {
+        return;
+    }
+    let now = this.current_screen(&mut c.m, p);
+    if now.0 != 0 {
+        if screen_fn(c, now, SCREEN_TRANSITION_IS_FINISHED) == 0 {
+            return;
+        }
+        let p = player(&mut c.m, this);
+        if this.transition_to_menu(&mut c.m, p).0 != 0 {
+            return;
+        }
+        let now = this.current_screen(&mut c.m, p);
+        if now.0 != 0 {
+            screen_fn(c, now, SCREEN_CLEANUP);
+        }
+    }
+    let p = player(&mut c.m, this);
+    let next = this.transition_to_screen(&mut c.m, p);
+    this.set_current_screen(&mut c.m, p, next);
+    let left = call(c, LARGEST_UNUSED, &[]);
+    c.m.w32(MEMORY_LEFT, left);
+    let screen = current_screen(&mut c.m, this);
+    screen_fn(c, screen, SCREEN_INITIALIZE);
+    let p = player(&mut c.m, this);
+    this.set_transition_to_screen(&mut c.m, p, Screen(0));
+    let screen = current_screen(&mut c.m, this);
+    call_addr(c, SCREEN_TRANSITION_ON, &[screen.0, TRANSITION, 0]);
+}
+
+/// `MainLoop`'s input for the player, once its menu and screen are on: the keys of the players
+/// the menu's flags choose, from the first to the last, and their commands. `Some` the loop's
+/// result when a race starts or the front end is quit.
+fn input(c: &mut Cpu, s: &mut Loop) -> Option<u32> {
+    let this = s.this;
+    let menu = current_menu(&mut c.m, this);
+    if menu.0 == 0 {
+        return None;
+    }
+    let m = &mut c.m;
+    let flags = menu.flags(m);
+    let p = player(m, this);
+    let (mut first, mut last) = (p, p);
+    if flags & MENU_BOTH_PLAYERS_KEYS != 0 || (m.r8(TWO_PLAYERS) == 1 && flags & MENU_OWN_PLAYERS_KEYS == 0) {
+        (first, last) = (0, 1);
+    }
+    if flags & MENU_INPUT_PLAYERS_KEYS != 0 {
+        let k = this.input_player(m) as u8 as u32;
+        (first, last) = (k, k);
+    }
+    if flags & MENU_FIRST_PLAYERS_KEYS != 0 {
+        (first, last) = (0, 0);
+    }
+    if flags & MENU_SECOND_PLAYERS_KEYS != 0 {
+        (first, last) = (1, 1);
+    }
+    let on = menu_fn(c, menu, MENU_TRANSITION_IS_FINISHED) != 0 && {
+        let screen = current_screen(&mut c.m, this);
+        screen.0 != 0 && screen_fn(c, screen, SCREEN_TRANSITION_IS_FINISHED) != 0
+    };
+    if !on {
+        return None;
+    }
+    let menu = current_menu(&mut c.m, this);
+    let debounced = menu_fn(c, menu, MENU_DEBOUNCE_KEYS);
+    for k in first..=last {
+        key(c, s, k, debounced);
+        if let Some(result) = command(c, s, k) {
+            return Some(result);
+        }
+    }
+    None
+}
+
+/// Player `k`'s key (those in `debounced` only when pressed again), handed to the help (help
+/// hides it), the top-most dialog, the screen and the menu, which may leave a command.
+fn key(c: &mut Cpu, s: &mut Loop, k: u32, debounced: u32) {
+    let (this, l) = (s.this, s.locals);
+    l.command(k).set_type_(&mut c.m, 0);
+    let key = call_addr(c, GET_KEY_FROM_PLAYER, &[k, debounced]);
+    let m = &mut c.m;
+    let at = l.key(k);
+    m.w32(at, key);
+    if key != 0 {
+        this.set_input_player(m, k as i8);
+    }
+    // the last key, unless a debounced one held down
+    if m.r32(GAME_TICKS).wrapping_sub(s.key_times[k as usize]) >= KEY_REPEAT || debounced & m.r32(at) == 0 {
+        let key = m.r32(at);
+        this.set_last_key_pressed(m, k, key as i32);
+    }
+    if m.r32(at) == 0 {
+        return;
+    }
+    let top = call_addr(c, GET_TOP_MOST_DIALOG, &[]);
+    s.last_active = s.frame_start;
+    s.key_times[k as usize] = s.frame_start;
+    let help = this.help_popup();
+    if c.m.r32(at) == KEY_HELP && help.currently_on(&mut c.m) != 0 {
+        c.m.w32(at, KEY_NONE);
+        call_addr(c, HIDE, &[help.0]);
+    }
+    let command = l.command(k).0;
+    if top != 0 && c.m.r32(at) != KEY_HELP {
+        call_virtual(c, top, SCREEN_VPTR, SCREEN_PROCESS_INPUT, &[k, at, command]);
+    }
+    let screen = current_screen(&mut c.m, this);
+    if screen.0 != 0 {
+        call_virtual(c, screen.0, SCREEN_VPTR, SCREEN_PROCESS_INPUT, &[k, at, command]);
+    }
+    if c.m.r32(at) != KEY_NONE {
+        let menu = current_menu(&mut c.m, this);
+        call_virtual(c, menu.0, MENU_VPTR, MENU_PROCESS_INPUT, &[k, at, command]);
     }
 }
 
-/// `MainLoop`'s back: off the second player's options (its menus going off) or one menu back
-/// down the player's stack, with a sound (the second player with none left: just the sound);
-/// the players' overlaid menus put away first.
-fn back(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) {
-    let depth_at = sp + 336;
-    let player = |m: &mut Mem| m.r8(this + PLAYER) as u32;
-    let depth = |m: &mut Mem| m.r16(depth_at) as i16 as i32;
-    let p = player(&mut c.m);
+/// The current menu of the player pushed on its back stack.
+fn push(m: &mut Mem, this: FEApplication, p: u32) {
+    let depth = this.back_depth(m, p) as u32;
+    let menu = this.current_menu(m, p);
+    this.set_back_list(m, 16 * p + depth, menu);
+}
+
+/// Player `k`'s command, run for the player being run: `Some` the loop's result when a race
+/// starts or the front end is quit.
+fn command(c: &mut Cpu, s: &mut Loop, k: u32) -> Option<u32> {
+    let (this, command) = (s.this, s.locals.command(k));
+    let p = player(&mut c.m, this);
+    let kind = command.type_(&mut c.m) as u32;
+    match kind {
+        COMMAND_GO_TO | COMMAND_GO_TO_RESET => {
+            call(c, PLAY_FE_SFX, &[SOUND_ACCEPT]);
+            let m = &mut c.m;
+            let p = player(m, this);
+            if kind == COMMAND_GO_TO {
+                push(m, this, p);
+                this.update_back_depth(m, p, |d| d + 1);
+            } else {
+                this.set_back_depth(m, p, 0);
+            }
+            let next = command.next_menu(m);
+            set_menu(c, this, p, next);
+        }
+        COMMAND_GO_TO_WITH_SECOND => {
+            call(c, PLAY_FE_SFX, &[SOUND_ACCEPT]);
+            let m = &mut c.m;
+            let p = player(m, this);
+            push(m, this, p);
+            s.second_pending = true;
+            this.update_back_depth(m, p, |d| d + 1);
+            s.second_depth = this.back_depth(m, p) as i16;
+            let next = command.next_menu(m);
+            set_menu(c, this, p, next);
+            this.set_back_depth(&mut c.m, 1, 0);
+        }
+        COMMAND_BACK => back(c, s),
+        COMMAND_RACE_WHEN_BOTH_READY => {
+            let m = &mut c.m;
+            let other = 1 - p;
+            if this.waiting_for_other_player(m, other) == 0 {
+                this.set_waiting_for_other_player(m, p, 1);
+            } else {
+                this.set_waiting_for_other_player(m, other, 0);
+                if m.r8(RACE_TYPE) as u32 != PINK_SLIPS || save_pink_slips(c, this, s.locals.text()) {
+                    return Some(start_race(c, this, s.locals.car()));
+                }
+            }
+        }
+        COMMAND_RACE | COMMAND_RACE_TOO => return Some(start_race(c, this, s.locals.car())),
+        COMMAND_QUIT => {
+            c.m.w32(GAME_START, 2);
+            perform_menu_destruction(c, this);
+            return Some(2);
+        }
+        _ => {}
+    }
+    None
+}
+
+/// `MainLoop`'s back. A player waiting for the other with no menu to go back to stops waiting.
+/// Otherwise both stop waiting, and:
+/// - the first player back where the second player's menu came up: the second's menus and
+///   screen go off;
+/// - the second player at the bottom of its stack: its menus and screen go off, and the first
+///   player goes back to the menu before;
+/// - else the player goes one menu back down its stack (or, the second player with none left,
+///   just the sound).
+fn back(c: &mut Cpu, s: &mut Loop) {
+    let this = s.this;
+    let m = &mut c.m;
+    let p = player(m, this);
     let down = match p {
-        0 => depth(&mut c.m) < c.m.r32(this + 324) as i32,
-        1 => c.m.r32(this + 328) as i32 > 0,
+        0 => (s.second_depth as i32) < this.back_depth(m, 0),
+        1 => this.back_depth(m, 1) > 0,
         _ => false,
     };
     if !down {
-        let p = player(&mut c.m);
-        let at = of(this, OVERLAID, p);
-        if c.m.r32(at) != 0 {
-            c.m.w32(at, 0);
+        if this.waiting_for_other_player(m, p) != 0 {
+            this.set_waiting_for_other_player(m, p, 0);
             return;
         }
-        c.m.w32(of(this, OVERLAID, 1u32.wrapping_sub(p)), 0);
-        let p = player(&mut c.m);
-        c.m.w32(of(this, OVERLAID, p), 0);
+        this.set_waiting_for_other_player(m, 1 - p, 0);
+        this.set_waiting_for_other_player(m, p, 0);
     }
-    let off = |c: &mut Cpu, r: &Saved, at: u32, ra: u32| {
-        let menu = c.m.r32(this + at);
-        if menu != 0 {
-            vcall(c, r, menu, MENU_VPTR, MENU_TRANSITION_OFF, &[], ra);
+    let parents_off = |c: &mut Cpu| {
+        for p in 0..2 {
+            let parent = this.parent_menu(&mut c.m, p);
+            if parent.0 != 0 {
+                menu_fn(c, parent, MENU_TRANSITION_OFF);
+            }
         }
     };
-    let p = player(&mut c.m);
-    if p == 0 && c.m.r32(this + 324) as i32 == depth(&mut c.m) && c.m.r32(this + MENUS + 4) != 0 {
-        // the second player's options going off
-        off(c, r, LEAVING, 0x8001_4fa0);
-        off(c, r, LEAVING + 4, 0x8001_4fcc);
-        let menu = c.m.r32(this + MENUS + 4);
-        c.m.w16(depth_at, u16::MAX);
-        vcall(c, r, menu, MENU_VPTR, MENU_TRANSITION_OFF, &[], 0x8001_4ff4);
-        let screen = c.m.r32(this + SCREENS + 4);
-        port(c, r, 0x8002_6824, 0x8001_5004, &[screen, 2, 0], crate::fescreen::abi_transition_off);
-        c.m.w32(this + 328, 0);
-    } else if player(&mut c.m) == 1 {
-        if c.m.r32(this + 328) as i32 > 0 {
-            back_down(c, r, this);
+    let second_screen_off = |c: &mut Cpu| {
+        let screen = this.current_screen(&mut c.m, 1);
+        call_addr(c, SCREEN_TRANSITION_OFF, &[screen.0, TRANSITION, 0]);
+    };
+    let m = &mut c.m;
+    if p == 0 && this.back_depth(m, 0) == s.second_depth as i32 && this.current_menu(m, 1).0 != 0 {
+        // the second player's menus going off
+        parents_off(c);
+        let menu = this.current_menu(&mut c.m, 1);
+        s.second_depth = -1;
+        menu_fn(c, menu, MENU_TRANSITION_OFF);
+        second_screen_off(c);
+        this.set_back_depth(&mut c.m, 1, 0);
+    } else if player(m, this) == 1 {
+        if this.back_depth(m, 1) > 0 {
+            back_down(c, this);
             return;
         }
-        if c.m.r32(this + MENUS + 4) != 0 {
-            let to = (depth(&mut c.m) - 1) as u32;
-            c.m.w32(this + 324, to);
-            let menu = c.m.r32(this + MENUS + 4);
-            vcall(c, r, menu, MENU_VPTR, MENU_TRANSITION_OFF, &[], 0x8001_5074);
-            off(c, r, LEAVING, 0x8001_50a0);
-            off(c, r, LEAVING + 4, 0x8001_50cc);
-            c.m.w16(depth_at, u16::MAX);
-            let screen = c.m.r32(this + SCREENS + 4);
-            port(c, r, 0x8002_6824, 0x8001_50e4, &[screen, 2, 0], crate::fescreen::abi_transition_off);
-            let depth0 = c.m.r32(this + 324);
-            let menu = c.m.r32(this.wrapping_add(depth0 << 2).wrapping_add(196));
-            r.enter_leaving(c, 0x8001_3ef4, 0x8001_5100, |c| set_menu(c, this, 0, menu));
+        if this.current_menu(m, 1).0 != 0 {
+            // the second player's menus going off, the first player back to the menu before
+            this.set_back_depth(m, 0, s.second_depth as i32 - 1);
+            let menu = this.current_menu(m, 1);
+            menu_fn(c, menu, MENU_TRANSITION_OFF);
+            parents_off(c);
+            s.second_depth = -1;
+            second_screen_off(c);
+            let m = &mut c.m;
+            let depth = this.back_depth(m, 0) as u32;
+            let menu = this.back_list(m, depth);
+            set_menu(c, this, 0, menu);
         }
     }
-    let p = player(&mut c.m);
-    if c.m.r32(of(this, 324, p)) as i32 > 0 {
-        back_down(c, r, this);
+    let m = &mut c.m;
+    let p = player(m, this);
+    if this.back_depth(m, p) > 0 {
+        back_down(c, this);
     } else if p == 1 {
-        r.call_leaving(c, PLAY_FE_SFX, &[1], 0x8001_51ec);
+        call(c, PLAY_FE_SFX, &[SOUND_BACK]);
     }
 }
 
-/// One menu back down the player's stack, with a sound (kept on it when the menu there is
-/// already finished going on).
-fn back_down(c: &mut Cpu, r: &mut Saved, this: u32) {
-    let player = |m: &mut Mem| m.r8(this + PLAYER) as u32;
-    r.call_leaving(c, PLAY_FE_SFX, &[1], 0x8001_5128);
-    let p = player(&mut c.m);
-    let depth = c.m.r32(of(this, 324, p)).wrapping_sub(1);
-    c.m.w32(of(this, 324, p), depth);
-    let p = player(&mut c.m);
-    let depth = c.m.r32(of(this, 324, p));
-    let menu = c.m.r32(this.wrapping_add((depth << 2).wrapping_add(p << 6)).wrapping_add(196));
-    r.enter_leaving(c, 0x8001_3ef4, 0x8001_517c, |c| set_menu(c, this, p, menu));
-    let menu = current(&mut c.m, this, MENUS);
-    if vcall(c, r, menu, MENU_VPTR, MENU_TRANSITION_IS_FINISHED, &[], 0x8001_51b0) != 0 {
-        let p = player(&mut c.m);
-        let v = c.m.r32(of(this, 324, p)).wrapping_add(1);
-        c.m.w32(of(this, 324, p), v);
+/// One menu back down the player's stack, with a sound (the depth kept when the menu gone back
+/// to is a sub-menu).
+fn back_down(c: &mut Cpu, this: FEApplication) {
+    call(c, PLAY_FE_SFX, &[SOUND_BACK]);
+    let m = &mut c.m;
+    let p = player(m, this);
+    this.update_back_depth(m, p, |d| d - 1);
+    let depth = this.back_depth(m, p) as u32;
+    let menu = this.back_list(m, 16 * p + depth);
+    set_menu(c, this, p, menu);
+    let menu = current_menu(&mut c.m, this);
+    if menu_fn(c, menu, MENU_IS_SUB_MENU) != 0 {
+        let p = player(&mut c.m, this);
+        this.update_back_depth(&mut c.m, p, |d| d + 1);
     }
 }
 
-/// The two players' pink slips race: each player's car saved to the card at stake (the second
-/// card's player told by name); whether the saving failed (back to the menus, the music
-/// again).
-fn save_pink_slips(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> bool {
-    r.call_leaving(c, STOP_SONG, &[400], 0x8001_5250);
-    r.call_leaving(c, CARD_START, &[0, 1], 0x8001_525c);
-    r.0[3] = 0;
-    r.0[1] = 0;
-    r.0[4] = 0x8005_0000;
-    let text = sp + 24;
-    r.0[5] = text;
-    while (r.0[1] as i32) < 2 && r.0[3] == 0 {
-        let k = r.0[1];
-        r.0[0] = c.m.r32(FE_APP).wrapping_add(NO_INPUT_MESSAGE);
-        let word = r.call_leaving(c, TEXT_WORD, &[k + 662], 0x8001_528c);
-        let dialog = c.m.r32(FE_APP).wrapping_add(NO_INPUT_MESSAGE);
-        c.m.w32(r.0[0] + 144, word);
-        r.call_ptr_leaving(c, 0x8001_8980, &[dialog], 0x8001_529c);
-        loop {
-            let app = c.m.r32(FE_APP);
-            if c.m.r32(app + 852) == 1 {
-                break;
-            }
-            r.call_ptr_leaving(c, REDRAW, &[app], 0x8001_52c0);
+/// The two players' pink slips race: each player's car saved to the memory card at stake (on
+/// the second card, the first player told by name whose card it is). Whether both were saved;
+/// if not, the music is back on and the front end goes on.
+fn save_pink_slips(c: &mut Cpu, this: FEApplication, text: u32) -> bool {
+    call(c, STOP_SONG, &[400]);
+    call(c, CARD_START, &[0, 1]);
+    let dialog = |m: &mut Mem| FEApplication(m.r32(FE_APP)).no_input_mem_card_dialog();
+    let mut failed = 0;
+    for k in 0..2 {
+        if failed != 0 {
+            break;
         }
-        let car = c.m.r8(FRONT_END + 293 + k) as u32;
-        r.0[3] = r.call_leaving(c, SAVE_PINK_SLIPS, &[sx(k), 0, car], 0x8001_52e4);
-        if r.0[3] != 0 && k == 1 {
-            let format = r.call_leaving(c, TEXT_WORD, &[664], 0x8001_5300);
-            r.0[0] = format;
-            let name = r.call_leaving(c, PLAYER_NAME, &[0], 0x8001_530c);
-            r.call_leaving(c, SPRINTF, &[text, format, name, 1], 0x8001_5320);
+        let word = call(c, TEXT_WORD, &[SAVING_TEXT + k]);
+        dialog(&mut c.m).set_string(&mut c.m, word);
+        let d = dialog(&mut c.m);
+        call_addr(c, DISPLAY, &[d.0]);
+        while dialog(&mut c.m).fully_open(&mut c.m) != 1 {
             let app = c.m.r32(FE_APP);
-            c.m.w32(app + 864, text);
-            r.call_leaving(c, SAVE_PINK_SLIPS, &[0, 1, u32::MAX], 0x8001_5338);
+            call_addr(c, REDRAW, &[app]);
         }
-        r.0[1] = k + 1;
-        let dialog = c.m.r32(FE_APP).wrapping_add(NO_INPUT_MESSAGE);
-        r.call_ptr_leaving(c, 0x8001_8a44, &[dialog], 0x8001_5348);
+        let car = c.m.r8(PINK_SLIPS_CARS + k) as u32;
+        failed = call(c, SAVE_PINK_SLIPS, &[k, 0, car]);
+        if failed != 0 && k == 1 {
+            let format = call(c, TEXT_WORD, &[OTHER_CARD_TEXT]);
+            let name = call(c, PLAYER_NAME, &[0]);
+            call(c, SPRINTF, &[text, format, name, 1]);
+            dialog(&mut c.m).set_string(&mut c.m, text);
+            call(c, SAVE_PINK_SLIPS, &[0, 1, u32::MAX]);
+        }
+        let d = dialog(&mut c.m);
+        call_addr(c, HIDE, &[d.0]);
     }
-    r.call_leaving(c, CARD_END, &[], 0x8001_5358);
-    if r.0[3] == 0 {
-        return false;
+    call(c, CARD_END, &[]);
+    if failed == 0 {
+        return true;
     }
-    r.enter_leaving(c, 0x8001_3e34, 0x8001_5368, |c| update_music(c, this));
+    update_music(c, this);
     let volume = music_volume(&mut c.m);
-    r.call_leaving(c, MUSIC_VOLUME, &[volume], 0x8001_5390);
-    true
+    call(c, MUSIC_VOLUME, &[volume]);
+    false
 }
 
-/// A race started: the player's car (a stock car, the garage's or the pink slips'), its sound,
-/// 256 ticks of the sound going on, the menus' end. Returns 0.
-fn start_race(c: &mut Cpu, r: &mut Saved, this: u32, sp: u32) -> u32 {
-    let car = sp + 128;
-    let p = c.m.r8(this + PLAYER) as u32;
-    if c.m.r8(RACE_TYPE) as u32 == PINK_SLIPS {
-        let k = c.m.r8(FRONT_END + 293 + p) as u32;
-        port(c, r, 0x8001_71a0, 0x8001_5440, &[CAR_MANAGER, k, car, p], crate::fecars::abi_get_pink_slips_car);
-    } else if c.m.r8(FRONT_END + 298) == 0 {
-        let k = c.m.r8(FRONT_END + 92 + p) as u32;
-        port(c, r, 0x8001_6fd8, 0x8001_53e4, &[CAR_MANAGER, k, car], crate::fecars::abi_get_stock_car);
+/// A race started: the player's car got into `car` (the pink slips', a stock car or the
+/// garage's), its engine's sound, 256 ticks for the sound, the menus' end. Returns 0.
+fn start_race(c: &mut Cpu, this: FEApplication, car: CarInfo) -> u32 {
+    let m = &mut c.m;
+    let p = player(m, this);
+    if m.r8(RACE_TYPE) as u32 == PINK_SLIPS {
+        let k = m.r8(PINK_SLIPS_CARS + p) as u32;
+        call_addr(c, GET_PINK_SLIPS_CAR, &[CAR_MANAGER, k, car.0, p]);
+    } else if m.r8(GARAGE_CAR) == 0 {
+        let k = m.r8(STOCK_CARS + p) as u32;
+        call_addr(c, GET_STOCK_CAR, &[CAR_MANAGER, k, car.0]);
     } else {
-        let k = c.m.r8(FRONT_END + 291 + p) as u32;
-        port(c, r, 0x8001_7094, 0x8001_5410, &[CAR_MANAGER, k, car, p], crate::fecars::abi_get_garage_car);
+        let k = m.r8(GARAGE_CARS + p) as u32;
+        call_addr(c, GET_GARAGE_CAR, &[CAR_MANAGER, k, car.0, p]);
     }
-    let sound = c.m.r8(sp + 320) as u32;
+    let sound = car.engine_patch(&mut c.m) as u32;
     if sound != 0 {
-        r.call_leaving(c, PLAY_FE_SFX, &[sound], 0x8001_5458);
+        call(c, PLAY_FE_SFX, &[sound]);
     }
     let from = c.m.r32(GAME_TICKS);
-    r.0[0] = from;
     while c.m.r32(GAME_TICKS).wrapping_sub(from) < 256 {
-        r.call_leaving(c, SYSTEM_TASK, &[0], 0x8001_5484);
+        call(c, SYSTEM_TASK, &[0]);
     }
     c.m.w32(GAME_START, 0);
-    r.enter_leaving(c, 0x8001_33f4, 0x8001_5498, |c| perform_menu_destruction(c, this));
+    perform_menu_destruction(c, this);
     0
 }
 
-/// The memory's largest free block (noted at `MEMORY_FREE`), the demo video's number (the
-/// two alternate), the music's volume setting.
-const LARGEST_FREE: fn(&mut Cpu) = nfs4rc::f_800e5e70;
-const MEMORY_FREE: u32 = 0x8005_19A0;
+/// The demo video's number (5 and 0 alternate); the audio's car sounds' end, its driver's end
+/// and start; the front end's samples loaded.
 const DEMO_VIDEO: u32 = 0x8005_19A4;
-/// The host's `ClearImage` and `DrawSync`.
+const CAR_SOUNDS_END: fn(&mut Cpu) = nfs4rc::f_800bcb04;
+const AUDIO_DEINIT: fn(&mut Cpu) = nfs4rc::f_800bca4c;
+const AUDIO_INIT: fn(&mut Cpu) = nfs4rc::f_800bc958;
+const LOAD_FE_SAMPLES: fn(&mut Cpu) = nfs4rc::f_800780f0;
+/// The front end's graphics and data: draw memory freed and allocated, FETOOLS' end and
+/// start, the loading text, the help's shapes loaded; the movie played.
+const FREE_DRAW_MEMORY: u32 = 0x8004_DD18;
+const ALLOCATE_DRAW_MEMORY: u32 = 0x8004_DCA4;
+const FETOOLS_DEINIT: u32 = 0x8002_6CB0;
+const FETOOLS_INIT: u32 = 0x8002_6BC8;
+const DISPLAY_LOADING_TEXT: u32 = 0x8002_5AD8;
+const LOAD_ALL_HELP_SHAPES: u32 = 0x8004_F09C;
+const PLAY_MOVIE: u32 = 0x8004_D3DC;
+/// `ClearImage` and `DrawSync`.
 const CLEAR_IMAGE: u32 = 0x800E_E35C;
 const DRAW_SYNC: u32 = 0x800E_E1D8;
 
 /// VRAM cleared (1024 by 512, black) and drawn.
-fn clear_vram(c: &mut Cpu, r: &Saved, rect: u32, ras: (u32, u32)) {
-    let m = &mut c.m;
-    m.w16(rect, 0);
-    m.w16(rect + 2, 0);
-    m.w16(rect + 4, 1024);
-    m.w16(rect + 6, 512);
-    r.call_ptr_leaving(c, CLEAR_IMAGE, &[rect, 0, 0, 0], ras.0);
-    r.call_ptr_leaving(c, DRAW_SYNC, &[0], ras.1);
-}
-
-/// `tFEApplication::RunDemoVideo` (FEAPP.CPP, 0x800140e8): from the main menu only: the music
-/// stopped, the menu and the screen transitioned off (frames drawn until both are done), the
-/// screen cleaned up, the front end's graphics freed, the demo video played over cleared VRAM;
-/// everything back (the graphics, the fonts, the loading text, the help's shapes), the menu and
-/// the screen initialised and on, the other demo video next time, the music at its volume.
-pub fn abi_run_demo_video(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 96, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[5] = this;
-        let all = c.m.r32(SONGS_SCREEN);
-        if c.m.r32(this + MENUS) != all + 176 {
-            return;
-        }
-        r.call_leaving(c, nfs4rc::f_8007b798, &[120], 0x8001_412c);
-        port(c, &r, 0x8001_5a70, 0x8001_4134, &[0], crate::feaudio::abi_systemtask);
-        let menu = c.m.r32(this + MENUS);
-        vcall(c, &r, menu, 104, 40, &[], 0x8001_4158);
-        let screen = c.m.r32(this + 12);
-        port(c, &r, 0x8002_6824, 0x8001_4168, &[screen, 2, 0], crate::fescreen::abi_transition_off);
-        loop {
-            r.0[0] = 0;
-            let menu = c.m.r32(this + MENUS);
-            let mut busy = vcall(c, &r, menu, 104, 56, &[], 0x8001_418c) == 0;
-            if !busy {
-                let screen = c.m.r32(this + 12);
-                busy = vcall(c, &r, screen, 96, 64, &[], 0x8001_41b8) == 0;
-            }
-            if !busy {
-                break;
-            }
-            r.0[0] = 1;
-            r.call_ptr_leaving(c, REDRAW, &[this], 0x8001_41d4);
-            port(c, &r, 0x8001_5a70, 0x8001_41dc, &[0], crate::feaudio::abi_systemtask);
-            c.tick();
-        }
-        let screen = c.m.r32(this + 12);
-        vcall(c, &r, screen, 96, 56, &[], 0x8001_4208);
-        r.0[0] = 0x8005_0000;
-        r.call_leaving(c, nfs4rc::f_800bcb04, &[], 0x8001_4210);
-        r.0[2] = 1024;
-        r.call_leaving(c, nfs4rc::f_800bca4c, &[], 0x8001_4218);
-        r.0[1] = 512;
-        port(c, &r, 0x8004_dd18, 0x8001_4220, &[], crate::psxfront::abi_free_draw_memory);
-        r.0[4] = 0x8005_0000;
-        port(c, &r, 0x8002_6cb0, 0x8001_4228, &[], crate::fetools::abi_deinit);
-        port(c, &r, 0x8001_406c, 0x8001_4230, &[], abi_free_help_shape_cluts);
-        let free = r.call_leaving(c, LARGEST_FREE, &[], 0x8001_4238);
-        let rect = sp + 56;
-        r.0[3] = rect;
-        c.m.w32(MEMORY_FREE, free);
-        clear_vram(c, &r, rect, (0x8001_4264, 0x8001_426c));
-        let k = c.m.r8(DEMO_VIDEO) as u32;
-        port(c, &r, 0x8004_d3dc, 0x8001_4278, &[k], crate::movie::abi_play_movie);
-        clear_vram(c, &r, rect, (0x8001_429c, 0x8001_42a4));
-        let free = r.call_leaving(c, LARGEST_FREE, &[], 0x8001_42ac);
-        c.m.w32(MEMORY_FREE, free);
-        port(c, &r, 0x8004_dca4, 0x8001_42b4, &[], crate::psxfront::abi_allocate_draw_memory);
-        port(c, &r, 0x8002_6bc8, 0x8001_42bc, &[], crate::fetools::abi_init);
-        port(c, &r, 0x8002_5ad8, 0x8001_42c4, &[], crate::fescreen::abi_display_loading_text);
-        r.call_leaving(c, nfs4rc::f_800bc958, &[0xD800, 0x1_8000], 0x8001_42d4);
-        r.call_leaving(c, nfs4rc::f_800780f0, &[], 0x8001_42dc);
-        port(c, &r, 0x8004_f09c, 0x8001_42e4, &[], crate::psxfront::abi_load_all_help_shapes);
-        let free = r.call_leaving(c, LARGEST_FREE, &[], 0x8001_42ec);
-        let menu = c.m.r32(this + MENUS);
-        c.m.w32(MEMORY_FREE, free);
-        vcall(c, &r, menu, 104, 16, &[], 0x8001_4310);
-        let screen = c.m.r32(this + 12);
-        vcall(c, &r, screen, 96, 48, &[], 0x8001_4334);
-        let menu = c.m.r32(this + MENUS);
-        vcall(c, &r, menu, 104, 48, &[], 0x8001_4358);
-        let screen = c.m.r32(this + 12);
-        port(c, &r, 0x8002_6844, 0x8001_4368, &[screen, 2, 0], crate::fescreen::abi_transition_on);
-        let k = c.m.r32(DEMO_VIDEO);
-        c.m.w32(DEMO_VIDEO, 5u32.wrapping_sub(k));
-        port(c, &r, 0x8001_3e34, 0x8001_4380, &[this], abi_update_music);
-        let v = c.m.r8(VOLUME) as u32;
-        r.call_leaving(c, nfs4rc::f_8007bc44, &[(v.wrapping_mul(35) as i32 >> 6) as u32], 0x8001_43a4);
+fn clear_vram(c: &mut Cpu) {
+    with_buffer(c, 8, |c, at| {
+        let (rect, m) = (RECT(at), &mut c.m);
+        rect.set_x(m, 0);
+        rect.set_y(m, 0);
+        rect.set_w(m, 1024);
+        rect.set_h(m, 512);
+        call_addr(c, CLEAR_IMAGE, &[at, 0, 0, 0]);
+        call_addr(c, DRAW_SYNC, &[0]);
     })
 }
 
-/// The race's first car's stats; the track raced; the names' grids' names and screen.
+/// The memory left noted.
+fn note_memory_left(c: &mut Cpu) {
+    let left = call(c, LARGEST_UNUSED, &[]);
+    c.m.w32(MEMORY_LEFT, left);
+}
+
+/// `tFEApplication::RunDemoVideo` (FEAPP.CPP, 0x800140e8), from the main menu only. The music
+/// stops; the menu and the screen go off (frames drawn until both are done). The screen is
+/// cleaned up, the front end's graphics and sounds freed, and the demo video played over
+/// cleared VRAM. Then everything comes back (the graphics, the sounds, the loading text, the
+/// help's shapes), the menu and the screen initialised and coming on, the other demo video next
+/// time, the music at its volume.
+pub fn run_demo_video(c: &mut Cpu, this: FEApplication) {
+    let main = Menu(c.m.r32(MENU_DEFS).wrapping_add(MAIN_MENU));
+    if this.current_menu(&mut c.m, 0) != main {
+        return;
+    }
+    call(c, STOP_SONG, &[120]);
+    call(c, SYSTEM_TASK, &[0]);
+    let menu = this.current_menu(&mut c.m, 0);
+    menu_fn(c, menu, MENU_TRANSITION_OFF);
+    let screen = this.current_screen(&mut c.m, 0);
+    call_addr(c, SCREEN_TRANSITION_OFF, &[screen.0, TRANSITION, 0]);
+    loop {
+        let menu = this.current_menu(&mut c.m, 0);
+        let off = menu_fn(c, menu, MENU_TRANSITION_IS_FINISHED) != 0 && {
+            let screen = this.current_screen(&mut c.m, 0);
+            screen_fn(c, screen, SCREEN_TRANSITION_IS_FINISHED) != 0
+        };
+        if off {
+            break;
+        }
+        call_addr(c, REDRAW, &[this.0]);
+        call(c, SYSTEM_TASK, &[0]);
+        c.tick();
+    }
+    let screen = this.current_screen(&mut c.m, 0);
+    screen_fn(c, screen, SCREEN_CLEANUP);
+    call(c, CAR_SOUNDS_END, &[]);
+    call(c, AUDIO_DEINIT, &[]);
+    call_addr(c, FREE_DRAW_MEMORY, &[]);
+    call_addr(c, FETOOLS_DEINIT, &[]);
+    free_help_shape_cluts(c);
+    note_memory_left(c);
+    clear_vram(c);
+    let k = c.m.r8(DEMO_VIDEO) as u32;
+    call_addr(c, PLAY_MOVIE, &[k]);
+    clear_vram(c);
+    note_memory_left(c);
+    call_addr(c, ALLOCATE_DRAW_MEMORY, &[]);
+    call_addr(c, FETOOLS_INIT, &[]);
+    call_addr(c, DISPLAY_LOADING_TEXT, &[]);
+    call(c, AUDIO_INIT, &[0xD800, 0x1_8000]);
+    call(c, LOAD_FE_SAMPLES, &[]);
+    call_addr(c, LOAD_ALL_HELP_SHAPES, &[]);
+    note_memory_left(c);
+    let menu = this.current_menu(&mut c.m, 0);
+    menu_fn(c, menu, MENU_INITIALIZE);
+    let screen = this.current_screen(&mut c.m, 0);
+    screen_fn(c, screen, SCREEN_INITIALIZE);
+    let menu = this.current_menu(&mut c.m, 0);
+    menu_fn(c, menu, MENU_TRANSITION_ON);
+    let screen = this.current_screen(&mut c.m, 0);
+    call_addr(c, SCREEN_TRANSITION_ON, &[screen.0, TRANSITION, 0]);
+    let k = c.m.r32(DEMO_VIDEO);
+    c.m.w32(DEMO_VIDEO, 5u32.wrapping_sub(k));
+    update_music(c, this);
+    let volume = music_volume(&mut c.m);
+    call(c, MUSIC_VOLUME, &[volume]);
+}
+
+pub fn abi_run_demo_video(c: &mut Cpu) {
+    run_demo_video(c, FEApplication(c.r[4]));
+}
+
+/// The race's cars' stats; the track raced; the records: new ones cleared, whether a car's
+/// lap is a record (the car in `*who`) and whether the race made top times (bits: the first
+/// player's race 1 and lap 2, the second's race 4 and lap 8). The pads reset (with their
+/// kinds, `frontEnd + 866`); the post-game menu.
 const RACE_STATS: u32 = 0x8011_0E08;
 const TRACK_RACED: u32 = 0x8013_DAEC;
+const CLEAR_NEW_RECORDS: u32 = 0x8004_AD14;
+const IS_RECORD_LAP_TIME: u32 = 0x8004_9CC8;
+const IS_TOP_TIME: u32 = 0x8004_A194;
+const RESET_PSX_CONTROLLER: u32 = 0x8002_7104;
+const PAD_KINDS: u32 = FRONT_END + 866;
+const POST_GAME_MENU: u32 = 0x8002_DBC4;
+/// The name entries: the players' names, the name screen (its menu at +100), and each player's
+/// name grid and menu (FEMENUDEFS' menus' offsets).
 const NAMES: u32 = 0x8011_5C1C;
 const NAME_SCREEN: u32 = 0x8005_2E44;
+const NAME_ENTRIES: [(u32, u32); 2] = [(12728, 14032), (12868, 14160)];
 
-/// The name entry for player `p` (its grid's menu at `grid`, the screen's menu at `menu`).
-fn name_entry(m: &mut Mem, grid: u32, menu: u32, p: u32) -> u32 {
-    let all = m.r32(SONGS_SCREEN);
-    let (grid, menu) = (all + grid, all + menu);
+/// The name entry for player `p`: its grid set for the player's name (7 long, at its start),
+/// the name screen going to its menu, which is returned.
+fn name_entry(m: &mut Mem, p: u32) -> Menu {
+    let defs = m.r32(MENU_DEFS);
+    let (grid, menu) = (defs + NAME_ENTRIES[p as usize].0, defs + NAME_ENTRIES[p as usize].1);
     m.w16(grid + 128, p as u16);
     m.w32(grid + 28, NAMES + 8 * p);
     let screen = m.r32(NAME_SCREEN);
@@ -1345,109 +1300,92 @@ fn name_entry(m: &mut Mem, grid: u32, menu: u32, p: u32) -> u32 {
     m.w16(grid + 36, 0);
     m.w16(grid + 34, 0);
     m.w32(screen + 100, menu);
-    menu
+    Menu(menu)
 }
 
-/// `tFEApplication::RunPostGame` (FEAPP.CPP, 0x80015554): after a race (but a test drive or
-/// the pink slips'): the new records cleared, both pads reset, no names wanted; a record lap
-/// (whose: one player's, or two players' first or second) or top times (lap or race, first or
-/// second) noted for each player as the records to enter their name for; then the front end
-/// from the first player's name entry, the second's, or the post-game menu.
-pub fn abi_run_post_game(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 64, |c, sp| {
-        let mut r = Saved::of(c);
-        (r.0[0], r.0[2]) = (FRONT_END, this);
-        let kind = c.m.r8(RACE_TYPE) as u32;
-        let mut menu = None;
-        if kind != PINK_SLIPS && !(kind == 0 && c.m.r8(FRONT_END + 298) == 0) {
-            r.0[5] = RACE_STATS;
-            port(c, &r, 0x8004_ad14, 0x8001_55ac, &[], crate::statchk::abi_clear_new_records);
-            (r.0[4], r.0[3]) = (FRONT_END, u32::MAX);
-            for p in 0..2u32 {
-                (r.0[1], r.0[0]) = (p + 1, this + 4 * p);
-                let pad = c.m.r8(FRONT_END + p + 866) as u32;
-                port(c, &r, 0x8002_7104, 0x8001_55d0, &[p, pad], crate::front::abi_reset_psx_controller);
-                let m = &mut c.m;
-                m.w32(this + 4 * p + 872, 0);
-                m.w32(this + 4 * p + 880, 0);
-                m.w32(this + 4 * p + 888, u32::MAX);
-            }
-            r.0[0] = this + 8;
-            let track = c.m.r16(TRACK_RACED) as i16 as i32 as u32;
-            if port(c, &r, 0x8004_9cc8, 0x8001_55fc, &[RACE_STATS, track, sp + 24], crate::statchk::abi_is_record_lap_time) != 0 {
-                let m = &mut c.m;
-                let who = m.r16(sp + 24) as i16 as i32 as u32;
-                let v = if m.r8(FRONT_END + 3) == 1 { if who != 0 { 8 } else { 7 } } else { 6 };
-                m.w32(this.wrapping_add(who << 2) + 888, v);
-                m.w32(this.wrapping_add(who << 2) + 880, 1);
-            }
-            let track = c.m.r16(TRACK_RACED) as i16 as i32 as u32;
-            let top = sx(port(c, &r, 0x8004_a194, 0x8001_566c, &[RACE_STATS, track], crate::statchk::abi_is_top_time));
+/// `tFEApplication::RunPostGame` (FEAPP.CPP, 0x80015554). After a race (not a pink slips' one,
+/// nor one of race type 0 with a stock car), the new records are cleared, both pads reset, and
+/// no names are wanted. A record lap, then top times, are noted for each player as a name to
+/// enter and a speech to play:
+/// - one player: a lap record 6; a top race 3 or lap 0 (12 or 9 after a lap record);
+/// - two players: a lap record 7 (the first player's) or 8 (the second's); the first player's
+///   top race 4 or lap 1 (13 or 10 after its own lap record), the second's top race 5 or lap 2
+///   (14 or 11 after its own lap record).
+///
+/// Then the front end runs from the first player's name entry, the second's, or the post-game
+/// menu.
+pub fn run_post_game(c: &mut Cpu, this: FEApplication) -> u32 {
+    let kind = c.m.r8(RACE_TYPE) as u32;
+    let mut menu = None;
+    if kind != PINK_SLIPS && !(kind == 0 && c.m.r8(GARAGE_CAR) == 0) {
+        call_addr(c, CLEAR_NEW_RECORDS, &[]);
+        for p in 0..2u32 {
+            let pad = c.m.r8(PAD_KINDS + p) as u32;
+            call_addr(c, RESET_PSX_CONTROLLER, &[p, pad]);
             let m = &mut c.m;
-            if top != 0 {
-                let who = m.r16(sp + 24) as i16 as i32;
-                if m.r8(FRONT_END + 3) == 1 {
-                    if top & 3 != 0 {
-                        m.w32(this + 880, 1);
-                        let v = if m.r32(this + 888) == u32::MAX || who != 0 {
-                            if top & 2 != 0 { 1 } else { 4 }
-                        } else if top & 2 != 0 {
-                            10
-                        } else {
-                            13
-                        };
-                        m.w32(this + 888, v);
-                    }
-                    if top & 0xC != 0 {
-                        m.w32(this + 884, 1);
-                        let v = if m.r32(this + 892) != u32::MAX && who == 1 {
-                            if top & 8 != 0 { 11 } else { 14 }
-                        } else if top & 8 != 0 {
-                            2
-                        } else {
-                            5
-                        };
-                        m.w32(this + 892, v);
-                    }
-                } else {
-                    m.w32(this + 880, 1);
-                    let v = if m.r32(this + 888) == u32::MAX {
-                        if top & 2 != 0 { 0 } else { 3 }
-                    } else if top & 2 != 0 {
-                        9
-                    } else {
-                        12
-                    };
-                    m.w32(this + 888, v);
+            this.set_got_name(m, p, 0);
+            this.set_need_name(m, p, 0);
+            this.set_speech_to_play(m, p, -1);
+        }
+        // (the record lap's car is written only when a car is checked: the original reads its
+        // stack's leftover then; here it starts at 0)
+        let (record, who) = with_buffer(c, 8, |c, at| {
+            c.m.w16(at, 0);
+            let track = c.m.r16(TRACK_RACED) as i16 as i32 as u32;
+            let record = call_addr(c, IS_RECORD_LAP_TIME, &[RACE_STATS, track, at]) != 0;
+            (record, c.m.r16(at) as i16 as i32)
+        });
+        let track = c.m.r16(TRACK_RACED) as i16 as i32 as u32;
+        let top = sx(call_addr(c, IS_TOP_TIME, &[RACE_STATS, track]));
+        let m = &mut c.m;
+        let two = m.r8(TWO_PLAYERS) == 1;
+        if record {
+            let who = who as u32;
+            let speech = if two { if who != 0 { 8 } else { 7 } } else { 6 };
+            this.set_speech_to_play(m, who, speech);
+            this.set_need_name(m, who, 1);
+        }
+        if top != 0 {
+            let pick = |bit: u32, (yes, no): (i32, i32)| if top & bit != 0 { yes } else { no };
+            if two {
+                if top & 3 != 0 {
+                    this.set_need_name(m, 0, 1);
+                    let first = this.speech_to_play(m, 0) == -1 || who != 0;
+                    this.set_speech_to_play(m, 0, if first { pick(2, (1, 4)) } else { pick(2, (10, 13)) });
                 }
-            }
-            if m.r32(this + 880) != 0 {
-                menu = Some(name_entry(m, 12728, 14032, 0));
-            } else if m.r32(this + 884) != 0 {
-                menu = Some(name_entry(m, 12868, 14160, 1));
+                if top & 0xC != 0 {
+                    this.set_need_name(m, 1, 1);
+                    let after = this.speech_to_play(m, 1) != -1 && who == 1;
+                    this.set_speech_to_play(m, 1, if after { pick(8, (11, 14)) } else { pick(8, (2, 5)) });
+                }
+            } else {
+                this.set_need_name(m, 0, 1);
+                let first = this.speech_to_play(m, 0) == -1;
+                this.set_speech_to_play(m, 0, if first { pick(2, (0, 3)) } else { pick(2, (9, 12)) });
             }
         }
-        let menu = match menu {
-            Some(v) => v,
-            None => {
-                port(c, &r, 0x8002_dbc4, 0x8001_5828, &[sp + 16], crate::femenudefs::abi_post_game_menu);
-                c.m.r32(sp + 20)
-            }
-        };
-        c.r[2] = port(c, &r, 0x8001_43c8, 0x8001_5838, &[this, menu], abi_main_loop);
-    })
+        if this.need_name(m, 0) != 0 {
+            menu = Some(name_entry(m, 0));
+        } else if this.need_name(m, 1) != 0 {
+            menu = Some(name_entry(m, 1));
+        }
+    }
+    let menu = match menu {
+        Some(menu) => menu,
+        None => with_buffer(c, 8, |c, at| {
+            call_addr(c, POST_GAME_MENU, &[at]);
+            MenuCommand(at).next_menu(&mut c.m)
+        }),
+    };
+    main_loop(c, this, menu)
 }
 
-/// `tFEApplication::RunDemoVideo` entered as the original's callers `jal` it.
-fn run_demo_video_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8001_40e8, None, &[]);
-    abi_run_demo_video(c);
+pub fn abi_run_post_game(c: &mut Cpu) {
+    c.r[2] = run_post_game(c, FEApplication(c.r[4]));
 }
 
-/// `tFEApplication::RunPostGame` entered as the original's callers `jal` it.
+/// `tFEApplication::RunPostGame` called as the original's callers call it.
 pub(crate) fn run_post_game_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8001_5554, None, &[]);
     abi_run_post_game(c);
 }
 
@@ -1486,15 +1424,16 @@ mod tests {
             m.w8(PAD_GLOBAL + 34 * p + 1, kind);
         }
         let a = app(m);
-        let real = m.r32(a + MENUS);
-        m.w32(a + MENUS, [real, real, MENU, MENU2][pick(rng, 4) as usize]);
-        m.w32(a + MENUS + 4, [0, 0, MENU2][pick(rng, 3) as usize]);
+        let app = FEApplication(a);
+        let real = app.current_menu(m, 0).0;
+        app.set_current_menu(m, 0, Menu([real, real, MENU, MENU2][pick(rng, 4) as usize]));
+        app.set_current_menu(m, 1, Menu([0, 0, MENU2][pick(rng, 3) as usize]));
         for menu in [MENU, MENU2] {
             m.w16(menu + 100, (pick(rng, 3) == 0) as u16);
         }
-        m.w32(a + LEAVING, [0, MENU2][pick(rng, 2) as usize]);
+        app.set_parent_menu(m, 0, Menu([0, MENU2][pick(rng, 2) as usize]));
         for p in 0..2 {
-            m.w32(of(a, OVERLAID, p), pick(rng, 2));
+            app.set_waiting_for_other_player(m, p, pick(rng, 2));
         }
         // (the test menus' transitions answering either way: their vtables copied, the two
         // transition calls made routines returning 0 or 1)
@@ -1507,14 +1446,14 @@ mod tests {
                 let v = m.r32(real_vt + 4 * k);
                 m.w32(vt + 4 * k, v);
             }
-            for slot in [MENU_IN_TRANSITION, MENU_TRANSITION_IS_FINISHED] {
+            for slot in [MENU_TRANSITION_IS_FINISHED, MENU_IS_SUB_MENU] {
                 let f = m.r32(real_vt + slot + 4);
                 m.w32(vt + slot + 4, [f, STUBS, STUBS + 8][pick(rng, 3) as usize]);
             }
             m.w32(menu + MENU_VPTR, vt);
         }
-        m.w32(a + MUSIC_FLAGS, [0, 0x1000, 0x2000][pick(rng, 3) as usize]);
-        m.w8(a + PLAYER, pick(rng, 2) as u8);
+        app.set_current_music(m, [0, 0x1000, 0x2000][pick(rng, 3) as usize]);
+        app.set_player(m, pick(rng, 2) as i8);
         for k in 0..APP_SIZE {
             let b = m.r8(a + k);
             m.w8(COPY + k, b);
@@ -1536,13 +1475,14 @@ mod tests {
             ("Redraw", 0x8001_3894, nfs4rc::f_80013894, |c, _| vec![app(&mut c.m)]),
             ("SetMenu", 0x8001_3ef4, nfs4rc::f_80013ef4, |c, r| {
                 let a = app(&mut c.m);
-                let now = c.m.r32(a + MENUS);
+                let now = FEApplication(a).current_menu(&mut c.m, 0).0;
                 vec![a, pick(r, 2), [now, MENU, MENU2][pick(r, 3) as usize]]
             }),
             ("SetScreen", 0x8001_3ff8, nfs4rc::f_80013ff8, |c, r| {
                 let a = app(&mut c.m);
-                let now = c.m.r32(a + SCREENS);
-                vec![a, pick(r, 2), [0, now, a + MESSAGE][pick(r, 3) as usize]]
+                let app = FEApplication(a);
+                let now = app.current_screen(&mut c.m, 0).0;
+                vec![a, pick(r, 2), [0, now, app.message_popup().0][pick(r, 3) as usize]]
             }),
             ("DisplayHelp", 0x8001_4048, nfs4rc::f_80014048, |c, r| vec![app(&mut c.m), pick(r, 3)]),
             ("FreeHelpShapeCluts", 0x8001_406c, nfs4rc::f_8001406c, |_, _| vec![]),
