@@ -2,33 +2,46 @@
 //! descriptions from fetrk.trk, which tracks are available and which are bonus tracks, saved
 //! and loaded with the game; and the track menu's iterator (`tListIteratorTrack`), which skips
 //! the tracks the race type can't have.
+//!
+//! Written as FEMENU.CPP is (see there).
 
-use crate::abi::{self, Saved};
+use crate::call::{call, with_buffer};
 use crate::femenu;
 use crate::femenuextended::SPRINTF;
 use crate::globals::{FRONT_END, PATHS};
+use crate::types::ListIteratorIndexed;
 use ps1rt::{Cpu, Mem};
 
 // A track manager: +0 how many tracks, +4 their descriptions (48 bytes each: +0 the track's
-// id, +2 its class, +3 available from the start, +4 not a bonus track), +8 each id's track
-// available (16 words), +72 each id's track a bonus one unlocked (16 words).
+// id, +2 its class, +3 available (from the start in the file; a copy's: now), +4 a bonus
+// track), +8 each id's track available (16 words), +72 each id's track a bonus one unlocked (16
+// words).
 const COUNT: u32 = 0;
 const DESCRIPTIONS: u32 = 4;
 const AVAILABLE: u32 = 8;
 const UNLOCKED: u32 = 72;
 const DESCRIPTION_SIZE: u32 = 48;
 const TRACKS: u32 = 16;
+const ID: u32 = 0;
+const CLASS: u32 = 2;
+const AVAILABLE_NOW: u32 = 3;
+const BONUS: u32 = 4;
+/// Tournaments race the first three classes only.
+const TOURNAMENT_CLASSES: u8 = 3;
 
-/// The track iterator's vtable; its value's list (+4), the index of the player's value (+16)
-/// and its track manager (+20).
+/// The track iterator's vtable (at +12); its value's list (+4), the index of the player's value
+/// (+16) and its track manager (+20).
 const TRACK_ITERATOR_VT: u32 = 0x8001_0FE0;
+const VPTR: u32 = 12;
 const VALUES: u32 = 4;
 const INDEX: u32 = 16;
 const MANAGER: u32 = 20;
 /// The tracks' names' texts (from 214 on, by id).
 const TRACK_NAMES: u32 = 214;
-/// The race type (`frontEnd + 4`: 0 a single race, 1 a tournament's).
+/// The race type (`frontEnd + 4`): a single race, a tournament's.
 const RACE_TYPE: u32 = FRONT_END + 4;
+const SINGLE_RACE: u8 = 0;
+const TOURNAMENT: u8 = 1;
 
 /// The descriptions' file ("%s%s" of the front end's path and "fetrk.trk"), the memory they
 /// go in ("Track List"); `loadfileadr`, `reservememadr`, `blockmove`, `purgememadr`.
@@ -50,16 +63,15 @@ fn description(m: &mut Mem, this: u32, k: u32) -> u32 {
     m.r32(this + DESCRIPTIONS).wrapping_add(k.wrapping_mul(DESCRIPTION_SIZE))
 }
 
-/// The word for the track whose id is the (signed) byte at `at` in the table at `table`.
-fn by_id(m: &mut Mem, this: u32, table: u32, at: u32) -> u32 {
-    let id = m.r8(at) as i8 as i32 as u32;
+/// The word in table `table` (`AVAILABLE` or `UNLOCKED`) for the track of description `d`.
+fn by_id(m: &mut Mem, this: u32, table: u32, d: u32) -> u32 {
+    let id = m.r8(d + ID) as i8 as i32 as u32;
     this.wrapping_add(id << 2).wrapping_add(table)
 }
 
 /// `tTrackManager::Initialize` (FETRACKS.CPP, 0x80021b70): no descriptions, no track available
 /// or unlocked.
-pub fn abi_initialize(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
+pub fn initialize(m: &mut Mem, this: u32) {
     m.w32(this + COUNT, 0);
     m.w32(this + DESCRIPTIONS, 0);
     for k in 0..TRACKS {
@@ -68,95 +80,99 @@ pub fn abi_initialize(c: &mut Cpu) {
     }
 }
 
+pub fn abi_initialize(c: &mut Cpu) {
+    initialize(&mut c.m, c.r[4]);
+}
+
 /// `tTrackManager::LoadTracks` (FETRACKS.CPP, 0x80021bb0): which tracks are available, from a
 /// saved game's bytes.
-pub fn abi_load_tracks(c: &mut Cpu) {
-    let (m, this, save) = (&mut c.m, c.r[4], c.r[5]);
+pub fn load_tracks(m: &mut Mem, this: u32, save: u32) {
     for k in 0..TRACKS {
         let v = (m.r8(save + k) != 0) as u32;
         m.w32(this + AVAILABLE + 4 * k, v);
     }
 }
 
+pub fn abi_load_tracks(c: &mut Cpu) {
+    load_tracks(&mut c.m, c.r[4], c.r[5]);
+}
+
 /// `tTrackManager::SaveTracks` (FETRACKS.CPP, 0x80021bdc): which tracks are available, into a
 /// saved game's bytes.
-pub fn abi_save_tracks(c: &mut Cpu) {
-    let (m, this, save) = (&mut c.m, c.r[4], c.r[5]);
+pub fn save_tracks(m: &mut Mem, this: u32, save: u32) {
     for k in 0..TRACKS {
         let v = m.r8(this + AVAILABLE + 4 * k);
         m.w8(save + k, v);
     }
 }
 
-/// `tTrackManager::GetTrack` (FETRACKS.CPP, 0x80021c04): description `k` copied out, marked
-/// available as its track is.
+pub fn abi_save_tracks(c: &mut Cpu) {
+    save_tracks(&mut c.m, c.r[4], c.r[5]);
+}
+
+/// `tTrackManager::GetTrack` (FETRACKS.CPP, 0x80021c04): description `k` (a `short`) copied to
+/// `out`, marked available as its track is now.
+pub fn get_track(c: &mut Cpu, this: u32, k: u32, out: u32) {
+    let from = description(&mut c.m, this, sx(k));
+    call(c, BLOCKMOVE, &[from, out, DESCRIPTION_SIZE]);
+    let m = &mut c.m;
+    let at = by_id(m, this, AVAILABLE, out);
+    let v = m.r8(at);
+    m.w8(out + AVAILABLE_NOW, v);
+}
+
 pub fn abi_get_track(c: &mut Cpu) {
-    let (this, k, out) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..2].copy_from_slice(&[this, out]);
-        let from = description(&mut c.m, this, sx(k));
-        r.call_leaving(c, BLOCKMOVE, &[from, out, DESCRIPTION_SIZE], 0x8002_1c44);
-        let m = &mut c.m;
-        let at = by_id(m, this, AVAILABLE, out);
-        let v = m.r8(at);
-        m.w8(out + 3, v);
-    })
+    get_track(c, c.r[4], c.r[5], c.r[6]);
 }
 
 /// `tTrackManager::LoadDescription` (FETRACKS.CPP, 0x80021c74): the descriptions read from
 /// fetrk.trk (their count, then them) into memory of their own, those before released; the
 /// tracks available from the start made available, the bonus ones' unlocked flags set for the
 /// others.
-pub fn abi_load_description(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 112, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let name = sp + 16;
+pub fn load_description(c: &mut Cpu, this: u32) {
+    let file = with_buffer(c, 96, |c, name| {
         let path = c.m.r32(FRONT_END_PATH);
-        r.call_leaving(c, SPRINTF, &[name, PATH_FORMAT, path, FILE_NAME], 0x8002_1ca8);
-        r.enter_leaving(c, 0x8002_1dac, 0x8002_1cb0, |c| release_description(c, this));
-        let file = r.call_leaving(c, LOAD_FILE, &[name, 16], 0x8002_1cbc);
-        r.0[1] = file;
-        let n = c.m.r32(file);
-        c.m.w32(this + COUNT, n);
-        let memory = r.call_leaving(c, RESERVE, &[MEMORY_NAME, n.wrapping_mul(DESCRIPTION_SIZE), 0], 0x8002_1ce4);
-        c.m.w32(this + DESCRIPTIONS, memory);
-        let n = c.m.r32(this + COUNT);
-        r.call_leaving(c, BLOCKMOVE, &[file + 4, memory, n.wrapping_mul(DESCRIPTION_SIZE)], 0x8002_1d04);
-        let mut k = 0u32;
-        while k < c.m.r32(this + COUNT) {
-            let m = &mut c.m;
-            let d = description(m, this, k);
-            if m.r8(d + 3) != 0 {
-                let at = by_id(m, this, AVAILABLE, d);
-                m.w32(at, 1);
-            }
-            let d = description(m, this, k);
-            if m.r8(d + 4) == 0 {
-                let at = by_id(m, this, UNLOCKED, d);
-                m.w32(at, 1);
-            }
-            k += 1;
+        call(c, SPRINTF, &[name, PATH_FORMAT, path, FILE_NAME]);
+        release_description(c, this);
+        call(c, LOAD_FILE, &[name, 16])
+    });
+    let n = c.m.r32(file);
+    c.m.w32(this + COUNT, n);
+    let memory = call(c, RESERVE, &[MEMORY_NAME, n.wrapping_mul(DESCRIPTION_SIZE), 0]);
+    c.m.w32(this + DESCRIPTIONS, memory);
+    let n = c.m.r32(this + COUNT);
+    call(c, BLOCKMOVE, &[file + 4, memory, n.wrapping_mul(DESCRIPTION_SIZE)]);
+    let m = &mut c.m;
+    let mut k = 0u32;
+    while k < m.r32(this + COUNT) {
+        let d = description(m, this, k);
+        if m.r8(d + AVAILABLE_NOW) != 0 {
+            let at = by_id(m, this, AVAILABLE, d);
+            m.w32(at, 1);
         }
-        r.call_leaving(c, PURGE, &[file], 0x8002_1d98);
-    })
+        let d = description(m, this, k);
+        if m.r8(d + BONUS) == 0 {
+            let at = by_id(m, this, UNLOCKED, d);
+            m.w32(at, 1);
+        }
+        k += 1;
+    }
+    call(c, PURGE, &[file]);
+}
+
+pub fn abi_load_description(c: &mut Cpu) {
+    load_description(c, c.r[4]);
 }
 
 /// `tTrackManager::ReleaseDescription` (FETRACKS.CPP, 0x80021dac): the descriptions' memory
 /// freed, none left.
 pub fn release_description(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let memory = c.m.r32(this + DESCRIPTIONS);
-        if memory != 0 {
-            r.call_leaving(c, PURGE, &[memory], 0x8002_1dd4);
-        }
-        c.m.w32(this + DESCRIPTIONS, 0);
-        c.m.w32(this + COUNT, 0);
-    })
+    let memory = c.m.r32(this + DESCRIPTIONS);
+    if memory != 0 {
+        call(c, PURGE, &[memory]);
+    }
+    c.m.w32(this + DESCRIPTIONS, 0);
+    c.m.w32(this + COUNT, 0);
 }
 
 pub fn abi_release_description(c: &mut Cpu) {
@@ -164,19 +180,21 @@ pub fn abi_release_description(c: &mut Cpu) {
 }
 
 /// `tTrackManager::SetTrackAvailable` (FETRACKS.CPP, 0x80021dec): track `id` available or not.
+pub fn set_track_available(m: &mut Mem, this: u32, id: u32, on: u32) {
+    m.w32(this.wrapping_add(sx(id) << 2).wrapping_add(AVAILABLE), on);
+}
+
 pub fn abi_set_track_available(c: &mut Cpu) {
-    let (this, id, on) = (c.r[4], c.r[5], c.r[6]);
-    c.m.w32(this.wrapping_add(sx(id) << 2).wrapping_add(AVAILABLE), on);
+    set_track_available(&mut c.m, c.r[4], c.r[5], c.r[6]);
 }
 
 /// `tTrackManager::SetClassAvailable` (FETRACKS.CPP, 0x80021e00): the tracks of a class
 /// available or not.
-pub fn abi_set_class_available(c: &mut Cpu) {
-    let (m, this, class, on) = (&mut c.m, c.r[4], c.r[5], c.r[6]);
+pub fn set_class_available(m: &mut Mem, this: u32, class: u32, on: u32) {
     let mut k = 0u32;
     while k < m.r32(this + COUNT) {
         let d = description(m, this, k);
-        if m.r8(d + 2) as u32 == class {
+        if m.r8(d + CLASS) as u32 == class {
             let at = by_id(m, this, AVAILABLE, d);
             m.w32(at, on);
         }
@@ -184,14 +202,17 @@ pub fn abi_set_class_available(c: &mut Cpu) {
     }
 }
 
+pub fn abi_set_class_available(c: &mut Cpu) {
+    set_class_available(&mut c.m, c.r[4], c.r[5], c.r[6]);
+}
+
 /// `tTrackManager::GetTrackByID` (FETRACKS.CPP, 0x80021e60): the description of track `id` (the
 /// first when there is none).
 pub fn get_track_by_id(m: &mut Mem, this: u32, id: u32) -> u32 {
     let n = m.r32(this + COUNT);
-    let first = m.r32(this + DESCRIPTIONS);
-    let mut d = first;
+    let mut d = m.r32(this + DESCRIPTIONS);
     for _ in 0..n {
-        if m.r8(d) as i8 as i32 as u32 == sx(id) {
+        if m.r8(d + ID) as i8 as i32 as u32 == sx(id) {
             return d;
         }
         d = d.wrapping_add(DESCRIPTION_SIZE);
@@ -206,14 +227,10 @@ pub fn abi_get_track_by_id(c: &mut Cpu) {
 /// `tListIteratorTrack::tListIteratorTrack` (FETRACKS.CPP, 0x80021eb4): an indexed iterator
 /// over `values` (the player's at `*index`), the tracks of `manager`.
 pub fn list_iterator_track(c: &mut Cpu, this: u32, values: u32, index: u32, manager: u32) -> u32 {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[..2].copy_from_slice(&[this, manager]);
-        r.enter(c, 0x8002_3f80, 0x8002_1ee4, |c| femenu::indexed(c, crate::types::ListIteratorIndexed(this), 0, values, index));
-        c.m.w32(this + 12, TRACK_ITERATOR_VT);
-        c.m.w32(this + MANAGER, manager);
-        this
-    })
+    femenu::indexed(c, ListIteratorIndexed(this), 0, values, index);
+    c.m.w32(this + VPTR, TRACK_ITERATOR_VT);
+    c.m.w32(this + MANAGER, manager);
+    this
 }
 
 pub fn abi_list_iterator_track(c: &mut Cpu) {
@@ -222,16 +239,13 @@ pub fn abi_list_iterator_track(c: &mut Cpu) {
 
 /// `tListIteratorTrack::~tListIteratorTrack` (FETRACKS.CPP, 0x80021f0c): the indexed
 /// iterator's.
+pub fn list_iterator_track_dtor(c: &mut Cpu, this: u32, flags: u32) {
+    c.m.w32(this + VPTR, TRACK_ITERATOR_VT);
+    femenu::indexed_dtor(c, this, flags);
+}
+
 pub fn abi_list_iterator_track_dtor(c: &mut Cpu) {
-    let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        c.m.w32(this + 12, TRACK_ITERATOR_VT);
-        Saved::of(c).enter(c, 0x8002_3fc4, 0x8002_1f24, |c| {
-            c.r[4] = this;
-            c.r[5] = flags;
-            femenu::abi_indexed_dtor(c)
-        });
-    })
+    list_iterator_track_dtor(c, c.r[4], c.r[5]);
 }
 
 /// The track in the iterator's value now (`fValue[*fIndex]`'s place).
@@ -242,68 +256,65 @@ fn value_at(m: &mut Mem, this: u32) -> u32 {
 }
 
 /// `tListIteratorTrack::TextValue` (FETRACKS.CPP, 0x80021f34): the track's name.
-pub fn abi_list_iterator_track_text_value(c: &mut Cpu) {
-    let (m, this) = (&mut c.m, c.r[4]);
+pub fn list_iterator_track_text_value(m: &mut Mem, this: u32) -> u32 {
     let at = value_at(m, this);
     let k = m.r8(at) as u32;
     let manager = m.r32(this + MANAGER);
     let d = description(m, manager, k);
-    c.r[2] = (m.r8(d) as i8 as i32 as u32).wrapping_add(TRACK_NAMES);
+    (m.r8(d + ID) as i8 as i32 as u32).wrapping_add(TRACK_NAMES)
+}
+
+pub fn abi_list_iterator_track_text_value(c: &mut Cpu) {
+    c.r[2] = list_iterator_track_text_value(&mut c.m, c.r[4]);
 }
 
 /// `tListIteratorTrack::Increment` (FETRACKS.CPP, 0x80021f74): the next track (round to the
 /// first) until one the race type can have.
-pub fn abi_list_iterator_track_increment(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        loop {
-            let m = &mut c.m;
-            let at = value_at(m, this);
-            let v = m.r8(at).wrapping_add(1);
-            m.w8(at, v);
-            let at = value_at(m, this);
-            let manager = m.r32(this + MANAGER);
-            if m.r8(at) as u32 >= m.r32(manager + COUNT) {
-                m.w8(at, 0);
-            }
-            let at = value_at(m, this);
-            let k = m.r8(at) as u32;
-            let valid = r.enter_leaving(c, 0x8002_20b0, 0x8002_2004, |c| valid_track(&mut c.m, this, k));
-            if valid == 1 {
-                return;
-            }
+pub fn list_iterator_track_increment(m: &mut Mem, this: u32) {
+    loop {
+        let at = value_at(m, this);
+        let v = m.r8(at).wrapping_add(1);
+        m.w8(at, v);
+        let at = value_at(m, this);
+        let manager = m.r32(this + MANAGER);
+        if m.r8(at) as u32 >= m.r32(manager + COUNT) {
+            m.w8(at, 0);
         }
-    })
+        let at = value_at(m, this);
+        let k = m.r8(at) as u32;
+        if valid_track(m, this, k) == 1 {
+            return;
+        }
+    }
+}
+
+pub fn abi_list_iterator_track_increment(c: &mut Cpu) {
+    list_iterator_track_increment(&mut c.m, c.r[4]);
 }
 
 /// `tListIteratorTrack::Decrement` (FETRACKS.CPP, 0x80022020): the track before (round to the
 /// last) until one the race type can have.
-pub fn abi_list_iterator_track_decrement(c: &mut Cpu) {
-    let this = c.r[4];
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        loop {
-            let m = &mut c.m;
-            let at = value_at(m, this);
-            let v = m.r8(at);
-            let v = if v == 0 {
-                let manager = m.r32(this + MANAGER);
-                m.r8(manager + COUNT).wrapping_sub(1)
-            } else {
-                v - 1
-            };
-            m.w8(at, v);
-            let at = value_at(m, this);
-            let k = m.r8(at) as u32;
-            let valid = r.enter_leaving(c, 0x8002_20b0, 0x8002_2094, |c| valid_track(&mut c.m, this, k));
-            if valid == 1 {
-                return;
-            }
+pub fn list_iterator_track_decrement(m: &mut Mem, this: u32) {
+    loop {
+        let at = value_at(m, this);
+        let v = m.r8(at);
+        let v = if v == 0 {
+            let manager = m.r32(this + MANAGER);
+            m.r8(manager + COUNT).wrapping_sub(1)
+        } else {
+            v - 1
+        };
+        m.w8(at, v);
+        let at = value_at(m, this);
+        let k = m.r8(at) as u32;
+        if valid_track(m, this, k) == 1 {
+            return;
         }
-    })
+    }
+}
+
+pub fn abi_list_iterator_track_decrement(c: &mut Cpu) {
+    list_iterator_track_decrement(&mut c.m, c.r[4]);
 }
 
 /// `tListIteratorTrack::ValidTrack` (FETRACKS.CPP, 0x800220b0): whether track `k` can be
@@ -315,16 +326,12 @@ pub fn valid_track(m: &mut Mem, this: u32, k: u32) -> u32 {
     let at = by_id(m, manager, 0, d);
     let available = m.r32(at + AVAILABLE);
     match m.r8(RACE_TYPE) {
-        0 => ((available | m.r32(at + UNLOCKED)) != 0) as u32,
-        1 => {
-            let mut v = ((available | m.r32(at + UNLOCKED)) != 0) as u32;
-            if m.r8(d + 4) != 0 {
-                v = 0;
-            }
-            if m.r8(d + 2) >= 3 {
-                v = 0;
-            }
-            v
+        SINGLE_RACE => ((available | m.r32(at + UNLOCKED)) != 0) as u32,
+        TOURNAMENT => {
+            let open = (available | m.r32(at + UNLOCKED)) != 0;
+            let bonus = m.r8(d + BONUS) != 0;
+            let class_ok = m.r8(d + CLASS) < TOURNAMENT_CLASSES;
+            (open && !bonus && class_ok) as u32
         }
         _ => available,
     }
