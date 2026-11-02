@@ -1,102 +1,101 @@
 //! FETOOLS.CPP: the front end's tools: strings made upper or lower case, a pad's button drawn
 //! (the PlayStation pad's or the NeGcon's, the d-pad's directions as two arrows), the fonts
 //! loaded and freed, an amount of money formatted with its thousands.
+//!
+//! Written as FEMENU.CPP is (see there).
 
-use crate::abi::{self, Saved};
+use crate::call::{call, with_buffer};
 use crate::femenuextended::{DRAW_SHAPE_EXTENDED, SPRINTF, STRLEN, TEXT_WORD};
 use crate::globals::{CURRENT_FONT, FONTS, PATHS};
+use crate::types::DrawShapeExtended;
 use ps1rt::{Cpu, Mem};
 
 /// The NeGcon (as `FeTools_DrawPSXButton`'s kind).
 const NEGCON: u32 = 35;
-/// The buttons' shapes (24: the help's shapes): the d-pad's up and down and its left and right
-/// (two arrows each), and each button's on the PlayStation pad and the NeGcon, and how far up
-/// it is drawn.
-const BUTTON_SHAPES: u32 = 24;
+/// The buttons' drawing: the help's shapes, coloured (`0xBEBE`).
+const BUTTON_FLAGS: u32 = 8 | 0x10;
+const BUTTON_COLOR: i32 = 0xBEBE;
+/// The d-pad's up and down and its left and right (each two arrows: shapes 26, 27 and 28, 29);
+/// each button (Triangle, Cross, Square, Start) as the PlayStation pad's and the NeGcon's shape,
+/// and how far up it is drawn.
 const UP_DOWN: u32 = 80;
 const LEFT_RIGHT: u32 = 160;
 const PAD_BUTTONS: [(u32, u32, u32); 4] = [(0x1000, 15, 3), (0x4000, 12, 3), (0x8000, 14, 3), (8, 16, 1)];
 const NEGCON_BUTTONS: [(u32, u32, u32); 4] = [(0x1000, 18, 3), (0x4000, 19, 4), (0x8000, 20, 2), (8, 21, 1)];
+/// The pad's Start (shape 16) is drawn 2 further right.
+const PAD_START: u32 = 16;
 
-/// The fonts' files ("%stiny.pfn", "%ssmall.pfn", "%stitle.pfn" in the front end's path),
-/// where in VRAM each goes; the font system's start and end (0x800cc608, 0x800cc5b8),
-/// `Font_LoadFont`, `loadfileadrz`, `purgememadr`.
-const FONT_FILES: [(u32, u32, u32, u32); 3] = [(0x8001_141C, 960, 385, 0x8002_6bf4), (0x8001_1428, 896, 256, 0x8002_6c30), (0x8001_1434, 960, 256, 0x8002_6c6c)];
+/// The fonts' files ("%stiny.pfn", "%ssmall.pfn", "%stitle.pfn" in the front end's path) and
+/// where in VRAM each goes; the font system's start and end, `Font_LoadFont`, `loadfileadrz`,
+/// `purgememadr`; the font made current.
+const FONT_FILES: [(u32, u32, u32); 3] = [(0x8001_141C, 960, 385), (0x8001_1428, 896, 256), (0x8001_1434, 960, 256)];
 const FONT_PATH: u32 = PATHS + 0x84;
 const FONT_START: fn(&mut Cpu) = nfs4rc::f_800cc608;
 const FONT_END: fn(&mut Cpu) = nfs4rc::f_800cc5b8;
 const LOAD_FONT: fn(&mut Cpu) = nfs4rc::f_800cc61c;
 const LOAD_FILE: fn(&mut Cpu) = nfs4rc::f_800e6394;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
+const FIRST_FONT: u16 = 3;
 
 /// The money's formats (up to a thousand, a million, more).
 const MONEY_TEXTS: [u32; 3] = [132, 133, 134];
 
 /// A string's letters from `from` (`'a'` or `'A'`) moved by `by`, in place.
-fn change_case(c: &mut Cpu, s: u32, from: u8, by: u8, ra: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = s;
-        let n = r.call_leaving(c, STRLEN, &[s], ra) as i32;
-        let m: &mut Mem = &mut c.m;
-        for k in 0..n.max(0) as u32 {
-            let b = m.r8(s + k);
-            if b.wrapping_sub(from) < 26 {
-                m.w8(s + k, b.wrapping_add(by));
-            }
+fn change_case(c: &mut Cpu, s: u32, from: u8, by: u8) {
+    let n = call(c, STRLEN, &[s]) as i32;
+    let m: &mut Mem = &mut c.m;
+    for k in 0..n.max(0) as u32 {
+        let b = m.r8(s + k);
+        if b.wrapping_sub(from) < 26 {
+            m.w8(s + k, b.wrapping_add(by));
         }
-    })
+    }
 }
 
 /// `s_upper` (FETOOLS.CPP, 0x80026910): a string in upper case.
+pub fn s_upper(c: &mut Cpu, s: u32) {
+    change_case(c, s, b'a', b'A'.wrapping_sub(b'a'));
+}
+
 pub fn abi_s_upper(c: &mut Cpu) {
-    change_case(c, c.r[4], b'a', 224, 0x8002_6924);
+    s_upper(c, c.r[4]);
 }
 
 /// `s_lower` (FETOOLS.CPP, 0x80026970): a string in lower case.
+pub fn s_lower(c: &mut Cpu, s: u32) {
+    change_case(c, s, b'A', b'a' - b'A');
+}
+
 pub fn abi_s_lower(c: &mut Cpu) {
-    change_case(c, c.r[4], b'A', 32, 0x8002_6984);
+    s_lower(c, c.r[4]);
 }
 
 /// `FeTools_DrawPSXButton` (FETOOLS.CPP, 0x800269d0): `button` drawn at `x`, `y` for a pad of
 /// `kind`: the d-pad's directions as two arrows, the buttons as the pad's or the NeGcon's
 /// (none known: shape 0).
 pub fn draw_psx_button(c: &mut Cpu, kind: u32, button: u32, x: u32, y: u32) {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = x;
-        r.0[1] = y.wrapping_add(1);
-        c.m.w32(sp + 36, 0xBEBE);
-        let draw = sp + 32;
-        let shape = |c: &mut Cpu, r: &Saved, k: u32, x: u32, y: u32, ra: u32| {
-            r.call_leaving(c, DRAW_SHAPE_EXTENDED, &[k, BUTTON_SHAPES, x, y, 0, 0, draw], ra);
+    with_buffer(c, DrawShapeExtended::SIZE, |c, options| {
+        DrawShapeExtended(options).set_tint(&mut c.m, 0, BUTTON_COLOR);
+        let shape = |c: &mut Cpu, k: u32, x: u32, y: u32| {
+            call(c, DRAW_SHAPE_EXTENDED, &[k, BUTTON_FLAGS, x, y, 0, 0, options]);
         };
+        let y = y.wrapping_add(1);
         match button & 0xFFFF {
             UP_DOWN => {
-                r.0[0] = draw;
-                let y = r.0[1];
-                shape(c, &r, 26, x.wrapping_add(3), y.wrapping_sub(2), 0x8002_6a3c);
-                shape(c, &r, 27, x.wrapping_add(4), y.wrapping_add(4), 0x8002_6bb0);
+                shape(c, 26, x.wrapping_add(3), y.wrapping_sub(2));
+                shape(c, 27, x.wrapping_add(4), y.wrapping_add(4));
             }
             LEFT_RIGHT => {
-                r.0[1] = r.0[1].wrapping_sub(1);
-                r.0[0] = draw;
-                let y = r.0[1];
-                shape(c, &r, 28, x, y, 0x8002_6a84);
-                shape(c, &r, 29, x.wrapping_add(10), y, 0x8002_6bb0);
+                shape(c, 28, x, y.wrapping_sub(1));
+                shape(c, 29, x.wrapping_add(10), y.wrapping_sub(1));
             }
             b => {
                 let table = if kind & 0xFF == NEGCON { NEGCON_BUTTONS } else { PAD_BUTTONS };
-                let mut k = 0;
-                if let Some(&(_, s, up)) = table.iter().find(|e| e.0 == b) {
-                    k = s;
-                    r.0[1] = r.0[1].wrapping_sub(up);
-                    if s == 16 {
-                        r.0[2] = r.0[2].wrapping_add(2);
-                    }
-                }
-                let (x, y) = (r.0[2], r.0[1]);
-                shape(c, &r, k, x, y, 0x8002_6bb0);
+                let (k, x, y) = match table.iter().find(|e| e.0 == b) {
+                    Some(&(_, k, up)) => (k, if k == PAD_START { x.wrapping_add(2) } else { x }, y.wrapping_sub(up)),
+                    None => (0, x, y),
+                };
+                shape(c, k, x, y);
             }
         }
     })
@@ -108,59 +107,53 @@ pub fn abi_draw_psx_button(c: &mut Cpu) {
 
 /// `FeTools_init` (FETOOLS.CPP, 0x80026bc8): the font system started, the three fonts loaded
 /// (each file kept, the font put in VRAM), font 3 the current one.
-pub fn abi_init(c: &mut Cpu) {
-    abi::frame(c, 280, |c, sp| {
-        let mut r = Saved::of(c);
-        r.call_leaving(c, FONT_START, &[], 0x8002_6bd8);
-        r.0[0] = PATHS;
-        let name = sp + 16;
-        for (k, (format, vx, vy, ra)) in FONT_FILES.into_iter().enumerate() {
+pub fn init(c: &mut Cpu) {
+    call(c, FONT_START, &[]);
+    with_buffer(c, 256, |c, name| {
+        for (k, (format, vx, vy)) in FONT_FILES.into_iter().enumerate() {
             let path = c.m.r32(FONT_PATH);
-            r.call_leaving(c, SPRINTF, &[name, format, path], ra);
-            let file = r.call_leaving(c, LOAD_FILE, &[name, 0], ra + 12);
+            call(c, SPRINTF, &[name, format, path]);
+            let file = call(c, LOAD_FILE, &[name, 0]);
             c.m.w32(FONTS + 4 * k as u32, file);
-            r.call_leaving(c, LOAD_FONT, &[file, vx, vy, 0], ra + 40);
+            call(c, LOAD_FONT, &[file, vx, vy, 0]);
         }
-        c.m.w16(CURRENT_FONT, 3);
-    })
+    });
+    c.m.w16(CURRENT_FONT, FIRST_FONT);
 }
 
-/// `FeTools_deinit` (FETOOLS.CPP, 0x80026cb0): the fonts' files freed, the font system ended.
+pub fn abi_init(c: &mut Cpu) {
+    init(c);
+}
+
+/// `FeTools_deinit` (FETOOLS.CPP, 0x80026cb0): the fonts' files freed (the second, the third,
+/// the first), the font system ended.
+pub fn deinit(c: &mut Cpu) {
+    for k in [1, 2, 0] {
+        let file = c.m.r32(FONTS + 4 * k);
+        call(c, PURGE, &[file]);
+    }
+    call(c, FONT_END, &[]);
+}
+
 pub fn abi_deinit(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| {
-        let r = Saved::of(c);
-        for (k, ra) in [(1, 0x8002_6cc8), (2, 0x8002_6cd8), (0, 0x8002_6ce8)] {
-            let file = c.m.r32(FONTS + 4 * k);
-            r.call_leaving(c, PURGE, &[file], ra);
-        }
-        r.call_leaving(c, FONT_END, &[], 0x8002_6cf0);
-    })
+    deinit(c);
 }
 
 /// `FeTools_FormatMoney` (FETOOLS.CPP, 0x80026d00): `amount` into `out`, its sign and its
 /// thousands (and millions) apart.
 pub fn format_money(c: &mut Cpu, out: u32, amount: u32) {
-    abi::frame(c, 40, |c, sp| {
-        // (the return address saved after the first branch, where the prologue's replay
-        // doesn't look)
-        let ra = c.r[31];
-        c.m.w32(sp + 36, ra);
-        let mut r = Saved::of(c);
-        let v = (amount as i32).wrapping_abs();
-        let sign = if (amount as i32) < 0 { b'-' } else { b' ' } as u32;
-        r.0[..3].copy_from_slice(&[v as u32, sign, out]);
-        if v < 1000 {
-            let format = r.call_leaving(c, TEXT_WORD, &[MONEY_TEXTS[0]], 0x8002_6d44);
-            r.call_leaving(c, SPRINTF, &[out, format, sign, v as u32], 0x8002_6d58);
-        } else if v <= 999_999 {
-            let format = r.call_leaving(c, TEXT_WORD, &[MONEY_TEXTS[1]], 0x8002_6d78);
-            r.call_leaving(c, SPRINTF, &[out, format, sign, (v / 1000) as u32, (v % 1000) as u32], 0x8002_6e5c);
-        } else {
-            let format = r.call_leaving(c, TEXT_WORD, &[MONEY_TEXTS[2]], 0x8002_6dc4);
-            let args = [out, format, sign, (v / 1_000_000) as u32, (v % 1_000_000 / 1000) as u32, (v % 1000) as u32];
-            r.call_leaving(c, SPRINTF, &args, 0x8002_6e5c);
-        }
-    })
+    let v = (amount as i32).wrapping_abs();
+    let sign = if (amount as i32) < 0 { b'-' } else { b' ' } as u32;
+    if v < 1000 {
+        let format = call(c, TEXT_WORD, &[MONEY_TEXTS[0]]);
+        call(c, SPRINTF, &[out, format, sign, v as u32]);
+    } else if v <= 999_999 {
+        let format = call(c, TEXT_WORD, &[MONEY_TEXTS[1]]);
+        call(c, SPRINTF, &[out, format, sign, (v / 1000) as u32, (v % 1000) as u32]);
+    } else {
+        let format = call(c, TEXT_WORD, &[MONEY_TEXTS[2]]);
+        call(c, SPRINTF, &[out, format, sign, (v / 1_000_000) as u32, (v % 1_000_000 / 1000) as u32, (v % 1000) as u32]);
+    }
 }
 
 pub fn abi_format_money(c: &mut Cpu) {
