@@ -1,12 +1,18 @@
 //! MMEFFECT.CPP: the front end's blending mode, a `DR_MODE` primitive in the ordering table.
+//!
+//! Written as FEMENU.CPP is (see there).
 
-use crate::abi::{self, Saved};
+use crate::call::call;
 use crate::femenuextended::{NEXT_PRIM, OT};
 use ps1rt::{Cpu, Mem};
 
 /// `GetTPage`, `SetDrawMode`.
 const GET_TPAGE: fn(&mut Cpu) = nfs4rc::f_800f2930;
 const SET_DRAW_MODE: fn(&mut Cpu) = nfs4rc::f_800eed18;
+
+/// A `DR_MODE`'s size; a 16-bit texture page at 0, 256.
+const DR_MODE_SIZE: u32 = 12;
+const PAGE_16BIT: u32 = 2;
 
 /// A primitive of `size` bytes taken from the scratchpad's buffer and linked into the ordering
 /// table (the original's reads and writes in its order).
@@ -21,21 +27,19 @@ pub(crate) fn add_prim(m: &mut Mem, size: u32) -> u32 {
     prim
 }
 
-/// `FeDraw_SetABRMode` (MMEFFECT.CPP, 0x8004dbc0): a `DR_MODE` (12 bytes) setting the
-/// semi-transparency mode `mode` on a 16-bit texture page at 0, 256, no dithering.
-pub fn abi_set_abr_mode(c: &mut Cpu) {
-    let mode = c.r[4];
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        let prim = add_prim(&mut c.m, 12);
-        r.0[0] = prim;
-        let tpage = r.call_leaving(c, GET_TPAGE, &[2, mode, 0, 256], 0x8004_dc34);
-        r.call_leaving(c, SET_DRAW_MODE, &[prim, 0, 0, tpage & 0xFFFF, 0], 0x8004_dc4c);
-    })
+/// `FeDraw_SetABRMode` (MMEFFECT.CPP, 0x8004dbc0): a `DR_MODE` setting the semi-transparency
+/// mode `mode` (on a 16-bit texture page at 0, 256; no dithering, no drawing to the display).
+pub fn set_abr_mode(c: &mut Cpu, mode: u32) {
+    let prim = add_prim(&mut c.m, DR_MODE_SIZE);
+    let tpage = call(c, GET_TPAGE, &[PAGE_16BIT, mode, 0, 256]);
+    call(c, SET_DRAW_MODE, &[prim, 0, 0, tpage & 0xFFFF, 0]);
 }
 
-/// `FeDraw_SetABRMode` entered as the original's callers `jal` it.
+pub fn abi_set_abr_mode(c: &mut Cpu) {
+    set_abr_mode(c, c.r[4]);
+}
+
+/// For callers not rewritten yet: `FeDraw_SetABRMode` with the C convention's arguments.
 pub(crate) fn set_abr_mode_entry(c: &mut Cpu) {
-    abi::leave_prologue(c, 0x8004_dbc0, None, &[]);
     abi_set_abr_mode(c);
 }
