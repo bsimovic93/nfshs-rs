@@ -33,7 +33,9 @@ NAMES = {'coorddef': 'Coord', 'matrixtdef': 'Matrix', 'BO_tNewtonObj': 'NewtonOb
 # The list iterators' bounds are `char` in the SYM, but the original loads and compares them
 # unsigned (`lbu`, `sltu`).
 OVERRIDES = {('AITrigger_TriggerManager', 'triggers_'): (0x8, 'ulong[100]'),
-             ('tListIterator', 'fMinValue'): (0x8, 'uchar'), ('tListIterator', 'fMaxValue'): (0x9, 'uchar')}
+             ('tListIterator', 'fMinValue'): (0x8, 'uchar'), ('tListIterator', 'fMaxValue'): (0x9, 'uchar'),
+             # the help's seven lines' strings (`char *text[7]`)
+             ('tDialogHelp', 'text'): (0x94, 'ulong[7]')}
 
 SCALARS = {'char': ('i8', 1), 'uchar': ('u8', 1), 'short': ('i16', 2), 'ushort': ('u16', 2),
            'int': ('i32', 4), 'uint': ('u32', 4), 'long': ('i32', 4), 'ulong': ('u32', 4),

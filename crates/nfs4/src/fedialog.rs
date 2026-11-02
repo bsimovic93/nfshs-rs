@@ -1,20 +1,22 @@
-//! FEDIALOG.CPP: the front end's dialogs: a stack of up to eight shown at once over the
-//! screen (the top one first), each a box that grows open over 50 ticks and fades its text in;
-//! the help box (the keys the current menu takes, with their pads' buttons, typed out letter
-//! by letter), message boxes (a text word-wrapped or on one line), those that take only Start
-//! or no input, and the interactive ones (`Run`: the front end's frames go on while one waits
-//! for its answer): yes or no, the memory card's (closed when the card is taken out) and the
-//! one Start answers too.
+//! FEDIALOG.CPP: the front end's dialogs. Up to eight are shown at once over the screen, the
+//! top one first; each is a box that grows open over 50 ticks and fades its text in.
+//! - The help box: the keys the current menu takes with the pads' buttons, typed out letter
+//!   by letter.
+//! - Message boxes: a text word-wrapped or on one line; those that take only Start, or no
+//!   input.
+//! - The interactive ones (`Run`: the front end's frames go on while one waits for its
+//!   answer): yes or no, the memory card's (closed when the card is taken out), and the one
+//!   Start answers too.
 //!
-//! The dialogs are screens (`tScreen`, its vptr at +96); their `ProcessInput`,
-//! `CalculateDimensions` and `Draw` are virtual, called with the registers the original has at
-//! its `jalr`.
+//! The dialogs are screens (`tScreen`, their vtable pointer at +96); their `ProcessInput`,
+//! `CalculateDimensions` and `Draw` are virtual. Written as FEMENU.CPP is (see there).
 
-use crate::abi::{self, Saved};
-use crate::femenu::{KEY_ACCEPT, KEY_BACK, KEY_HELP, KEY_LEFT, KEY_NONE, KEY_RIGHT, KEY_START, PLAY_FE_SFX, PROCESS_INPUT, method};
+use crate::call::{call, call_addr, call_virtual, with_buffer};
+use crate::femenu::{ITEM_DISABLED, KEY_ACCEPT, KEY_BACK, KEY_HELP, KEY_LEFT, KEY_NONE, KEY_RIGHT, KEY_START, PLAY_FE_SFX, PROCESS_INPUT};
 use crate::femenuextended::{DRAW_TRANS_SQUARE, MENU_VPTR, SET_ABR_MODE, STRLEN, TEXT_PIXELS, TEXT_WORD};
 use crate::fetextrender;
 use crate::globals::{FE_APP, GAME_TICKS, PAD_INFO, SCREEN_WIDTH, SHAPES, TEXT_COLORS, TEXT_STYLES};
+use crate::types::{DialogBase, DialogHelp, DialogInteractive, DialogMessageString, DialogYesNo, FEApplication, Menu, MenuItem, RECT};
 use ps1rt::{Cpu, Mem};
 
 /// The dialogs shown, the top one first (`tDialogBase::fDialogs[8]`).
@@ -28,67 +30,54 @@ const MESSAGE_VT: u32 = 0x8001_04E8;
 const INTERACTIVE_VT: u32 = 0x8001_03C8;
 const YES_NO_VT: u32 = 0x8001_0368;
 
-/// A dialog's vptr (a screen's) and its virtual `ProcessInput`, `CalculateDimensions` and
-/// `Draw`.
+/// A dialog's vtable pointer (a screen's) and its virtual `ProcessInput`,
+/// `CalculateDimensions` and `Draw`.
 const VPTR: u32 = 96;
 const PROCESS_INPUT_SLOT: u32 = 72;
 const CALCULATE_DIMENSIONS: u32 = 80;
 const DRAW: u32 = 88;
 
-// A dialog: +100 the player it listens to (-1 either), +102 x, +104 y, +106 its width, +108
-// its height, +110 the room under its text (the yes-or-no's answers), +112 shown, +116 the tick
-// it was shown at, +120 its timeout (ticks; 0 none), +124 and +126 its place off the centre,
-// +128 a message's width, +130 its height (0: as its text takes), +132 open (grown to its
-// size), +136 the answer it starts on, +138 the answer, +140 the text's fade, +144 a message's
-// text (the help's page), +148 a message on one line (the help's texts, seven), +152 answered,
-// +156 running, +160 the yes-or-no's two texts; the help's +176 buttons (seven), +204 how many
-// lines, +206 the pads' kinds (1 a pad, 2 a NeGcon), +208 the texts' place right of the
-// buttons.
-const PLAYER: u32 = 100;
-const X: u32 = 102;
-const Y: u32 = 104;
-const W: u32 = 106;
-const H: u32 = 108;
-const SHOWN: u32 = 112;
-const SHOWN_AT: u32 = 116;
-const TIMEOUT: u32 = 120;
-const OPEN: u32 = 132;
-const ANSWER: u32 = 138;
-const FADE: u32 = 140;
-const TEXT: u32 = 144;
-const ONE_LINE: u32 = 148;
-const ANSWERED: u32 = 152;
-const HELP_TEXTS: u32 = 148;
-const HELP_BUTTONS: u32 = 176;
-const HELP_LINES: u32 = 204;
-const HELP_PADS: u32 = 206;
-const HELP_TEXT_X: u32 = 208;
-const HELP_MAX_LINES: u32 = 7;
-
 /// How long a dialog takes to open (ticks).
 const OPENING: i32 = 50;
+/// The help's lines (its title and six keys at most).
+const HELP_MAX_LINES: i16 = 7;
 
 /// `FeTools_DrawPSXButton`; `PAD_update`; `blockmove`; `CalcFadeVal`; the front end's key for a
-/// player (FEINPUT.CPP); a frame of the front end (`tFEApplication`'s, 0x80013894); the
-/// memory card's events and its state (`MCRD_handlecardevents`, `MCRD_getcard`); the screen's
-/// constructor and destructor (`tScreen`).
+/// player (FEINPUT.CPP); the memory card's events and its state (`MCRD_handlecardevents`,
+/// `MCRD_getcard`); the screen's constructor and destructor (`tScreen`).
 const DRAW_PSX_BUTTON: fn(&mut Cpu) = nfs4rc::f_800269d0;
 const PAD_UPDATE: fn(&mut Cpu) = nfs4rc::f_800e4e08;
 const BLOCKMOVE: fn(&mut Cpu) = nfs4rc::f_800e6ec8;
 const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
 const GET_KEY: fn(&mut Cpu) = nfs4rc::f_80023ca8;
-/// `tFEApplication::Redraw`, hooked (the host autosaves between front-end frames): called by
-/// address; `Cpu::call` routes it to the port after the host.
-const FRONT_END_FRAME: u32 = 0x8001_3894;
 const CARD_EVENTS: fn(&mut Cpu) = crate::memcard::handlecardevents_entry;
 const GET_CARD: fn(&mut Cpu) = crate::memcard::getcard_entry;
 const SCREEN: fn(&mut Cpu) = nfs4rc::f_80026040;
 const SCREEN_DESTRUCTOR: fn(&mut Cpu) = nfs4rc::f_80026098;
+/// Hooked by the host, so called by address: `tDialog::Display` and `Hide` (it notes the
+/// dialog for its autosave's sounds); `tFEApplication::Redraw` (it autosaves between frames);
+/// `tDialogMessageString::Draw` (it hides the save's message while autosaving).
+const DISPLAY: u32 = 0x8001_8980;
+const HIDE: u32 = 0x8001_8A44;
+const FRONT_END_FRAME: u32 = 0x8001_3894;
+const MESSAGE_DRAW: u32 = 0x8001_976C;
 
-/// The help's pages (one, its flag the menu's keys: no texts of its own), copied to the stack.
+/// The help's pages (one), 18 bytes each: a byte whether it shows the menu's keys, then up to
+/// four lines of its own (a text, a button: shorts) to a 0 text.
 const HELP_PAGES: u32 = 0x8001_023C;
 const HELP_PAGE_SIZE: u32 = 18;
-/// The pads' buttons drawn for the keys (the PlayStation's, the NeGcon's).
+/// The help's title, and its keys' texts and the pads' buttons for them.
+const HELP_TITLE: u32 = 90;
+const HELP_MOVE: (u32, u32) = (83, 80);
+const HELP_CHOOSE: (u32, u32) = (84, 160);
+const HELP_SELECT: u32 = 86;
+const HELP_SELECT_OR_PAGE: u32 = 87;
+const HELP_ACCEPT_BUTTON: u32 = 0x4000;
+const HELP_OPTIONS: (u32, u32) = (85, 0x1000);
+const HELP_MENU_OPTIONS: (u32, u32) = (88, 0xFFFF_8000);
+const HELP_BACK: u32 = 89;
+const HELP_BACK_BUTTON: u32 = 8;
+/// The buttons' shapes: the PlayStation pad's, the NeGcon's.
 const PAD_BUTTONS: u32 = 65;
 const NEGCON_BUTTONS: u32 = 35;
 const PAD_NEGCON: u32 = 0x23;
@@ -97,83 +86,87 @@ const PAD_NEGCON: u32 = 0x23;
 const CARD_PORT: u32 = 0x8005_1EF0;
 const CARD_EVENT_TABLE: u32 = 0x8001_0250;
 const CARD_EVENT_CLOSES: u32 = 0x8001_9F50;
-/// The help dialog the front end keeps (`gFEApp + 344`), its menus (per player, +4) and their
-/// pages of options (+324); set while the front end takes no input (+456).
+/// The application's help dialog (`gFEApp + 344`), each player's pages of options (+324),
+/// whether the front end takes no input (+456).
 const APP_HELP: u32 = 344;
-const APP_MENUS: u32 = 4;
 const APP_OPTIONS: u32 = 324;
 const APP_NO_INPUT: u32 = 456;
+/// A menu's flags the help reads: back goes to the parent; start goes on; its items' kinds.
+const MENU_BACK_PARENT: u32 = 0x800;
+const MENU_START_CONTINUES: u32 = 0x3_0000;
+const MENU_BACK_ACCEPTS: u32 = 4;
+const ITEM_LEFT_RIGHT: u32 = 0x400;
+/// The front end's sounds: a dialog opening, closing; left, right, accept.
+const SOUND_OPEN: u32 = 15;
+const SOUND_CLOSE: u32 = 18;
+/// A message's text style (type 8, state 1); the yes-or-no answers' (type 8, states 1 and 2).
+const MESSAGE_STYLE: u32 = 52;
+const ANSWER_STYLES: u32 = 51;
+/// The dialogs' opening shape (42nd: its width and height, the size they open from).
+const OPENING_SHAPE: u32 = 1360;
+/// The help box's narrowest (the 4th shape's width, +20) and where it opens.
+const HELP_TITLE_SHAPE: u32 = 112;
 
 fn sx(v: u32) -> u32 {
     v as i16 as i32 as u32
 }
 
-fn lh(m: &mut Mem, at: u32) -> u32 {
-    m.r16(at) as i16 as i32 as u32
+fn ticks(m: &mut Mem) -> u32 {
+    m.r32(GAME_TICKS)
+}
+
+/// The dialog's `k`th place on the stack.
+fn slot(k: u32) -> u32 {
+    DIALOGS.wrapping_add(k << 2)
 }
 
 /// `tDialogBase::ShouldTimeOut` (FEDIALOG.CPP, 0x80018808): whether a dialog with a timeout has
 /// been shown that long.
-pub fn should_time_out(m: &mut Mem, this: u32) -> u32 {
-    let timeout = m.r32(this + TIMEOUT) as i32;
+pub fn should_time_out(m: &mut Mem, this: DialogBase) -> u32 {
+    let timeout = this.time_out_ticks(m);
     if timeout <= 0 {
         return 0;
     }
-    let shown = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + SHOWN_AT)) as i32;
+    let shown = ticks(m).wrapping_sub(this.start_ticks(m) as u32) as i32;
     (shown >= timeout) as u32
 }
 
 pub fn abi_should_time_out(c: &mut Cpu) {
-    c.r[2] = should_time_out(&mut c.m, c.r[4]);
+    c.r[2] = should_time_out(&mut c.m, DialogBase(c.r[4]));
 }
 
 /// `tDialogBase::InitializeClass` (FEDIALOG.CPP, 0x80018840): no dialogs shown.
 pub fn abi_initialize_class(c: &mut Cpu) {
-    abi::frame(c, 24, |c, _| hide_all_dialogs(&mut c.m));
+    hide_all_dialogs(&mut c.m);
 }
 
 /// `tDialogBase::DrawAllDialogs` (FEDIALOG.CPP, 0x80018860): each dialog shown, the top one
 /// first, drawn; one that has timed out hidden instead (the rest move up, and the one moved
 /// into its place is drawn).
 pub fn abi_draw_all_dialogs(c: &mut Cpu) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = 0;
-        if c.m.r32(DIALOGS) == 0 {
+    if c.m.r32(DIALOGS) == 0 {
+        return;
+    }
+    for k in 0..MAX_DIALOGS {
+        let dialog = c.m.r32(slot(k));
+        if should_time_out(&mut c.m, DialogBase(dialog)) != 0 {
+            call_addr(c, HIDE, &[dialog]);
+            if c.m.r32(slot(k)) == 0 {
+                return;
+            }
+        }
+        let dialog = c.m.r32(slot(k));
+        call_virtual(c, dialog, VPTR, DRAW, &[]);
+        if c.m.r32(slot(k + 1)) == 0 {
             return;
         }
-        r.0[2] = DIALOGS;
-        loop {
-            let k = sx(r.0[1]);
-            if k as i32 >= MAX_DIALOGS as i32 {
-                return;
-            }
-            let at = DIALOGS.wrapping_add(k << 2);
-            r.0[0] = at;
-            let dialog = c.m.r32(at);
-            if should_time_out(&mut c.m, dialog) != 0 {
-                r.call_ptr(c, 0x8001_8a44, &[dialog], 0x8001_88c4);
-                if c.m.r32(at) == 0 {
-                    return;
-                }
-            }
-            let dialog = c.m.r32(at);
-            let (obj, f) = method(&mut c.m, dialog, VPTR, DRAW);
-            r.call_ptr_leaving(c, f, &[obj], 0x8001_88f8);
-            let next = r.0[1].wrapping_add(1);
-            let more = c.m.r32(DIALOGS.wrapping_add(sx(next) << 2)) != 0;
-            r.0[1] = next;
-            if !more {
-                return;
-            }
-        }
-    })
+    }
 }
 
 /// `tDialogBase::HideAllDialogs` (FEDIALOG.CPP, 0x80018930).
 pub fn hide_all_dialogs(m: &mut Mem) {
     for k in 0..MAX_DIALOGS {
-        m.w32(DIALOGS + 4 * k, 0);
+        m.w32(slot(k), 0);
     }
 }
 
@@ -189,159 +182,116 @@ pub fn abi_get_top_most_dialog(c: &mut Cpu) {
 /// `tDialogBase::Display` (FEDIALOG.CPP, 0x80018980): a dialog not shown yet put on top (the
 /// others moved down, the last dropped), shown from now on its first answer, closed, its text
 /// unfaded, with a sound.
-pub fn display(c: &mut Cpu, this: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = this;
-        let m = &mut c.m;
-        if m.r32(this + SHOWN) != 0 {
-            return;
-        }
-        let first = m.r16(this + 136);
-        m.w32(this + SHOWN, 1);
-        m.w32(this + OPEN, 0);
-        m.w16(this + ANSWER, first);
-        for k in (1..MAX_DIALOGS).rev() {
-            let v = m.r32(DIALOGS + 4 * (k - 1));
-            m.w32(DIALOGS + 4 * k, v);
-        }
-        r.0[0] = 0x8005_0000;
-        m.w32(DIALOGS, this);
-        should_time_out(m, this);
-        let top = m.r32(DIALOGS);
-        should_time_out(m, top);
-        let ticks = m.r32(GAME_TICKS);
-        m.w32(this + SHOWN_AT, ticks);
-        r.call_leaving(c, PLAY_FE_SFX, &[15], 0x8001_8a24);
-        let m = &mut c.m;
-        m.w32(this + OPEN, 0);
-        m.w32(this + FADE, 128);
-    })
+pub fn display(c: &mut Cpu, this: DialogBase) {
+    let m = &mut c.m;
+    if this.currently_on(m) != 0 {
+        return;
+    }
+    let first = this.default(m);
+    this.set_currently_on(m, 1);
+    this.set_fully_open(m, 0);
+    this.set_return_value(m, first);
+    for k in (1..MAX_DIALOGS).rev() {
+        let v = m.r32(slot(k - 1));
+        m.w32(slot(k), v);
+    }
+    m.w32(DIALOGS, this.0);
+    let now = ticks(m);
+    this.set_start_ticks(m, now as i32);
+    call(c, PLAY_FE_SFX, &[SOUND_OPEN]);
+    let m = &mut c.m;
+    this.set_fully_open(m, 0);
+    this.set_fade_text(m, 128);
 }
 
 pub fn abi_display(c: &mut Cpu) {
-    display(c, c.r[4]);
+    display(c, DialogBase(c.r[4]));
 }
 
 /// `tDialogBase::Hide` (FEDIALOG.CPP, 0x80018a44): a dialog shown taken off the stack (those
 /// under it moved up), with a sound.
-pub fn hide(c: &mut Cpu, this: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        if c.m.r32(this + SHOWN) == 0 {
-            return;
+pub fn hide(c: &mut Cpu, this: DialogBase) {
+    if this.currently_on(&mut c.m) == 0 {
+        return;
+    }
+    this.set_currently_on(&mut c.m, 0);
+    for k in 0..MAX_DIALOGS {
+        let at = slot(k);
+        if c.m.r32(at) == this.0 {
+            this.set_currently_on(&mut c.m, 0);
+            c.m.w32(at, 0);
+            call(c, BLOCKMOVE, &[at + 4, at, (7 - k) << 2]);
+            c.m.w32(slot(MAX_DIALOGS - 1), 0);
+            call(c, PLAY_FE_SFX, &[SOUND_CLOSE]);
         }
-        r.0[0] = 0;
-        c.m.w32(this + SHOWN, 0);
-        r.0[1] = DIALOGS;
-        loop {
-            let k = sx(r.0[0]);
-            let at = DIALOGS.wrapping_add(k << 2);
-            if c.m.r32(at) == this {
-                let n = 7u32.wrapping_sub(k) << 2;
-                c.m.w32(this + SHOWN, 0);
-                c.m.w32(at, 0);
-                r.call_leaving(c, BLOCKMOVE, &[at.wrapping_add(4), at, n], 0x8001_8ab8);
-                c.m.w32(DIALOGS + 4 * (MAX_DIALOGS - 1), 0);
-                r.call_leaving(c, PLAY_FE_SFX, &[18], 0x8001_8ac4);
-            }
-            r.0[0] = r.0[0].wrapping_add(1);
-            if sx(r.0[0]) as i32 >= MAX_DIALOGS as i32 {
-                return;
-            }
-        }
-    })
+    }
 }
 
 pub fn abi_hide(c: &mut Cpu) {
-    hide(c, c.r[4]);
+    hide(c, DialogBase(c.r[4]));
 }
 
-/// `tDialogBase::Draw` (FEDIALOG.CPP, 0x80018af8): the box's frame (four edges, the sides
-/// 4 wide, the top and bottom 2 high) and its shaded inside.
-pub fn draw(c: &mut Cpu, this: u32) {
-    abi::frame(c, 40, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[2] = 4;
-        let m = &mut c.m;
-        let (x, y, w, h) = (lh(m, this + X), lh(m, this + Y), lh(m, this + W), lh(m, this + H));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x, y, 4, h, 4], 0x8001_8b34);
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(w).wrapping_sub(4), y, 4, h, 4], 0x8001_8b60);
-        r.0[1] = 2;
-        let m = &mut c.m;
-        let (x, y, w) = (lh(m, this + X), lh(m, this + Y), lh(m, this + W));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y, w.wrapping_sub(8), 2, 4], 0x8001_8b88);
-        let m = &mut c.m;
-        let (x, y, h, w) = (lh(m, this + X), lh(m, this + Y), lh(m, this + H), lh(m, this + W));
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y.wrapping_add(h).wrapping_sub(2), w.wrapping_sub(8), 2, 4], 0x8001_8bb8);
-        let m = &mut c.m;
-        let (x, y, w, h) = (lh(m, this + X), lh(m, this + Y), lh(m, this + W), lh(m, this + H));
-        let args = [0, x.wrapping_add(4), y.wrapping_add(2), w.wrapping_sub(8), h.wrapping_sub(4), 2];
-        r.call_ptr_leaving(c, DRAW_TRANS_SQUARE, &args, 0x8001_8be8);
-        r.call_leaving(c, SET_ABR_MODE, &[0], 0x8001_8bf0);
-    })
+/// `tDialogBase::Draw` (FEDIALOG.CPP, 0x80018af8): the box's frame (four edges, the sides 4
+/// wide, the top and bottom 2 high) and its shaded inside.
+pub fn draw(c: &mut Cpu, this: DialogBase) {
+    let m = &mut c.m;
+    let (x, y, w, h) = (this.left(m) as i32 as u32, this.top(m) as i32 as u32, this.width(m) as i32 as u32, this.height(m) as i32 as u32);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, x, y, 4, h, 4]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(w).wrapping_sub(4), y, 4, h, 4]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y, w.wrapping_sub(8), 2, 4]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y.wrapping_add(h).wrapping_sub(2), w.wrapping_sub(8), 2, 4]);
+    call_addr(c, DRAW_TRANS_SQUARE, &[0, x.wrapping_add(4), y.wrapping_add(2), w.wrapping_sub(8), h.wrapping_sub(4), 2]);
+    call(c, SET_ABR_MODE, &[0]);
 }
 
 pub fn abi_draw(c: &mut Cpu) {
-    draw(c, c.r[4]);
+    draw(c, DialogBase(c.r[4]));
 }
 
 /// `tDialogBase::ProcessInput` (FEDIALOG.CPP, 0x80018c08): any key hides the dialog (and is
 /// taken).
 pub fn abi_process_input(c: &mut Cpu) {
     let (this, key) = (c.r[4], c.r[6]);
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[1] = key;
-        r.0[0] = 1;
-        if c.m.r32(key) != KEY_NONE {
-            r.call_ptr(c, 0x8001_8a44, &[this], 0x8001_8c34);
-            c.m.w32(key, KEY_NONE);
-        }
-    })
+    if c.m.r32(key) != KEY_NONE {
+        call_addr(c, HIDE, &[this]);
+        c.m.w32(key, KEY_NONE);
+    }
 }
 
 /// `tDialogHelp::AddItem` (FEDIALOG.CPP, 0x80018c4c): a line (a text and the pads' button for
 /// it), while there is room for one.
-pub fn add_item(c: &mut Cpu, this: u32, text: u32, button: u32) {
-    abi::frame(c, 32, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.0[1] = button;
-        if lh(&mut c.m, this + HELP_LINES) as i32 >= HELP_MAX_LINES as i32 {
-            return;
-        }
-        let word = r.call_leaving(c, TEXT_WORD, &[sx(text)], 0x8001_8c80);
-        let m = &mut c.m;
-        let k = lh(m, this + HELP_LINES);
-        m.w32(this.wrapping_add(k << 2).wrapping_add(HELP_TEXTS), word);
-        let k = lh(m, this + HELP_LINES);
-        m.w32(this.wrapping_add(k << 2).wrapping_add(HELP_BUTTONS), sx(button));
-        let n = m.r16(this + HELP_LINES).wrapping_add(1);
-        m.w16(this + HELP_LINES, n);
-    })
+pub fn add_item(c: &mut Cpu, this: DialogHelp, text: u32, button: u32) {
+    if this.num_items(&mut c.m) >= HELP_MAX_LINES {
+        return;
+    }
+    let word = call(c, TEXT_WORD, &[sx(text)]);
+    let m = &mut c.m;
+    let k = this.num_items(m) as i32 as u32;
+    this.set_text(m, k, word);
+    let k = this.num_items(m) as i32 as u32;
+    this.set_cont(m, k, sx(button) as i32);
+    this.update_num_items(m, |n| n.wrapping_add(1));
 }
 
 pub fn abi_add_item(c: &mut Cpu) {
-    add_item(c, c.r[4], c.r[5], c.r[6]);
+    add_item(c, DialogHelp(c.r[4]), c.r[5], c.r[6]);
 }
 
-/// The ABI entry of [`add_item`] for its callers here (its prologue's stores left).
-fn enter_add_item(c: &mut Cpu, r: &Saved, this: u32, text: u32, button: u32, ra: u32) {
-    r.enter(c, 0x8001_8c4c, ra, |c| add_item(c, this, text, button));
-}
-
-/// Where the box opening over its first ticks is now: its size (at `at`) grown from twice the
-/// starting size `from` (`elapsed` ticks of 50; `signed` the division the original does: the
-/// help's unsigned, a message's signed).
-fn opening(m: &mut Mem, this: u32, at: u32, from: u32, elapsed: u32, signed: bool) -> u32 {
-    let from = from as i16 as i32;
+/// The size of an opening box: grown from twice the opening shape's size `from` to the full
+/// `size` over the first 50 ticks (`elapsed` of them; `signed` the division the original does:
+/// the help's unsigned, a message's signed).
+fn opening(size: i16, from: i16, elapsed: u32, signed: bool) -> i16 {
+    let from = from as i32;
     let start = ((from << 1) as u16 as i16) as i32;
-    let grown = (lh(m, this + at) as i32).wrapping_sub(start).wrapping_mul(elapsed as i32);
+    let grown = (size as i32).wrapping_sub(start).wrapping_mul(elapsed as i32);
     let step = if signed { grown / OPENING } else { ((grown as u32 as u64 * 0x51EB_851F) >> 36) as i32 };
-    (from << 1).wrapping_add(step) as u32
+    (from << 1).wrapping_add(step) as i16
+}
+
+/// The opening shape's width and height.
+fn opening_size(m: &mut Mem) -> (i16, i16) {
+    let shapes = m.r32(SHAPES);
+    (m.r16(shapes + OPENING_SHAPE) as i16, m.r16(shapes + OPENING_SHAPE + 2) as i16)
 }
 
 /// `tDialogHelp::CalculateDimensions` (FEDIALOG.CPP, 0x80018cd0): the help's lines: its title,
@@ -350,685 +300,582 @@ fn opening(m: &mut Mem, this: u32, at: u32, from: u32, elapsed: u32, signed: boo
 /// page's own; the pads' kinds; a box as wide as the widest text past the buttons (as wide as
 /// the help's title shape at least), 15 high a line, at the top right, opening over its first
 /// ticks.
-pub fn calculate_dimensions_help(c: &mut Cpu, this: u32) {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[3] = this;
-        let pages = sp + 16;
-        for k in 0..HELP_PAGE_SIZE {
-            let b = c.m.r8(HELP_PAGES + k);
-            c.m.w8(pages + k, b);
-        }
-        r.call_leaving(c, fetextrender::set_font_entry, &[0], 0x8001_8d4c);
-        c.m.w16(this + HELP_LINES, 0);
-        enter_add_item(c, &r, this, 90, 0, 0x8001_8d60);
-        r.0[5] = 0;
-        let player = lh(&mut c.m, this + PLAYER);
-        r.0[0] = pages;
-        if player != u32::MAX {
-            r.0[5] = player;
-        }
-        let page = lh(&mut c.m, this + TEXT);
-        let entry = pages.wrapping_add(page.wrapping_mul(HELP_PAGE_SIZE));
-        r.0[2] = 0;
-        if c.m.r8(entry) != 0 {
-            r.0[4] = 0;
-            let app = c.m.r32(FE_APP);
-            let menu = c.m.r32(app.wrapping_add(r.0[5] << 2).wrapping_add(APP_MENUS));
-            r.0[0] = menu;
-            r.0[1] = 0;
-            loop {
-                let item = c.m.r32(menu.wrapping_add(sx(r.0[1]) << 2).wrapping_add(16));
-                if item == 0 {
-                    break;
-                }
-                let flags = c.m.r32(item);
-                if flags & 1 == 0 {
-                    if flags & 0x400 != 0 {
-                        r.0[2] = 1;
-                    } else {
-                        r.0[4] = 1;
-                    }
-                }
-                r.0[1] = r.0[1].wrapping_add(1);
+pub fn calculate_dimensions_help(c: &mut Cpu, this: DialogHelp) {
+    call(c, fetextrender::set_font_entry, &[0]);
+    this.set_num_items(&mut c.m, 0);
+    add_item(c, this, HELP_TITLE, 0);
+    let player = match this.specific_player(&mut c.m) {
+        -1 => 0,
+        p => p as i32 as u32,
+    };
+    let page = HELP_PAGES.wrapping_add((this.variant(&mut c.m) as i32 as u32).wrapping_mul(HELP_PAGE_SIZE));
+    if c.m.r8(page) != 0 {
+        // the keys the player's current menu takes
+        let app = FEApplication(c.m.r32(FE_APP));
+        // (the player's current menu, read as the original does for any player)
+        let menu = Menu(c.m.r32(app.0.wrapping_add(player << 2).wrapping_add(4)));
+        let (mut choices, mut others) = (false, false);
+        let mut k = 0u32;
+        loop {
+            let it = MenuItem(c.m.r32(menu.0.wrapping_add(sx(k) << 2).wrapping_add(16)));
+            if it.0 == 0 {
+                break;
             }
-            let n = r.enter(c, 0x8002_58b4, 0x8001_8e18, |c| crate::femenu::get_number_enabled_items(&mut c.m, crate::types::Menu(menu)));
-            if sx(n) as i32 >= 2 {
-                enter_add_item(c, &r, this, 83, 80, 0x8001_8e38);
-            }
-            if r.0[2] != 0 {
-                enter_add_item(c, &r, this, 84, 160, 0x8001_8e4c);
-            }
-            if r.0[4] != 0 {
-                let flags = c.m.r32(menu);
-                let text = if flags & 0x3_0000 != 0 { 87 } else { 86 };
-                enter_add_item(c, &r, this, text, 0x4000, 0x8001_8e98);
-            }
-            let app = c.m.r32(FE_APP);
-            if c.m.r32(app.wrapping_add(r.0[5] << 2).wrapping_add(APP_OPTIONS)) as i32 > 0 {
-                enter_add_item(c, &r, this, 85, 0x1000, 0x8001_8ec4);
-            }
-            if c.m.r32(menu + 92) != 0 {
-                enter_add_item(c, &r, this, 88, 0xFFFF_8000, 0x8001_8ee0);
-            }
-            let flags = c.m.r32(menu);
-            if flags & 0x800 != 0 {
-                enter_add_item(c, &r, this, 89, 8, 0x8001_8f54);
-            } else {
-                let m = &mut c.m;
-                if m.r32(menu + 84) != 0 || flags & 0x400 != 0 || m.r32(menu + 96) != 0 || m.r32(menu) & 4 != 0 {
-                    enter_add_item(c, &r, this, 87, 8, 0x8001_8f54);
+            let flags = it.flags(&mut c.m);
+            if flags & ITEM_DISABLED == 0 {
+                if flags & ITEM_LEFT_RIGHT != 0 {
+                    choices = true;
+                } else {
+                    others = true;
                 }
             }
+            k = k.wrapping_add(1);
         }
-        // the page's own lines
-        r.0[2] = pages;
-        let page = lh(&mut c.m, this + TEXT);
-        let first = lh(&mut c.m, pages.wrapping_add(page.wrapping_mul(HELP_PAGE_SIZE)).wrapping_add(2));
-        r.0[1] = 0;
-        if first != 0 {
-            loop {
-                let page = sx(c.m.r16(this + TEXT) as u32);
-                let at = pages.wrapping_add(sx(r.0[1]) << 2).wrapping_add(page.wrapping_mul(HELP_PAGE_SIZE));
-                let (text, button) = (lh(&mut c.m, at + 2), lh(&mut c.m, at + 4));
-                r.0[0] = pages;
-                enter_add_item(c, &r, this, text, button, 0x8001_8fb4);
-                r.0[1] = r.0[1].wrapping_add(1);
-                let page = lh(&mut c.m, this + TEXT);
-                r.0[0] = pages.wrapping_add((sx(r.0[1]) << 2).wrapping_add(page.wrapping_mul(HELP_PAGE_SIZE)));
-                if lh(&mut c.m, r.0[0] + 2) == 0 {
-                    break;
-                }
-            }
+        let line = |c: &mut Cpu, (text, button): (u32, u32)| add_item(c, this, text, button);
+        if sx(crate::femenu::get_number_enabled_items(&mut c.m, menu)) as i32 >= 2 {
+            line(c, HELP_MOVE);
         }
-        // the pads' kinds
-        c.m.w16(this + HELP_PADS, 0);
-        r.call_leaving(c, PAD_UPDATE, &[], 0x8001_8ff4);
-        let m = &mut c.m;
-        for pad in [PAD_INFO, PAD_INFO + 32] {
-            if m.r8(pad + 4) == 0 {
-                let kind = if m.r8(pad + 5) as u32 == PAD_NEGCON { 2 } else { 1 };
-                let v = m.r16(this + HELP_PADS) | kind;
-                m.w16(this + HELP_PADS, v);
-            }
+        if choices {
+            line(c, HELP_CHOOSE);
         }
-        // as wide as the widest text
-        m.w16(this + W, 0);
-        r.0[1] = 0;
-        while (sx(r.0[1]) as i32) < lh(&mut c.m, this + HELP_LINES) as i32 {
-            let text = c.m.r32(this.wrapping_add(sx(r.0[1]) << 2).wrapping_add(HELP_TEXTS));
-            let w = r.call_leaving(c, TEXT_PIXELS, &[text], 0x8001_9080);
-            if (lh(&mut c.m, this + W) as i32) < w as i32 {
-                c.m.w16(this + W, w as u16);
-            }
-            r.0[1] = r.0[1].wrapping_add(1);
+        if others {
+            let text = if menu.flags(&mut c.m) & MENU_START_CONTINUES != 0 { HELP_SELECT_OR_PAGE } else { HELP_SELECT };
+            line(c, (text, HELP_ACCEPT_BUTTON));
+        }
+        if c.m.r32(app.0.wrapping_add(player << 2).wrapping_add(APP_OPTIONS)) as i32 > 0 {
+            line(c, HELP_OPTIONS);
+        }
+        if menu.options_menu(&mut c.m).0 != 0 {
+            line(c, HELP_MENU_OPTIONS);
         }
         let m = &mut c.m;
-        let both = lh(m, this + HELP_PADS) == 3;
-        let past = if both { 70 } else { 40 };
-        m.w16(this + HELP_TEXT_X, past);
-        let w = m.r16(this + W).wrapping_add(past);
-        m.w16(this + W, w);
-        let lines = lh(m, this + HELP_LINES);
-        let h = if (lines as i32) < 2 { 0 } else { lines.wrapping_mul(15) };
-        m.w16(this + H, h as u16);
-        let shapes = m.r32(SHAPES);
-        let x = (m.r32(SCREEN_WIDTH).wrapping_sub(lh(m, this + W)) as i32) / 2;
-        m.w16(this + X, x as u16);
-        let y = (240u32.wrapping_sub(lh(m, this + H)) as i32) / 2;
-        m.w16(this + Y, y as u16);
-        let least = lh(m, shapes + 112).wrapping_add(20);
-        if (lh(m, this + W) as i32) < least as i32 {
-            m.w16(this + W, least as u16);
+        let flags = menu.flags(m);
+        if flags & MENU_BACK_PARENT != 0 {
+            line(c, (HELP_BACK, HELP_BACK_BUTTON));
+        } else if menu.next_menu(m).0 != 0 || flags & ITEM_LEFT_RIGHT != 0 || menu.on_button_press(m) != 0 || menu.flags(m) & MENU_BACK_ACCEPTS != 0 {
+            line(c, (HELP_SELECT_OR_PAGE, HELP_BACK_BUTTON));
         }
-        let ticks = m.r32(GAME_TICKS);
-        let w = m.r16(this + W).wrapping_add(20);
-        m.w16(this + W, w);
-        let h = m.r16(this + H).wrapping_add(10);
-        m.w16(this + H, h);
-        let elapsed = ticks.wrapping_sub(m.r32(this + SHOWN_AT));
-        if elapsed < OPENING as u32 {
-            let shapes = m.r32(SHAPES);
-            let (from_w, from_h) = (lh(m, shapes + 1360), lh(m, shapes + 1362));
-            let w = opening(m, this, W, from_w, elapsed, false);
-            let h = opening(m, this, H, from_h, elapsed, false);
-            m.w16(this + W, w as u16);
-            m.w16(this + H, h as u16);
+    }
+    // the page's own lines
+    let own = |m: &mut Mem, k: u32| {
+        let at = HELP_PAGES.wrapping_add(sx(k) << 2).wrapping_add((this.variant(m) as i32 as u32).wrapping_mul(HELP_PAGE_SIZE));
+        (m.r16(at + 2) as i16 as i32 as u32, m.r16(at + 4) as i16 as i32 as u32)
+    };
+    if own(&mut c.m, 0).0 != 0 {
+        let mut k = 0u32;
+        loop {
+            let (text, button) = own(&mut c.m, k);
+            add_item(c, this, text, button);
+            k = k.wrapping_add(1);
+            if own(&mut c.m, k).0 == 0 {
+                break;
+            }
         }
-        m.w16(this + Y, 20);
-        let x = 505u32.wrapping_sub(m.r16(this + W) as u32);
-        m.w16(this + X, x as u16);
-    })
+    }
+    // the pads' kinds: 1 a pad, 2 a NeGcon
+    this.set_helpcontrollers(&mut c.m, 0);
+    call(c, PAD_UPDATE, &[]);
+    let m = &mut c.m;
+    for pad in [PAD_INFO, PAD_INFO + 32] {
+        if m.r8(pad + 4) == 0 {
+            let kind = if m.r8(pad + 5) as u32 == PAD_NEGCON { 2 } else { 1 };
+            this.update_helpcontrollers(m, |v| v | kind);
+        }
+    }
+    // as wide as the widest text
+    this.set_width(m, 0);
+    let mut k = 0u32;
+    while (sx(k) as i32) < this.num_items(&mut c.m) as i32 {
+        let text = this.text(&mut c.m, sx(k));
+        let w = call(c, TEXT_PIXELS, &[text]);
+        if (this.width(&mut c.m) as i32) < w as i32 {
+            this.set_width(&mut c.m, w as i16);
+        }
+        k = k.wrapping_add(1);
+    }
+    let m = &mut c.m;
+    let past = if this.helpcontrollers(m) == 3 { 70 } else { 40 };
+    this.set_lefttext(m, past);
+    this.update_width(m, |w| w.wrapping_add(past));
+    let lines = this.num_items(m);
+    this.set_height(m, if lines < 2 { 0 } else { lines.wrapping_mul(15) });
+    let x = (m.r32(SCREEN_WIDTH).wrapping_sub(this.width(m) as i32 as u32) as i32) / 2;
+    this.set_left(m, x as i16);
+    let y = (240u32.wrapping_sub(this.height(m) as i32 as u32) as i32) / 2;
+    this.set_top(m, y as i16);
+    let shapes = m.r32(SHAPES);
+    let least = (m.r16(shapes + HELP_TITLE_SHAPE) as i16).wrapping_add(20);
+    if this.width(m) < least {
+        this.set_width(m, least);
+    }
+    let now = ticks(m);
+    this.update_width(m, |w| w.wrapping_add(20));
+    this.update_height(m, |h| h.wrapping_add(10));
+    let elapsed = now.wrapping_sub(this.start_ticks(m) as u32);
+    if elapsed < OPENING as u32 {
+        let (from_w, from_h) = opening_size(m);
+        let (w, h) = (opening(this.width(m), from_w, elapsed, false), opening(this.height(m), from_h, elapsed, false));
+        this.set_width(m, w);
+        this.set_height(m, h);
+    }
+    this.set_top(m, 20);
+    let x = 505u32.wrapping_sub(this.width(m) as u16 as u32);
+    this.set_left(m, x as i16);
 }
 
 pub fn abi_calculate_dimensions_help(c: &mut Cpu) {
-    calculate_dimensions_help(c, c.r[4]);
+    calculate_dimensions_help(c, DialogHelp(c.r[4]));
 }
 
 /// `tDialogHelp::Draw` (FEDIALOG.CPP, 0x8001926c): once open, the title and the lines, each
 /// key's button (the PlayStation pad's, the NeGcon's, or both) left of its text, the texts
 /// typed out a letter every three ticks; the box.
-pub fn draw_help(c: &mut Cpu, this: u32) {
-    abi::frame(c, 136, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        let (obj, f) = method(&mut c.m, this, VPTR, CALCULATE_DIMENSIONS);
-        r.call_ptr_leaving(c, f, &[obj], 0x8001_92b0);
-        let ticks = c.m.r32(GAME_TICKS);
-        let shown = c.m.r32(this + SHOWN_AT);
-        if (ticks as i32) >= (shown.wrapping_add(OPENING as u32) as i32) {
-            let typed = (ticks.wrapping_sub(shown).wrapping_sub(OPENING as u32) as i32) / 3;
-            r.0[5] = typed as u32;
-            r.0[3] = 0;
-            let buf = sp + 24;
-            r.0[6] = buf;
-            loop {
-                let k = sx(r.0[3]);
-                if k as i32 >= lh(&mut c.m, this + HELP_LINES) as i32 {
-                    break;
-                }
-                let top = c.m.r16(this + Y) as u32;
-                r.0[4] = if k == 0 { top.wrapping_add(4) } else { top.wrapping_add(k.wrapping_sub(1).wrapping_mul(15)).wrapping_add(19) };
-                if k as i32 > 0 {
+pub fn draw_help(c: &mut Cpu, this: DialogHelp) {
+    call_virtual(c, this.0, VPTR, CALCULATE_DIMENSIONS, &[]);
+    let now = ticks(&mut c.m);
+    let shown = this.start_ticks(&mut c.m) as u32;
+    if (now as i32) >= (shown.wrapping_add(OPENING as u32) as i32) {
+        let typed = (now.wrapping_sub(shown).wrapping_sub(OPENING as u32) as i32) / 3;
+        with_buffer(c, 112, |c, buf| {
+            let mut k = 0u32;
+            while (sx(k) as i32) < this.num_items(&mut c.m) as i32 {
+                let k_ = sx(k);
+                let top = this.top(&mut c.m) as u16 as u32;
+                let y = if k_ == 0 { top.wrapping_add(4) } else { top.wrapping_add(k_.wrapping_sub(1).wrapping_mul(15)).wrapping_add(19) };
+                if k_ as i32 > 0 {
+                    // the key's button
                     let m = &mut c.m;
-                    let pads = lh(m, this + HELP_PADS);
-                    let button = m.r32(this.wrapping_add(k << 2).wrapping_add(HELP_BUTTONS));
-                    let row = k.wrapping_sub(1).wrapping_mul(15);
-                    let kind = if pads == 2 {
-                        NEGCON_BUTTONS
+                    let pads = this.helpcontrollers(m);
+                    let button = this.cont(m, k_) as u32;
+                    let row = k_.wrapping_sub(1).wrapping_mul(15);
+                    let (x, by) = (this.left(m) as i32 as u32, (this.top(m) as i32 as u32).wrapping_add(row).wrapping_add(19));
+                    if pads == 2 {
+                        call(c, DRAW_PSX_BUTTON, &[NEGCON_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
                     } else if pads != 3 || matches!(button, 160 | 80 | 64) {
-                        PAD_BUTTONS
+                        call(c, DRAW_PSX_BUTTON, &[PAD_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
                     } else {
                         // both pads: the PlayStation's button and the NeGcon's
-                        let b = button & 0xFFFF;
-                        r.0[1] = b;
-                        r.0[0] = row.wrapping_add(15);
-                        let (x, y) = (lh(m, this + X), lh(m, this + Y));
-                        let y = y.wrapping_add(r.0[0]).wrapping_add(4);
-                        r.call_leaving(c, DRAW_PSX_BUTTON, &[PAD_BUTTONS, b, x.wrapping_add(20), y], 0x8001_93d4);
+                        call(c, DRAW_PSX_BUTTON, &[PAD_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
                         let m = &mut c.m;
-                        let (x, y) = (lh(m, this + X), lh(m, this + Y));
-                        let y = y.wrapping_add(r.0[0]).wrapping_add(4);
-                        r.call_leaving(c, DRAW_PSX_BUTTON, &[NEGCON_BUTTONS, b, x.wrapping_add(40), y], 0x8001_942c);
-                        0
-                    };
-                    if kind != 0 {
-                        let m = &mut c.m;
-                        let (x, y) = (lh(m, this + X), lh(m, this + Y));
-                        r.call_leaving(c, DRAW_PSX_BUTTON, &[kind, button & 0xFFFF, x.wrapping_add(20), row.wrapping_add(y).wrapping_add(19)], 0x8001_942c);
+                        let (x, by) = (this.left(m) as i32 as u32, (this.top(m) as i32 as u32).wrapping_add(row).wrapping_add(19));
+                        call(c, DRAW_PSX_BUTTON, &[NEGCON_BUTTONS, button & 0xFFFF, x.wrapping_add(40), by]);
                     }
                 }
-                r.0[1] = k;
-                let at = this.wrapping_add(k << 2);
-                r.0[0] = at;
-                let text = c.m.r32(at + HELP_TEXTS);
-                let len = r.call_leaving(c, STRLEN, &[text], 0x8001_9448);
+                // its text, typed so far
+                let text = this.text(&mut c.m, k_);
+                let len = call(c, STRLEN, &[text]);
                 let m = &mut c.m;
-                let x = sx(m.r16(this + X).wrapping_add(m.r16(this + HELP_TEXT_X)) as u32);
-                let y = sx(r.0[4]);
-                let ty = if k == 0 { 9 } else { 8 };
+                let x = sx((this.left(m) as u16).wrapping_add(this.lefttext(m) as u16) as u32);
                 let shown_text = if typed < len as i32 {
-                    // typed so far
                     for i in 0..typed.max(0) as u32 {
-                        let text = m.r32(at + HELP_TEXTS);
+                        let text = this.text(m, k_);
                         let b = m.r8(text.wrapping_add(i));
                         m.w8(buf + i, b);
                     }
                     m.w8(buf.wrapping_add(typed as u32), 0);
                     buf
                 } else {
-                    m.r32(at + HELP_TEXTS)
+                    this.text(m, k_)
                 };
-                r.0[3] = r.0[3].wrapping_add(1);
-                r.call_leaving(c, fetextrender::full_text_entry, &[shown_text, x, y, ty, 1, 0], 0x8001_9520);
+                k = k.wrapping_add(1);
+                let ty = if k_ == 0 { 9 } else { 8 };
+                call(c, fetextrender::full_text_entry, &[shown_text, x, sx(y), ty, 1, 0]);
             }
-        }
-        r.enter(c, 0x8001_8af8, 0x8001_9530, |c| draw(c, this));
-    })
+        });
+    }
+    draw(c, this.base());
 }
 
 pub fn abi_draw_help(c: &mut Cpu) {
-    draw_help(c, c.r[4]);
+    draw_help(c, DialogHelp(c.r[4]));
 }
 
 /// `tDialogMessageString::CalculateDimensions` (FEDIALOG.CPP, 0x80019558): the text fading in
 /// after the box opens; the box as wide as asked and as high as the text word-wrapped (one line:
 /// shown on a line) or as asked, opening over its first ticks, centred (and moved off the
 /// centre as asked).
-pub fn calculate_dimensions_message(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
+pub fn calculate_dimensions_message(c: &mut Cpu, this: DialogMessageString) {
+    let m = &mut c.m;
+    let since = ticks(m).wrapping_sub(OPENING as u32).wrapping_sub(this.start_ticks(m) as u32) << 7;
+    let fade = 128i32.wrapping_sub(since as i32 / 100).clamp(0, 128);
+    this.set_fade_text(m, fade);
+    if fade != 0 {
+        this.set_fully_open(m, 0);
+    }
+    let width = this.max_w(m);
+    this.set_width(m, width);
+    let height = if this.max_h(m) == 0 {
+        let text = this.string(m);
+        let h = call(c, fetextrender::word_wrap_height_entry, &[sx((width as u32).wrapping_sub(40)), text]);
         let m = &mut c.m;
-        let ticks = m.r32(GAME_TICKS);
-        let since = ticks.wrapping_sub(OPENING as u32).wrapping_sub(m.r32(this + SHOWN_AT)) << 7;
-        let fade = 128i32.wrapping_sub(since as i32 / 100);
-        m.w32(this + FADE, fade as u32);
-        let fade = fade.clamp(0, 128);
-        m.w32(this + FADE, fade as u32);
-        if fade != 0 {
-            m.w32(this + OPEN, 0);
-        }
-        let width = m.r16(this + 128);
-        m.w16(this + W, width);
-        let h = if lh(m, this + 130) == 0 {
-            let text = m.r32(this + TEXT);
-            let h = r.call_leaving(c, fetextrender::word_wrap_height_entry, &[sx((width as u32).wrapping_sub(40)), text], 0x8001_9600);
-            let m = &mut c.m;
-            m.w16(this + H, h as u16);
-            m.w32(this + ONE_LINE, (sx(h) == 8) as u32);
-            m.r16(this + H).wrapping_add(16)
-        } else {
-            m.w32(this + ONE_LINE, 0);
-            m.r16(this + 130)
-        };
-        let m = &mut c.m;
-        m.w16(this + H, h);
-        let elapsed = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + SHOWN_AT));
-        if (elapsed as i32) < OPENING {
-            let shapes = m.r32(SHAPES);
-            let (from_w, from_h) = (lh(m, shapes + 1360), lh(m, shapes + 1362));
-            let w = opening(m, this, W, from_w, elapsed, true);
-            let h = opening(m, this, H, from_h, elapsed, true);
-            m.w32(this + OPEN, 0);
-            m.w16(this + W, w as u16);
-            m.w16(this + H, h as u16);
-        } else {
-            m.w32(this + OPEN, 1);
-        }
-        let x = (m.r32(SCREEN_WIDTH).wrapping_sub(lh(m, this + W)) as i32 / 2) as u32;
-        let x = (m.r16(this + 124) as u32).wrapping_add(x);
-        m.w16(this + X, x as u16);
-        let y = (240u32.wrapping_sub(lh(m, this + H)) as i32 / 2) as u32;
-        let y = (m.r16(this + 126) as u32).wrapping_add(y);
-        m.w16(this + Y, y as u16);
-    })
+        this.set_height(m, h as i16);
+        this.set_centerit(m, (sx(h) == 8) as u32);
+        this.height(m).wrapping_add(16)
+    } else {
+        this.set_centerit(m, 0);
+        this.max_h(m)
+    };
+    let m = &mut c.m;
+    this.set_height(m, height);
+    let elapsed = ticks(m).wrapping_sub(this.start_ticks(m) as u32);
+    if (elapsed as i32) < OPENING {
+        let (from_w, from_h) = opening_size(m);
+        let (w, h) = (opening(this.width(m), from_w, elapsed, true), opening(this.height(m), from_h, elapsed, true));
+        this.set_fully_open(m, 0);
+        this.set_width(m, w);
+        this.set_height(m, h);
+    } else {
+        this.set_fully_open(m, 1);
+    }
+    let x = (m.r32(SCREEN_WIDTH).wrapping_sub(this.width(m) as i32 as u32) as i32 / 2) as u32;
+    let left = (this.offset_x(m) as u16 as u32).wrapping_add(x);
+    this.set_left(m, left as i16);
+    centre_vertically(m, this.base());
+}
+
+/// The box centred on the screen's height, moved off the centre as asked.
+fn centre_vertically(m: &mut Mem, this: DialogBase) {
+    let y = (240u32.wrapping_sub(this.height(m) as i32 as u32) as i32 / 2) as u32;
+    let top = (this.offset_y(m) as u16 as u32).wrapping_add(y);
+    this.set_top(m, top as i16);
 }
 
 pub fn abi_calculate_dimensions_message(c: &mut Cpu) {
-    calculate_dimensions_message(c, c.r[4]);
+    calculate_dimensions_message(c, DialogMessageString(c.r[4]));
 }
 
 /// `tDialogMessageString::Draw` (FEDIALOG.CPP, 0x8001976c): once open, the text faded in,
 /// centred on its line or word-wrapped inside the box (above the room left under it); the box.
-pub fn draw_message(c: &mut Cpu, this: u32) {
-    abi::frame(c, 48, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let (obj, f) = method(&mut c.m, this, VPTR, CALCULATE_DIMENSIONS);
-        r.call_ptr_leaving(c, f, &[obj], 0x8001_979c);
-        let m = &mut c.m;
-        if (m.r32(GAME_TICKS) as i32) < (m.r32(this + SHOWN_AT).wrapping_add(OPENING as u32) as i32) {
-            m.w32(this + OPEN, 0);
-        } else {
-            if m.r32(this + FADE) != 0 {
-                m.w32(this + OPEN, 0);
-            }
-            let style = m.r8(TEXT_STYLES + 52) as u32;
-            let base = m.r32(TEXT_COLORS + 4 * style);
-            let fade = m.r32(this + FADE);
-            let color = r.call_leaving(c, CALC_FADE_VAL, &[base, fade], 0x8001_97f8);
-            let m = &mut c.m;
-            let (x, y, w, h) = (m.r16(this + X), m.r16(this + Y), m.r16(this + W), m.r16(this + H));
-            let under = m.r16(this + 110).wrapping_add(8);
-            m.w16(sp + 24, x.wrapping_add(17));
-            m.w16(sp + 26, y.wrapping_add(10));
-            m.w16(sp + 28, w.wrapping_sub(20));
-            r.0[1] = color;
-            m.w16(sp + 30, h.wrapping_sub(under));
-            r.call_leaving(c, fetextrender::set_abr_entry, &[1, 1], 0x8001_9840);
-            let m = &mut c.m;
-            let text = m.r32(this + TEXT);
-            if m.r32(this + ONE_LINE) != 0 {
-                let (x, y, w) = (m.r16(this + X) as u32, m.r16(this + Y) as u32, m.r16(this + W));
-                let x = sx(x.wrapping_add(((w as i16) >> 1) as i32 as u32));
-                let y = sx(y.wrapping_add(8));
-                r.call_leaving(c, fetextrender::full_text_rgb_entry, &[text, x, y, color, 0, 2], 0x8001_9890);
-            } else {
-                r.call_leaving(c, fetextrender::word_wrap_text_rgb_entry, &[text, sp + 24, color], 0x8001_98a8);
-            }
-            r.call_leaving(c, fetextrender::set_abr_entry, &[0, 0], 0x8001_98b4);
+pub fn draw_message(c: &mut Cpu, this: DialogMessageString) {
+    call_virtual(c, this.0, VPTR, CALCULATE_DIMENSIONS, &[]);
+    let m = &mut c.m;
+    if (ticks(m) as i32) < ((this.start_ticks(m) as u32).wrapping_add(OPENING as u32) as i32) {
+        this.set_fully_open(m, 0);
+    } else {
+        if this.fade_text(m) != 0 {
+            this.set_fully_open(m, 0);
         }
-        r.enter(c, 0x8001_8af8, 0x8001_98bc, |c| draw(c, this));
-    })
+        let style = m.r8(TEXT_STYLES + MESSAGE_STYLE) as u32;
+        let base = m.r32(TEXT_COLORS + 4 * style);
+        let fade = this.fade_text(m) as u32;
+        let colour = call(c, CALC_FADE_VAL, &[base, fade]);
+        with_buffer(c, 8, |c, at| {
+            let (m, rect) = (&mut c.m, RECT(at));
+            let (x, y, w, h) = (this.left(m), this.top(m), this.width(m), this.height(m));
+            let under = this.reservedheight(m).wrapping_add(8);
+            rect.set_x(m, x.wrapping_add(17));
+            rect.set_y(m, y.wrapping_add(10));
+            rect.set_w(m, w.wrapping_sub(20));
+            rect.set_h(m, h.wrapping_sub(under));
+            call(c, fetextrender::set_abr_entry, &[1, 1]);
+            let m = &mut c.m;
+            let text = this.string(m);
+            if this.centerit(m) != 0 {
+                let (x, y, w) = (this.left(m) as u16 as u32, this.top(m) as u16 as u32, this.width(m));
+                let x = sx(x.wrapping_add((w >> 1) as i32 as u32));
+                call(c, fetextrender::full_text_rgb_entry, &[text, x, sx(y.wrapping_add(8)), colour, 0, 2]);
+            } else {
+                call(c, fetextrender::word_wrap_text_rgb_entry, &[text, rect.0, colour]);
+            }
+            call(c, fetextrender::set_abr_entry, &[0, 0]);
+        });
+    }
+    draw(c, this.base());
 }
 
 pub fn abi_draw_message(c: &mut Cpu) {
-    draw_message(c, c.r[4]);
+    draw_message(c, DialogMessageString(c.r[4]));
+}
+
+/// Whether a dialog for `only` (-1: either player) listens to `player`.
+fn listens_to(m: &mut Mem, this: DialogBase, player: u32) -> bool {
+    let only = this.specific_player(m) as i32 as u32;
+    only == u32::MAX || player == only
 }
 
 /// `tDialogBackUpOnly::ProcessInput` (FEDIALOG.CPP, 0x800198d0): for its player, Start hides the
 /// dialog; any key but help is taken.
 pub fn abi_process_input_back_up_only(c: &mut Cpu) {
-    let (this, player, key) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 24, |c, _| {
-        let only = lh(&mut c.m, this + PLAYER);
-        if only != u32::MAX && player != only {
-            return;
+    let (this, player, key) = (DialogBase(c.r[4]), c.r[5], c.r[6]);
+    if !listens_to(&mut c.m, this, player) {
+        return;
+    }
+    match c.m.r32(key) {
+        KEY_START => {
+            call_addr(c, HIDE, &[this.0]);
         }
-        match c.m.r32(key) {
-            KEY_START => {
-                Saved::of(c).call_ptr(c, 0x8001_8a44, &[this], 0x8001_9918);
-            }
-            KEY_HELP => {}
-            _ => c.m.w32(key, KEY_NONE),
-        }
-    })
+        KEY_HELP => {}
+        _ => c.m.w32(key, KEY_NONE),
+    }
 }
 
 /// `tDialogInteractive::Run` (FEDIALOG.CPP, 0x80019928): the dialog shown and the front end run
-/// a frame at a time until it is answered: each player's key (help to the current menu while
-/// the front end takes input, hiding the help dialog when it is up), then to the dialog; hidden
-/// with a sound after; the answer.
-pub fn run(c: &mut Cpu, this: u32) -> u32 {
-    abi::frame(c, 72, |c, sp| {
-        let mut r = Saved::of(c);
-        r.0[3] = this;
-        c.m.w32(this + 156, 1);
-        r.call_ptr(c, 0x8001_8980, &[this], 0x8001_9960);
-        let keys = sp + 16;
-        let command = sp + 24;
-        r.0[7] = keys;
-        r.0[4] = 1;
-        r.0[5] = 0x8005_0000;
-        let (obj, f) = method(&mut c.m, this, VPTR, CALCULATE_DIMENSIONS);
-        r.call_ptr_leaving(c, f, &[obj], 0x8001_9984);
-        c.m.w32(this + ANSWERED, 0);
-        loop {
-            r.0[6] = u32::MAX;
-            if c.m.r32(this + ANSWERED) != 0 {
-                break;
-            }
+/// a frame at a time until it is answered: each player's key (help goes to the current menu
+/// while the front end takes input; any key hides the help dialog when it is up), then to the
+/// dialog; hidden with a sound after; the answer.
+pub fn run(c: &mut Cpu, this: DialogInteractive) -> u32 {
+    this.set_currently_running(&mut c.m, 1);
+    call_addr(c, DISPLAY, &[this.0]);
+    call_virtual(c, this.0, VPTR, CALCULATE_DIMENSIONS, &[]);
+    this.set_ready_to_return_value(&mut c.m, 0);
+    // (the two players' keys at +0, the menu command at +8)
+    with_buffer(c, 16, |c, keys| {
+        let command = keys + 8;
+        while this.ready_to_return_value(&mut c.m) == 0 {
             c.m.w32(command, 0);
-            r.0[1] = 0;
-            r.0[0] = keys;
-            r.0[2] = 0;
-            while (r.0[1] as i32) < 2 {
-                let (player, key) = (r.0[1], r.0[0]);
-                let k = r.call_leaving(c, GET_KEY, &[player, u32::MAX], 0x8001_99bc);
+            for player in 0..2u32 {
+                let key = keys + 4 * player;
+                let k = call(c, GET_KEY, &[player, u32::MAX]);
                 c.m.w32(key, if k == 0 { KEY_NONE } else { k });
+                let app = FEApplication(c.m.r32(FE_APP));
                 if c.m.r32(key) == KEY_HELP {
-                    let app = c.m.r32(FE_APP);
-                    let menu = c.m.r32(app.wrapping_add(r.0[2]).wrapping_add(APP_MENUS));
-                    if c.m.r32(app + APP_NO_INPUT) == 0 && menu != 0 {
-                        let (obj, f) = method(&mut c.m, menu, MENU_VPTR, PROCESS_INPUT);
-                        r.call_ptr_leaving(c, f, &[obj, player, key, command], 0x8001_9a30);
+                    let menu = app.current_menu(&mut c.m, player);
+                    if c.m.r32(app.0 + APP_NO_INPUT) == 0 && menu.0 != 0 {
+                        call_virtual(c, menu.0, MENU_VPTR, PROCESS_INPUT, &[player, key, command]);
                         c.m.w32(key, KEY_NONE);
                     }
                 }
                 if c.m.r32(key) != KEY_NONE {
-                    let help = c.m.r32(FE_APP).wrapping_add(APP_HELP);
-                    if c.m.r32(help + SHOWN) != 0 {
-                        r.call_ptr(c, 0x8001_8a44, &[help], 0x8001_9a68);
+                    let help = DialogBase(c.m.r32(FE_APP).wrapping_add(APP_HELP));
+                    if help.currently_on(&mut c.m) != 0 {
+                        call_addr(c, HIDE, &[help.0]);
                         c.m.w32(key, KEY_NONE);
                     }
                 }
                 if c.m.r32(key) != 0 {
-                    let (obj, f) = method(&mut c.m, this, VPTR, PROCESS_INPUT_SLOT);
-                    r.call_ptr_leaving(c, f, &[obj, player, key, command], 0x8001_9a9c);
+                    call_virtual(c, this.0, VPTR, PROCESS_INPUT_SLOT, &[player, key, command]);
                 }
-                r.0[0] = key.wrapping_add(4);
-                r.0[2] = r.0[2].wrapping_add(4);
-                r.0[1] = player.wrapping_add(1);
             }
             let app = c.m.r32(FE_APP);
-            r.call_ptr_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ab8);
+            call_addr(c, FRONT_END_FRAME, &[app]);
         }
-        r.call_leaving(c, PLAY_FE_SFX, &[0], 0x8001_9ac8);
-        r.call_ptr(c, 0x8001_8a44, &[this], 0x8001_9ad0);
-        let app = c.m.r32(FE_APP);
-        r.call_ptr_leaving(c, FRONT_END_FRAME, &[app], 0x8001_9ae0);
-        let answer = lh(&mut c.m, this + ANSWER);
-        c.m.w32(this + 156, 0);
-        answer
-    })
+    });
+    call(c, PLAY_FE_SFX, &[0]);
+    call_addr(c, HIDE, &[this.0]);
+    let app = c.m.r32(FE_APP);
+    call_addr(c, FRONT_END_FRAME, &[app]);
+    let answer = this.return_value(&mut c.m) as i32 as u32;
+    this.set_currently_running(&mut c.m, 0);
+    answer
 }
 
 pub fn abi_run(c: &mut Cpu) {
-    c.r[2] = run(c, c.r[4]);
+    c.r[2] = run(c, DialogInteractive(c.r[4]));
 }
+
+/// The room under a yes-or-no's text for its answers.
+const ANSWERS_ROOM: i32 = 15;
 
 /// `tDialogYesNo::CalculateDimensions` (FEDIALOG.CPP, 0x80019b14): a message's, with room for
 /// the answers under the text (growing in as the box opens), unless its height is given.
-pub fn calculate_dimensions_yes_no(c: &mut Cpu, this: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.enter(c, 0x8001_9558, 0x8001_9b28, |c| calculate_dimensions_message(c, this));
-        let m = &mut c.m;
-        if m.r16(this + 130) != 0 {
-            return;
-        }
-        let elapsed = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + SHOWN_AT)) as i32;
-        let room = if elapsed < OPENING { elapsed.wrapping_mul(15) / OPENING } else { 15 };
-        let h = m.r16(this + H).wrapping_add(room as u16);
-        m.w16(this + H, h);
-        m.w16(this + 110, 15);
-        let y = (240u32.wrapping_sub(lh(m, this + H)) as i32 / 2) as u32;
-        let y = (m.r16(this + 126) as u32).wrapping_add(y);
-        m.w16(this + Y, y as u16);
-    })
+pub fn calculate_dimensions_yes_no(c: &mut Cpu, this: DialogMessageString) {
+    calculate_dimensions_message(c, this);
+    let m = &mut c.m;
+    if this.max_h(m) != 0 {
+        return;
+    }
+    let elapsed = ticks(m).wrapping_sub(this.start_ticks(m) as u32) as i32;
+    let room = if elapsed < OPENING { elapsed.wrapping_mul(ANSWERS_ROOM) / OPENING } else { ANSWERS_ROOM };
+    this.update_height(m, |h| h.wrapping_add(room as i16));
+    this.set_reservedheight(m, ANSWERS_ROOM as i16);
+    centre_vertically(m, this.base());
 }
 
 pub fn abi_calculate_dimensions_yes_no(c: &mut Cpu) {
-    calculate_dimensions_yes_no(c, c.r[4]);
+    calculate_dimensions_yes_no(c, DialogMessageString(c.r[4]));
 }
 
 /// `tDialogYesNo::tDialogYesNo` (FEDIALOG.CPP, 0x80019bcc): a screen made a dialog for either
-/// player, 288 wide, hidden, its text unfaded, answering yes.
-pub fn yes_no(c: &mut Cpu, this: u32) -> u32 {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        r.call_leaving(c, SCREEN, &[this], 0x8001_9be0);
-        let m = &mut c.m;
-        m.w32(this + VPTR, BASE_VT);
-        m.w16(this + 128, 288);
-        m.w16(this + PLAYER, u16::MAX);
-        m.w32(this + VPTR, MESSAGE_VT);
-        m.w32(this + FADE, 128);
-        m.w32(this + VPTR, INTERACTIVE_VT);
-        m.w32(this + SHOWN, 0);
-        for f in [110, 130, 126, 124, H, W, Y, X, 136] {
-            m.w16(this + f, 0);
-        }
-        for f in [TIMEOUT, ONE_LINE, OPEN, 156] {
-            m.w32(this + f, 0);
-        }
-        m.w32(this + VPTR, YES_NO_VT);
-        m.w16(this + ANSWER, 0);
-        m.w32(this + ANSWERED, 0);
-        this
-    })
+/// player, 288 wide, hidden, its text unfaded, answering yes (through each base class's
+/// constructor: the vtable written as each does).
+pub fn yes_no(c: &mut Cpu, this: DialogYesNo) -> u32 {
+    call(c, SCREEN, &[this.0]);
+    let m = &mut c.m;
+    this.set_vtable(m, BASE_VT);
+    this.set_max_w(m, 288);
+    this.set_specific_player(m, -1);
+    this.set_vtable(m, MESSAGE_VT);
+    this.set_fade_text(m, 128);
+    this.set_vtable(m, INTERACTIVE_VT);
+    this.set_currently_on(m, 0);
+    this.set_reservedheight(m, 0);
+    this.set_max_h(m, 0);
+    this.set_offset_y(m, 0);
+    this.set_offset_x(m, 0);
+    this.set_height(m, 0);
+    this.set_width(m, 0);
+    this.set_top(m, 0);
+    this.set_left(m, 0);
+    this.set_default(m, 0);
+    this.set_time_out_ticks(m, 0);
+    this.set_centerit(m, 0);
+    this.set_fully_open(m, 0);
+    this.set_currently_running(m, 0);
+    this.set_vtable(m, YES_NO_VT);
+    this.set_return_value(m, 0);
+    this.set_ready_to_return_value(m, 0);
+    this.0
 }
 
 pub fn abi_yes_no(c: &mut Cpu) {
-    c.r[2] = yes_no(c, c.r[4]);
+    c.r[2] = yes_no(c, DialogYesNo(c.r[4]));
 }
 
 /// `tDialogYesNo::Draw` (FEDIALOG.CPP, 0x80019c84): once open, the two answers (their texts,
 /// the chosen one highlighted) faded in along the bottom, a quarter and three quarters across;
-/// the message.
-pub fn draw_yes_no(c: &mut Cpu, this: u32) {
-    abi::frame(c, 64, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[2] = this;
-        let (obj, f) = method(&mut c.m, this, VPTR, CALCULATE_DIMENSIONS);
-        r.call_ptr_leaving(c, f, &[obj], 0x8001_9ccc);
-        let m = &mut c.m;
-        if m.r32(this + FADE) != 0 {
-            m.w32(this + OPEN, 0);
+/// the message (by address: the host hides the save's message).
+pub fn draw_yes_no(c: &mut Cpu, this: DialogYesNo) {
+    call_virtual(c, this.0, VPTR, CALCULATE_DIMENSIONS, &[]);
+    let m = &mut c.m;
+    if this.fade_text(m) != 0 {
+        this.set_fully_open(m, 0);
+    }
+    let elapsed = ticks(m).wrapping_sub(this.start_ticks(m) as u32) as i32;
+    if elapsed >= OPENING {
+        let mut x = (this.left(m) as i32 as u32).wrapping_add((this.width(m) >> 2) as i32 as u32);
+        for k in 0..2u32 {
+            let m = &mut c.m;
+            let state = if k == this.return_value(m) as i32 as u32 { 1 } else { 2 };
+            let style = m.r8(TEXT_STYLES + ANSWER_STYLES + state) as u32;
+            let (base, fade) = (m.r32(TEXT_COLORS + 4 * style), this.fade_text(m) as u32);
+            let colour = call(c, CALC_FADE_VAL, &[base, fade]);
+            let m = &mut c.m;
+            let y = sx((this.top(m) as i32 as u32).wrapping_add(this.height(m) as i32 as u32).wrapping_sub(11));
+            call(c, fetextrender::set_abr_entry, &[1, 1]);
+            let id = this.yesnowords(&mut c.m, k) as u32;
+            let word = call(c, TEXT_WORD, &[id]);
+            call(c, fetextrender::full_text_rgb_entry, &[word, sx(x), y, colour, 0, 2]);
+            call(c, fetextrender::set_abr_entry, &[0, 0]);
+            x = x.wrapping_add((this.width(&mut c.m) >> 1) as i32 as u32);
         }
-        let elapsed = m.r32(GAME_TICKS).wrapping_sub(m.r32(this + SHOWN_AT)) as i32;
-        r.0[3] = 0;
-        if elapsed >= OPENING {
-            r.0[7] = TEXT_COLORS;
-            r.0[6] = TEXT_STYLES;
-            r.0[5] = this;
-            r.0[4] = lh(m, this + X).wrapping_add(((m.r16(this + W) as i16) >> 2) as i32 as u32);
-            while (r.0[3] as i32) < 2 {
-                let m = &mut c.m;
-                let state = if r.0[3] == lh(m, this + ANSWER) { 1 } else { 2 };
-                let style = m.r8(TEXT_STYLES + 51 + state) as u32;
-                let (base, fade) = (m.r32(TEXT_COLORS + 4 * style), m.r32(this + FADE));
-                r.0[3] = r.0[3].wrapping_add(1);
-                let color = r.call_leaving(c, CALC_FADE_VAL, &[base, fade], 0x8001_9d64);
-                let m = &mut c.m;
-                r.0[0] = lh(m, this + Y).wrapping_add(lh(m, this + H)).wrapping_sub(11);
-                r.0[1] = color;
-                r.call_leaving(c, fetextrender::set_abr_entry, &[1, 1], 0x8001_9d84);
-                r.0[0] <<= 16;
-                let id = c.m.r32(r.0[5] + 160);
-                let word = r.call_leaving(c, TEXT_WORD, &[id], 0x8001_9d90);
-                let args = [word, sx(r.0[4]), ((r.0[0] as i32) >> 16) as u32, color, 0, 2];
-                r.call_leaving(c, fetextrender::full_text_rgb_entry, &args, 0x8001_9db4);
-                r.call_leaving(c, fetextrender::set_abr_entry, &[0, 0], 0x8001_9dc0);
-                r.0[5] = r.0[5].wrapping_add(4);
-                let w = c.m.r16(this + W) as i16;
-                r.0[4] = r.0[4].wrapping_add((w >> 1) as i32 as u32);
-            }
-        }
-        // `tDialogMessageString::Draw` is hooked (the host hides the save message when autosaving):
-        // called by address, `Cpu::call` routing it to the port after the host
-        r.call_ptr(c, 0x8001_976C, &[this], 0x8001_9de0);
-    })
+    }
+    call_addr(c, MESSAGE_DRAW, &[this.0]);
 }
 
 pub fn abi_draw_yes_no(c: &mut Cpu) {
-    draw_yes_no(c, c.r[4]);
+    draw_yes_no(c, DialogYesNo(c.r[4]));
 }
 
 /// `tDialogYesNo::ProcessInput` (FEDIALOG.CPP, 0x80019e0c): for its player, once open: left
 /// yes, right no (with their sounds); accept or back answers.
-pub fn process_input_yes_no(c: &mut Cpu, this: u32, player: u32, key: u32) {
-    abi::frame(c, 24, |c, _| {
-        let mut r = Saved::of(c);
-        r.0[0] = this;
-        let only = lh(&mut c.m, this + PLAYER);
-        if (only != u32::MAX && player != only) || c.m.r32(this + OPEN) != 1 {
-            return;
+pub fn process_input_yes_no(c: &mut Cpu, this: DialogInteractive, player: u32, key: u32) {
+    if !listens_to(&mut c.m, this.base().base(), player) || this.fully_open(&mut c.m) != 1 {
+        return;
+    }
+    match c.m.r32(key) {
+        KEY_LEFT => {
+            call(c, PLAY_FE_SFX, &[5]);
+            this.set_return_value(&mut c.m, 1);
         }
-        match c.m.r32(key) {
-            KEY_LEFT => {
-                r.call_leaving(c, PLAY_FE_SFX, &[5], 0x8001_9e94);
-                c.m.w16(this + ANSWER, 1);
-            }
-            KEY_RIGHT => {
-                r.call_leaving(c, PLAY_FE_SFX, &[6], 0x8001_9ea8);
-                c.m.w16(this + ANSWER, 0);
-            }
-            KEY_ACCEPT | KEY_BACK => {
-                r.call_leaving(c, PLAY_FE_SFX, &[0], 0x8001_9eb8);
-                c.m.w32(this + ANSWERED, 1);
-                r.call_ptr(c, 0x8001_8a44, &[this], 0x8001_9ec8);
-            }
-            _ => {}
+        KEY_RIGHT => {
+            call(c, PLAY_FE_SFX, &[6]);
+            this.set_return_value(&mut c.m, 0);
         }
-    })
+        KEY_ACCEPT | KEY_BACK => {
+            call(c, PLAY_FE_SFX, &[0]);
+            this.set_ready_to_return_value(&mut c.m, 1);
+            call_addr(c, HIDE, &[this.0]);
+        }
+        _ => {}
+    }
 }
 
 pub fn abi_process_input_yes_no(c: &mut Cpu) {
-    process_input_yes_no(c, c.r[4], c.r[5], c.r[6]);
+    process_input_yes_no(c, DialogInteractive(c.r[4]), c.r[5], c.r[6]);
+}
+
+/// A dialog answered -1 (cancelled).
+fn cancel(m: &mut Mem, this: DialogInteractive) {
+    this.set_ready_to_return_value(m, 1);
+    this.set_return_value(m, -1);
 }
 
 /// `tDialogYesNoMem::ProcessInput` (FEDIALOG.CPP, 0x80019ed8): answered -1 when the memory card
 /// in use is taken out (its events, or no card), else a yes-or-no's.
 pub fn abi_process_input_yes_no_mem(c: &mut Cpu) {
-    let (this, player, key, command) = (c.r[4], c.r[5], c.r[6], c.r[7]);
-    abi::frame(c, 48, |c, _| {
-        let mut r = Saved::of(c);
-        let port = (c.m.r32(CARD_PORT) << 2).wrapping_add(1);
-        r.0[..6].copy_from_slice(&[0, port, this, player, key, command]);
-        let event = r.call_leaving(c, CARD_EVENTS, &[port], 0x8001_9f24).wrapping_sub(2);
-        if event < 22 && c.m.r32(CARD_EVENT_TABLE + 4 * event) == CARD_EVENT_CLOSES {
-            r.0[0] = 1;
-        }
-        let card = r.call_leaving(c, GET_CARD, &[port], 0x8001_9f5c);
-        if c.m.r32(card) == u32::MAX {
-            r.0[0] = 1;
-        }
-        if r.0[0] != 0 {
-            c.m.w32(this + ANSWERED, 1);
-            c.m.w16(this + ANSWER, u16::MAX);
-        } else {
-            r.enter(c, 0x8001_9e0c, 0x8001_9f98, |c| process_input_yes_no(c, this, player, key));
-        }
-    })
+    let (this, player, key) = (DialogInteractive(c.r[4]), c.r[5], c.r[6]);
+    let port = (c.m.r32(CARD_PORT) << 2).wrapping_add(1);
+    let event = call(c, CARD_EVENTS, &[port]).wrapping_sub(2);
+    let mut gone = event < 22 && c.m.r32(CARD_EVENT_TABLE + 4 * event) == CARD_EVENT_CLOSES;
+    let card = call(c, GET_CARD, &[port]);
+    if c.m.r32(card) == u32::MAX {
+        gone = true;
+    }
+    if gone {
+        cancel(&mut c.m, this);
+    } else {
+        process_input_yes_no(c, this, player, key);
+    }
 }
 
 /// `tDialogYesNoTri::ProcessInput` (FEDIALOG.CPP, 0x80019fbc): Start answers -1, else a
 /// yes-or-no's.
 pub fn abi_process_input_yes_no_tri(c: &mut Cpu) {
-    let (this, player, key) = (c.r[4], c.r[5], c.r[6]);
-    abi::frame(c, 24, |c, _| {
-        if c.m.r32(key) == KEY_START {
-            c.m.w32(this + ANSWERED, 1);
-            c.m.w16(this + ANSWER, u16::MAX);
-        } else {
-            Saved::of(c).enter(c, 0x8001_9e0c, 0x8001_9fec, |c| process_input_yes_no(c, this, player, key));
-        }
-    })
+    let (this, player, key) = (DialogInteractive(c.r[4]), c.r[5], c.r[6]);
+    if c.m.r32(key) == KEY_START {
+        cancel(&mut c.m, this);
+    } else {
+        process_input_yes_no(c, this, player, key);
+    }
 }
 
 /// `tDialogNoInputMessage::ProcessInput` (FEDIALOG.CPP, 0x80019ffc): no input taken.
 pub fn abi_process_input_no_input(_: &mut Cpu) {}
 
-/// A dialog's destructor (FEDIALOG.H; the one at `addr`): the screen's.
-fn destructor(c: &mut Cpu, addr: u32) {
+/// The dialogs' destructors (FEDIALOG.H): the screen's.
+fn destructor(c: &mut Cpu) {
     let (this, flags) = (c.r[4], c.r[5]);
-    abi::frame(c, 24, |c, _| {
-        Saved::of(c).call_leaving(c, SCREEN_DESTRUCTOR, &[this, flags], addr + 0x10);
-    })
+    call(c, SCREEN_DESTRUCTOR, &[this, flags]);
 }
 
 /// `tDialogMessageStringWithTimeout::~tDialogMessageStringWithTimeout` (FEDIALOG.H, 0x80015884).
 pub fn abi_message_with_timeout_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_5884);
+    destructor(c);
 }
 
 /// `tDialogYesNoTri::~tDialogYesNoTri` (FEDIALOG.H, 0x8001a004).
 pub fn abi_yes_no_tri_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a004);
+    destructor(c);
 }
 
 /// `tDialogYesNoMem::~tDialogYesNoMem` (FEDIALOG.H, 0x8001a024).
 pub fn abi_yes_no_mem_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a024);
+    destructor(c);
 }
 
 /// `tDialogYesNo::~tDialogYesNo` (FEDIALOG.H, 0x8001a044).
 pub fn abi_yes_no_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a044);
+    destructor(c);
 }
 
 /// `tDialogInteractive::~tDialogInteractive` (FEDIALOG.H, 0x8001a064).
 pub fn abi_interactive_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a064);
+    destructor(c);
 }
 
 /// `tDialogNoInputMessage::~tDialogNoInputMessage` (FEDIALOG.H, 0x8001a084).
 pub fn abi_no_input_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a084);
+    destructor(c);
 }
 
 /// `tDialogBackUpOnly::~tDialogBackUpOnly` (FEDIALOG.H, 0x8001a0a4).
 pub fn abi_back_up_only_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a0a4);
+    destructor(c);
 }
 
 /// `tDialogMessageString::~tDialogMessageString` (FEDIALOG.H, 0x8001a0c4).
 pub fn abi_message_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a0c4);
+    destructor(c);
 }
 
 /// `tDialogHelp::~tDialogHelp` (FEDIALOG.H, 0x8001a0e4).
 pub fn abi_help_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a0e4);
+    destructor(c);
 }
 
 /// `tDialogBase::~tDialogBase` (FEDIALOG.H, 0x8001a104).
 pub fn abi_base_destructor(c: &mut Cpu) {
-    destructor(c, 0x8001_a104);
+    destructor(c);
 }
 
 #[cfg(test)]
@@ -1037,6 +884,30 @@ mod tests {
     use crate::femenu::tests::{self as base, ADDR, COMMAND, Case, KEY, MENU, MENU2, pick, player, via_abi};
     use crate::femenu::{KEY_DOWN, KEY_OPTIONS, KEY_UP};
     use crate::test_util::{Rng, against_original_in, fe_ram};
+
+    // The dialogs' fields the shuffle sets (`tDialogBase`'s, a message's, the help's, the
+    // yes-or-no's), and the application's menus.
+    const PLAYER: u32 = 100;
+    const X: u32 = 102;
+    const Y: u32 = 104;
+    const W: u32 = 106;
+    const H: u32 = 108;
+    const SHOWN: u32 = 112;
+    const SHOWN_AT: u32 = 116;
+    const TIMEOUT: u32 = 120;
+    const OPEN: u32 = 132;
+    const ANSWER: u32 = 138;
+    const FADE: u32 = 140;
+    const TEXT: u32 = 144;
+    const ONE_LINE: u32 = 148;
+    const ANSWERED: u32 = 152;
+    const HELP_TEXTS: u32 = 148;
+    const HELP_BUTTONS: u32 = 176;
+    const HELP_LINES: u32 = 204;
+    const HELP_PADS: u32 = 206;
+    const HELP_TEXT_X: u32 = 208;
+    const HELP_MAX_LINES: u32 = 7;
+    const APP_MENUS: u32 = 4;
 
     /// A dialog of each class (vtables), 0x100 apart, and their texts.
     const DIALOG_AT: u32 = 0x8014_D000;
