@@ -84,10 +84,13 @@ pub mod hud;
 pub mod mathnfs;
 pub mod memcard;
 pub mod mmeffect;
+pub mod mpause;
+pub mod pausemenu;
 pub mod movie;
 pub mod newton;
 pub mod physics;
 pub mod psxfront;
+pub mod rpause;
 pub mod schedule;
 pub mod screenaudio;
 pub mod screencarselect;
@@ -1565,6 +1568,16 @@ pub static FUNCS: &[Func] = &[
     func(0x8009_e698, "Math_NormalizeShortVector", mathnfs::abi_normalize_short_vector),
     func(0x8009_e744, "Math_QDNormalizeVector", mathnfs::abi_qd_normalize_vector),
     func(0x8009_e850, "Math_fasttransmult", mathnfs::abi_fasttransmult),
+    func_ret(0x8009_e998, "tPauseMenuDefs::tPauseMenuDefs", mpause::abi_defs_ctor),
+    func(0x8009_ecf8, "tPauseMenuDefs::~tPauseMenuDefs", mpause::abi_defs_dtor),
+    func(0x8009_eeac, "MPause_MusicLogic", mpause::abi_music_logic),
+    func(0x8009_f1ac, "MPause_ControllerLogic", mpause::abi_controller_logic),
+    func_ret(0x8009_f290, "MPause_Logic", mpause::abi_logic),
+    func(0x8009_f5ac, "MPause_Render", mpause::abi_render),
+    func(0x8009_f754, "MPause_InitMPause", mpause::abi_init),
+    func(0x8009_f78c, "MPause_StartPauseMenu", mpause::abi_start_pause_menu),
+    func(0x8009_f9bc, "MPause_EndPauseMenu", mpause::abi_end_pause_menu),
+    func(0x8009_f9f8, "MPause_KillMPause", mpause::abi_kill),
     func(0x8009_fa38, "Newton_AddDamageZone", newton::abi_add_damage_zone),
     func_ret(0x800a_0210, "Newton_FindClosestQuad", newton::abi_find_closest_quad),
     func_ret(0x800a_023c, "Newton_CalculateSliceYaw", newton::abi_calculate_slice_yaw),
@@ -1597,6 +1610,66 @@ pub static FUNCS: &[Func] = &[
     func(0x800a_41d8, "Newton_ApplyTheLawOfGravity", newton::abi_apply_the_law_of_gravity),
     func_ret(0x800a_46c4, "Newton_CalculateRoadPositionFromSliceAndPosition", newton::abi_calculate_road_position_from_slice_and_position),
     func_ret(0x800a_47b8, "Newton_CalculateRoadPosition", newton::abi_calculate_road_position),
+    func(0x800a_7af4, "PauseMenu_FullText", pausemenu::abi_full_text),
+    func(0x800a_7ba8, "PauseMenu_MenuTextPositioned", pausemenu::abi_menu_text_positioned),
+    func(0x800a_7c20, "PauseMenu_MenuText", pausemenu::abi_menu_text),
+    func_ret(0x800a_7c84, "tPListIterator::tPListIterator", pausemenu::abi_iterator),
+    func(0x800a_7ca0, "tPListIterator::~tPListIterator", pausemenu::abi_iterator_dtor),
+    func_ret(0x800a_7cd4, "tPListIterator::Value", pausemenu::abi_value),
+    func_ret(0x800a_7ce8, "tPListIterator::TextValue", pausemenu::abi_text_value),
+    func(0x800a_7d38, "tPListIterator::Increment", pausemenu::abi_increment),
+    func(0x800a_7da4, "tPListIterator::Decrement", pausemenu::abi_decrement),
+    func_ret(0x800a_7e44, "tPListIteratorIndexed::tPListIteratorIndexed", pausemenu::abi_indexed),
+    func(0x800a_7e88, "tPListIteratorIndexed::~tPListIteratorIndexed", pausemenu::abi_indexed_dtor),
+    func_ret(0x800a_7eb0, "tPListIteratorIndexed::Value", pausemenu::abi_indexed_value),
+    func_ret(0x800a_7ed4, "tPListIteratorIndexed::TextValue", pausemenu::abi_text_value),
+    func(0x800a_7f24, "tPListIteratorIndexed::Increment", pausemenu::abi_indexed_increment),
+    func(0x800a_7fb0, "tPListIteratorIndexed::Decrement", pausemenu::abi_indexed_decrement),
+    func_ret(0x800a_807c, "tPMenuItem::tPMenuItem", pausemenu::abi_item),
+    func(0x800a_8098, "tPMenuItem::~tPMenuItem", pausemenu::abi_item_dtor),
+    func_ret(0x800a_80cc, "tPMenuItem::NextMenu", pausemenu::abi_item_next_menu),
+    func_ret(0x800a_80d4, "tPMenuItem::Debounce", pausemenu::abi_item_debounce),
+    func(0x800a_80dc, "tPMenuItem::ProcessInput", pausemenu::abi_item_process_input),
+    func_ret(0x800a_80e4, "tPMenuItemNonInteractiveText::tPMenuItemNonInteractiveText", pausemenu::abi_text),
+    func(0x800a_8118, "tPMenuItemNonInteractiveText::~tPMenuItemNonInteractiveText", pausemenu::abi_text_dtor),
+    func(0x800a_8140, "tPMenuItemNonInteractiveText::Draw", pausemenu::abi_text_draw),
+    func_ret(0x800a_8168, "tPMenuItemInteractive::tPMenuItemInteractive", pausemenu::abi_interactive),
+    func(0x800a_819c, "tPMenuItemInteractive::~tPMenuItemInteractive", pausemenu::abi_interactive_dtor),
+    func(0x800a_81c4, "tPMenuItemInteractive::Draw", pausemenu::abi_interactive_draw),
+    func_ret(0x800a_81ec, "tPMenuItemLeftRightChoice::tPMenuItemLeftRightChoice", pausemenu::abi_choice),
+    func(0x800a_8230, "tPMenuItemLeftRightChoice::~tPMenuItemLeftRightChoice", pausemenu::abi_choice_dtor),
+    func(0x800a_8258, "tPMenuItemLeftRightChoice::ProcessInput", pausemenu::abi_choice_process_input),
+    func(0x800a_82e4, "tPMenuItemLeftRightChoice::Draw", pausemenu::abi_choice_draw),
+    func_ret(0x800a_84bc, "tPMenuItemLeftRightSlider::tPMenuItemLeftRightSlider", pausemenu::abi_slider),
+    func(0x800a_8510, "tPMenuItemLeftRightSlider::~tPMenuItemLeftRightSlider", pausemenu::abi_slider_dtor),
+    func_ret(0x800a_8538, "tPMenuItemLeftRightSlider::Debounce", pausemenu::abi_slider_debounce),
+    func(0x800a_8540, "tPMenuItemLeftRightSlider::ProcessInput", pausemenu::abi_slider_process_input),
+    func(0x800a_865c, "tPMenuItemLeftRightSlider::Draw", pausemenu::abi_slider_draw),
+    func_ret(0x800a_8900, "tPMenuItemLeftRightSliderIndexed::tPMenuItemLeftRightSliderIndexed", pausemenu::abi_slider_indexed),
+    func(0x800a_8948, "tPMenuItemLeftRightSliderIndexed::~tPMenuItemLeftRightSliderIndexed", pausemenu::abi_slider_indexed_dtor),
+    func(0x800a_8970, "tPMenuItemLeftRightSliderIndexed::ProcessInput", pausemenu::abi_slider_indexed_process_input),
+    func(0x800a_89bc, "tPMenuItemLeftRightSliderIndexed::Draw", pausemenu::abi_slider_indexed_draw),
+    func_ret(0x800a_8a08, "tPMenuItemGoToMenuButton::tPMenuItemGoToMenuButton", pausemenu::abi_go_to_menu),
+    func(0x800a_8a5c, "tPMenuItemGoToMenuButton::~tPMenuItemGoToMenuButton", pausemenu::abi_go_to_menu_dtor),
+    func_ret(0x800a_8a84, "tPMenuItemGoToMenuButton::NextMenu", pausemenu::abi_go_to_menu_next_menu),
+    func(0x800a_8a90, "tPMenuItemGoToMenuButton::ProcessInput", pausemenu::abi_go_to_menu_process_input),
+    func_ret(0x800a_8b44, "tPMenuItemCommandButton::tPMenuItemCommandButton", pausemenu::abi_command_button),
+    func(0x800a_8b88, "tPMenuItemCommandButton::~tPMenuItemCommandButton", pausemenu::abi_command_button_dtor),
+    func(0x800a_8bb0, "tPMenuItemCommandButton::ProcessInput", pausemenu::abi_command_button_process_input),
+    func(0x800a_8c10, "tPMenu::tPMenuConstructor", pausemenu::abi_menu_constructor),
+    func_ret(0x800a_8c5c, "tPMenu::tPMenu", pausemenu::abi_menu),
+    func(0x800a_8ca8, "tPMenu::~tPMenu", pausemenu::abi_menu_dtor),
+    func(0x800a_8cdc, "tPMenu::Initialize", pausemenu::abi_initialize),
+    func_ret(0x800a_8ddc, "tPMenu::Debounce", pausemenu::abi_debounce),
+    func(0x800a_8e28, "tPMenu::CheckForDisabled", pausemenu::abi_check_for_disabled),
+    func(0x800a_8f30, "tPMenu::ProcessInput", pausemenu::abi_process_input),
+    func(0x800a_91a4, "tPMenu::Draw", pausemenu::abi_draw),
+    func_ret(0x800a_9294, "tPMenu::NumEnabledItems", pausemenu::abi_num_enabled_items),
+    func_ret(0x800a_92e4, "tPMenu::ItemEnabledNum", pausemenu::abi_item_enabled_num),
+    func_ret(0x800a_932c, "tPMenuItemInteractive::IsNavigable", pausemenu::abi_interactive_is_navigable),
+    func_ret(0x800a_9334, "tPMenuItemNonInteractiveText::IsNavigable", pausemenu::abi_text_is_navigable),
+    func_ret(0x800a_933c, "tPMenuItem::IsEnabled", pausemenu::abi_is_enabled),
+    func_ret(0x800a_9350, "tPMenuItem::IsDisabled", pausemenu::abi_is_disabled),
     func(0x800a_935c, "Physics_InitCarSpecs", physics::abi_init_car_specs),
     func(0x800a_95f8, "Physics_CalculateDerivedCarSpecs", physics::abi_calculate_derived_car_specs),
     func(0x800a_9b08, "Physics_CheckGamedata", physics::abi_check_gamedata),
@@ -1710,6 +1783,9 @@ pub static FUNCS: &[Func] = &[
     func(0x800d_a4f8, "Hud_BTC_BonusTime", hud::abi_btc_bonus_time),
     func(0x800d_a510, "Hud_Perp_OverlayOn", hud::abi_perp_overlay_on),
     func(0x800d_a53c, "Hud_Perp_OverlayOff", hud::abi_perp_overlay_off),
+    func(0x800d_dad0, "RPause_CopyBackToFrontBuffer", rpause::abi_copy_back_to_front_buffer),
+    func(0x800d_db90, "RPause_StartPauseMenu", rpause::abi_start_pause_menu),
+    func(0x800d_dbb0, "RPause_StopPauseMenu", rpause::abi_stop_pause_menu),
 ];
 
 /// The index of the function at `addr` in [`FUNCS`].
@@ -2029,7 +2105,11 @@ pub(crate) mod test_util {
             return true;
         }
         c.r[2] = match addr {
-            0x800F_07FC => 6,
+            // `PadGetState`: what PAD_STATE holds, a stable pad (6) when it's 0
+            0x800F_07FC => match c.m.r32(PAD_STATE) {
+                0 => 6,
+                state => state,
+            },
             // `PadInfoMode`: the modes' count (a2 -1), else mode a2, from PAD_MODES
             0x800F_08BC if c.r[6] as i32 == -1 => c.m.r32(PAD_MODES),
             0x800F_08BC => c.m.r32(PAD_MODES + 4 + 4 * (c.r[6] % 7)),
@@ -2076,6 +2156,9 @@ pub(crate) mod test_util {
 
     /// Where the test CPUs answer `PadInfoMode` from: the count, then seven modes.
     pub const PAD_MODES: u32 = 0x8014_8AD0;
+
+    /// Where the test CPUs answer `PadGetState` from (0: a stable pad, 6).
+    pub const PAD_STATE: u32 = 0x8014_8AC0;
 
     /// The words where two RAM images differ, but for the main stack (as `decomp-check`): the
     /// dead stack, and the callers' frames, where the original homes its arguments and the

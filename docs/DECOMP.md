@@ -30,7 +30,8 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
    replays, then the drawing (DRAW*, RENDER, R3DCAR, TRACK, OBJECT, FLARE, WEATHER, NIGHT,
    TEXTURE*, HRZSKU, SKIDMARK, TRSPROJ) and the sound and speech (SPEECH, SPCHEVNT, AUDIO*,
    COPSPEAK, TRGSFX). The drawing is checked by pictures and the primitives it emits. The HUD
-   (HUD.CPP, all 62) and the camera (CAMERA.CPP, all 41) done 2026-11-03: see "The readable HUD".
+   (HUD.CPP, all 62), the camera (CAMERA.CPP, all 41) and the pause menu (MPAUSE.CPP,
+   PAUSEMENU.CPP, RPAUSE.CPP, all 73) done 2026-11-03: see "The readable HUD".
 4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
    the AI (what the planned changes touch first).
 5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
@@ -277,6 +278,26 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   camera in a tunnel (a slice's acoustics), far from its car, off the road and mirrored to
   reach every branch; an animated camera that has finished is only reached by the tours.
 
+- **The pause menu (MPAUSE.CPP, PAUSEMENU.CPP, RPAUSE.CPP: `mpause.rs`, `pausemenu.rs`,
+  `rpause.rs`).** PAUSEMENU.CPP is a smaller copy of the front end's menu classes (its items'
+  vtable pointer at +8, the menu's at +80; a title as item 0, `fNumItems` not counting it);
+  the menus are made once a race (`tPauseMenuDefs`, at 0x801529f8 in the race RAM, which the
+  fuzz uses as the game left it). `tPMenu`'s constructor is variadic: from the game it homes
+  a1..a3 in its caller's argument area and reads the items on from there, as the original
+  does; `CheckForDisabled` and up and down loop for ever on a menu with nothing to go to, so
+  the fuzz keeps one item usable. The slider divides by its maximum (never 0 in the game: the
+  original traps), and draws its arrows once for each of its 15 bars. `MPause_MusicLogic`'s
+  sound options buffer is the library's to fill (the test CPUs don't), which changes no RAM.
+  The test CPUs answer `PadGetState` from `test_util::PAD_STATE`, for the vibration items.
+
+- **Calling a port.** Routing happens at the recompiled call sites: a port calling another
+  function's recompiled original (`nfs4rc::f_*`) runs the original even once that function is
+  decompiled. Until 2026-11-03, 112 calls did (the race loop's camera and AI start-up and
+  clean-up, the HUD's views and their parts, the AI's HUD notices, the front end's fades): the
+  ports never ran from there, and the checks compared the original with itself. They go by
+  address now (`call_addr`, `Saved::call_ptr`; readable to readable as plain Rust where no hook
+  cares), and `tools/hookaudit.py` reports any such call.
+
 ## Checking
 
 - **Unit tests** (`cargo test -p nfs4 --release`: in release, since fuzzed pointers and counts trip a debug build's overflow checks where the original wraps) compare pure functions with their recompiled
@@ -323,6 +344,10 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   `BOOT_SCRIPT="2:-,0.2:p,2:-,0.2:p,2:-,0.2:p,4:-,0.1:u,0.5:-,0.1:x,3:-,0.1:x,3:-,0.1:x,3:-,0.1:x,4:-,0.1:r,2:-,0.1:d,1:-,0.1:t,3:-,0.1:t,3:-,0.1:t,3:-"`.
   The demo tour (the main menu idle until the demo movie plays, `RunDemoVideo`; 11022 frames):
   `BOOT_SCRIPT="2:-,0.2:p,2:-,0.2:p,2:-,0.2:p,4:-,170:-,0.1:x,3:-"`.
+  The pause tour (the front-end tour's race, loaded and running, paused: Options, Audio (the
+  mode, the music and effects levels, right held for the test sound), back, Controller (the
+  configuration, vibration), back twice, up twice, carry on; 7949 frames):
+  `BOOT_SCRIPT="2:-,0.2:p,2:-,0.2:p,2:-,0.2:p,4:-,0.1:u,0.5:-,0.1:u,0.5:-,0.1:x,3:-,0.1:x,3:-,0.1:d,0.5:-,0.1:r,2:-,0.1:r,2:-,0.1:l,2:-,0.1:u,0.5:-,0.1:x,3:-,0.1:d,0.5:-,0.1:r,2:-,0.1:r,2:-,0.1:d,0.5:-,0.1:r,1:-,0.1:d,0.5:-,0.1:x,4:-,0.1:t,2:-,0.1:u,0.5:-,0.1:u,0.5:-,0.1:u,0.5:-,0.1:x,10:-,40:-,0.084:p,2:-,0.15:d,1:-,0.15:d,1:-,0.15:x,2:-,0.15:x,2:-,0.15:r,1:-,0.15:r,1:-,0.15:d,1:-,0.15:l,1:-,0.15:d,1:-,0.6:r,4:-,0.15:t,2:-,0.15:d,1:-,0.15:x,2:-,0.15:r,1:-,0.15:d,1:-,0.15:r,1:-,0.15:t,2:-,0.15:t,2:-,0.15:u,1:-,0.15:u,1:-,0.15:p,4:-"`.
   Leaving the options (and the dialog tour's High Stakes) saves to the memory card: run the
   tours with `NFSHS_MEMCARD` set to a copy of the card, or they write to `memcard.mcd`.
   The front end's fuzz tests run on `re/boot/fe_ram.bin`, its RAM at the car select (that script
@@ -389,6 +414,9 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
 | SIMQUEUE.CPP | all 8: the players' pad input queued ahead for the ticks (`Put`, `SetCurrentInput`, `GetCurrentInput`, `IsBlocking`, `SetLag`, `StartUp`, `Reset`, `CleanUp`) |
 | STATS.CPP | all 7: laps, lap times and top speeds (`TrackStats`), the race order (`ClearPosition`, `GetPosition`, `GetNumOpponents`), the catch-up glue (`DoPlayerGlue`), the checkpoint gaps and the race's end (`TrackEndGame`), the final standings (`ExtrapolateOpponentTimes`) |
 | UDFF.CPP | `Udff_GetInt` |
+| MPAUSE.CPP (readable) | all 10: the pause menus made (`tPauseMenuDefs`: pause, options, audio, controller, are you sure) and freed, a paused frame's input (`MPause_Logic`: the pad's key to the menu once the highlight bar stops, the bar sent moving, going to a menu (confirming first in one player races), back, or the race's command), its drawing (`MPause_Render`: the bar, the box), the audio menu's mode, music level and test sounds (`MusicLogic`), the vibration items for the pad (`ControllerLogic`), the menu up (`StartPauseMenu`: Restart, Quit or Forfeit by the race) and down (the controller set up again) |
+| PAUSEMENU.CPP (readable) | all 60 and PAUSEMENU.H's 2: the pause menu's classes: texts on the current line (centred on the title's), list iterators (plain and indexed by the player), items (text, interactive, left-right choices with arrows, sliders of 15 bars, indexed ones, go-to and command buttons), menus (`tPMenu`: items up and down move between past disabled ones, round; start and back; drawn a line each) |
+| RPAUSE.CPP (readable) | all 3: a paused frame begun, and shown (the race's picture copied under the menu, its view's ordering table drawn, the buffers flipped) |
 | CAMERA.CPP (readable) | all 41: the cameras per player (`Camera_gInfo`): chase (tail, helicopter: one routine), bumper, simple, crash, circle, TV, blimp, spline, animated, finish, pull-over, police; `Camera_Update`, `Init`, the modes, the view's and the sound's maths, pitch and roll, the ground, tunnel and wall checks |
 | HUD.CPP (readable) | all 62: the views and the primitives the HUD builds from its shapes and the font (`gpu.rs` the set-up), the dashboard (`Init`: gauges, time sprites, the map frame; the numbers, the tachometer, the speed in big digits), the map (track map and markers, or the radar near and far), the wingman's orders, the CD player (title scrolling, track and time), the replay's controls, the next racer's name, the 3-2-1 countdown, the pursuit's big time, the perp overlay, the busted overlay and the perps' records, the pause box, `Hud_Render` |
 | FEMENU.CPP (front end) | all but `DrawSlider` (a host hook; 72): the list iterators a menu item steps through (`tListIterator`: a byte into a list of text ids; indexed by one byte or two, per player, a range, a range indexed; `Value`, `TextValue`, `Increment`, `Decrement` going round), the menu items (`tMenuItem`: flags, text, the selection's fade; interactive; left-right choices and sliders, which step their iterator with a sound and draw the text and the value or slider; buttons going to a menu and calling a function) and the menus (`tMenu`: built from a list of items, the current item moved up and down past disabled ones, accept, back, options, help and start, drawn with the title, transitions) |
