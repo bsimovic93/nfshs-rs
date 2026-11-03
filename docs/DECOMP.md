@@ -29,7 +29,8 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
 3. **The rest of the game, readable from the start:** the HUD, the camera, the pause menu, the
    replays, then the drawing (DRAW*, RENDER, R3DCAR, TRACK, OBJECT, FLARE, WEATHER, NIGHT,
    TEXTURE*, HRZSKU, SKIDMARK, TRSPROJ) and the sound and speech (SPEECH, SPCHEVNT, AUDIO*,
-   COPSPEAK, TRGSFX). The drawing is checked by pictures and the primitives it emits.
+   COPSPEAK, TRGSFX). The drawing is checked by pictures and the primitives it emits. The HUD
+   (HUD.CPP, all 62) done 2026-11-03: see "The readable HUD".
 4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
    the AI (what the planned changes touch first).
 5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
@@ -242,6 +243,33 @@ words, go on), `NFSHS_WATCH=addr` (which code changes a stack slot, between port
 exits and calls). Track 1 doesn't boot headless (`Track_Init` spins in the watchdog), with or
 without the decompiled code.
 
+## The readable HUD
+
+HUD.CPP (`crates/nfs4/src/hud.rs`) was written readable from the start, without a bit-exact
+pass first: each function read from its disassembly, written in the front end's readable style
+(state exact, the stack and registers free), fuzzed against the recompiled original on the race
+RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and their screenshots.
+`gpu.rs` holds the primitive set-up (`addPrim`, `SetPolyF4`...) the HUD inlines.
+
+- **The host's hooks.** The host draws the HUD's text, boxes and pause box itself and records the
+  rest (`Hud_BuildString`, `Hud_FBuildF4`, `Hud_BlackThinBox`, `Hud_RenderPauseBox`,
+  `Font_TextXY`, `Flare_2DHalo`): ports call them by address (`call_addr`). The host skips
+  recording what the functions it draws itself (`RenderMapView`, `Draw321Num`, `Render321Go`,
+  `BigBTCTime`, `RenderHudView`, `RenderTacView`) call, telling them by the innermost function
+  on the call stack: so those ports call every sub-function through `call`/`call_addr` (each
+  pushes itself), never as plain Rust, or the host would take a sub-function's calls for theirs.
+- **The original's quirks kept.** The radar's quarter-scale pass reads the police not in the
+  world at places it never worked out (the stack's leftovers): only a "far" result can come of
+  it, which the map treats as none, and the places stay at the original's stack offsets so the
+  fuzz sees the same leftovers. The busted overlay clears a perp's record before copying its
+  name in, quitting copies first (a long name runs into the record's time).
+- **Testing views.** The views' functions draw into a view's primitive buffer, which
+  `Draw_StartRenderingView` ends at `Draw_gMaxPrim`; `Flare_2DHalo` only draws with 4 KB to
+  spare, so the fuzz points both ends past its free RAM (else the halos' sizes go untested).
+- **Reading the disassembly.** `tools/fdis.py` leaves out delay-slot `nop`s: an instruction that
+  looks like it sits between a call and the next is after the call (`Hud_PositionMap`'s second
+  load of the map's turn is `csin`'s argument, not a leftover of `ccos`'s).
+
 ## Checking
 
 - **Unit tests** (`cargo test -p nfs4 --release`: in release, since fuzzed pointers and counts trip a debug build's overflow checks where the original wraps) compare pure functions with their recompiled
@@ -354,6 +382,7 @@ without the decompiled code.
 | SIMQUEUE.CPP | all 8: the players' pad input queued ahead for the ticks (`Put`, `SetCurrentInput`, `GetCurrentInput`, `IsBlocking`, `SetLag`, `StartUp`, `Reset`, `CleanUp`) |
 | STATS.CPP | all 7: laps, lap times and top speeds (`TrackStats`), the race order (`ClearPosition`, `GetPosition`, `GetNumOpponents`), the catch-up glue (`DoPlayerGlue`), the checkpoint gaps and the race's end (`TrackEndGame`), the final standings (`ExtrapolateOpponentTimes`) |
 | UDFF.CPP | `Udff_GetInt` |
+| HUD.CPP (readable) | all 62: the views and the primitives the HUD builds from its shapes and the font (`gpu.rs` the set-up), the dashboard (`Init`: gauges, time sprites, the map frame; the numbers, the tachometer, the speed in big digits), the map (track map and markers, or the radar near and far), the wingman's orders, the CD player (title scrolling, track and time), the replay's controls, the next racer's name, the 3-2-1 countdown, the pursuit's big time, the perp overlay, the busted overlay and the perps' records, the pause box, `Hud_Render` |
 | FEMENU.CPP (front end) | all but `DrawSlider` (a host hook; 72): the list iterators a menu item steps through (`tListIterator`: a byte into a list of text ids; indexed by one byte or two, per player, a range, a range indexed; `Value`, `TextValue`, `Increment`, `Decrement` going round), the menu items (`tMenuItem`: flags, text, the selection's fade; interactive; left-right choices and sliders, which step their iterator with a sound and draw the text and the value or slider; buttons going to a menu and calling a function) and the menus (`tMenu`: built from a list of items, the current item moved up and down past disabled ones, accept, back, options, help and start, drawn with the title, transitions) |
 | FECARS.CPP (front end) | all 46: the car manager (`tCarManager`, `carManager`): the descriptions from fecars.car (`LoadDescription`: each default colour made a place in the colour order; `ReleaseDescription`, `GetCarFromID`, `GetCarFromSimID`, `CheapestCarStockPrice`), each player's garage and pink slips' cars (bought, sold at their used price, upgraded, taken out with the rest moving up, counted, loaded and saved, their descriptions: `GetStockCar`, `GetGarageCar`, `GetPinkSlipsCar`), the models and classes available and viewable, a class's list, a race's line-up (`gCarSelected`, a bit per colour; `FindSimilarCar`); the car menu's iterator (`tListIteratorCar`: its value and text, `AdjustPosition` walking the list the filter picks, the police's liveries first, until `ValidCar` takes a car) and the colour menu's (`tListIteratorCarColor`) |
 | FEMENUEXTENDED.CPP (front end) | all 57: the NFS4-style menus: an item's text box (`MenuNFS4_DrawTextBox`: its text twice, the second offset, between arrows, the rounded box clipped to the screen; `SetHelpPos`), the buttons going to a menu and the left-right choices sliding in and fading between enabled and disabled, the options screen's choices (a list's value, or one of two with the on-off fade), the menus holding them (`tMenuNFS4` with its animated button image and transitions on and off item by item; the two-player, bottom, blank and options menus) |
