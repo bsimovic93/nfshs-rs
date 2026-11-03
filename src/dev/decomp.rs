@@ -74,7 +74,31 @@ pub fn check(root: PathBuf, setup: Option<&RaceSetup>, steps: &[(f32, u16, Optio
     Ok(())
 }
 
-/// The word offsets where two RAM images differ (but for the dead stack).
+/// Where the libraries keep their caller's return address and stack pointers while they run
+/// (`InitGeom` its return address at 0x80135d60; `_patch_gte` and the timer's set-up the stack
+/// pointers): nothing reads them after, and a readable caller's stack depth differs.
+const CALLER_SAVES: [usize; 3] = [0x5_3684, 0x13_5D60, 0x14_E2BC];
+
+/// Known leftovers that only the pictures could use, and they don't: the skid marks' colours
+/// (`gPrevSkidSm`, and the marks' segments at gp+5484) take their top byte from the stack
+/// (`TrgSfx_AddSkidmark` builds the colour without it); the host draws the marks with the low
+/// 24 bits. A difference there in the top byte alone isn't one. (See DECOMP.md, "The race's
+/// leftovers".)
+fn inert(a: &[u8], at: usize, x: &[u8], y: &[u8]) -> bool {
+    if CALLER_SAVES.contains(&at) {
+        return true;
+    }
+    if x[..3] != y[..3] {
+        return false;
+    }
+    const PREV_SKIDS: std::ops::Range<usize> = 0x11_F5E0..0x11_F960;
+    let word = |o: usize| u32::from_le_bytes(a[o..o + 4].try_into().unwrap());
+    let base = (word((crate::ps1::race::addr::GP + 5484) as usize & 0x1F_FFFF) & 0x1F_FFFF) as usize;
+    PREV_SKIDS.contains(&at) || (base != 0 && (base..base + 64 * 688).contains(&at))
+}
+
+/// The word offsets where two RAM images differ (but for the dead stack and the known inert
+/// leftovers).
 fn differences(a: &[u8], b: &[u8]) -> Vec<usize> {
     let mut out = Vec::new();
     for (k, (x, y)) in a.chunks(256).zip(b.chunks(256)).enumerate() {
@@ -83,7 +107,7 @@ fn differences(a: &[u8], b: &[u8]) -> Vec<usize> {
         }
         for w in (0..x.len()).step_by(4) {
             let at = k * 256 + w;
-            if !STACK.contains(&at) && x[w..w + 4] != y[w..w + 4] {
+            if !STACK.contains(&at) && x[w..w + 4] != y[w..w + 4] && !inert(a, at, &x[w..w + 4], &y[w..w + 4]) {
                 out.push(at);
             }
         }

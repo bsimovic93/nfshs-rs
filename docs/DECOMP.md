@@ -22,10 +22,10 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
 
 1. **Finish the readable front end** (see "The readable front end"): the rest of the screens,
    FRONT, FEMENUDEFS and the other bit-exact front-end ports. Done 2026-11-02.
-2. **The race's leftovers.** Run the race in lockstep with `NFSHS_DECOMP_SCRAMBLE=1` to find
+2. **The race's leftovers.** Run the race in lockstep with `NFSHS_DECOMP_SCRAMBLE=race` to find
    every place the race's bit-exact code reads stack or register leftovers (the barrier
    check's uninitialized wall normal is one), and make those values explicit, before readable
-   code changes the stack under them.
+   code changes the stack under them. Done 2026-11-03: see "The race's leftovers".
 3. **The rest of the game, readable from the start:** the HUD, the camera, the pause menu, the
    replays, then the drawing (DRAW*, RENDER, R3DCAR, TRACK, OBJECT, FLARE, WEATHER, NIGHT,
    TEXTURE*, HRZSKU, SKIDMARK, TRSPROJ) and the sound and speech (SPEECH, SPCHEVNT, AUDIO*,
@@ -202,6 +202,45 @@ back (Triangle) and 8192 start (Start); commands 1 to 8 are go to, go to with th
 go to with the second player's menu, back, race, race when both players are ready, race, quit.
 `tMenu`'s vtable slot 56 is `TransitionIsFinished` and 64 `IsSubMenu` (the old FEAPP port had them as
 "in transition" and "transition is finished").
+
+## The race's leftovers
+
+Step 2 (2026-11-03) ran races in lockstep with `NFSHS_DECOMP_SCRAMBLE=race`, which junks the
+race's ports' leftovers (every port outside the front end, the scratchpad stack included), with
+`NFSHS_DECOMP_RESYNC=1` so one run lists every difference: the reference race (track 0, one
+lap, `BOOT_SCRIPT="8:-,150:x"`), tracks 2 to 6 with rain, night and traffic, a reversed track, a
+police car as the player (`GS_SET=3d4=27`), the pause menu's restart, and the eight front-end
+tours. Every AI module and the rest of the race logic read none. What reads leftovers:
+
+- **The barrier check's wall normal** (`Physics_DoBarrierCheck`, from `Collide_CheckMeForCollisions`):
+  a car on its wheels scraping a barrier is turned with a normal that is only set on the
+  bounce path; on this one it is whatever is at scratchpad 0x1F8002CC, a slot written about
+  60,000 times a race by dozens of functions (`NFSHS_WATCH` showed `Newton_TestForUndrivableSurfaces`'
+  last wheel point, its sp+80, in 4 of the 7 reads seen, and `Newton_ApplyTheLawOfGravity`'s
+  locals in the other 3). It is a world position, not a unit vector: the car gets a yaw kick.
+  0 to 5 reads a race. It can't be modelled as a value: exactness would mean keeping the
+  original's stack layout for every function at that depth. Decided (the user, 2026-11-03):
+  the bit-exact ports stay as they are for now (exact), and when the physics is rewritten
+  readable (step 4) it is fixed as a bug, with a real normal (the barrier's, as the bounce
+  path uses), and documented; lockstep checks resync over those frames.
+- **The skid marks' colours** (`TrgSfx_AddSkidmark`, still recompiled): built on its stack
+  without the top byte, which comes from whatever the stack held (a saved return address).
+  Stored in `gPrevSkidSm` and the marks' segments (gp+5484); the host draws the marks with the
+  low 24 bits, so `decomp-check` ignores a difference in that byte alone there.
+- **The car's drawing** (`0x800b0868` after `R3DCar_MATRIX3DT_Copy`, still recompiled): one
+  word of its per-frame transformed vectors (seen at 0x801c978c in a rain, night and traffic
+  race) comes from its stack (a saved return address in the original). Pictures with and
+  without the scramble are the same; it gets a defined value when R3DCAR is decompiled.
+- **The libraries' saved registers**: `InitGeom` keeps its return address at 0x80135d60 while it
+  runs, `_patch_gte` and the timer's set-up keep stack pointers at 0x80053684 and 0x8014e2bc;
+  nothing reads them after. A readable caller has another stack depth, so `decomp-check`
+  ignores those three words (they made the front-end tour differ from the PSXFRONT rewrite on).
+
+Tools: `NFSHS_DECOMP_SCRAMBLE=race` (or `all`; `1` the front end), `NFSHS_DECOMP_SCRAMBLE_ONLY=Name,...`
+to bisect by function, `NFSHS_DECOMP_RESYNC=1` (report, give the decompiled run the original's
+words, go on), `NFSHS_WATCH=addr` (which code changes a stack slot, between port entries,
+exits and calls). Track 1 doesn't boot headless (`Track_Init` spins in the watchdog), with or
+without the decompiled code.
 
 ## Checking
 
