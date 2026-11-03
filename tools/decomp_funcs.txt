@@ -718,6 +718,46 @@
 800da510 Hud_Perp_OverlayOn
 800da53c Hud_Perp_OverlayOff
 
+# CAMERA.CPP (readable from the start)
+80081030 EulerToMat
+80081128 Camera_SetCamera
+80081160 Camera_LookBack
+800811e8 Camera_TunnelLimit
+80081330 Camera_UpdateCollisionCam
+800814ec Camera_UpdateSimpleCam
+800815d0 Camera_UpdateBumperCam
+800817a8 Camera_UpdateTailCam
+80081df0 Camera_UpdateHeliCam
+800824dc Camera_UpdateCircleCam
+8008275c SetCameraZoom
+8008286c Camera_UpdateTVCam
+800829b8 Camera_UpdateAnimCam
+80082c78 Camera_UpdateFinishCam
+80082da0 Camera_UpdateBlimpCam
+80082ee4 Camera_SetSplineCam
+800830e4 Camera_UpdateSplineCam
+80083660 Camera_IslandProfile
+800836b8 Camera_UpdatePulloverCam
+80083a34 Camera_UpdateCopCam1
+80083bcc Camera_UpdateCopCam2
+80083cd4 Camera_UpdateBTCopCam
+80083dfc Camera_Update
+8008427c Camera_Init
+80084610 Camera_Kill
+80084698 Camera_PitchAndRoll
+8008474c Camera_TooSteep
+800848bc Camera_CheckWallCollisions
+80085230 Camera_SetAboveGround
+800852bc Camera_AcquireTarget
+80085658 Camera_OpponentLookBehind
+80085a2c Camera_GetViewInfo
+80085d60 Camera_GetAudioViewInfo
+80085f8c Camera_GetMode
+8008602c Camera_SetMode
+80086240 Camera_NextMode
+800865f4 Camera_ReplayUpdate
+800866f8 Camera_ResetRelPos
+
 # FECARS.CPP (the front end)
 800162d8 tCarManager::Initialize
 80016374 tCarManager::GetCarFromID
