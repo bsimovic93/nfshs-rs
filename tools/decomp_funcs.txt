@@ -654,6 +654,30 @@
 # UDFF.CPP
 800bc8f8 Udff_GetInt
 
+# HUD.CPP (readable from the start)
+800d27e0 Hud_CreateHudViews
+800d2acc Hud_GoTpage
+800d2b5c Hud_DebugInfo
+800d2b64 Hud_DebugCrap
+800d2b6c Hud_BuildSprite
+800d2c18 Hud_BuildSprite2
+800d2c44 Hud_FBuildSprite
+800d2cd8 Hud_BuildSpriteFromFont
+800d2d98 Hud_BuildF3
+800d2e5c Hud_BuildGT4
+800d2f08 Hud_BuildFT4
+800d2ff8 Hud_BuildMirrorFT4
+800d30fc Hud_BuildMapMirrorFT4
+800d3208 Hud_BuildF4
+800d32ac Hud_BuildG4
+800d3368 Hud_BuildF4o
+800d343c Hud_FBuildGT4
+800d34c8 Hud_FBuildFT4
+800d3558 Hud_FBuildF4
+800d3618 uppercase
+800d3678 Hud_Kill
+800d36c8 Hud_Init0
+
 # FECARS.CPP (the front end)
 800162d8 tCarManager::Initialize
 80016374 tCarManager::GetCarFromID

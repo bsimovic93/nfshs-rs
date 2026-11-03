@@ -78,6 +78,8 @@ pub mod fevideowall;
 pub mod fixed;
 pub mod front;
 pub mod globals;
+pub mod gpu;
+pub mod hud;
 pub mod mathnfs;
 pub mod memcard;
 pub mod mmeffect;
@@ -1607,6 +1609,28 @@ pub static FUNCS: &[Func] = &[
     func(0x800b_8ed0, "Stats_TrackStats", stats::abi_track_stats),
     func(0x800b_92d8, "Stats_ExtrapolateOpponentTimes", stats::abi_extrapolate_opponent_times),
     func(0x800b_9a80, "Stats_TrackEndGame", stats::abi_track_end_game),
+    func(0x800d_27e0, "Hud_CreateHudViews", hud::abi_create_hud_views),
+    func(0x800d_2acc, "Hud_GoTpage", hud::abi_go_tpage),
+    func(0x800d_2b5c, "Hud_DebugInfo", hud::abi_nothing),
+    func(0x800d_2b64, "Hud_DebugCrap", hud::abi_nothing),
+    func(0x800d_2b6c, "Hud_BuildSprite", hud::abi_build_sprite),
+    func(0x800d_2c18, "Hud_BuildSprite2", hud::abi_build_sprite2),
+    func(0x800d_2c44, "Hud_FBuildSprite", hud::abi_f_build_sprite),
+    func(0x800d_2cd8, "Hud_BuildSpriteFromFont", hud::abi_build_sprite_from_font),
+    func(0x800d_2d98, "Hud_BuildF3", hud::abi_build_f3),
+    func(0x800d_2e5c, "Hud_BuildGT4", hud::abi_build_gt4),
+    func(0x800d_2f08, "Hud_BuildFT4", hud::abi_build_ft4),
+    func(0x800d_2ff8, "Hud_BuildMirrorFT4", hud::abi_build_mirror_ft4),
+    func(0x800d_30fc, "Hud_BuildMapMirrorFT4", hud::abi_build_map_mirror_ft4),
+    func(0x800d_3208, "Hud_BuildF4", hud::abi_build_f4),
+    func(0x800d_32ac, "Hud_BuildG4", hud::abi_build_g4),
+    func(0x800d_3368, "Hud_BuildF4o", hud::abi_build_f4o),
+    func(0x800d_343c, "Hud_FBuildGT4", hud::abi_f_build_gt4),
+    func(0x800d_34c8, "Hud_FBuildFT4", hud::abi_f_build_ft4),
+    func(0x800d_3558, "Hud_FBuildF4", hud::abi_f_build_f4),
+    func(0x800d_3618, "uppercase", hud::abi_uppercase),
+    func(0x800d_3678, "Hud_Kill", hud::abi_kill),
+    func(0x800d_36c8, "Hud_Init0", hud::abi_init0),
 ];
 
 /// The index of the function at `addr` in [`FUNCS`].
