@@ -30,7 +30,7 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
    replays, then the drawing (DRAW*, RENDER, R3DCAR, TRACK, OBJECT, FLARE, WEATHER, NIGHT,
    TEXTURE*, HRZSKU, SKIDMARK, TRSPROJ) and the sound and speech (SPEECH, SPCHEVNT, AUDIO*,
    COPSPEAK, TRGSFX). The drawing is checked by pictures and the primitives it emits. The HUD
-   (HUD.CPP, all 62) done 2026-11-03: see "The readable HUD".
+   (HUD.CPP, all 62) and the camera (CAMERA.CPP, all 41) done 2026-11-03: see "The readable HUD".
 4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
    the AI (what the planned changes touch first).
 5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
@@ -270,6 +270,13 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   looks like it sits between a call and the next is after the call (`Hud_PositionMap`'s second
   load of the map's turn is `csin`'s argument, not a leftover of `ccos`'s).
 
+- **The camera (CAMERA.CPP, `camera.rs`).** Written the same way. Its bits word (`camera_info`
+  +0x74) holds the mode's flags with two byte counters in it (the transition's, +0x75, and the
+  crash's, +0x76): the ports keep the original's order of byte and word writes to it. The tail
+  and helicopter cameras are one chase routine with each's constants. The fuzz cases need the
+  camera in a tunnel (a slice's acoustics), far from its car, off the road and mirrored to
+  reach every branch; an animated camera that has finished is only reached by the tours.
+
 ## Checking
 
 - **Unit tests** (`cargo test -p nfs4 --release`: in release, since fuzzed pointers and counts trip a debug build's overflow checks where the original wraps) compare pure functions with their recompiled
@@ -382,6 +389,7 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
 | SIMQUEUE.CPP | all 8: the players' pad input queued ahead for the ticks (`Put`, `SetCurrentInput`, `GetCurrentInput`, `IsBlocking`, `SetLag`, `StartUp`, `Reset`, `CleanUp`) |
 | STATS.CPP | all 7: laps, lap times and top speeds (`TrackStats`), the race order (`ClearPosition`, `GetPosition`, `GetNumOpponents`), the catch-up glue (`DoPlayerGlue`), the checkpoint gaps and the race's end (`TrackEndGame`), the final standings (`ExtrapolateOpponentTimes`) |
 | UDFF.CPP | `Udff_GetInt` |
+| CAMERA.CPP (readable) | all 41: the cameras per player (`Camera_gInfo`): chase (tail, helicopter: one routine), bumper, simple, crash, circle, TV, blimp, spline, animated, finish, pull-over, police; `Camera_Update`, `Init`, the modes, the view's and the sound's maths, pitch and roll, the ground, tunnel and wall checks |
 | HUD.CPP (readable) | all 62: the views and the primitives the HUD builds from its shapes and the font (`gpu.rs` the set-up), the dashboard (`Init`: gauges, time sprites, the map frame; the numbers, the tachometer, the speed in big digits), the map (track map and markers, or the radar near and far), the wingman's orders, the CD player (title scrolling, track and time), the replay's controls, the next racer's name, the 3-2-1 countdown, the pursuit's big time, the perp overlay, the busted overlay and the perps' records, the pause box, `Hud_Render` |
 | FEMENU.CPP (front end) | all but `DrawSlider` (a host hook; 72): the list iterators a menu item steps through (`tListIterator`: a byte into a list of text ids; indexed by one byte or two, per player, a range, a range indexed; `Value`, `TextValue`, `Increment`, `Decrement` going round), the menu items (`tMenuItem`: flags, text, the selection's fade; interactive; left-right choices and sliders, which step their iterator with a sound and draw the text and the value or slider; buttons going to a menu and calling a function) and the menus (`tMenu`: built from a list of items, the current item moved up and down past disabled ones, accept, back, options, help and start, drawn with the title, transitions) |
 | FECARS.CPP (front end) | all 46: the car manager (`tCarManager`, `carManager`): the descriptions from fecars.car (`LoadDescription`: each default colour made a place in the colour order; `ReleaseDescription`, `GetCarFromID`, `GetCarFromSimID`, `CheapestCarStockPrice`), each player's garage and pink slips' cars (bought, sold at their used price, upgraded, taken out with the rest moving up, counted, loaded and saved, their descriptions: `GetStockCar`, `GetGarageCar`, `GetPinkSlipsCar`), the models and classes available and viewable, a class's list, a race's line-up (`gCarSelected`, a bit per colour; `FindSimilarCar`); the car menu's iterator (`tListIteratorCar`: its value and text, `AdjustPosition` walking the list the filter picks, the police's liveries first, until `ValidCar` takes a car) and the colour menu's (`tListIteratorCarColor`) |
