@@ -688,6 +688,35 @@
 800d4e9c Hud_BuildString
 800d51f8 Hud_BuildNumbers0
 800d5a44 Hud_BuildNumbers
+800d661c Hud_InitMap
+800d66bc Hud_BuildMapMarkers
+800d6b8c Hud_WingmanFlash
+800d6c40 Hud_BuildWingmanInterface
+800d6f8c Hud_InitCdPlayer
+800d6fb0 Hud_BuildCdPlayer
+800d771c Hud_BuildRadar
+800d7e24 Hud_BuildReplay
+800d8120 Hud_NextPlayer
+800d8284 Hud_NextPlayerNameOrCarOrTime
+800d840c Hud_RenderMapView
+800d8690 Hud_BlackThinBox
+800d887c Hud_Draw321Num
+800d8a38 Hud_Render321Go
+800d8b84 Hud_BigBTCTime
+800d8ea4 Hud_RenderHudView
+800d981c Hud_RenderTacView
+800d9938 Hud_ParseTime
+800d9abc Hud_RenderPauseBox
+800d9c44 Hud_Render
+800da0ac Hud_PositionMap
+800da1b4 Hud_BTC_Update
+800da218 Hud_BustedOverlayOn
+800da3d0 Hud_BustedOverlayOff
+800da3dc Hud_Reset
+800da434 Hud_BTC_QuitOut
+800da4f8 Hud_BTC_BonusTime
+800da510 Hud_Perp_OverlayOn
+800da53c Hud_Perp_OverlayOff
 
 # FECARS.CPP (the front end)
 800162d8 tCarManager::Initialize
