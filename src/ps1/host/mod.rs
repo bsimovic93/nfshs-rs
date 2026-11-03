@@ -158,8 +158,15 @@ pub type FrameFn = Box<dyn FnMut(&mut Cpu, FrameInfo) -> Option<[Pad; 2]>>;
 /// Hud_RenderTacView): 2D calls made from them are not recorded again.
 const NATIVE_HUD: [std::ops::Range<u32>; 4] = [0x800D_840C..0x800D_8690, 0x800D_887C..0x800D_8B84, 0x800D_8EA4..0x800D_981C, 0x800D_981C..0x800D_9938];
 
-fn native_hud(ra: u32) -> bool {
-    NATIVE_HUD.iter().any(|r| r.contains(&ra))
+fn native_hud(addr: u32) -> bool {
+    NATIVE_HUD.iter().any(|r| r.contains(&addr))
+}
+
+/// Whether the function calling (the innermost on the call stack: recompiled code pushes its
+/// start, a port its address) is one of the HUD's the host draws itself. Not the return
+/// address: a readable port's calls have none.
+fn native_hud_caller(c: &Cpu) -> bool {
+    c.stack.last().is_some_and(|&f| native_hud(f))
 }
 
 thread_local! {

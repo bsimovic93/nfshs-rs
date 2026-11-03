@@ -35,7 +35,7 @@ impl GameHost {
                 // letters and digits and the pad button symbols; returns the width
                 let sp = c.r[29];
                 let measure = c.m.r32(sp + 20) != 0;
-                let record = !measure && !native_hud(c.r[31]);
+                let record = !measure && !native_hud_caller(c);
                 let width = |c: &mut Cpu, s: u32| c.m.r16(crate::ps1::race::HUD_SHAPES + 20 * s + 16) as i16 as i32;
                 let (x0, y) = (a1 as i32, a2 as i32);
                 let mut x = x0;
@@ -75,7 +75,7 @@ impl GameHost {
                 (x - x0) as u32
             }
             0x800D_8690 => {
-                if !native_hud(c.r[31]) {
+                if !native_hud_caller(c) {
                     self.overlay.push(OverlayCmd::ThinBox { x: a0 as i16, y: a1 as i16, w: a2 as i16, h: a3 as i16 });
                 }
                 0
@@ -84,7 +84,7 @@ impl GameHost {
                 self.overlay.push(OverlayCmd::PauseBox { x: a0 as i16, y: a1 as i16, w: a2 as i16, h: a3 as i16 });
                 0
             }
-            0x800D_3558 if native_hud(c.r[31]) => 0,
+            0x800D_3558 if native_hud_caller(c) => 0,
             0x800D_3558 => {
                 let sp = c.r[29];
                 if std::env::var_os("PS1_OVLOG").is_some() {
