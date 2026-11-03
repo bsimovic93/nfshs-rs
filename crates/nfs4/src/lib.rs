@@ -1633,10 +1633,15 @@ pub static FUNCS: &[Func] = &[
     func(0x800d_36c8, "Hud_Init0", hud::abi_init0),
     func(0x800d_3720, "Hud_InitMapFrame", hud::abi_init_map_frame),
     func(0x800d_3acc, "Hud_BuildTimeSprites", hud::abi_build_time_sprites),
+    func(0x800d_3c00, "Hud_Init", hud::abi_init),
     func(0x800d_45c0, "Hud_InitTables", hud::abi_init_tables),
     func(0x800d_45ec, "Hud_BuildETimeString", hud::abi_build_e_time_string),
     func_ret(0x800d_4778, "Hud_BuildDistanceString", hud::abi_build_distance_string),
     func(0x800d_4918, "Hud_BuildTimeString", hud::abi_build_time_string),
+    func(0x800d_4a68, "Hud_BuildTach", hud::abi_build_tach),
+    func_ret(0x800d_4e9c, "Hud_BuildString", hud::abi_build_string),
+    func(0x800d_51f8, "Hud_BuildNumbers0", hud::abi_build_numbers0),
+    func(0x800d_5a44, "Hud_BuildNumbers", hud::abi_build_numbers),
 ];
 
 /// The index of the function at `addr` in [`FUNCS`].
