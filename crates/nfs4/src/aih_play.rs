@@ -517,16 +517,16 @@ pub fn handle_speech(c: &mut Cpu, this: AIHighPlayer) {
         let index = car_of(m, this).car_index(m);
         let what = match perp.pull_over_mode_(m) {
             1 => {
-                r.call(c, nfs4rc::f_800da510, &[index as u32, 0], 0x8006_2d88); // the HUD's notice
+                r.call_ptr(c, 0x800d_a510, &[index as u32, 0], 0x8006_2d88); // the HUD's notice
                 2
             }
             2 => {
-                r.call(c, nfs4rc::f_800da510, &[index as u32, 1], 0x8006_2d98);
+                r.call_ptr(c, 0x800d_a510, &[index as u32, 1], 0x8006_2d98);
                 let busts = this.num_busts_(&mut c.m);
                 if busts < 3 { 8 } else { busts + 6 }
             }
             3 => {
-                r.call(c, nfs4rc::f_800da510, &[index as u32, 2], 0x8006_2dbc);
+                r.call_ptr(c, 0x800d_a510, &[index as u32, 2], 0x8006_2dbc);
                 1
             }
             _ => 4,
@@ -756,7 +756,7 @@ pub fn handle_pull_over(c: &mut Cpu, this: AIHighPlayer) {
             let car = car_of(m, this);
             let index = car.car_index(m);
             if index < 2 {
-                r.call(c, nfs4rc::f_800da53c, &[index as u32], 0x8006_35d0); // the HUD's notice off
+                r.call_ptr(c, 0x800d_a53c, &[index as u32], 0x8006_35d0); // the HUD's notice off
             }
             let m = &mut c.m;
             let now = SIM_COUNTER.get(m);

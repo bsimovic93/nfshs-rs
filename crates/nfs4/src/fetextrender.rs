@@ -25,7 +25,7 @@ const SPRINTF: fn(&mut Cpu) = nfs4rc::f_800e50a8;
 const STRLEN: fn(&mut Cpu) = nfs4rc::f_800ea8d0;
 const STRCPY: fn(&mut Cpu) = nfs4rc::f_800e6714;
 const BLOCKMOVE: fn(&mut Cpu) = nfs4rc::f_800e6ec8;
-const S_LOWER: fn(&mut Cpu) = nfs4rc::f_80026970;
+const S_LOWER: u32 = 0x8002_6970;
 const TEXT_PIXELS: fn(&mut Cpu) = nfs4rc::f_800e4a2c;
 /// `TextSys_Word`, `TextSys_WordX`, `TextSys_WordY`, `TextSys_WordFlags`: a text id's string,
 /// place and text type.
@@ -35,7 +35,7 @@ const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 const WORD_FLAGS: fn(&mut Cpu) = nfs4rc::f_800b9f38;
 /// `CalcFadeVal` (the colour and a fade), `FeDraw_SetABRMode`; `PSXDrawTransSquare` (called
 /// by address: the host draws it).
-const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
+const CALC_FADE_VAL: u32 = 0x8004_bd68;
 const SET_ABR_MODE: fn(&mut Cpu) = crate::mmeffect::set_abr_mode_entry;
 const DRAW_TRANS_SQUARE: u32 = 0x8004_F3B8;
 /// "%s".
@@ -121,7 +121,7 @@ pub fn full_text_rgb(c: &mut Cpu, text: u32, x: u32, y: u32, colour: u32, font: 
         set_font(c, font);
         let s = if font == 0 {
             call(c, SPRINTF, &[buf, TEXT_FORMAT, text]);
-            call(c, S_LOWER, &[buf]);
+            call_addr(c, S_LOWER, &[buf]);
             buf
         } else {
             text
@@ -175,7 +175,7 @@ pub fn full_text_entry(c: &mut Cpu) {
 #[allow(clippy::too_many_arguments)]
 pub fn full_text_fade(c: &mut Cpu, fade: u32, text: u32, x: u32, y: u32, ty: u32, state: u32, justify: u32) {
     let colour = style_colour(&mut c.m, ty, state);
-    let faded = call(c, CALC_FADE_VAL, &[colour, fade]);
+    let faded = call_addr(c, CALC_FADE_VAL, &[colour, fade]);
     let font = style_font(&mut c.m, ty);
     full_text_rgb(c, text, sx(x), sx(y), faded, font, sx(justify));
 }
@@ -288,7 +288,7 @@ pub fn word_wrap_text_rgb_justify(c: &mut Cpu, text: u32, rect: RECT, colour: u3
         let buf = line + WRAP_LINE;
         call(c, BLOCKMOVE, &[text, buf, len.wrapping_add(1)]);
         if font == 0 {
-            call(c, S_LOWER, &[buf]);
+            call_addr(c, S_LOWER, &[buf]);
         }
         if len as i32 <= 0 {
             return;
@@ -424,7 +424,7 @@ pub fn word_wrap_text_rgb_entry(c: &mut Cpu) {
 /// `rect` in text type `ty`'s font, justification and colour in `state`, faded by `fade`.
 pub fn word_wrap_text_fade(c: &mut Cpu, fade: u32, text: u32, rect: u32, state: u32, ty: u32) -> u32 {
     let colour = style_colour(&mut c.m, ty, state);
-    let faded = call(c, CALC_FADE_VAL, &[colour, fade]);
+    let faded = call_addr(c, CALC_FADE_VAL, &[colour, fade]);
     let m = &mut c.m;
     let (justify, font) = (style_justify(m, ty), style_font(m, ty));
     word_wrap_text_rgb_justify(c, text, RECT(rect), faded, justify, font, 0)
@@ -495,7 +495,7 @@ pub fn title(c: &mut Cpu, id: u32) {
     with_buffer(c, TITLE_BUFFER, |c, buf| {
         let word = call(c, TEXT_WORD, &[sx(id)]);
         call(c, STRCPY, &[buf, word]);
-        call(c, S_LOWER, &[buf]);
+        call_addr(c, S_LOWER, &[buf]);
         full_text(c, buf, 48, top | 0x10, 0, 1, 0);
         let w = call(c, TEXT_PIXELS, &[buf]).wrapping_add(10);
         call_addr(c, DRAW_TRANS_SQUARE, &[0, 43, top + 18, sx(w), 12, 2]);

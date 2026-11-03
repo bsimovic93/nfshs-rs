@@ -238,7 +238,7 @@ pub fn abi_cop_false_arrest(c: &mut Cpu) {
 pub fn cop_hud_off(c: &mut Cpu, this: AIHighBTCCop) {
     abi::frame(c, 24, |c, _| {
         if this.ai_high_basic_cop().cop_index_(&mut c.m) == 0 {
-            Saved::of(c).call(c, nfs4rc::f_800da3d0, &[], 0x8005_d714); // Hud_BustedOverlayOff
+            Saved::of(c).call_ptr(c, 0x800d_a3d0, &[], 0x8005_d714); // Hud_BustedOverlayOff
         }
     })
 }
@@ -506,7 +506,7 @@ pub fn human_cop_new_stage(c: &mut Cpu, this: AIHighBTCHumanCop, slice: i32, dir
         let time = time.wrapping_mul(this.stage_time_multiplier_(m)) / 0x1_0000;
         r.0[0] = time as u32;
         if this.ai_high_btc_cop().ai_high_basic_cop().cop_index_(m) == 0 {
-            r.call(c, nfs4rc::f_800da4f8, &[(time << 1) as u32], 0x8005_e168); // Hud_BTC_BonusTime
+            r.call_ptr(c, 0x800d_a4f8, &[(time << 1) as u32], 0x8005_e168); // Hud_BTC_BonusTime
         }
         let m = &mut c.m;
         this.set_need_perp_(m, 1);
@@ -545,7 +545,7 @@ pub fn human_cop_update_and_check_time_left(c: &mut Cpu, this: AIHighBTCHumanCop
             (0, 0)
         };
         let manual = (me.rs_control(m) == 0) as u32;
-        r.call(c, nfs4rc::f_800da1b4, &[name, time, manual], 0x8005_e234); // the HUD's chase time
+        r.call_ptr(c, 0x800d_a1b4, &[name, time, manual], 0x8005_e234); // the HUD's chase time
         let m = &mut c.m;
         if this.time_left_(m) >= 0 {
             return;
@@ -864,7 +864,7 @@ pub fn human_cop_hud_on(c: &mut Cpu, this: AIHighBTCHumanCop, perp: AIHighBTCPer
         let time = SIM_COUNTER.get(m).wrapping_sub(this.chase_start_time_(m));
         let name = Car(m.r32(perp.0)).car_info(m).0.wrapping_add(92);
         let index = car.car_index(m) as i16 as i32;
-        Saved::of(c).call(c, nfs4rc::f_800da218, &[time as u32, name, (out == 0) as u32, index as u32], 0x8005_ead0); // Hud_BustedOverlayOn
+        Saved::of(c).call_ptr(c, 0x800d_a218, &[time as u32, name, (out == 0) as u32, index as u32], 0x8005_ead0); // Hud_BustedOverlayOn
     })
 }
 

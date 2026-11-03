@@ -1509,7 +1509,7 @@ pub fn apply_the_law_of_gravity(c: &mut Cpu, obj: NewtonObj) {
         let (rate, ticks) = (sp + 80, sp + 84);
         let keep = car.force_no_sim_optz(&mut c.m) as u32;
         let (dist, id) = (obj.dist_to_player(&mut c.m) as u32, obj.obj_id(&mut c.m) as u32);
-        let due = abi::call(c, nfs4rc::f_800b6e90, &[1, 3, dist, id, rate, ticks, sp + 88, keep]);
+        let due = abi::Saved::of(c).call_ptr(c, 0x800b_6e90, &[1, 3, dist, id, rate, ticks, sp + 88, keep], 0);
         if due == 0 {
             return;
         }
@@ -1620,7 +1620,7 @@ pub fn apply_the_law_of_gravity(c: &mut Cpu, obj: NewtonObj) {
         }
         let now = SIM_COUNTER.get(&mut c.m);
         obj.set_last_updated(&mut c.m, now);
-        let tunnel = abi::call(c, nfs4rc::f_800809f8, &[obj.sim_road_info().0]);
+        let tunnel = abi::Saved::of(c).call_ptr(c, 0x8008_09f8, &[obj.sim_road_info().0], 0);
         if tunnel != 0 {
             let vy = obj.linear_vel().y(&mut c.m);
             if vy > 0 && 0x8_0000 < obj.position().y(&mut c.m).wrapping_sub(obj.road_center_point().y(&mut c.m)) {
@@ -1760,7 +1760,7 @@ pub fn test_for_undrivable_surfaces(c: &mut Cpu, obj: NewtonObj) {
             do_post_barrier_collision_handling(c, obj, w);
             let p = wheel.current_pos().get(&mut c.m);
             obj.collision().collision_point().set(&mut c.m, p);
-            abi::call(c, nfs4rc::f_8006d120, &[car.0]);
+            abi::Saved::of(c).call_ptr(c, 0x8006_d120, &[car.0], 0);
             if car.car_flags(&mut c.m) & 4 != 0 {
                 crate::physics::fix_engine_rpm(c, car);
             }

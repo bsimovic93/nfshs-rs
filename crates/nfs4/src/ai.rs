@@ -1045,7 +1045,7 @@ pub fn handle_traffic_honking(c: &mut Cpu, car: Car) {
     abi::frame(c, 24, |c, _| {
         let mut r = Saved::of(c);
         r.0[0] = car.0;
-        let visible = r.call(c, nfs4rc::f_80068fec, &[car.0], 0x8005_a38c); // AILife_IsCarInAnyVisibleArea
+        let visible = r.call_ptr(c, 0x8006_8fec, &[car.0], 0x8005_a38c); // AILife_IsCarInAnyVisibleArea
         let m = &mut c.m;
         if car.car_flags(m) & CAR_TRAFFIC == 0 {
             return;

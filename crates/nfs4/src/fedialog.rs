@@ -45,15 +45,15 @@ const HELP_MAX_LINES: i16 = 7;
 /// `FeTools_DrawPSXButton`; `PAD_update`; `blockmove`; `CalcFadeVal`; the front end's key for a
 /// player (FEINPUT.CPP); the memory card's events and its state (`MCRD_handlecardevents`,
 /// `MCRD_getcard`); the screen's constructor and destructor (`tScreen`).
-const DRAW_PSX_BUTTON: fn(&mut Cpu) = nfs4rc::f_800269d0;
+const DRAW_PSX_BUTTON: u32 = 0x8002_69d0;
 const PAD_UPDATE: fn(&mut Cpu) = nfs4rc::f_800e4e08;
 const BLOCKMOVE: fn(&mut Cpu) = nfs4rc::f_800e6ec8;
-const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
-const GET_KEY: fn(&mut Cpu) = nfs4rc::f_80023ca8;
+const CALC_FADE_VAL: u32 = 0x8004_bd68;
+const GET_KEY: u32 = 0x8002_3ca8;
 const CARD_EVENTS: fn(&mut Cpu) = crate::memcard::handlecardevents_entry;
 const GET_CARD: fn(&mut Cpu) = crate::memcard::getcard_entry;
-const SCREEN: fn(&mut Cpu) = nfs4rc::f_80026040;
-const SCREEN_DESTRUCTOR: fn(&mut Cpu) = nfs4rc::f_80026098;
+const SCREEN: u32 = 0x8002_6040;
+const SCREEN_DESTRUCTOR: u32 = 0x8002_6098;
 /// Hooked by the host, so called by address: `tDialog::Display` and `Hide` (it notes the
 /// dialog for its autosave's sounds); `tFEApplication::Redraw` (it autosaves between frames);
 /// `tDialogMessageString::Draw` (it hides the save's message while autosaving).
@@ -450,15 +450,15 @@ pub fn draw_help(c: &mut Cpu, this: DialogHelp) {
                     let row = k_.wrapping_sub(1).wrapping_mul(15);
                     let (x, by) = (this.left(m) as i32 as u32, (this.top(m) as i32 as u32).wrapping_add(row).wrapping_add(19));
                     if pads == 2 {
-                        call(c, DRAW_PSX_BUTTON, &[NEGCON_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
+                        call_addr(c, DRAW_PSX_BUTTON, &[NEGCON_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
                     } else if pads != 3 || matches!(button, 160 | 80 | 64) {
-                        call(c, DRAW_PSX_BUTTON, &[PAD_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
+                        call_addr(c, DRAW_PSX_BUTTON, &[PAD_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
                     } else {
                         // both pads: the PlayStation's button and the NeGcon's
-                        call(c, DRAW_PSX_BUTTON, &[PAD_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
+                        call_addr(c, DRAW_PSX_BUTTON, &[PAD_BUTTONS, button & 0xFFFF, x.wrapping_add(20), by]);
                         let m = &mut c.m;
                         let (x, by) = (this.left(m) as i32 as u32, (this.top(m) as i32 as u32).wrapping_add(row).wrapping_add(19));
-                        call(c, DRAW_PSX_BUTTON, &[NEGCON_BUTTONS, button & 0xFFFF, x.wrapping_add(40), by]);
+                        call_addr(c, DRAW_PSX_BUTTON, &[NEGCON_BUTTONS, button & 0xFFFF, x.wrapping_add(40), by]);
                     }
                 }
                 // its text, typed so far
@@ -558,7 +558,7 @@ pub fn draw_message(c: &mut Cpu, this: DialogMessageString) {
         let style = m.r8(TEXT_STYLES + MESSAGE_STYLE) as u32;
         let base = m.r32(TEXT_COLORS + 4 * style);
         let fade = this.fade_text(m) as u32;
-        let colour = call(c, CALC_FADE_VAL, &[base, fade]);
+        let colour = call_addr(c, CALC_FADE_VAL, &[base, fade]);
         with_buffer(c, 8, |c, at| {
             let (m, rect) = (&mut c.m, RECT(at));
             let (x, y, w, h) = (this.left(m), this.top(m), this.width(m), this.height(m));
@@ -625,7 +625,7 @@ pub fn run(c: &mut Cpu, this: DialogInteractive) -> u32 {
             c.m.w32(command, 0);
             for player in 0..2u32 {
                 let key = keys + 4 * player;
-                let k = call(c, GET_KEY, &[player, u32::MAX]);
+                let k = call_addr(c, GET_KEY, &[player, u32::MAX]);
                 c.m.w32(key, if k == 0 { KEY_NONE } else { k });
                 let app = FEApplication(c.m.r32(FE_APP));
                 if c.m.r32(key) == KEY_HELP {
@@ -689,7 +689,7 @@ pub fn abi_calculate_dimensions_yes_no(c: &mut Cpu) {
 /// player, 288 wide, hidden, its text unfaded, answering yes (through each base class's
 /// constructor: the vtable written as each does).
 pub fn yes_no(c: &mut Cpu, this: DialogYesNo) -> u32 {
-    call(c, SCREEN, &[this.0]);
+    call_addr(c, SCREEN, &[this.0]);
     let m = &mut c.m;
     this.set_vtable(m, BASE_VT);
     this.set_max_w(m, 288);
@@ -738,7 +738,7 @@ pub fn draw_yes_no(c: &mut Cpu, this: DialogYesNo) {
             let state = if k == this.return_value(m) as i32 as u32 { 1 } else { 2 };
             let style = m.r8(TEXT_STYLES + ANSWER_STYLES + state) as u32;
             let (base, fade) = (m.r32(TEXT_COLORS + 4 * style), this.fade_text(m) as u32);
-            let colour = call(c, CALC_FADE_VAL, &[base, fade]);
+            let colour = call_addr(c, CALC_FADE_VAL, &[base, fade]);
             let m = &mut c.m;
             let y = sx((this.top(m) as i32 as u32).wrapping_add(this.height(m) as i32 as u32).wrapping_sub(11));
             call(c, fetextrender::set_abr_entry, &[1, 1]);
@@ -825,7 +825,7 @@ pub fn abi_process_input_no_input(_: &mut Cpu) {}
 /// The dialogs' destructors (FEDIALOG.H): the screen's.
 fn destructor(c: &mut Cpu) {
     let (this, flags) = (c.r[4], c.r[5]);
-    call(c, SCREEN_DESTRUCTOR, &[this, flags]);
+    call_addr(c, SCREEN_DESTRUCTOR, &[this, flags]);
 }
 
 /// `tDialogMessageStringWithTimeout::~tDialogMessageStringWithTimeout` (FEDIALOG.H, 0x80015884).

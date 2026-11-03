@@ -95,7 +95,7 @@ fn settle(c: &mut Cpu, r: &mut Saved, car: Car, ra: [u32; 3]) {
     let orient = car.n().orient_mat();
     copy_matrix(&mut c.m, orient, car.n().shadow_mat());
     r.0[0] = orient.0.wrapping_add(0x20);
-    r.call(c, nfs4rc::f_80067974, &[car.0], ra[0]); // AIInit_ClearAICar
+    r.call_ptr(c, 0x8006_7974, &[car.0], ra[0]); // AIInit_ClearAICar
     find_road_position(c, r, car, [ra[1], ra[2]]);
 }
 
@@ -445,7 +445,7 @@ pub fn reencarnate_traffic_by_position(c: &mut Cpu, car: Car, slice: i32, dir: i
         let m = &mut c.m;
         put(m, car, pos, mat, Coord(sp + 16));
         car.n().set_speed_xz(m, 0);
-        r.call(c, nfs4rc::f_80067974, &[car.0], 0x8006_894c); // AIInit_ClearAICar
+        r.call_ptr(c, 0x8006_7974, &[car.0], 0x8006_894c); // AIInit_ClearAICar
         find_road_position(c, &r, car, [0x8006_8954, 0x8006_8974]);
         rc_pick_desired_lat_position(&mut c.m, car);
     })
@@ -518,7 +518,7 @@ pub fn reencarnate_cop_by_position(c: &mut Cpu, car: Car, slice: i32, dir: i32, 
         let (slice, dir) = (car.n().sim_road_info().slice(m) as i32, car.direction(m));
         r.enter(c, 0x800a_22a8, 0x8006_8bcc, |c| crate::newton::set_initial_slice_position_orientation_etc(c, car.n(), slice, Coord(sp + 32), dir));
         put(&mut c.m, car, pos, mat, Coord(sp + 16));
-        r.call(c, nfs4rc::f_80067974, &[car.0], 0x8006_8c8c); // AIInit_ClearAICar
+        r.call_ptr(c, 0x8006_7974, &[car.0], 0x8006_8c8c); // AIInit_ClearAICar
         find_road_position(c, &r, car, [0x8006_8c94, 0x8006_8cb4]);
     })
 }
@@ -566,7 +566,7 @@ pub fn reencarnate_cop_by_lat_pos_and_rotation(c: &mut Cpu, car: Car, slice: i32
         let v = Coord(sp + 16).get(&mut c.m);
         car.n().linear_vel().set(&mut c.m, v);
         r.0[0] = orient.0.wrapping_add(0x20);
-        r.call(c, nfs4rc::f_80067974, &[car.0], 0x8006_8e14); // AIInit_ClearAICar
+        r.call_ptr(c, 0x8006_7974, &[car.0], 0x8006_8e14); // AIInit_ClearAICar
         find_road_position(c, &r, car, [0x8006_8e1c, 0x8006_8e3c]);
     })
 }

@@ -1820,7 +1820,7 @@ const MONEY: u32 = 20;
 const PINK_WINNERS: u32 = 12;
 const PINK_WINS: u32 = 72;
 const LARGEST_UNUSED: fn(&mut Cpu) = nfs4rc::f_800e5e70;
-const TO_MAIN_MENU: fn(&mut Cpu) = nfs4rc::f_8002c514;
+const TO_MAIN_MENU: u32 = 0x8002_c514;
 /// The cars' sound banks freed (the car code's), the words unloaded.
 const CAR_SOUNDS_END: fn(&mut Cpu) = nfs4rc::f_800bcb04;
 const UNLOAD_WORDS: fn(&mut Cpu) = nfs4rc::f_800b9f98;
@@ -1856,7 +1856,7 @@ pub fn front_menu(c: &mut Cpu, mode: u32) -> u32 {
         // (from the start `LoadConfig`, which does nothing)
         if c.m.r32(USE) != 0 {
             result = with_buffer(c, 32, |c, command| {
-                call(c, TO_MAIN_MENU, &[command]);
+                call_addr(c, TO_MAIN_MENU, &[command]);
                 let app = FEApplication(c.m.r32(FE_APP));
                 crate::feapp::run_front_end(c, app)
             });

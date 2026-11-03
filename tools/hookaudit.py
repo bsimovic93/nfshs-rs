@@ -11,6 +11,11 @@ host, and `nfshs decomp-check` can't tell: it compares RAM, which the hooks don'
 Hooked addresses come from tools/hook_funcs.txt, tools/hle_funcs.txt, the host's match arms
 and `addr ==` checks (by hex or by a `const NAME: u32` in src/ps1) and CAPTURED_FE_DRAWING.
 
+It also finds ports calling the recompiled original (nfs4rc::f_*) of a function that is
+decompiled too (in nfs4::FUNCS): routing happens at call sites, so from there the original runs
+and the port is never used (nor checked). Call it by address (call_addr, Saved::call_ptr) or,
+from readable code, as Rust.
+
     python tools/hookaudit.py [ROOT]   (exit status 1 when it finds any)
 """
 import glob
@@ -95,7 +100,8 @@ def main():
         if norm(m.group(1)) in hooked:
             ported[(m.group(2), m.group(3))] = norm(m.group(1))
 
-    found = 0
+    routed = {norm(m.group(1)) for m in re.finditer(r'func(?:_ret)?\(0x([0-9A-Fa-f_]+), "', read(os.path.join(ROOT, 'crates/nfs4/src/lib.rs')))}
+    found = unrouted = 0
     for p in files:
         here = os.path.splitext(os.path.basename(p))[0]
         if here == 'lib':
@@ -112,12 +118,17 @@ def main():
                 if key in ported and not re.search(r'fn ' + m.group(2) + r'\b', l):
                     hits.append((ported[key], f'{key[0]}::{key[1]}'))
             for a, how in hits:
+                if how == 'the recompiled original' and a in routed and a not in hooked:
+                    unrouted += 1
+                    print(f'{os.path.relpath(p, ROOT)}:{i}: {a:#x} is decompiled, but called as the recompiled original (the port never runs from here)')
+                    print(f'    {l.strip()[:150]}')
                 if a in hooked:
                     found += 1
                     print(f'{os.path.relpath(p, ROOT)}:{i}: {a:#x} called through {how}, not by address [{hooked[a]}]')
                     print(f'    {l.strip()[:150]}')
     print(f'{len(hooked)} hooked functions; {found} direct call{"" if found == 1 else "s"} found')
-    return 1 if found else 0
+    print(f'{len(routed)} decompiled functions; {unrouted} call{"" if unrouted == 1 else "s"} of their recompiled originals found')
+    return 1 if found or unrouted else 0
 
 
 if __name__ == '__main__':

@@ -41,22 +41,22 @@ const USER_NAME_VT: u32 = 0x8001_0B10;
 
 /// `CalcFadeVal` (a colour and a fade); `TextSys_WordX`; `Flare_2DHalo` (the host captures its
 /// primitives: called by address).
-const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bd68;
+const CALC_FADE_VAL: u32 = 0x8004_bd68;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const FLARE_2D_HALO: u32 = 0x800C_ECD0;
 /// `CalcFadeVal` (a colour between two by the selection, faded), `TextSys_WordY`;
 /// `SubtractiveBox` (the host captures its primitives: called by address).
-const CALC_FADE_VAL_FADED: fn(&mut Cpu) = nfs4rc::f_8004bd8c;
+const CALC_FADE_VAL_FADED: u32 = 0x8004_bd8c;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 /// `TextSys_WordFlags` (a text's text type); `DrawSlider` (the host captures its primitives:
 /// called by address).
 const WORD_FLAGS: fn(&mut Cpu) = nfs4rc::f_800b9f38;
 const DRAW_SLIDER: u32 = 0x8002_4C4C;
 /// `CalcFadeVal` (a colour between two by the selection), `CalcTextFadeUnselToSel`.
-const CALC_FADE_VAL_SEL: fn(&mut Cpu) = nfs4rc::f_8004bcd8;
-const CALC_TEXT_FADE_UNSEL_TO_SEL: fn(&mut Cpu) = nfs4rc::f_8004bdc0;
+const CALC_FADE_VAL_SEL: u32 = 0x8004_bcd8;
+const CALC_TEXT_FADE_UNSEL_TO_SEL: u32 = 0x8004_bdc0;
 /// The calibration's help text (0x80045c94, of the word at 0x80052d60).
-const CALIBRATE_HELP: fn(&mut Cpu) = nfs4rc::f_80045c94;
+const CALIBRATE_HELP: u32 = 0x8004_5c94;
 const CALIBRATE_HELP_ARG: u32 = 0x8005_2D60;
 /// The key that ends a calibration.
 const KEY_STOP: u32 = 128;
@@ -66,9 +66,9 @@ const PAD_ANALOG: u32 = 0x53;
 const PAD_DUAL_SHOCK: u32 = 0x73;
 /// `FECheat_ActivateCheat`, `FECheat_ActivateBonusByCode`; the records' case for a name
 /// (`Stattool_SamNelsonsUpperLowerStringConverterForRecords`); `FeAudio_AsyncPlaySpeech`.
-const ACTIVATE_CHEAT: fn(&mut Cpu) = nfs4rc::f_80023634;
-const ACTIVATE_BONUS: fn(&mut Cpu) = nfs4rc::f_80023800;
-const CASE_FOR_RECORDS: fn(&mut Cpu) = nfs4rc::f_8004b0ac;
+const ACTIVATE_CHEAT: u32 = 0x8002_3634;
+const ACTIVATE_BONUS: u32 = 0x8002_3800;
+const CASE_FOR_RECORDS: u32 = 0x8004_b0ac;
 const PLAY_SPEECH: fn(&mut Cpu) = crate::feaudio::async_play_speech_entry;
 /// The name grid: its rows' texts (from 508), how many rows each language has (6 shorts), the
 /// rows now (`gNameRows`) and the grid's top; the accented letters' jump table.
@@ -166,7 +166,7 @@ fn stack_arg(c: &Cpu, n: u32) -> u32 {
 pub fn calc_pulsate_yellow(c: &mut Cpu) {
     let t = (c.m.r32(GAME_TICKS) as i32) % 128;
     let f = if t >= 65 { 128 - t } else { t };
-    let v = call(c, CALC_FADE_VAL, &[0xBEBE, f as u32]);
+    let v = call_addr(c, CALC_FADE_VAL, &[0xBEBE, f as u32]);
     c.m.w32(PULSATE_YELLOW, v);
 }
 
@@ -930,7 +930,7 @@ pub fn sliding_menu_draw(c: &mut Cpu, this: MenuItemSlidingMenu, x: u32, y: u32,
     call_virtual(c, this.0, ITEM_VPTR, SLIDING_UPDATE_OPEN_HEIGHT, &[selected]);
     let f = Fade::of_sliding(this);
     let (sel, fade) = (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
-    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
     let text = this.text_description(&mut c.m);
     let tx = call(c, WORD_X, &[text]).wrapping_add(x);
     let ty = call(c, WORD_Y, &[text]).wrapping_add(y);
@@ -949,7 +949,7 @@ pub fn sliding_menu_draw(c: &mut Cpu, this: MenuItemSlidingMenu, x: u32, y: u32,
             // the arrows at its right end
             let right = if songs { 220 } else { this.width(&mut c.m) as i32 as u32 };
             let (sel, fade) = (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
-            let arrow = call(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade]);
+            let arrow = call_addr(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade]);
             c.m.w32(buf + 4, arrow);
             let end = tx.wrapping_add(right);
             let ax = end.wrapping_sub(shape_w(&mut c.m, bar)).wrapping_sub(10);
@@ -1189,12 +1189,12 @@ pub fn my_left_right_draw(c: &mut Cpu, this: MenuItemLeftRightFade, x: u32, y: u
     let faded = |c: &mut Cpu| (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
     with_buffer(c, 8, |c, options| {
         let (sel, fade) = faded(c);
-        let arrows = call(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
+        let arrows = call_addr(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
         c.m.w32(options + 4, arrows);
         let (sel, fade) = faded(c);
         draw_left_flare(c, y, sel, fade, this.0 + 0x28);
         let (sel, fade) = faded(c);
-        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+        let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
         let text = this.text_description(&mut c.m);
         let word = call(c, TEXT_WORD, &[text]);
         call(c, fetextrender::full_text_rgb_entry, &[word, sx(x), sx(y), colour, 0, 1]);
@@ -1220,7 +1220,7 @@ pub fn display_choice_draw(c: &mut Cpu, this: MenuItemLeftRightFade, x: u32, y: 
     let tx = call(c, WORD_X, &[text]).wrapping_add(x);
     let ty = call(c, WORD_Y, &[text]).wrapping_add(y);
     let (sel, fade) = (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
-    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
     let ty = sx(ty);
     my_left_right_draw(c, this, sx(tx), ty);
     let (data, player) = (this.data(&mut c.m), c.m.r32(SUB_MENU_PLAYER));
@@ -1266,7 +1266,7 @@ pub fn on_off_draw(c: &mut Cpu, this: MenuItemOnOffLeftRightChoice, x: u32, y: u
     with_buffer(c, 8, |c, colours| {
         let m = &mut c.m;
         let (on, sel, fade) = (this.on_fade(m) as i32 as u32, this.sel_fade(m) as i32 as u32, f.value(m) as i32 as u32);
-        call(c, CALC_ON_OFF_FADE, &[6, on, sel, fade, colours, colours + 4]);
+        call_addr(c, CALC_ON_OFF_FADE, &[6, on, sel, fade, colours, colours + 4]);
         let ty = sx(ty);
         my_left_right_draw(c, this.base(), sx(tx), ty);
         let word = call(c, TEXT_WORD, &[TEXT_ON]);
@@ -1333,7 +1333,7 @@ pub fn audio_slider_draw(c: &mut Cpu, this: MenuItemLeftRightAudioSlider, x: u32
     let fy = this.y(&mut c.m) as i32 as u32;
     draw_left_flare(c, fy, sel, fade, this.0 + 0x34);
     let (sel, fade) = faded(c);
-    let colour = call(c, CALC_FADE_VAL_FADED, &[unselected_colour, selected_colour, sel, fade]);
+    let colour = call_addr(c, CALC_FADE_VAL_FADED, &[unselected_colour, selected_colour, sel, fade]);
     if f.value(&mut c.m) == 128 {
         return;
     }
@@ -1341,7 +1341,7 @@ pub fn audio_slider_draw(c: &mut Cpu, this: MenuItemLeftRightAudioSlider, x: u32
     let (px, py) = (this.x(&mut c.m) as i32 as u32, this.y(&mut c.m) as i32 as u32);
     call(c, fetextrender::full_text_rgb_entry, &[word, px, py, colour, 0, 1]);
     let (sel, fade) = faded(c);
-    let speaker = call(c, CALC_FADE_VAL_FADED, &[SPEAKER_COLOUR, 0xBEBE, sel, fade]);
+    let speaker = call_addr(c, CALC_FADE_VAL_FADED, &[SPEAKER_COLOUR, 0xBEBE, sel, fade]);
     with_buffer(c, 8, |c, options| {
         c.m.w32(options + 4, speaker);
         if this.sel_fade(&mut c.m) != 0 {
@@ -1527,10 +1527,10 @@ pub fn abi_song_menu_draw(c: &mut Cpu) {
 /// text (in its selection's colour), ON and OFF in its on-off fade's, and its frame.
 #[allow(clippy::too_many_arguments)]
 pub fn song_menu_draw_one_song(c: &mut Cpu, song: u32, x: u32, y: u32, w: u32, on_fade: u32, sel_fade: u32) {
-    let frame = call(c, CALC_FADE_VAL, &[SPEAKER_COLOUR, 40]);
+    let frame = call_addr(c, CALC_FADE_VAL, &[SPEAKER_COLOUR, 40]);
     with_buffer(c, 8, |c, colours| {
-        call(c, CALC_ON_OFF_FADE, &[6, sx(on_fade), sx(sel_fade), 0, colours, colours + 4]);
-        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sx(sel_fade), 0]);
+        call_addr(c, CALC_ON_OFF_FADE, &[6, sx(on_fade), sx(sel_fade), 0, colours, colours + 4]);
+        let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sx(sel_fade), 0]);
         // the song's entry: 64 bytes, its two lines' texts at +12 and +16
         let entry = (sx(song) << 6).wrapping_add(12);
         let list = song_list(&mut c.m);
@@ -1649,9 +1649,9 @@ pub fn controller_choice_draw(c: &mut Cpu, this: MenuItemLeftRightFade, x: u32, 
     let bar = c.m.r32(SHAPES).wrapping_add(BAR * 32);
     let faded = |c: &mut Cpu| (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
     let (sel, fade) = faded(c);
-    let arrows = call(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
+    let arrows = call_addr(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
     let (sel, fade) = faded(c);
-    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
     with_buffer(c, 8, |c, options| {
         c.m.w32(options + 4, arrows);
         if f.value(&mut c.m) != 128 {
@@ -1663,7 +1663,7 @@ pub fn controller_choice_draw(c: &mut Cpu, this: MenuItemLeftRightFade, x: u32, 
             call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx.wrapping_add(151)), sx(ty), colour, 0, 2]);
         }
         let (sel, fade) = faded(c);
-        let v = call(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade]);
+        let v = call_addr(c, CALC_FADE_VAL_FADED, &[0, 0xBEBE, sel, fade]);
         let (x, y) = (sx(tx), sx(ty));
         c.m.w32(options + 4, v);
         call(c, DRAW_SHAPE_EXTENDED, &[10, 24, x.wrapping_add(131), y, 0, 1, options]);
@@ -1732,9 +1732,9 @@ pub fn inside_slider_draw(c: &mut Cpu, this: MenuItemLeftRightSlider, x: u32, y:
     this.set_x(&mut c.m, x as i16);
     this.set_y(&mut c.m, y as i16);
     let sel = this.sel_fade(&mut c.m) as i32 as u32;
-    let line = call(c, CALC_FADE_VAL_SEL, &[LINE_DIM, LINE_LIT, sel]);
+    let line = call_addr(c, CALC_FADE_VAL_SEL, &[LINE_DIM, LINE_LIT, sel]);
     let sel = this.sel_fade(&mut c.m) as i32 as u32;
-    let colour = call(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, sel, 0]);
+    let colour = call_addr(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, sel, 0]);
     for dy in [0, 8] {
         let (px, py) = (this.x(&mut c.m) as i32 as u32, this.y(&mut c.m) as i32 as u32);
         call_addr(c, DRAW_SQUARE, &[line, px, py.wrapping_add(dy), w, 1]);
@@ -1817,11 +1817,11 @@ pub fn two_way_slider_draw(c: &mut Cpu, this: InsideBoxTwoWaySlider, x: u32, y: 
     slider.set_y(&mut c.m, y as i16);
     let sel = |c: &mut Cpu| this.sel_fade(&mut c.m) as i32 as u32;
     let s = sel(c);
-    let line = call(c, CALC_FADE_VAL_SEL, &[LINE_DIM, LINE_LIT, s]);
+    let line = call_addr(c, CALC_FADE_VAL_SEL, &[LINE_DIM, LINE_LIT, s]);
     let s = sel(c);
-    let mark = call(c, CALC_FADE_VAL_SEL, &[LINE_DIM, MARK_LIT, s]);
+    let mark = call_addr(c, CALC_FADE_VAL_SEL, &[LINE_DIM, MARK_LIT, s]);
     let s = sel(c);
-    let colour = call(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, s, 0]);
+    let colour = call_addr(c, CALC_TEXT_FADE_UNSEL_TO_SEL, &[6, s, 0]);
     let len = half.wrapping_sub(4);
     // the halves' lines, above and below
     for (dx, dy) in [(0, 0), (8, 0), (0, 8), (9, 8)] {
@@ -1903,7 +1903,7 @@ pub fn calibrate(c: &mut Cpu, this: InsideBoxTwoWaySlider) {
     let arg = m.r32(CALIBRATE_HELP_ARG);
     let pad = FEApplication(m.r32(FE_APP)).input_player(m) as u8 as u32;
     let info = pad_info(pad);
-    let help = call(c, CALIBRATE_HELP, &[arg]);
+    let help = call_addr(c, CALIBRATE_HELP, &[arg]);
     let m = &mut c.m;
     m.w32(BOX_HELP_TEXT, help);
     let cal = pad.wrapping_add(FRONT_END);
@@ -2013,10 +2013,10 @@ pub fn check_for_cheats(c: &mut Cpu, name: u32) -> u32 {
     for k in len.max(0)..8 {
         c.m.w8(name.wrapping_add(k as u32), 0);
     }
-    if call(c, ACTIVATE_CHEAT, &[name]) != 0 {
+    if call_addr(c, ACTIVATE_CHEAT, &[name]) != 0 {
         return 1;
     }
-    (call(c, ACTIVATE_BONUS, &[name]) != 0) as u32
+    (call_addr(c, ACTIVATE_BONUS, &[name]) != 0) as u32
 }
 
 pub fn abi_check_for_cheats(c: &mut Cpu) {
@@ -2067,7 +2067,7 @@ pub fn user_name_process_input(c: &mut Cpu, this: UserNameMenuItem, key: u32) {
                 column_right(m, this);
             }
             let name = this.data(m);
-            call(c, CASE_FOR_RECORDS, &[name]);
+            call_addr(c, CASE_FOR_RECORDS, &[name]);
             return;
         }
         femenu::KEY_ACCEPT => {
@@ -2136,7 +2136,7 @@ pub fn user_name_process_input(c: &mut Cpu, this: UserNameMenuItem, key: u32) {
         column_left(m, this);
     }
     let name = this.data(m);
-    call(c, CASE_FOR_RECORDS, &[name]);
+    call_addr(c, CASE_FOR_RECORDS, &[name]);
 }
 
 pub fn abi_user_name_process_input(c: &mut Cpu) {
@@ -2193,9 +2193,9 @@ pub fn user_name_draw(c: &mut Cpu, this: UserNameMenuItem) {
         }
         c.m.w8(buf + 1, 0);
         let fade = this.fade_val(&mut c.m) as i32 as u32;
-        let colour = call(c, CALC_FADE_VAL, &[0xBEBE, fade]);
+        let colour = call_addr(c, CALC_FADE_VAL, &[0xBEBE, fade]);
         let fade = this.fade_val(&mut c.m) as i32 as u32;
-        let line = call(c, CALC_FADE_VAL, &[0xBEBE, fade]);
+        let line = call_addr(c, CALC_FADE_VAL, &[0xBEBE, fade]);
         let word = call(c, TEXT_WORD, &[text]);
         call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), colour, 0, 0]);
         let name = this.data(&mut c.m);
@@ -2367,11 +2367,11 @@ pub fn memory_card_draw(c: &mut Cpu, this: MemoryCardMenuItem) {
     let ty = call(c, WORD_Y, &[text]);
     let faded = |c: &mut Cpu| (this.sel_fade(&mut c.m) as i32 as u32, f.value(&mut c.m) as i32 as u32);
     let (sel, fade) = faded(c);
-    let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
+    let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, sel, fade]);
     let (sel, fade) = faded(c);
-    let bar_colour = call(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
-    call(c, CALC_FADE_VAL, &[bar_colour, fade_in]);
-    let colour = call(c, CALC_FADE_VAL, &[colour, fade_in]);
+    let bar_colour = call_addr(c, CALC_FADE_VAL_FADED, &[ARROWS_COLOUR, 0xBEBE, sel, fade]);
+    call_addr(c, CALC_FADE_VAL, &[bar_colour, fade_in]);
+    let colour = call_addr(c, CALC_FADE_VAL, &[colour, fade_in]);
     if colour != 0 {
         let word = call(c, TEXT_WORD, &[text]);
         call(c, fetextrender::full_text_rgb_entry, &[word, sx(tx), sx(ty), colour, 0, 0]);

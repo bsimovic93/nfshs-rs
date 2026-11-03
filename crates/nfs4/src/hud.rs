@@ -860,8 +860,8 @@ const BUSTED_OVERLAY: u32 = 0x8013_EC08;
 const PERP_OVERLAY_ON: u32 = 0x8013_F140;
 const PERP_OVERLAY_MESSAGE: u32 = 0x8013_F148;
 const TURN_SONG_OFF_NEXT: u32 = 0x8013_EC20;
-const INIT_CD_PLAYER: fn(&mut Cpu) = nfs4rc::f_800d6f8c;
-const HUD_RESET: fn(&mut Cpu) = nfs4rc::f_800da3dc;
+const INIT_CD_PLAYER: u32 = 0x800d_6f8c;
+const HUD_RESET: u32 = 0x800d_a3dc;
 
 /// The dashboard's colours: its text, its sprites, its bars' grey.
 const TEXT_COLOUR: u32 = 0xA0_A0A0;
@@ -924,8 +924,8 @@ pub fn init(c: &mut Cpu) {
     }
     build_sprite2(m, sprites + 1140, 3, 0, y.wrapping_add(4));
     m.w8(SPRITE_TRANSPARENT, 0);
-    call(c, INIT_CD_PLAYER, &[]);
-    call(c, HUD_RESET, &[]);
+    call_addr(c, INIT_CD_PLAYER, &[]);
+    call_addr(c, HUD_RESET, &[]);
     let m = &mut c.m;
     for at in [BTC_BONUS_TIME, BTC_COUNTDOWN, FINAL_BTC_COUNTDOWN, BTC_USER_HAS_CONTROL, BUSTED_OVERLAY] {
         m.w32(at, 0);
@@ -1990,7 +1990,7 @@ const OPPONENT_BY_CAR: i32 = 2;
 const CAR_AI_RACER: u32 = 0x8;
 /// No racer (an empty string).
 const NO_NAME: u32 = 0x8013_EBFC;
-const STATS_GET_POSITION: fn(&mut Cpu) = nfs4rc::f_800b8e28;
+const STATS_GET_POSITION: u32 = 0x800b_8e28;
 /// The other human's voices: the second player's for the first, the first's for the second.
 const HUMAN_VOICE: [u32; 2] = [8, 7];
 
@@ -2004,7 +2004,7 @@ fn next_racer(c: &mut Cpu, p: u32) -> Option<u32> {
     if NUM_RACE_CARS.get(m) < 2 {
         return None;
     }
-    let first = call(c, STATS_GET_POSITION, &[car]) == 1;
+    let first = call_addr(c, STATS_GET_POSITION, &[car]) == 1;
     if first && !looks_back {
         return None;
     }
@@ -2077,10 +2077,10 @@ pub fn render_map_view(c: &mut Cpu) {
             let view = m.r32(MAP_VIEW + 4 * p);
             call_addr(c, DRAW_START_RENDERING_VIEW, &[view]);
             if car.hud_map(&mut c.m) == HUD_MAP_TRACK {
-                call(c, nfs4rc::f_800d66bc, &[p]);
+                call_addr(c, 0x800d_66bc, &[p]);
                 link(&mut c.m, ft4);
             } else {
-                let rim = if call(c, nfs4rc::f_800d771c, &[p]) == RADAR_NEAR { [ft4 + 40, ft4 + 80] } else { [ft4 + 120, ft4 + 160] };
+                let rim = if call_addr(c, 0x800d_771c, &[p]) == RADAR_NEAR { [ft4 + 40, ft4 + 80] } else { [ft4 + 120, ft4 + 160] };
                 for half in rim {
                     link(&mut c.m, half);
                 }
@@ -2191,7 +2191,7 @@ pub fn render_321_go(c: &mut Cpu) {
     if countdown != 4 {
         let digit = 4u32.wrapping_sub(countdown as u32);
         for (x, left, right) in [(160 - 88, 1, 0), (160 - 25, 0, 0), (160 + 38, 0, 1)] {
-            call(c, nfs4rc::f_800d887c, &[x, y, digit, size as u32, left, right]);
+            call_addr(c, 0x800d_887c, &[x, y, digit, size as u32, left, right]);
         }
     }
     let view = c.m.r32(STATS_VIEW);
@@ -2275,7 +2275,6 @@ const PERP_WORDS: u32 = 65;
 const PERP_LIGHT: u32 = 61;
 const PERP_BACK: u32 = 0x46_1414;
 /// The dashboard's own (DASHHUD.CPP): the speedometer and the tachometer's needles' parts.
-const DASH_HUD_SPEEDO: fn(&mut Cpu) = nfs4rc::f_8009bac4;
 const DASH_HUD_TACH: fn(&mut Cpu) = nfs4rc::f_8009bb34;
 /// The pursuit's time on the HUD: the countdown in 64ths (seconds 1 to 30 shown big).
 const BTC_SECONDS_SHOWN: u32 = 30;
@@ -2328,7 +2327,7 @@ fn next_racer_label(c: &mut Cpu, p: u32, dy: u32) {
     let back_w = shape_wh(m, shape(MAP_BACKGROUND)).0.wrapping_add(2);
     let (corner_w, corner_h) = shape_wh(m, shape(14));
     let side_w = shape_wh(m, shape(20)).0;
-    let name = call(c, nfs4rc::f_800d8284, &[p]);
+    let name = call_addr(c, 0x800d_8284, &[p]);
     with_buffer(c, 64, |c, buf| {
         call_addr(c, SPRINTF, &[buf, STRING_FORMAT, name]);
         go_tpage(c, 1);
@@ -2375,18 +2374,19 @@ pub fn render_hud_view(c: &mut Cpu) {
         if p == m.r32(HUD_LAST_PLAYER) {
             let seconds = m.r32(BTC_COUNTDOWN) as i32 >> 6;
             if (seconds as u32).wrapping_sub(1) < BTC_SECONDS_SHOWN {
-                call(c, nfs4rc::f_800d8b84, &[seconds as u32]);
+                call_addr(c, 0x800d_8b84, &[seconds as u32]);
             } else {
                 let intro = crate::globals::SIM_COUNTER.get(m) < 576 || (m.r8(COUNTDOWN) < 4 && m.r32(BE_THE_COP) == 0);
-                call(c, nfs4rc::f_800d6fb0, &[!intro as u32, p]);
+                call_addr(c, 0x800d_6fb0, &[!intro as u32, p]);
             }
         }
         let m = &mut c.m;
         let car = GAME_SETUP.car_info(p);
         if m.r32(HUD_SHOWN + 4 * p) != 0 {
             let sprites = m.r32(SPRITES[(p != 0) as usize]);
-            for f in [DASH_HUD_SPEEDO, DASH_HUD_TACH, nfs4rc::f_800d51f8, nfs4rc::f_800d5a44] {
-                call(c, f, &[p]);
+            // DashHud_Speedo, DashHud_Tach, Hud_BuildNumbers0, Hud_BuildNumbers
+            for f in [0x8009_bac4, 0x8009_bb34, 0x800d_51f8, 0x800d_5a44] {
+                call_addr(c, f, &[p]);
             }
             let m = &mut c.m;
             link(m, TPAGE[0] + 48 * p);
@@ -2396,7 +2396,7 @@ pub fn render_hud_view(c: &mut Cpu) {
             if car.hud_map(m) != 0 {
                 let label = car.hud_opponent_id(m) != 0 && m.r32(BE_THE_COP) == 0 && GAME_SETUP.comm_mode(m) != 1;
                 if label {
-                    let voice = call(c, nfs4rc::f_800d8120, &[p]) as i32;
+                    let voice = call_addr(c, 0x800d_8120, &[p]) as i32;
                     if (0..9).contains(&voice) && c.m.r32(BE_THE_COP) == 0 {
                         next_racer_label(c, p, dy);
                     }
@@ -2410,12 +2410,12 @@ pub fn render_hud_view(c: &mut Cpu) {
         let m = &mut c.m;
         let replay = crate::globals::REPLAY_INTERFACE;
         if p == 0 && m.r32(REPLAY_MODE) as i32 >= 2 && replay.stats_screen(m) == 0 {
-            call(c, nfs4rc::f_800d7e24, &[]);
+            call_addr(c, 0x800d_7e24, &[]);
         }
         let m = &mut c.m;
         link(m, TPAGE[1] + 48 * p);
         if m.r32(HUD_SHOWN + 4 * p) != 0 && m.r8(WINGMAN_INTERFACE + p) != 0 && (m.r32(REPLAY_MODE) as i32) < 2 {
-            call(c, nfs4rc::f_800d6c40, &[p]);
+            call_addr(c, 0x800d_6c40, &[p]);
         }
         let m = &mut c.m;
         link(m, TPAGE[0] + 48 * p + 12);
@@ -2440,7 +2440,7 @@ pub fn render_tac_view(c: &mut Cpu) {
             let view = m.r32(TAC_VIEW + 4 * p);
             call_addr(c, DRAW_START_RENDERING_VIEW, &[view]);
             call(c, DASH_HUD_TACH, &[p]);
-            call(c, nfs4rc::f_800d4a68, &[p]);
+            call_addr(c, 0x800d_4a68, &[p]);
             link(&mut c.m, TPAGE[1] + 48 * p + 24);
             let view = c.m.r32(TAC_VIEW + 4 * p);
             call_addr(c, DRAW_STOP_RENDERING_VIEW, &[view]);
@@ -2568,15 +2568,15 @@ pub fn render(c: &mut Cpu) {
             go_tpage(c, 1);
             let m = &mut c.m;
             if p == 0 && m.r32(REPLAY_MODE) as i32 >= 2 && REPLAY_INTERFACE.stats_screen(m) == 0 {
-                call(c, nfs4rc::f_800d7e24, &[]);
+                call_addr(c, 0x800d_7e24, &[]);
             }
             let m = &mut c.m;
             if p == m.r32(HUD_LAST_PLAYER) {
                 let intro = SIM_COUNTER.get(m) < 576 && m.r8(COUNTDOWN) == 0;
-                call(c, nfs4rc::f_800d6fb0, &[!intro as u32, p]);
+                call_addr(c, 0x800d_6fb0, &[!intro as u32, p]);
             }
             if c.m.r32(HUD_SHOWN + 4 * p) != 0 {
-                call(c, nfs4rc::f_800d51f8, &[p]);
+                call_addr(c, 0x800d_51f8, &[p]);
             }
             go_tpage(c, 0);
             let view = c.m.r32(HUD_VIEW + 4 * p);
@@ -2626,10 +2626,11 @@ pub fn render(c: &mut Cpu) {
     let m = &mut c.m;
     m.w32(SHOWED_CD_PLAYER, 0);
     if SIM_COUNTER.get(m) < 576 && m.r8(COUNTDOWN) != 0 && m.r32(BE_THE_COP) == 0 {
-        call(c, nfs4rc::f_800d8a38, &[]);
+        call_addr(c, 0x800d_8a38, &[]);
     }
-    for f in [nfs4rc::f_800d8ea4, nfs4rc::f_800d840c, nfs4rc::f_800d981c] {
-        call(c, f, &[]);
+    // Hud_RenderHudView, Hud_RenderMapView, Hud_RenderTacView
+    for f in [0x800d_8ea4, 0x800d_840c, 0x800d_981c] {
+        call_addr(c, f, &[]);
     }
 }
 

@@ -124,7 +124,7 @@ const POINT_TOTAL: fn(&mut Cpu) = fetourn::tourn_point_total_entry;
 const TOURNAMENT_TEXT: fn(&mut Cpu) = fetourn::text_value_entry;
 const TRACK_RACED: fn(&mut Cpu) = crate::front::get_track_raced_entry;
 const PLAYER_NAME: fn(&mut Cpu) = crate::front::player_name_entry;
-const COMPETITOR_NAME: fn(&mut Cpu) = nfs4rc::f_8004b428;
+const COMPETITOR_NAME: u32 = 0x8004_b428;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 /// Ports called by address: FETOOLS' `FormatMoney`, FETRACKS' `GetTrack`, FELINES'
@@ -426,7 +426,7 @@ fn draw_racer(c: &mut Cpu, f: u32, t: u32, k: u32, n: u32) {
         call(c, PLAYER_NAME, &[0])
     } else {
         let id = c.m.r32(TOURNAMENT_MANAGER.wrapping_add(place << 4) + COMPETITORS);
-        call(c, COMPETITOR_NAME, &[id])
+        call_addr(c, COMPETITOR_NAME, &[id])
     };
     let x = sx(word_x(c, NAME_X));
     let y = word_y(c, ROWS + k);

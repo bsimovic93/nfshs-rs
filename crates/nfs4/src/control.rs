@@ -89,7 +89,7 @@ pub fn control_human(c: &mut Cpu, car: Car) {
                 if HUD_BUSTED_OVERLAY.get(m) == 0 {
                     control.set_queued_event(m, event as i8);
                     let index = car.car_index(m) as u32;
-                    r.call(c, nfs4rc::f_800d6b8c, &[index, event as u32 - 4], 0x8009_2d08); // Hud_WingmanFlash
+                    r.call_ptr(c, 0x800d_6b8c, &[index, event as u32 - 4], 0x8009_2d08); // Hud_WingmanFlash
                 }
             }
             // the left indicator, the right one (off when on), not on a police car

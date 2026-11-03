@@ -980,7 +980,7 @@ fn real_in_frame(c: &mut Cpu, car: Car, sp: u32) {
 
 /// `BWorldSm_TunnelFlagSm` (still recompiled): 1 where the car's road quad is in a tunnel.
 fn tunnel_flag(c: &mut Cpu, car: Car) -> u32 {
-    abi::call(c, nfs4rc::f_800809f8, &[car.n().sim_road_info().0])
+    abi::Saved::of(c).call_ptr(c, 0x8008_09f8, &[car.n().sim_road_info().0], 0)
 }
 
 /// The front wheels' steering angle, from the controls.
@@ -1546,7 +1546,9 @@ pub fn do_barrier_check(c: &mut Cpu, car: Car) -> i32 {
             let facing = if side < 0 { right } else { right.map(i32::wrapping_neg) };
             normal.set(&mut c.m, facing.into());
             let saved = [along as u32, car.0, off as u32, side as u32, depth as u32, slice as u32];
-            abi::call_from(c, nfs4rc::f_8008e498, &[car.0, normal.0, n.position().0], 0x800a_a65c, &saved); // Collide_TestWithPlane
+            let mut r = abi::Saved::of(c);
+            r.0[..saved.len()].copy_from_slice(&saved);
+            r.call_ptr(c, 0x8008_e498, &[car.0, normal.0, n.position().0], 0x800a_a65c); // Collide_TestWithPlane
             let hit = n.collision();
             if hit.impulse(&mut c.m) != 0 {
                 hit.set_other_obj(&mut c.m, crate::types::NewtonObj(0));

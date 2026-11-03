@@ -34,8 +34,8 @@ const UNLOCK_CLASS: u32 = 0x8002_33D4;
 const UNLOCK_CARS: [(u32, u32); 3] = [(0x8002_33EC, 19), (0x8002_33FC, 20), (0x8002_340C, 28)];
 /// `tCarManager::SetClassAvailable`, `SetCarAvailable` of `carManager`.
 const CAR_MANAGER: u32 = 0x8011_552C;
-const SET_CLASS_AVAILABLE: fn(&mut Cpu) = nfs4rc::f_80016eb0;
-const SET_CAR_AVAILABLE: fn(&mut Cpu) = nfs4rc::f_80016f34;
+const SET_CLASS_AVAILABLE: u32 = 0x8001_6eb0;
+const SET_CAR_AVAILABLE: u32 = 0x8001_6f34;
 
 /// The cheat's sound; its message ("cheat activated") in the front end's message dialog
 /// (`gFEApp + 568`: its text at +144; `tDialog::Display`, called by address: hooked).
@@ -53,9 +53,9 @@ pub fn handle_activation(c: &mut Cpu, code: u32) {
     }
     let target = c.m.r32(ACTIVATIONS + 4 * code);
     if target == UNLOCK_CLASS {
-        call(c, SET_CLASS_AVAILABLE, &[CAR_MANAGER, code, 1]);
+        call_addr(c, SET_CLASS_AVAILABLE, &[CAR_MANAGER, code, 1]);
     } else if let Some(&(_, car)) = UNLOCK_CARS.iter().find(|&&(t, _)| t == target) {
-        call(c, SET_CAR_AVAILABLE, &[CAR_MANAGER, car, 1]);
+        call_addr(c, SET_CAR_AVAILABLE, &[CAR_MANAGER, car, 1]);
     }
 }
 

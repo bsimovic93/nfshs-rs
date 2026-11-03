@@ -109,7 +109,7 @@ pub(crate) const TITLE: fn(&mut Cpu) = crate::fetextrender::title_entry;
 /// The text type of a menu item's text and value.
 const ITEM_TEXT: u32 = 6;
 /// `tFEApplication::DisplayHelp(app, page)`.
-const DISPLAY_HELP: fn(&mut Cpu) = nfs4rc::f_80014048;
+const DISPLAY_HELP: u32 = 0x8001_4048;
 /// `DrawSlider(value, min, max, x, y, w, h, ...)`, hooked by the host: called by address.
 const DRAW_SLIDER: u32 = 0x8002_4C4C;
 
@@ -1029,7 +1029,7 @@ pub fn process_input(c: &mut Cpu, this: Menu, player: u32, key: u32, command: Me
         }
         KEY_HELP => {
             let app = m.r32(FE_APP);
-            call(c, DISPLAY_HELP, &[app, 0]);
+            call_addr(c, DISPLAY_HELP, &[app, 0]);
         }
         KEY_OPTIONS if this.options_menu(m).0 != 0 => go_to(m, Menu::options_menu),
         _ => {}

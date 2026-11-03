@@ -686,7 +686,7 @@ pub fn ai_perp_high_execute(c: &mut Cpu, this: AIHighBTCAIPerp) {
                                 let cop = perp.original_activation_cop_(m);
                                 let cop_car = Car(m.r32(cop.0));
                                 speech(c, &r, cop_car, 6, 0x8006_1260, 0x8006_127c, &[car.0]);
-                                r.call(c, nfs4rc::f_800866f8, &[3], 0x8006_1284); // the camera's mode
+                                r.call_ptr(c, 0x8008_66f8, &[3], 0x8006_1284); // the camera's mode
                             }
                             cop_camera(&mut c.m, car, 0);
                         }
@@ -832,7 +832,7 @@ pub fn ai_perp_new_stage(c: &mut Cpu, this: AIHighBTCAIPerp, cop: AIHighBTCHuman
         r.0[2] = 0x8011_0000;
         r.enter(c, 0x8006_8450, 0x8006_189c, |c| crate::ailife::place_car_at_location_at(c, car, slice, lat, dir, speed, 0));
         r.0[2] = GAME_SETUP.0;
-        r.call(c, nfs4rc::f_80083dfc, &[], 0x8006_18a4); // Camera_Update
+        r.call_ptr(c, 0x8008_3dfc, &[], 0x8006_18a4); // Camera_Update
         let m = &mut c.m;
         let info = GAME_SETUP.0.wrapping_add((stage as u32).wrapping_mul(0x34));
         (r.0[0], r.0[1]) = (info, AITUNE_BTC);
@@ -859,7 +859,7 @@ pub fn ai_perp_new_stage(c: &mut Cpu, this: AIHighBTCAIPerp, cop: AIHighBTCHuman
         m.w32(car_info + 0x9C, v);
         let v = m.r32(info + 0x1C8);
         m.w32(car_info + 0x94, v);
-        r.call(c, nfs4rc::f_800d661c, &[], 0x8006_19d4); // Hud_InitMap
+        r.call_ptr(c, 0x800d_661c, &[], 0x8006_19d4); // Hud_InitMap
         let m = &mut c.m;
         let now = SIM_COUNTER.get(m);
         this.set_creation_time_(m, now);

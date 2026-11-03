@@ -79,9 +79,9 @@ const DRAW_BRIGHT_END_LINE: u32 = 0x8004_C018;
 const WORD_X: fn(&mut Cpu) = nfs4rc::f_800b9f58;
 const WORD_Y: fn(&mut Cpu) = nfs4rc::f_800b9f78;
 const HALO_2D: u32 = 0x800C_ECD0;
-const PARSE_TIME: fn(&mut Cpu) = nfs4rc::f_8004ae74;
-const GET_RECORDS: fn(&mut Cpu) = nfs4rc::f_8004b2f4;
-const RECORDS_DONE: fn(&mut Cpu) = nfs4rc::f_8004ad14;
+const PARSE_TIME: u32 = 0x8004_ae74;
+const GET_RECORDS: u32 = 0x8004_b2f4;
+const RECORDS_DONE: u32 = 0x8004_ad14;
 const TRACK_RACED: fn(&mut Cpu) = crate::front::get_track_raced_entry;
 const UNITS_KIND: fn(&mut Cpu) = crate::front::get_laps_for_type_entry;
 const METRIC: u32 = 2;
@@ -133,7 +133,7 @@ pub fn initialize(c: &mut Cpu, this: Screen) {
     c.m.w32(this + RECORDS, records);
     let track = call(c, TRACK_RACED, &[]);
     let records = c.m.r32(this + RECORDS);
-    call(c, GET_RECORDS, &[sx(track), records]);
+    call_addr(c, GET_RECORDS, &[sx(track), records]);
     c.m.w32(this + CLEARED, 0);
 }
 
@@ -147,7 +147,7 @@ pub fn cleanup(c: &mut Cpu, this: Screen) {
     let records = c.m.r32(this.0 + RECORDS);
     call(c, PURGE, &[records]);
     c.m.w32(this.0 + RECORDS, 0);
-    call(c, RECORDS_DONE, &[]);
+    call_addr(c, RECORDS_DONE, &[]);
     fescreen::cleanup(c, this);
 }
 
@@ -184,7 +184,7 @@ pub fn draw_one_record(c: &mut Cpu, this: u32, k: u32, lit: u32, y: u32) {
         let rec = record(&mut c.m);
         let time = c.m.r32(rec + TIME);
         if time != 0 {
-            call(c, PARSE_TIME, &[time, text]);
+            call_addr(c, PARSE_TIME, &[time, text]);
         } else {
             let w = call(c, TEXT_WORD, &[NO_TIME]);
             call(c, SPRINTF, &[text, w]);
@@ -193,7 +193,7 @@ pub fn draw_one_record(c: &mut Cpu, this: u32, k: u32, lit: u32, y: u32) {
         fetextrender::full_text(c, text, sx(x), y, 11, if lit || k != 0 { 2 } else { 0 }, 0);
         let rec = record(&mut c.m);
         let lap = c.m.r32(rec + BEST_LAP);
-        call(c, PARSE_TIME, &[lap, text]);
+        call_addr(c, PARSE_TIME, &[lap, text]);
         let x = word_x(c, LAP_X);
         fetextrender::full_text(c, text, sx(x), y, 11, if k != 0 || lit { bright } else { 2 }, 0);
     })

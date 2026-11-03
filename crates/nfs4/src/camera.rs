@@ -6,7 +6,7 @@
 //! Written readable from the start (step 3 of DECOMP.md's plan): the game's data as the
 //! original leaves it, the stack and registers free.
 
-use crate::call::{call, with_buffer};
+use crate::call::{call, call_addr, with_buffer};
 use crate::fixed::fixedmult;
 use crate::vec::Vec3;
 use crate::globals::{GAME_SETUP, HUMAN_RACE_CARS};
@@ -28,7 +28,7 @@ pub const GEOM_SCREEN: u32 = 0x8013_DAD0;
 const QUICK_PAUSE_SIM: u32 = 0x8011_F38C;
 
 const FIXED_XFORM: [fn(&mut Mem, u32, i32); 3] = [crate::fixed::fixedxformx, crate::fixed::fixedxformy, crate::fixed::fixedxformz];
-const MATH_FASTTRANSMULT: fn(&mut Cpu) = nfs4rc::f_8009e850;
+const MATH_FASTTRANSMULT: u32 = 0x8009_e850;
 const MATRIX_SIZE: u32 = 36;
 
 /// Player `p`'s camera.
@@ -45,8 +45,8 @@ pub fn euler_to_mat(c: &mut Cpu, out: Matrix, x: i32, y: i32, z: i32) {
         for (k, angle) in [x, y, z].into_iter().enumerate() {
             FIXED_XFORM[k](&mut c.m, turn(k as u32), angle);
         }
-        call(c, MATH_FASTTRANSMULT, &[turn(2), turn(1), turn(3)]);
-        call(c, MATH_FASTTRANSMULT, &[turn(3), turn(0), out.0]);
+        call_addr(c, MATH_FASTTRANSMULT, &[turn(2), turn(1), turn(3)]);
+        call_addr(c, MATH_FASTTRANSMULT, &[turn(3), turn(0), out.0]);
         let m = &mut c.m;
         let row = |k: u32| out.0 + 12 * k;
         let second = [m.r32(row(1)), m.r32(row(1) + 4), m.r32(row(1) + 8)];
@@ -65,14 +65,14 @@ pub fn abi_euler_to_mat(c: &mut Cpu) {
 }
 
 /// A view (`DRender_tView`: +0 its kind, +4 its player, +8 its view's maths).
-const CAMERA_GET_VIEW_INFO: fn(&mut Cpu) = nfs4rc::f_80085a2c;
+const CAMERA_GET_VIEW_INFO: u32 = 0x8008_5a2c;
 const TRS_PROJ_SET_VIEW_ENVIRO: fn(&mut Cpu) = nfs4rc::f_800e2614;
 
 /// `Camera_SetCamera` (CAMERA.CPP, 0x80081128): view `view`'s maths from its camera, then the
 /// projection's set-up for it.
 pub fn set_camera(c: &mut Cpu, view: u32) {
     let (player, kind) = (c.m.r32(view + 4), c.m.r32(view));
-    call(c, CAMERA_GET_VIEW_INFO, &[player, view + 8, kind]);
+    call_addr(c, CAMERA_GET_VIEW_INFO, &[player, view + 8, kind]);
     call(c, TRS_PROJ_SET_VIEW_ENVIRO, &[view]);
 }
 
@@ -100,9 +100,9 @@ const ANCHOR_ROAD_INFO: u32 = 8;
 const OBJ_POSITION: u32 = 0xA0;
 /// The tunnels' camera heights by track (the tracks from 16 seven down).
 const TUNNEL_CAM_HEIGHT: u32 = 0x8011_0790;
-const TUNNEL_FLAG_SM: fn(&mut Cpu) = nfs4rc::f_800809f8;
-const U_NORMAL: fn(&mut Cpu) = nfs4rc::f_80080f44;
-const FIND_GROUND_ELEVATION_GENERAL: fn(&mut Cpu) = nfs4rc::f_800a063c;
+const TUNNEL_FLAG_SM: u32 = 0x8008_09f8;
+const U_NORMAL: u32 = 0x8008_0f44;
+const FIND_GROUND_ELEVATION_GENERAL: u32 = 0x800a_063c;
 
 /// `Camera_TunnelLimit` (CAMERA.CPP, 0x800811e8): in a tunnel (the camera's place or its
 /// anchor's), `*limit` lowered to the tunnel's camera height over the anchor (the ground under
@@ -110,14 +110,14 @@ const FIND_GROUND_ELEVATION_GENERAL: fn(&mut Cpu) = nfs4rc::f_800a063c;
 pub fn tunnel_limit(c: &mut Cpu, p: u32, limit: u32) {
     let cam = info(p);
     let slice_pos = cam.0 + SLICE_POS;
-    let in_tunnel = call(c, TUNNEL_FLAG_SM, &[slice_pos]) != 0 || {
+    let in_tunnel = call_addr(c, TUNNEL_FLAG_SM, &[slice_pos]) != 0 || {
         let anchor = cam.anchor(&mut c.m).0;
-        call(c, TUNNEL_FLAG_SM, &[anchor + ANCHOR_ROAD_INFO]) != 0
+        call_addr(c, TUNNEL_FLAG_SM, &[anchor + ANCHOR_ROAD_INFO]) != 0
     };
     if !in_tunnel {
         return;
     }
-    let normal = call(c, U_NORMAL, &[slice_pos]);
+    let normal = call_addr(c, U_NORMAL, &[slice_pos]);
     let ground = with_buffer(c, 24, |c, buf| {
         let (n, pt) = (Coord(buf), Coord(buf + 12));
         let m = &mut c.m;
@@ -125,7 +125,7 @@ pub fn tunnel_limit(c: &mut Cpu, p: u32, limit: u32) {
         n.set(m, up);
         let pos = cam.position().get(m);
         pt.set(m, pos);
-        call(c, FIND_GROUND_ELEVATION_GENERAL, &[pt.0, n.0, slice_pos + 8]) as i32
+        call_addr(c, FIND_GROUND_ELEVATION_GENERAL, &[pt.0, n.0, slice_pos + 8]) as i32
     });
     let m = &mut c.m;
     let track = GAME_SETUP.track(m);
@@ -213,7 +213,7 @@ pub fn abi_get_mode(c: &mut Cpu) {
     c.r[2] = get_mode(&mut c.m, c.r[4]) as u32;
 }
 
-const SET_MODE: fn(&mut Cpu) = nfs4rc::f_8008602c;
+const SET_MODE: u32 = 0x8008_602c;
 
 /// `Camera_ReplayUpdate` (CAMERA.CPP, 0x800865f4): player `p`'s camera from a replay's camera
 /// slot (`Camera_tCamSlot`), unless one already holds it (bit 0): its mode, its bits (in
@@ -226,7 +226,7 @@ pub fn replay_update(c: &mut Cpu, p: u32, slot: u32) {
         return;
     }
     let mode = c.m.r8(slot) as u32;
-    call(c, SET_MODE, &[p, mode]);
+    call_addr(c, SET_MODE, &[p, mode]);
     let m = &mut c.m;
     let flags = m.r32(slot);
     let bits = (m.r32(bits_at) & !0x8) | ((flags >> 5) & 0x8);
@@ -469,7 +469,7 @@ const SLICE_Y: u32 = 4;
 const TAIL_EASE: [i32; 3] = [6553, 6553, 3276];
 const TAIL_EASE_Y: i32 = 3276;
 const TAIL_EASE_MIN: i32 = 1310;
-const MATH_VECTOR_LENGTH: fn(&mut Cpu) = nfs4rc::f_8009e1b0;
+const MATH_VECTOR_LENGTH: u32 = 0x8009_e1b0;
 
 /// Slice `s` stepped by `step` round the track.
 fn wrap_slice(m: &mut Mem, s: i32, step: i32, ahead_first: bool) -> i32 {
@@ -597,7 +597,7 @@ fn chase_cam(c: &mut Cpu, p: u32, kind: u32, chase: &Chase) {
             m.w32(cam.relpos().0 + 4 * k, eased as u32);
         }
         if m.r8(cam.0 + TRANSITION) == 0 {
-            let len = call(c, MATH_VECTOR_LENGTH, &[cam.relpos().0]) as i32;
+            let len = call_addr(c, MATH_VECTOR_LENGTH, &[cam.relpos().0]) as i32;
             if len < chase.closest {
                 let scale = crate::fixed::fixeddiv(chase.closest, len);
                 let m = &mut c.m;
@@ -694,7 +694,7 @@ pub fn abi_update_circle_cam(c: &mut Cpu) {
 /// Where each player's TV camera last stood (`lastX`, `lastY`: a word a player).
 const TV_LAST_X: u32 = 0x8013_F090;
 const TV_LAST_Y: u32 = 0x8013_F098;
-const MATH_DIST_3D: fn(&mut Cpu) = nfs4rc::f_8009defc;
+const MATH_DIST_3D: u32 = 0x8009_defc;
 
 /// `Camera_UpdateTVCam` (CAMERA.CPP, 0x8008286c): player `p`'s TV camera by the track: its
 /// height above where it was set (re-read when it moves) rising with the distance to the car it
@@ -771,7 +771,7 @@ fn anim_place(c: &mut Cpu, p: u32, buf: u32, in_world: bool) {
     let off = coord(m, out);
     place_off_anchor(m, cam, cam.position(), off);
     let anchor = cam.anchor(m).0;
-    call(c, MATH_FASTTRANSMULT, &[buf + ANIM_ROT, anchor + OBJ_ORIENT, cam.rotation().0]);
+    call_addr(c, MATH_FASTTRANSMULT, &[buf + ANIM_ROT, anchor + OBJ_ORIENT, cam.rotation().0]);
 }
 
 /// The next of player `p`'s track's animated cameras opened (counting the number down).
@@ -812,12 +812,12 @@ pub fn update_anim_cam(c: &mut Cpu, p: u32) {
                         let slice = anchor_slice(m, cam) as i16 as i32 as u32;
                         call(c, REPLAY_CHOOSE_CAMERA, &[p, slice]);
                     } else {
-                        call(c, SET_MODE, &[p, MODE_SPLINE]);
+                        call_addr(c, SET_MODE, &[p, MODE_SPLINE]);
                         cam.set_spline_mode(&mut c.m, 3);
                     }
                 } else {
                     let mode = m.r32(GAME_SETUP.car_info(p).0 + SETUP_CAMERA);
-                    call(c, SET_MODE, &[p, mode]);
+                    call_addr(c, SET_MODE, &[p, mode]);
                 }
                 return;
             }
@@ -916,7 +916,7 @@ const CAM_SPEED_TABLE: u32 = 0x8011_0A94;
 const REPLAY_CAMERA: u32 = 0x8011_8304;
 /// The road's frame under a car (`roadMatrix`; its third row the road's way).
 const OBJ_ROAD_FORWARD: u32 = OBJ_ROAD_MATRIX + 24;
-const FIND_CLOSEST_QUAD_REZ: fn(&mut Cpu) = nfs4rc::f_800804e8;
+const FIND_CLOSEST_QUAD_REZ: u32 = 0x8008_04e8;
 
 /// `Camera_SetSplineCam` (CAMERA.CPP, 0x80082ee4): player `p`'s spline camera placed (unless
 /// a replay chose a camera): slices ahead of the car (fewer the faster the mode; at most 8), or
@@ -956,7 +956,7 @@ pub fn set_spline_cam(c: &mut Cpu, p: u32) {
     let centre = (BWORLDSM_SLICES.get(m) as u32).wrapping_add((at as i16 as i32 as u32) << 5);
     let pos = Coord(centre).get(m);
     cam.position().set(m, pos);
-    call(c, FIND_CLOSEST_QUAD_REZ, &[cam.position().0, slice_pos, 1]);
+    call_addr(c, FIND_CLOSEST_QUAD_REZ, &[cam.position().0, slice_pos, 1]);
 }
 
 pub fn abi_set_spline_cam(c: &mut Cpu) {
@@ -967,14 +967,14 @@ pub fn abi_set_spline_cam(c: &mut Cpu) {
 /// camera at 80%).
 const OBJ_VELOCITY: u32 = 0xAC;
 const SETUP_SGGE: u32 = 0x38;
-const MATH_NORMALIZE_VECTOR: fn(&mut Cpu) = nfs4rc::f_8009e4e0;
+const MATH_NORMALIZE_VECTOR: u32 = 0x8009_e4e0;
 
 /// The distance from player `p`'s camera to the car it films, over 16 (its size).
 fn target_distance(c: &mut Cpu, p: u32) -> i32 {
     let cam = info(p);
     let dist = |c: &mut Cpu| {
         let target = cam.target(&mut c.m).0;
-        call(c, MATH_DIST_3D, &[target + OBJ_POSITION, cam.position().0]) as i32
+        call_addr(c, MATH_DIST_3D, &[target + OBJ_POSITION, cam.position().0]) as i32
     };
     if dist(c) > 0 { dist(c) >> 4 } else { dist(c).wrapping_neg() >> 4 }
 }
@@ -1002,7 +1002,7 @@ pub fn update_spline_cam(c: &mut Cpu, p: u32) {
     if replace && m.r32(REPLAY_CAMERA.wrapping_add(p << 4)) == 0 {
         set_spline_cam(c, p);
     } else {
-        call(c, FIND_CLOSEST_QUAD_REZ, &[cam.position().0, cam.0 + SLICE_POS, 1]);
+        call_addr(c, FIND_CLOSEST_QUAD_REZ, &[cam.position().0, cam.0 + SLICE_POS, 1]);
     }
     with_buffer(c, 24, |c, buf| {
         let (way, next) = (buf, buf + 12);
@@ -1014,7 +1014,7 @@ pub fn update_spline_cam(c: &mut Cpu, p: u32) {
         let there = Coord(if s_next < NUM_SLICES.get(m) { slices.wrapping_add((s_next as u32) << 5) } else { slices }).get(m);
         Coord(next).set(m, there);
         Coord(way).set(m, Vec3::new(there.x.wrapping_sub(here.x), there.y.wrapping_sub(here.y), there.z.wrapping_sub(here.z)));
-        call(c, MATH_NORMALIZE_VECTOR, &[way]);
+        call_addr(c, MATH_NORMALIZE_VECTOR, &[way]);
         let m = &mut c.m;
         let dir = coord(m, way);
         let mut along = (0..3).fold(0i32, |sum, k| sum.wrapping_add(fixedmult(m.r32(car + OBJ_VELOCITY + 4 * k as u32) as i32, dir[k])));
@@ -1122,7 +1122,7 @@ pub fn update_cop_cam1(c: &mut Cpu, p: u32) {
         }
         let (a, t) = (coord(m, anchor + OBJ_POSITION), coord(m, target + OBJ_POSITION));
         Coord(way).set(m, Vec3::new(a[0].wrapping_sub(t[0]), a[1].wrapping_sub(t[1]), a[2].wrapping_sub(t[2])));
-        call(c, MATH_NORMALIZE_VECTOR, &[way]);
+        call_addr(c, MATH_NORMALIZE_VECTOR, &[way]);
         let m = &mut c.m;
         let d = coord(m, way).map(|v| fixedmult(0x4_0000, v));
         let a = anchor_pos(m, cam);
@@ -1144,7 +1144,7 @@ pub fn update_cop_cam2(c: &mut Cpu, p: u32) {
         let (a, t) = (coord(m, anchor + OBJ_POSITION), coord(m, target + OBJ_POSITION));
         let d = [0, 1, 2].map(|k| t[k].wrapping_sub(a[k]) / 4);
         Coord(way).set(m, Vec3::from(d));
-        call(c, MATH_NORMALIZE_VECTOR, &[way]);
+        call_addr(c, MATH_NORMALIZE_VECTOR, &[way]);
         let m = &mut c.m;
         let d = coord(m, way);
         let a = anchor_pos(m, cam);
@@ -1421,8 +1421,8 @@ pub fn pitch_and_roll(c: &mut Cpu, p: u32) {
         crate::fixed::fixedxformz(m, roll, body_roll);
         let low = ((m.r32(cam.0 + CAMERA_BITS) >> 1) & 1) as i32;
         crate::fixed::fixedxformx(m, pitch, twice_pitch | low);
-        call(c, MATH_FASTTRANSMULT, &[roll, pitch, both]);
-        call(c, MATH_FASTTRANSMULT, &[both, cam.rotation().0, cam.rotation().0]);
+        call_addr(c, MATH_FASTTRANSMULT, &[roll, pitch, both]);
+        call_addr(c, MATH_FASTTRANSMULT, &[both, cam.rotation().0, cam.rotation().0]);
     });
 }
 
@@ -1432,7 +1432,7 @@ pub fn abi_pitch_and_roll(c: &mut Cpu) {
 
 /// The road's normal at `pos` (a `BWorldSm_Pos`).
 fn road_normal(c: &mut Cpu, pos: u32) -> [i32; 3] {
-    let n = call(c, U_NORMAL, &[pos]);
+    let n = call_addr(c, U_NORMAL, &[pos]);
     coord(&mut c.m, n)
 }
 
@@ -1470,7 +1470,7 @@ pub fn set_above_ground(c: &mut Cpu, p: u32, pos: u32) {
     let normal = road_normal(c, slice_pos);
     let ground = with_buffer(c, 12, |c, n| {
         Coord(n).set(&mut c.m, Vec3::from(normal));
-        call(c, FIND_GROUND_ELEVATION_GENERAL, &[pos, n, slice_pos + 8]) as i32
+        call_addr(c, FIND_GROUND_ELEVATION_GENERAL, &[pos, n, slice_pos + 8]) as i32
     });
     let least = ground.wrapping_add(0x1_0000);
     let m = &mut c.m;
@@ -1528,7 +1528,7 @@ pub fn acquire_target(c: &mut Cpu, p: u32, aim: u32, from: u32, mat: u32) {
     if REPLAY_MODE.get(m) == 2 {
         up[0] = cam.twist(m);
     }
-    call(c, MATH_NORMALIZE_VECTOR, &[fwd_at]);
+    call_addr(c, MATH_NORMALIZE_VECTOR, &[fwd_at]);
     let m = &mut c.m;
     let fwd = coord(m, fwd_at);
     if dot(up, fwd).wrapping_abs() > UP_ALONG_VIEW {
@@ -1538,14 +1538,14 @@ pub fn acquire_target(c: &mut Cpu, p: u32, aim: u32, from: u32, mat: u32) {
     for k in 0..3 {
         m.w32(right_at + 4 * k as u32, right[k] as u32);
     }
-    call(c, MATH_NORMALIZE_VECTOR, &[right_at]);
+    call_addr(c, MATH_NORMALIZE_VECTOR, &[right_at]);
     let m = &mut c.m;
     let (fwd, right) = (coord(m, fwd_at), coord(m, right_at));
     let up = cross(fwd, right);
     for k in 0..3 {
         m.w32(up_at + 4 * k as u32, up[k] as u32);
     }
-    call(c, MATH_NORMALIZE_VECTOR, &[up_at]);
+    call_addr(c, MATH_NORMALIZE_VECTOR, &[up_at]);
 }
 
 pub fn abi_acquire_target(c: &mut Cpu) {
@@ -1604,7 +1604,7 @@ pub fn opponent_look_behind(c: &mut Cpu, p: u32, from: u32, reset: bool) {
             let m = &mut c.m;
             let (f, cp) = (coord(m, from), coord(m, car + OBJ_POSITION));
             Coord(v).set(m, Vec3::new(f[0].wrapping_sub(cp[0]), f[1].wrapping_sub(cp[1]), f[2].wrapping_sub(cp[2])));
-            call(c, MATH_NORMALIZE_VECTOR, &[v]);
+            call_addr(c, MATH_NORMALIZE_VECTOR, &[v]);
             coord(&mut c.m, v)
         });
         let human = c.m.r32(HUMAN_RACE_CARS.wrapping_add(p << 2));
@@ -1667,7 +1667,7 @@ pub fn get_view_info(c: &mut Cpu, p: u32, view: u32) {
     if bit(c, 4) {
         check_wall_collisions(c, p, view);
     }
-    call(c, FIND_CLOSEST_QUAD_REZ, &[view + VIEW_POS, cam.0 + SLICE_POS, 1]);
+    call_addr(c, FIND_CLOSEST_QUAD_REZ, &[view + VIEW_POS, cam.0 + SLICE_POS, 1]);
     let m = &mut c.m;
     if m.r8(cam.0 + SLICE_OFF_EDGE) == 0 && cam.mode(m) >= 2 {
         set_above_ground(c, p, view + VIEW_POS);
@@ -1861,13 +1861,13 @@ const POS_POINT: u32 = 8;
 const POS_SIZE: u32 = 0x84;
 /// A wall too high above the car (16.16: 3.5).
 const WALL_HEIGHT: i32 = 0x3_8000;
-const FIND_CLOSEST_QUAD_MAX_ITERATIONS: fn(&mut Cpu) = nfs4rc::f_800806b4;
+const FIND_CLOSEST_QUAD_MAX_ITERATIONS: u32 = 0x8008_06b4;
 
 /// Whether `pt` is where player `p`'s camera can't be (found on the road from `pos`, a road
 /// position kept between the probes): off the road (no surface, off its edge), too steep from
 /// the car's road, or on a wall more than 3.5 above the car.
 fn blocked(c: &mut Cpu, p: u32, pt: u32, pos: u32) -> bool {
-    call(c, FIND_CLOSEST_QUAD_MAX_ITERATIONS, &[pt, pos, 3]);
+    call_addr(c, FIND_CLOSEST_QUAD_MAX_ITERATIONS, &[pt, pos, 3]);
     let m = &mut c.m;
     let quad = m.r32(pos + POS_QUAD);
     let ground = if quad != 0 {
@@ -1965,7 +1965,7 @@ pub fn check_wall_collisions(c: &mut Cpu, p: u32, view: u32) {
         let (left, right) = (coord(m, cam.wall_left().0), coord(m, cam.wall_right().0));
         let along = with_buffer(c, 12, |c, w| {
             Coord(w).set(&mut c.m, Vec3::new(right[0].wrapping_sub(left[0]), right[1].wrapping_sub(left[1]).wrapping_add(0x8000), right[2].wrapping_sub(left[2])));
-            call(c, MATH_NORMALIZE_VECTOR, &[w]);
+            call_addr(c, MATH_NORMALIZE_VECTOR, &[w]);
             coord(&mut c.m, w)
         });
         let m = &mut c.m;

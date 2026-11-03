@@ -48,19 +48,19 @@ const REFLECTED: u32 = 0x200;
 /// `DrawShapeExtended`, `DrawShape_NFS4RoundRectangle`, `Font_SetBlitter`,
 /// `Font_ReSetBlitter`, `FeDraw_SetABRMode`.
 pub(crate) const GET_DRAWENV: fn(&mut Cpu) = nfs4rc::f_800beb84;
-const CALC_FADE_VAL: fn(&mut Cpu) = nfs4rc::f_8004bcd8;
-pub(crate) const CALC_TEXT_FADE_SEL_TO_HI: fn(&mut Cpu) = nfs4rc::f_8004be30;
-pub(crate) const CALC_ON_OFF_FADE: fn(&mut Cpu) = nfs4rc::f_8004beb4;
+const CALC_FADE_VAL: u32 = 0x8004_bcd8;
+pub(crate) const CALC_TEXT_FADE_SEL_TO_HI: u32 = 0x8004_be30;
+pub(crate) const CALC_ON_OFF_FADE: u32 = 0x8004_beb4;
 const SET_FONT: fn(&mut Cpu) = fetextrender::set_font_entry;
 pub(crate) const TEXT_WORD: fn(&mut Cpu) = nfs4rc::f_800b9f18;
 pub(crate) const SPRINTF: fn(&mut Cpu) = nfs4rc::f_800e50a8;
-pub(crate) const S_UPPER: fn(&mut Cpu) = nfs4rc::f_80026910;
+pub(crate) const S_UPPER: u32 = 0x8002_6910;
 pub(crate) const TEXT_PIXELS: fn(&mut Cpu) = nfs4rc::f_800e4a2c;
 pub(crate) const STRLEN: fn(&mut Cpu) = nfs4rc::f_800ea8d0;
 const FULL_TEXT_RGB: fn(&mut Cpu) = fetextrender::full_text_rgb_entry;
 const MENU_TEXT_POSITIONED_JUSTIFY: fn(&mut Cpu) = fetextrender::menu_text_positioned_justify_entry;
 pub(crate) const DRAW_SHAPE_EXTENDED: fn(&mut Cpu) = crate::psxfront::draw_shape_extended_entry;
-pub(crate) const ROUND_RECTANGLE: fn(&mut Cpu) = nfs4rc::f_8004c490;
+pub(crate) const ROUND_RECTANGLE: u32 = 0x8004_c490;
 pub(crate) const SET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc52c;
 pub(crate) const RESET_BLITTER: fn(&mut Cpu) = nfs4rc::f_800cc538;
 pub(crate) const SET_ABR_MODE: fn(&mut Cpu) = crate::mmeffect::set_abr_mode_entry;
@@ -180,7 +180,7 @@ impl Locals {
 fn upper_text_width(c: &mut Cpu, id: u32, buf: u32) -> u32 {
     let word = call(c, TEXT_WORD, &[id]);
     call(c, SPRINTF, &[buf, TEXT_FORMAT, word]);
-    call(c, S_UPPER, &[buf]);
+    call_addr(c, S_UPPER, &[buf]);
     let pixels = call(c, TEXT_PIXELS, &[buf]);
     let letters = call(c, STRLEN, &[buf]);
     pixels.wrapping_sub(letters)
@@ -206,12 +206,12 @@ pub fn draw_text_box(c: &mut Cpu, text: u32, rect: RECT, width: u32, offset: u32
         let l = Locals(at);
         let (view, flip) = (c.m.r32(PLAYER1_VIEW), c.m.r32(FLIP));
         let env = DRAWENV(call(c, GET_DRAWENV, &[view, flip]));
-        let colour = call(c, CALC_FADE_VAL, &[BOX_DIM, BOX_LIT, sx(fade)]);
+        let colour = call_addr(c, CALC_FADE_VAL, &[BOX_DIM, BOX_LIT, sx(fade)]);
         l.set_shape_colour(&mut c.m, colour);
         if fade_by_y != 0 {
             let down = (224 - rect.y(&mut c.m) as i32).clamp(0, 128);
             let colour = l.shape_colour(&mut c.m);
-            let colour = call(c, CALC_FADE_VAL, &[0, colour, down as u32]);
+            let colour = call_addr(c, CALC_FADE_VAL, &[0, colour, down as u32]);
             l.set_shape_colour(&mut c.m, colour);
         }
         call_addr(c, SUBTRACT_RECT_EDGES, &[rect.0]);
@@ -223,10 +223,10 @@ pub fn draw_text_box(c: &mut Cpu, text: u32, rect: RECT, width: u32, offset: u32
             call(c, SET_FONT, &[0]);
             let shown = upper_text_width(c, text, l.text());
             let gap = (shown as i32).max(width as i32).wrapping_add(25) as u32;
-            let mut colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[1, sx(fade), 0]);
+            let mut colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[1, sx(fade), 0]);
             if fade_by_y != 0 {
                 let down = 240u32.wrapping_sub(rect.y(&mut c.m) as i32 as u32);
-                colour = call(c, CALC_FADE_VAL, &[0, colour, down]);
+                colour = call_addr(c, CALC_FADE_VAL, &[0, colour, down]);
             }
             for dx in [0, gap] {
                 let word = call(c, TEXT_WORD, &[text]);
@@ -550,7 +550,7 @@ pub fn abi_choice_update_transition(c: &mut Cpu) {
 /// choices' `Draw` end so); `shapes` the arrows' shape.
 fn options_arrows_and_box(c: &mut Cpu, l: &Locals, item: MenuItem, x: u32, y: u32, selected: u32, shapes: u32) {
     let fade = item.sel_fade(&mut c.m) as i32 as u32;
-    let colour = call(c, CALC_FADE_VAL, &[BOX_DIM, BOX_LIT, fade]);
+    let colour = call_addr(c, CALC_FADE_VAL, &[BOX_DIM, BOX_LIT, fade]);
     l.set_shape_colour(&mut c.m, colour);
     let dim = (selected == 0) as u32;
     call(c, DRAW_SHAPE_EXTENDED, &[LEFT_ARROW, ARROW_FLAGS, x.wrapping_add(166), y.wrapping_add(6), 0, dim, l.shape_options()]);
@@ -558,7 +558,7 @@ fn options_arrows_and_box(c: &mut Cpu, l: &Locals, item: MenuItem, x: u32, y: u3
     call(c, DRAW_SHAPE_EXTENDED, &[RIGHT_ARROW, ARROW_FLAGS, right, y.wrapping_add(6), 0, dim, l.shape_options()]);
     let h = shape_height(&mut c.m, shapes);
     set_rect(&mut c.m, l.rect(), x as i16, y as i16, 297, h);
-    call(c, ROUND_RECTANGLE, &[u32::MAX, l.rect().0, sx(selected)]);
+    call_addr(c, ROUND_RECTANGLE, &[u32::MAX, l.rect().0, sx(selected)]);
 }
 
 /// `tMenuItemOptionsLeftRightChoice::Draw` (FEMENUEXTENDED.CPP, 0x8001ad40): the item's text
@@ -568,7 +568,7 @@ pub fn options_left_right_choice_draw(c: &mut Cpu, this: MenuItemLeftRightChoice
         let l = Locals(at);
         let shapes = c.m.r32(SHAPES).wrapping_add(OPTIONS_SHAPE);
         let fade = this.sel_fade(&mut c.m) as i32 as u32;
-        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0]);
+        let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0]);
         let text = this.text_description(&mut c.m);
         let word = call(c, TEXT_WORD, &[text]);
         let ty = sx(y.wrapping_add(3));
@@ -613,10 +613,10 @@ pub fn two_item_choice_draw(c: &mut Cpu, this: MenuItemOptionsTwoItemChoice, x: 
         let v = this.on_off_fade(m).wrapping_add(step).clamp(0, 128);
         this.set_on_off_fade(m, v);
         let fade = this.sel_fade(m) as i32 as u32;
-        let colour = call(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0]);
+        let colour = call_addr(c, CALC_TEXT_FADE_SEL_TO_HI, &[6, fade, 0]);
         let m = &mut c.m;
         let (on_off, fade) = (this.on_off_fade(m) as i32 as u32, this.sel_fade(m) as i32 as u32);
-        call(c, CALC_ON_OFF_FADE, &[6, on_off, fade, 0, l.on_colour(), l.off_colour()]);
+        call_addr(c, CALC_ON_OFF_FADE, &[6, on_off, fade, 0, l.on_colour(), l.off_colour()]);
         let text = this.text_description(&mut c.m);
         let ty = sx(y.wrapping_add(3));
         let word = call(c, TEXT_WORD, &[text]);

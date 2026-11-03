@@ -179,7 +179,7 @@ pub fn manage_bureaucracy(c: &mut Cpu) {
             let pos = r.enter(c, 0x8008_b954, 0x8008_baf0, |c| calculate_road_position(c, car));
             car.set_road_position(&mut c.m, pos);
             r.enter(c, 0x8007_3e74, 0x8008_bafc, |c| crate::aiworld::calculate_lane_info(c, car));
-            if r.call(c, nfs4rc::f_8006a6ec, &[car.0], 0x8008_bb04) != 0 {
+            if r.call_ptr(c, 0x8006_a6ec, &[car.0], 0x8008_bb04) != 0 {
                 // AIPhysics_UseCoolPhysics
                 let v = calc_vel_down_road(&mut c.m, car);
                 car.set_current_speed(&mut c.m, v);
@@ -1059,7 +1059,7 @@ pub fn do_post_collision_stuff(c: &mut Cpu, car: Car) {
             do_extra_car_collision_processing(c, car);
             return;
         }
-        abi::call(c, nfs4rc::f_8006d174, &[car.0]); // AIPhysic_ProcessCollision
+        abi::Saved::of(c).call_ptr(c, 0x8006_d174, &[car.0], 0); // AIPhysic_ProcessCollision
         do_extra_car_collision_processing(c, car);
         do_skidding_stuff(c, car);
         let m = &mut c.m;
@@ -1380,7 +1380,7 @@ pub fn initialize_car_tables_flags_and_counters(c: &mut Cpu, car: Car) {
                 name
             };
             r.call_leaving(c, nfs4rc::f_800e6714, &[info.0 + 0x68, licence], 0x8008_6e00); // strcpy
-            r.call_leaving(c, nfs4rc::f_80026970, &[info.0 + 0x68], 0x8008_6e0c);
+            r.call_ptr_leaving(c, 0x8002_6970, &[info.0 + 0x68], 0x8008_6e0c);
             let m = &mut c.m;
             add_to(m, AI_CARS, NUM_AI_CARS, car);
             car.update_car_flags(m, |f| f | CAR_AI);
@@ -1577,7 +1577,7 @@ pub fn ini_car_objects(c: &mut Cpu, car: Car, i: i32) {
         car.set_old_audio_skid_state(m, 0);
         car.set_front_skid(m, 0);
         car.set_rear_skid(m, 0);
-        r.call(c, nfs4rc::f_800679ec, &[car.0], 0x8008_ab48); // AIInit_RestartAICar
+        r.call_ptr(c, 0x8006_79ec, &[car.0], 0x8008_ab48); // AIInit_RestartAICar
         let m = &mut c.m;
         car.set_audio_count(m, 0);
         car.set_audio_damage_scrape(m, 0);
@@ -1632,7 +1632,7 @@ pub fn init_car(c: &mut Cpu, car: Car, i: i32) {
         let (pack_name, specs_name, viv_name) = (sp + 16, sp + 224, sp + 120);
         if i < GAME_SETUP.num_cars(&mut c.m) {
             let car_type = car.car_info(&mut c.m).car_type(&mut c.m) as u32;
-            if r.call_leaving(c, nfs4rc::f_80067dd8, &[car_type], 0x8008_ac5c) != 0 {
+            if r.call_ptr_leaving(c, 0x8006_7dd8, &[car_type], 0x8008_ac5c) != 0 {
                 // AIInit_IsNonStandardCarFile
                 let dir = c.m.r32(PATHS + 0x10);
                 r.call_leaving(c, nfs4rc::f_800e50a8, &[pack_name, QDA_NAME, dir, car.0 + 0x240], 0x8008_ac7c); // sprintf
@@ -1656,8 +1656,8 @@ pub fn init_car(c: &mut Cpu, car: Car, i: i32) {
             let at = r.call_leaving(c, nfs4rc::f_800e6e04, &[r.0[2], specs_name], 0x8008_ad40); // locatebig
             r.0[0] = r.call_leaving(c, nfs4rc::f_800bc7dc, &[0, at, 0], 0x8008_ad50); // Udff_Opena
             if i < GAME_SETUP.num_cars(&mut c.m) {
-                r.call_leaving(c, nfs4rc::f_80067b14, &[car.0, r.0[4]], 0x8008_ad74); // AIInit_InitAICar
-                r.call_leaving(c, nfs4rc::f_800679ec, &[car.0], 0x8008_ad7c); // AIInit_RestartAICar
+                r.call_ptr_leaving(c, 0x8006_7b14, &[car.0, r.0[4]], 0x8008_ad74); // AIInit_InitAICar
+                r.call_ptr_leaving(c, 0x8006_79ec, &[car.0], 0x8008_ad7c); // AIInit_RestartAICar
                 let specs = r.call_leaving(c, nfs4rc::f_800e5f28, &[SPECS_HEAP_NAME, 464, 0], 0x8008_ad90); // reservememadr
                 car.set_specs(&mut c.m, crate::types::CarSpecs(specs));
                 let data = r.0[0];
@@ -1706,7 +1706,7 @@ pub fn de_init_car(c: &mut Cpu, car: Car) {
     abi::frame(c, 24, |c, _| {
         let mut r = abi::Saved::of(c);
         r.0[0] = car.0;
-        r.call(c, nfs4rc::f_80067ce8, &[car.0], 0x8008_af24); // AIInit_DeInitAICar
+        r.call_ptr(c, 0x8006_7ce8, &[car.0], 0x8008_af24); // AIInit_DeInitAICar
         let specs = car.specs(&mut c.m).0;
         if specs != 0 {
             car.set_specs(&mut c.m, crate::types::CarSpecs(0));

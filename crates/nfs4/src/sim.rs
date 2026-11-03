@@ -127,7 +127,7 @@ pub fn process_sim_schedules(c: &mut Cpu) {
         });
         if SIM_GLOBAL.game_ticks(&mut c.m) & 1 != 0 {
             on_scratchpad(c, |c| {
-                r.call(c, nfs4rc::f_8005ba00, &[], 0x800b_77cc); // AIHigh_Execute
+                r.call_ptr(c, 0x8005_ba00, &[], 0x800b_77cc); // AIHigh_Execute
             });
             let s32b = SIM_GLOBAL.schedule32_hz2(&mut c.m);
             on_scratchpad(c, |c| {
@@ -157,7 +157,7 @@ pub fn process_pause(c: &mut Cpu) {
         }
         let mut r = Saved::of(c);
         r.0[0] = 1;
-        let choice = r.call(c, nfs4rc::f_8009f290, &[], 0x800b_7898); // MPause_Logic
+        let choice = r.call_ptr(c, 0x8009_f290, &[], 0x800b_7898); // MPause_Logic
         match choice {
             1 => {
                 r.0[0] = SIM_VAR.0;
@@ -180,7 +180,7 @@ pub fn process_pause(c: &mut Cpu) {
                     let second = (c.m.r8(PAUSE_PORT_INDEX) != 0) as i32;
                     GAME_SETUP.set_pink_slips_forfeit(&mut c.m, second);
                 }
-                r.call(c, nfs4rc::f_800da434, &[], 0x800b_7934); // Hud_BTC_QuitOut
+                r.call_ptr(c, 0x800d_a434, &[], 0x800b_7934); // Hud_BTC_QuitOut
                 r.call(c, nfs4rc::f_8007a7f8, &[], 0x800b_793c); // AudioCmn_UnPauseAndRestart
                 let m = &mut c.m;
                 SIM_VAR.set_pause_sim(m, 0);
@@ -191,7 +191,7 @@ pub fn process_pause(c: &mut Cpu) {
             }
             _ => return,
         }
-        r.call(c, nfs4rc::f_8009f9bc, &[], 0x800b_7964); // MPause_EndPauseMenu
+        r.call_ptr(c, 0x8009_f9bc, &[], 0x800b_7964); // MPause_EndPauseMenu
     });
 }
 
@@ -256,16 +256,16 @@ pub fn start_up(c: &mut Cpu) {
         c.m.w32(SIM_GLOBAL.0 + 0xC, s);
         let seed = GAME_SETUP.rand_seed(&mut c.m) as u32;
         r.call(c, nfs4rc::f_8009bdfc, &[seed], 0x800b_72d4); // FastRandom_StartUp
-        r.call(c, nfs4rc::f_800671ac, &[], 0x800b_72dc); // AICop_StartUp
-        r.call(c, nfs4rc::f_800673b0, &[], 0x800b_72e4); // AIInit_StartUp1
+        r.call_ptr(c, 0x8006_71ac, &[], 0x800b_72dc); // AICop_StartUp
+        r.call_ptr(c, 0x8006_73b0, &[], 0x800b_72e4); // AIInit_StartUp1
         r.call(c, nfs4rc::f_800ae9ac, &[], 0x800b_72ec); // R3DCar_StartUp
         r.call(c, nfs4rc::f_800bccf8, &[], 0x800b_72f4); // CarIO_StartUp
         r.enter(c, 0x8008_b064, 0x800b_72fc, cars::start_up);
         r.call(c, nfs4rc::f_800aea7c, &[], 0x800b_7304); // R3DCar_PostStartUp
-        r.call(c, nfs4rc::f_8005b584, &[], 0x800b_730c); // AIHigh_StartUp
+        r.call_ptr(c, 0x8005_b584, &[], 0x800b_730c); // AIHigh_StartUp
         r.call_ptr(c, 0x800d_bdec, &[8], 0x800b_7314); // Loading_UpdateLoadingScreen
         r.call_ptr(c, 0x800d_bdec, &[9], 0x800b_731c);
-        r.call(c, nfs4rc::f_80067424, &[], 0x800b_7324); // AIInit_StartUp2
+        r.call_ptr(c, 0x8006_7424, &[], 0x800b_7324); // AIInit_StartUp2
         r.call_ptr(c, 0x800d_bdec, &[10], 0x800b_732c);
         r.call(c, nfs4rc::f_80077474, &[], 0x800b_7334); // AudioCmn_Init
         let s64 = SIM_GLOBAL.schedule64_hz(&mut c.m);
@@ -299,14 +299,14 @@ pub fn restart(c: &mut Cpu) {
         let mut r = Saved::of(c);
         r.0[0] = SIM_GLOBAL.0;
         r.call(c, nfs4rc::f_8009bdfc, &[seed], 0x800b_73b8); // FastRandom_StartUp
-        r.call(c, nfs4rc::f_80067258, &[], 0x800b_73c0); // AICop_Restart
-        r.call(c, nfs4rc::f_800674fc, &[], 0x800b_73c8); // AIInit_Reset1
+        r.call_ptr(c, 0x8006_7258, &[], 0x800b_73c0); // AICop_Restart
+        r.call_ptr(c, 0x8006_74fc, &[], 0x800b_73c8); // AIInit_Reset1
         r.call(c, nfs4rc::f_800aeb60, &[], 0x800b_73d0); // R3DCar_Restart
-        r.call(c, nfs4rc::f_8005b92c, &[], 0x800b_73d8); // AIHigh_Restart1
+        r.call_ptr(c, 0x8005_b92c, &[], 0x800b_73d8); // AIHigh_Restart1
         r.enter(c, 0x8008_af58, 0x800b_73e0, cars::restart);
-        r.call(c, nfs4rc::f_8005b94c, &[], 0x800b_73e8); // AIHigh_Restart2
-        r.call(c, nfs4rc::f_80067508, &[], 0x800b_73f0); // AIInit_Reset2
-        r.call(c, nfs4rc::f_800da3dc, &[], 0x800b_73f8); // Hud_Reset
+        r.call_ptr(c, 0x8005_b94c, &[], 0x800b_73e8); // AIHigh_Restart2
+        r.call_ptr(c, 0x8006_7508, &[], 0x800b_73f0); // AIInit_Reset2
+        r.call_ptr(c, 0x800d_a3dc, &[], 0x800b_73f8); // Hud_Reset
         r.call(c, nfs4rc::f_800b447c, &[], 0x800b_7400); // Render_RestartTrackRender
         simqueue::reset(&mut c.m);
         let t = INPUT_TIME.get(&mut c.m);
@@ -329,13 +329,13 @@ pub fn clean_up(c: &mut Cpu) {
         r.0[0] = SIM_GLOBAL.0;
         let s64 = SIM_GLOBAL.schedule64_hz(&mut c.m);
         schedule::delete_function(&mut c.m, s64, CAMERA_TICK, 0);
-        r.call(c, nfs4rc::f_80067644, &[], 0x800b_7460); // AIInit_CleanUp2
-        r.call(c, nfs4rc::f_8005b974, &[], 0x800b_7468); // AIHigh_CleanUp
+        r.call_ptr(c, 0x8006_7644, &[], 0x800b_7460); // AIInit_CleanUp2
+        r.call_ptr(c, 0x8005_b974, &[], 0x800b_7468); // AIHigh_CleanUp
         r.enter(c, 0x8008_b4cc, 0x800b_7470, cars::clean_up);
         r.call(c, nfs4rc::f_800aebd8, &[], 0x800b_7478); // R3DCar_CleanUp
         r.call(c, nfs4rc::f_800bcd64, &[], 0x800b_7480); // CarIO_CleanUp
-        r.call(c, nfs4rc::f_8006760c, &[], 0x800b_7488); // AIInit_CleanUp1
-        r.call(c, nfs4rc::f_800672a8, &[], 0x800b_7490); // AICop_CleanUp
+        r.call_ptr(c, 0x8006_760c, &[], 0x800b_7488); // AIInit_CleanUp1
+        r.call_ptr(c, 0x8006_72a8, &[], 0x800b_7490); // AICop_CleanUp
         r.call(c, nfs4rc::f_8009bdf4, &[], 0x800b_7498); // FastRandom_CleanUp
         for (at, ra) in [(0x10, 0x800b_74a4), (0x14, 0x800b_74b0), (0xC, 0x800b_74bc)] {
             let s = crate::types::SchedSchedule(c.m.r32(SIM_GLOBAL.0 + at));
@@ -400,7 +400,7 @@ pub fn main_game_loop(c: &mut Cpu) {
             let m = &mut c.m;
             SKIP_RENDER.set(m, 0);
             if SIM_VAR.pause_sim(m) != 0 || SIM_VAR.quick_pause_sim(m) != 0 || SIM_VAR.end_sim_game(m) != 0 {
-                r.call(c, nfs4rc::f_80083dfc, &[], 0x800b_7e70); // the camera
+                r.call_ptr(c, 0x8008_3dfc, &[], 0x800b_7e70); // the camera
             } else if SIM_VAR.goal_clock_ticks(m) < SIM_VAR.current_clock_ticks(m) {
                 SKIP_RENDER.set(m, 1);
             } else {
@@ -459,7 +459,7 @@ fn input_tick(c: &mut Cpu, r: &mut Saved) {
                 if SIM_VAR.quick_pause_sim(m) != pause {
                     SIM_VAR.set_quick_pause_sim(m, pause);
                     if pause != 0 {
-                        r.call(c, nfs4rc::f_80083dfc, &[], 0x800b_7bd8); // the camera
+                        r.call_ptr(c, 0x8008_3dfc, &[], 0x800b_7bd8); // the camera
                         r.call(c, nfs4rc::f_8007a5e8, &[], 0x800b_7be0); // AudioCmn_Pause
                     } else {
                         r.call(c, nfs4rc::f_8007a6a0, &[], 0x800b_7bf0); // AudioCmn_UnPause
@@ -495,7 +495,7 @@ fn input_tick(c: &mut Cpu, r: &mut Saved) {
     loop {
         r.0[0] = player;
         if input(c, r, 26 + player.min(1), 1, 0x800b_7c94) != 0 && REPLAY_MODE.get(&mut c.m) < REPLAY_WATCH {
-            r.call(c, nfs4rc::f_80086240, &[player], 0x800b_7cbc); // Camera_NextMode
+            r.call_ptr(c, 0x8008_6240, &[player], 0x800b_7cbc); // Camera_NextMode
         }
         if input(c, r, 28 + player.min(1), 1, 0x800b_7cd0) != 0 {
             r.call(c, nfs4rc::f_8009baa0, &[player], 0x800b_7ce0); // DashHUD_ToggleHud
@@ -535,7 +535,7 @@ fn sim_tick(c: &mut Cpu, r: &Saved) {
     };
     if steps == 0 {
         IN_BETWEEN.set(m, 1);
-        r.call(c, nfs4rc::f_80083dfc, &[], 0x800b_7e38); // the camera
+        r.call_ptr(c, 0x8008_3dfc, &[], 0x800b_7e38); // the camera
         return;
     }
     if steps == 2 {

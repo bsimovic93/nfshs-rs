@@ -1238,7 +1238,7 @@ pub fn in_control_physics(c: &mut Cpu, car: Car) {
         let to = Coord(sp + 16);
         let v = car.desired_vector().get(m);
         to.set(m, v);
-        r.call(c, nfs4rc::f_8009e744, &[to.0], 0x8006_c328); // Math_QDNormalizeVector (for its frame)
+        r.call_ptr(c, 0x8009_e744, &[to.0], 0x8006_c328); // Math_QDNormalizeVector (for its frame)
         let m = &mut c.m;
         let t = to.get(m);
         m.w32(sp + 64, 0);
