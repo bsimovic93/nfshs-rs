@@ -56,8 +56,6 @@ const SET_DRAW_MODE: fn(&mut Cpu) = nfs4rc::f_800eed18;
 const FONT_GET_UVWH: fn(&mut Cpu) = nfs4rc::f_800cc948;
 const HUD_PMX_KILL: fn(&mut Cpu) = nfs4rc::f_80093a20;
 const DRAW_SET_VIEW: u32 = 0x800B_E8A8;
-/// The HUD's functions not decompiled yet.
-const INIT_TABLES: u32 = 0x800D_45C0;
 
 fn shape(k: u32) -> u32 {
     SHAPES.wrapping_add(k.wrapping_mul(SHAPE_SIZE))
@@ -73,7 +71,7 @@ fn shape_wh(m: &mut Mem, shape: u32) -> (u32, u32) {
 /// the views: with two players (split screen) a map, dashboard and tachometer per half, else
 /// one of each; the stats' view.
 pub fn create_hud_views(c: &mut Cpu) {
-    call_addr(c, INIT_TABLES, &[]);
+    init_tables(&mut c.m);
     let m = &mut c.m;
     m.w32(BE_THE_COP, 0);
     let gs = GAME_SETUP;
@@ -469,6 +467,202 @@ pub fn abi_init0(c: &mut Cpu) {
     init0(c);
 }
 
+/// The HUD's elements' places (halves x, y per element; the second table for two players), the
+/// one in use (`g1Player`).
+const ELEMENT_POSITIONS: u32 = 0x8012_1C14;
+const ELEMENT_POSITIONS_2P: u32 = ELEMENT_POSITIONS + 76;
+const POSITIONS: u32 = 0x8013_F10C;
+
+/// `Hud_InitTables` (HUD.CPP, 0x800d45c0): the elements' places for one player or two.
+pub fn init_tables(m: &mut Mem) {
+    let two = GAME_SETUP.num_player_race_cars(m) >= 2;
+    m.w32(POSITIONS, if two { ELEMENT_POSITIONS_2P } else { ELEMENT_POSITIONS });
+}
+
+pub fn abi_init_tables(c: &mut Cpu) {
+    init_tables(&mut c.m);
+}
+
+/// The digits' texture words (`HudPmx_gHudNumberUV`), 0 to 9.
+const DIGITS: u32 = 0x8011_1F34;
+/// A sprite's texture word.
+const SPRT_UV: u32 = 12;
+
+/// Sprite `k` of `sprites` shows `digit`.
+fn set_digit(m: &mut Mem, sprites: u32, k: u32, digit: i32) {
+    let uv = m.r32(DIGITS.wrapping_add((digit as u32) << 2));
+    m.w32(sprites + SPRT_SIZE * k + SPRT_UV, uv);
+}
+
+/// A time in 64ths of a second as minutes, seconds (of the minute) and hundredths.
+fn split_time(t: i32) -> (i32, i32, i32) {
+    let seconds = t / 64;
+    let hundredths = (t - seconds * 64) * 100 / 64;
+    (seconds / 60, seconds % 60, hundredths)
+}
+
+/// `Hud_BuildETimeString` (HUD.CPP, 0x800d45ec): the elapsed time `t` (64ths of a second,
+/// none below 0) in `sprites` as "mm:ss.hh" (the separators' sprites left alone).
+pub fn build_e_time_string(m: &mut Mem, sprites: u32, t: i32) {
+    let (minutes, seconds, hundredths) = split_time(t.max(0));
+    let minutes = minutes % 60;
+    for (k, digit) in [(0, minutes / 10), (1, minutes % 10), (3, seconds / 10), (4, seconds % 10), (6, hundredths / 10), (7, hundredths % 10)] {
+        set_digit(m, sprites, k, digit);
+    }
+}
+
+pub fn abi_build_e_time_string(c: &mut Cpu) {
+    build_e_time_string(&mut c.m, c.r[4], c.r[5] as i32);
+}
+
+/// A car's distance along the track (`Car_tObj` +920, in sixths of a metre).
+const CAR_DISTANCE: u32 = 920;
+/// The players' HUD settings (`checkpointHUD`, a word each): 2 miles.
+const CHECKPOINT_HUD: u32 = 0xC0;
+const HUD_MILES: i32 = 2;
+
+/// `Hud_BuildDistanceString` (HUD.CPP, 0x800d4778): player `p`'s car's distance (metres, or
+/// thousandths of a mile, the game's being 1607 m) in `sprites` as "d.ddd"; whether it fits
+/// (under 10000).
+pub fn build_distance_string(m: &mut Mem, sprites: u32, p: u32) -> bool {
+    let car = m.r32(crate::globals::HUMAN_RACE_CARS.wrapping_add(p << 2));
+    let mut d = (m.r32(car + CAR_DISTANCE) as i32).wrapping_mul(6).wrapping_abs();
+    if m.r32(GAME_SETUP.0.wrapping_add(CHECKPOINT_HUD).wrapping_add(p << 2)) as i32 == HUD_MILES {
+        d = d.wrapping_mul(1000) / 1607;
+    }
+    if d >= 10000 {
+        return false;
+    }
+    for (k, digit) in [(0, d / 1000), (2, d % 1000 / 100), (3, d % 100 / 10), (4, d % 10)] {
+        set_digit(m, sprites, k, digit);
+    }
+    true
+}
+
+pub fn abi_build_distance_string(c: &mut Cpu) {
+    c.r[2] = build_distance_string(&mut c.m, c.r[4], c.r[5]) as u32;
+}
+
+/// `Hud_BuildTimeString` (HUD.CPP, 0x800d4918): the time `t` (64ths of a second, its size) in
+/// `sprites` as "m:ss.hh".
+pub fn build_time_string(m: &mut Mem, sprites: u32, t: i32) {
+    let (minutes, seconds, hundredths) = split_time(t.wrapping_abs());
+    for (k, digit) in [(0, minutes % 10), (2, seconds / 10), (3, seconds % 10), (5, hundredths / 10), (6, hundredths % 10)] {
+        set_digit(m, sprites, k, digit);
+    }
+}
+
+pub fn abi_build_time_string(c: &mut Cpu) {
+    build_time_string(&mut c.m, c.r[4], c.r[5] as i32);
+}
+
+/// The minutes' and the seconds' marks by language (six each).
+const MINUTE_MARKS: u32 = 0x8013_EBBC;
+const SECOND_MARKS: u32 = 0x8013_EBC4;
+/// `Font_Getcharacter` (its +8: the character's width).
+const FONT_GET_CHARACTER: fn(&mut Cpu) = nfs4rc::f_800cc4a0;
+
+/// `Hud_BuildTimeSprites` (HUD.CPP, 0x800d3acc): `text` as the font's sprites from `x`, `y`,
+/// a pixel apart; its M and S the language's minutes' and seconds' marks.
+pub fn build_time_sprites(c: &mut Cpu, sprites: u32, text: u32, x: u32, y: u32) {
+    let m = &mut c.m;
+    let language = GAME_SETUP.user_setting().language(m) as u32;
+    let minute = m.r8(MINUTE_MARKS.wrapping_add(language)) as u32;
+    let second = m.r8(SECOND_MARKS.wrapping_add(language)) as u32;
+    let (mut sprite, mut x) = (sprites, x);
+    let mut k = 0;
+    loop {
+        let mut ch = c.m.r8(text.wrapping_add(k)) as u32;
+        if ch == 0 {
+            return;
+        }
+        if ch == b'M' as u32 {
+            ch = minute;
+        }
+        if ch == b'S' as u32 {
+            ch = second;
+        }
+        let glyph = call(c, FONT_GET_CHARACTER, &[ch]);
+        let advance = (c.m.r8(glyph + 8) as i8 as i32 + 1) as u32;
+        build_sprite_from_font(c, sprite, ch, x, y);
+        sprite = sprite.wrapping_add(SPRT_SIZE);
+        x = x.wrapping_add(advance);
+        k += 1;
+    }
+}
+
+pub fn abi_build_time_sprites(c: &mut Cpu) {
+    build_time_sprites(c, c.r[4], c.r[5], c.r[6], c.r[7]);
+}
+
+/// The HUD's primitives kept between frames: the flat quads (`gHudF4`, 168 bytes a player)
+/// and the textured ones (`gHudFT4`, 200 a player).
+const HUD_F4: u32 = 0x8013_F758;
+const HUD_FT4: u32 = 0x8013_F8A8;
+/// The map frame's colour and shapes: corners 14 to 17, the sides from 20 by kind, the
+/// joins 24; the map's background and its rim's shapes; its element in the places' table.
+const MAP_FRAME_COLOUR: u32 = 0xFF_5721;
+const MAP_BACKGROUND: u32 = 120;
+const MAP_RIM: [u32; 2] = [112, 113];
+const GREY: u32 = 0x80_8080;
+const MAP_ELEMENT: u32 = 14;
+
+/// `Hud_InitMapFrame` (HUD.CPP, 0x800d3720): player `p`'s map frame (`kind` 1: 30 pixels
+/// further left; its sides' shapes by kind) as sprites in the player's sprite buffer: the four
+/// corners, the top and bottom sides, the joins; the map's black back, its background
+/// (mirrored on a mirrored track) and its rim.
+pub fn init_map_frame(c: &mut Cpu, p: u32, kind: u32) {
+    let m = &mut c.m;
+    let sprites = m.r32(SPRITES[(p != 0) as usize]);
+    let f4 = HUD_F4 + if p != 0 { 168 } else { 0 };
+    let ft4 = HUD_FT4 + if p != 0 { 200 } else { 0 };
+    let dy = if p != 0 { (-13i32) as u32 } else { 0 };
+    let (corner_w, corner_h) = shape_wh(m, shape(14));
+    let (side_w, side_h) = shape_wh(m, shape(20));
+    let (join_w, join_h) = shape_wh(m, shape(24));
+    // the frame's place (the left as moved for kind 1; the right side's from the place itself)
+    let place = |m: &mut Mem| {
+        let at = m.r32(POSITIONS) + 4 * MAP_ELEMENT;
+        let x = m.r16(at) as i16 as i32 as u32;
+        let y = (m.r16(at + 2) as i16 as i32 as u32).wrapping_add(m.r32(MAP_OFFSET_Y)).wrapping_add(dy);
+        (x, y)
+    };
+    let (left, _) = place(m);
+    let x = if kind == 1 { left.wrapping_sub(30) } else { left };
+    m.w32(SPRITE_COLOR, MAP_FRAME_COLOUR);
+    m.w8(SPRITE_TRANSPARENT, 0);
+    let right = |x0: u32| x0.wrapping_add(corner_w).wrapping_add(side_w);
+    let bottom = corner_h.wrapping_add(join_h);
+    let sprite = |k: u32| sprites.wrapping_add(1260 + SPRT_SIZE * k);
+    let (x0, y) = place(m);
+    build_sprite2(m, sprite(0), 14, x, y);
+    build_sprite2(m, sprite(1), 15, right(x0), y);
+    build_sprite2(m, sprite(2), 16, x, y.wrapping_add(bottom));
+    build_sprite2(m, sprite(3), 17, right(x0), y.wrapping_add(bottom));
+    let side = kind + 20;
+    let mid = x.wrapping_add(corner_w);
+    build_sprite2(m, sprite(4), side, mid, y);
+    build_sprite2(m, sprite(5), side, mid, y.wrapping_add(bottom).wrapping_add(corner_h.wrapping_sub(side_h)));
+    build_sprite2(m, sprite(6), 24, x, y.wrapping_add(corner_h));
+    build_sprite2(m, sprite(7), 24, right(x0).wrapping_add(corner_w.wrapping_sub(join_w)), y.wrapping_add(corner_h));
+    build_f4(m, f4 + 96, true, 0, 0, 45, 48, 0);
+    if GAME_SETUP.mirror_track(m) != 0 {
+        build_map_mirror_ft4(m, ft4, shape(MAP_BACKGROUND), 0, 0, GREY, true);
+    } else {
+        build_ft4(m, ft4, shape(MAP_BACKGROUND), 0, 0, GREY, true);
+    }
+    for (k, rim) in MAP_RIM.into_iter().enumerate() {
+        let at = ft4 + 40 + 80 * k as u32;
+        build_ft4(m, at, shape(rim), 0, 0, GREY, true);
+        let (w, _) = shape_wh(m, shape(rim));
+        build_mirror_ft4(m, at + 40, shape(rim), w, 0, GREY, true);
+    }
+}
+
+pub fn abi_init_map_frame(c: &mut Cpu) {
+    init_map_frame(c, c.r[4], c.r[5]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,7 +682,7 @@ mod tests {
         let m = &mut c.m;
         m.w32(gpu::OT, OT_ENTRY);
         m.w32(gpu::NEXT_PRIM, PRIMS);
-        for k in (0..0x400).step_by(4) {
+        for k in (0..0x1000).step_by(4) {
             m.w32(PRIMS + k, rng.next() as u32);
         }
         m.w32(OT_ENTRY, rng.next() as u32);
@@ -503,6 +697,10 @@ mod tests {
 
     fn coord(r: &mut Rng) -> u32 {
         [0, 1, 255, 319, 512, (-3i32) as u32, 0x8000, r.next() as u32 & 0x3FF][pick(r, 8) as usize]
+    }
+
+    fn time(r: &mut Rng) -> u32 {
+        [0, 63, 64, 3839, 3840, 383_999, 384_000, (-1i32) as u32, (-3840i32) as u32, i32::MIN as u32, r.next() as u32 & 0xFF_FFFF][pick(r, 11) as usize]
     }
 
     fn shape_arg(r: &mut Rng) -> u32 {
@@ -534,6 +732,41 @@ mod tests {
                 vec![pick(r, 3), coord(r), coord(r), coord(r), coord(r), r.next() as u32, r.next() as u32, r.next() as u32]
             }),
             ("uppercase", 0x800d_3618, nfs4rc::f_800d3618, |_, _| vec![TEXT]),
+            ("Hud_InitTables", 0x800d_45c0, nfs4rc::f_800d45c0, |c, r| {
+                GAME_SETUP.set_num_player_race_cars(&mut c.m, pick(r, 3) as i32);
+                vec![]
+            }),
+            ("Hud_BuildETimeString", 0x800d_45ec, nfs4rc::f_800d45ec, |_, r| vec![PRIMS + 0x100, time(r)]),
+            ("Hud_BuildTimeString", 0x800d_4918, nfs4rc::f_800d4918, |_, r| vec![PRIMS + 0x100, time(r)]),
+            ("Hud_BuildDistanceString", 0x800d_4778, nfs4rc::f_800d4778, |c, r| {
+                let p = pick(r, 2);
+                let m = &mut c.m;
+                let car = m.r32(crate::globals::HUMAN_RACE_CARS + 4 * p);
+                if car != 0 {
+                    m.w32(car + CAR_DISTANCE, [0, 1666, 1667, 16_666, (-5000i32) as u32, r.next() as u32 & 0xFFFF][pick(r, 6) as usize]);
+                }
+                m.w32(GAME_SETUP.0 + CHECKPOINT_HUD + 4 * p, pick(r, 4));
+                vec![PRIMS + 0x100, p]
+            }),
+            ("Hud_BuildTimeSprites", 0x800d_3acc, nfs4rc::f_800d3acc, |c, r| {
+                // (the marks' tables have six languages: the original copies them to its stack)
+                GAME_SETUP.user_setting().set_language(&mut c.m, pick(r, 6) as i32);
+                let n = pick(r, 10);
+                for k in 0..12 {
+                    let ch = if k < n { [b'M', b'S', b'0', b'9', b':', b' ', b'a'][pick(r, 7) as usize] } else { 0 };
+                    c.m.w8(TEXT + k, ch);
+                }
+                vec![PRIMS + 0x100, TEXT, coord(r), coord(r)]
+            }),
+            ("Hud_InitMapFrame", 0x800d_3720, nfs4rc::f_800d3720, |c, r| {
+                let m = &mut c.m;
+                m.w32(MAP_OFFSET_Y, [0, 8, (-6i32) as u32][pick(r, 3) as usize]);
+                crate::globals::I32(GAME_SETUP.0 + 0x2C).set(m, pick(r, 2) as i32);
+                // (both players' sprite buffers somewhere: the second's is none alone)
+                m.w32(SPRITES[0], PRIMS);
+                m.w32(SPRITES[1], PRIMS + 0x800);
+                vec![pick(r, 2), pick(r, 3)]
+            }),
             ("Hud_CreateHudViews", 0x800d_27e0, nfs4rc::f_800d27e0, |c, r| {
                 // the setup's split screen, players, opponents and cars' classes
                 let gs = GAME_SETUP;

@@ -677,6 +677,12 @@
 800d3618 uppercase
 800d3678 Hud_Kill
 800d36c8 Hud_Init0
+800d3720 Hud_InitMapFrame
+800d3acc Hud_BuildTimeSprites
+800d45c0 Hud_InitTables
+800d45ec Hud_BuildETimeString
+800d4778 Hud_BuildDistanceString
+800d4918 Hud_BuildTimeString
 
 # FECARS.CPP (the front end)
 800162d8 tCarManager::Initialize
