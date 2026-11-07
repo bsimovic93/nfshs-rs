@@ -90,6 +90,7 @@ pub mod movie;
 pub mod newton;
 pub mod physics;
 pub mod psxfront;
+pub mod replay;
 pub mod rpause;
 pub mod schedule;
 pub mod screenaudio;
@@ -1692,6 +1693,22 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x800a_cc38, "Physics_CalculateRSControlDesiredPosition", physics::abi_calculate_rs_control_desired_position),
     func(0x800a_cdf8, "Physics_Real", physics::abi_real),
     func(0x800a_e1dc, "Physics_SimCar", physics::abi_sim_car),
+    func_ret(0x800b_4920, "Replay_Compress", replay::abi_compress),
+    func_ret(0x800b_49e4, "Replay_Decompress", replay::abi_decompress),
+    func(0x800b_4a74, "Replay_InitReplay", replay::abi_init_replay),
+    func(0x800b_4c18, "Replay_ResetReplay", replay::abi_reset_replay),
+    func(0x800b_4d70, "Replay_StoringReplay", replay::abi_storing_replay),
+    func(0x800b_4d90, "Replay_StoringControllerData", replay::abi_storing_controller_data),
+    func_ret(0x800b_515c, "Replay_RetreivingControllerData", replay::abi_retreiving_controller_data),
+    func(0x800b_54f8, "Replay_SaveInput", replay::abi_save_input),
+    func(0x800b_580c, "Replay_GetInput", replay::abi_get_input),
+    func(0x800b_5c6c, "Replay_SaveReplay", replay::abi_save_replay),
+    func(0x800b_5cf8, "Replay_LoadReplay", replay::abi_load_replay),
+    func(0x800b_5d00, "Replay_DoReplay", replay::abi_do_replay),
+    func(0x800b_5d44, "Replay_GetInterfaceKey", replay::abi_get_interface_key),
+    func(0x800b_61d4, "Replay_LoadCameraFile", replay::abi_load_camera_file),
+    func(0x800b_6540, "Replay_ReplayChooseCamera", replay::abi_choose_camera),
+    func(0x800b_67e8, "Replay_ReplayFindClosestCamera", replay::abi_find_closest_camera),
     func_ret(0x800b_6e90, "Sched_ExecuteCheck", schedule::abi_execute_check),
     func_ret(0x800b_6fc4, "Sched_CreateNewSchedule", schedule::abi_create_new_schedule),
     func(0x800b_7034, "Sched_CleanUpSchedule", schedule::abi_clean_up_schedule),

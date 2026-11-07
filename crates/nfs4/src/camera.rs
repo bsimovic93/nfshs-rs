@@ -736,7 +736,7 @@ const FINISH_ANIM: u32 = 1;
 /// Replays' TV cameras: how many are set, one chosen by the slice (`0x800b67e8`); the spline
 /// camera's mode and its fallback's.
 const NUM_VALID_CAMS: u32 = 0x8013_E6D4;
-const REPLAY_CHOOSE_CAMERA: fn(&mut Cpu) = nfs4rc::f_800b67e8;
+const REPLAY_FIND_CLOSEST_CAMERA: u32 = 0x800b_67e8;
 const MODE_SPLINE: u32 = 11;
 /// A setup car's first camera (`camera[0]`).
 const SETUP_CAMERA: u32 = 0xA4;
@@ -810,7 +810,7 @@ pub fn update_anim_cam(c: &mut Cpu, p: u32) {
                 if REPLAY_MODE.get(m) == 2 {
                     if m.r32(NUM_VALID_CAMS) != 0 {
                         let slice = anchor_slice(m, cam) as i16 as i32 as u32;
-                        call(c, REPLAY_CHOOSE_CAMERA, &[p, slice]);
+                        call_addr(c, REPLAY_FIND_CLOSEST_CAMERA, &[p, slice]);
                     } else {
                         call_addr(c, SET_MODE, &[p, MODE_SPLINE]);
                         cam.set_spline_mode(&mut c.m, 3);
@@ -1278,7 +1278,7 @@ pub fn update(c: &mut Cpu) {
             cam.set_target(m, crate::types::NewtonObj(human));
             if REPLAY_MODE.get(m) >= 2 && m.r32(REPLAY_CAMERA.wrapping_add(p << 4) + REPLAY_CAMERA_MODE) == MODE_REPLAY_TV {
                 let slice = anchor_slice(m, cam) as i16 as i32 as u32;
-                call(c, REPLAY_CHOOSE_CAMERA, &[p, slice]);
+                call_addr(c, REPLAY_FIND_CLOSEST_CAMERA, &[p, slice]);
             }
         }
         let mode = cam.mode(&mut c.m);

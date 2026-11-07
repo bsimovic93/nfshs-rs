@@ -306,6 +306,22 @@
 80092ad4 Control_Human
 
 # SCHEDULE.CPP
+800b4920 Replay_Compress
+800b49e4 Replay_Decompress
+800b4a74 Replay_InitReplay
+800b4c18 Replay_ResetReplay
+800b4d70 Replay_StoringReplay
+800b4d90 Replay_StoringControllerData
+800b515c Replay_RetreivingControllerData
+800b54f8 Replay_SaveInput
+800b580c Replay_GetInput
+800b5c6c Replay_SaveReplay
+800b5cf8 Replay_LoadReplay
+800b5d00 Replay_DoReplay
+800b5d44 Replay_GetInterfaceKey
+800b61d4 Replay_LoadCameraFile
+800b6540 Replay_ReplayChooseCamera
+800b67e8 Replay_ReplayFindClosestCamera
 800b6e90 Sched_ExecuteCheck
 800b6fc4 Sched_CreateNewSchedule
 800b7034 Sched_CleanUpSchedule
