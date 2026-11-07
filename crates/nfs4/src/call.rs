@@ -51,6 +51,37 @@ pub fn call_addr(c: &mut Cpu, addr: u32, args: &[u32]) -> u32 {
     invoke(c, args, |c| c.call(addr)).0
 }
 
+/// The functions the recompiled code always calls through `Cpu::call` so the host sees them
+/// (`tools/hook_funcs.txt`, the recompiler's list).
+fn hooked(addr: u32) -> bool {
+    static HOOKED: std::sync::OnceLock<std::collections::HashSet<u32>> = std::sync::OnceLock::new();
+    HOOKED
+        .get_or_init(|| {
+            include_str!("../../../tools/hook_funcs.txt")
+                .lines()
+                .filter_map(|l| l.split_whitespace().next())
+                .filter_map(|w| u32::from_str_radix(w, 16).ok())
+                .collect()
+        })
+        .contains(&addr)
+}
+
+/// Call the game's function at `addr` with `args` as the original's `jal` does: to its port
+/// if it has one, else straight into the recompiled code, and through the host (`Cpu::call`,
+/// which ticks and restarts the host's spin count) only for the functions the host replaces
+/// or hooks. [`call_addr`] always goes through the host, as a `jalr` does: in code that runs
+/// while the race loads that changes when the host's clock moves on (see [`ticks`]).
+pub fn call_jal(c: &mut Cpu, addr: u32, args: &[u32]) -> u32 {
+    invoke(c, args, |c| jal(c, addr)).0
+}
+
+/// [`call_jal`]'s call alone, the arguments already set (for the bit-exact ports' `Saved`).
+pub fn jal(c: &mut Cpu, addr: u32) {
+    if hooked(addr) || !((c.decomp)(c, addr) || nfs4rc::dispatch(c, addr)) {
+        c.call(addr);
+    }
+}
+
 /// [`call_addr`] for a function returning a double or a 64-bit value.
 pub fn call_addr64(c: &mut Cpu, addr: u32, args: &[u32]) -> (u32, u32) {
     invoke(c, args, |c| c.call(addr))
@@ -84,4 +115,14 @@ pub fn with_buffer<R>(c: &mut Cpu, size: u32, f: impl FnOnce(&mut Cpu, u32) -> R
     let r = f(c, at);
     c.r[29] = sp;
     r
+}
+
+/// `n` of the original's loop passes: the recompiled code ticks the CPU at each backward branch
+/// taken, and the host takes 20,000 ticks without a call to it for the game spinning (moving
+/// its clock on), so ports of code that runs while the race loads tick as often as their
+/// originals (DECOMP.md, "the spin-tick trap").
+pub fn ticks(c: &mut Cpu, n: u32) {
+    for _ in 0..n {
+        c.tick();
+    }
 }

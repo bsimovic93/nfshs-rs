@@ -73,7 +73,7 @@ const TRS_PROJ_SET_VIEW_ENVIRO: u32 = 0x800e_2614;
 pub fn set_camera(c: &mut Cpu, view: u32) {
     let (player, kind) = (c.m.r32(view + 4), c.m.r32(view));
     call_addr(c, CAMERA_GET_VIEW_INFO, &[player, view + 8, kind]);
-    call_addr(c, TRS_PROJ_SET_VIEW_ENVIRO, &[view]);
+    crate::call::call_jal(c, TRS_PROJ_SET_VIEW_ENVIRO, &[view]);
 }
 
 pub fn abi_set_camera(c: &mut Cpu) {
@@ -810,7 +810,7 @@ pub fn update_anim_cam(c: &mut Cpu, p: u32) {
                 if REPLAY_MODE.get(m) == 2 {
                     if m.r32(NUM_VALID_CAMS) != 0 {
                         let slice = anchor_slice(m, cam) as i16 as i32 as u32;
-                        call_addr(c, REPLAY_FIND_CLOSEST_CAMERA, &[p, slice]);
+                        crate::call::call_jal(c, REPLAY_FIND_CLOSEST_CAMERA, &[p, slice]);
                     } else {
                         call_addr(c, SET_MODE, &[p, MODE_SPLINE]);
                         cam.set_spline_mode(&mut c.m, 3);
@@ -1278,7 +1278,7 @@ pub fn update(c: &mut Cpu) {
             cam.set_target(m, crate::types::NewtonObj(human));
             if REPLAY_MODE.get(m) >= 2 && m.r32(REPLAY_CAMERA.wrapping_add(p << 4) + REPLAY_CAMERA_MODE) == MODE_REPLAY_TV {
                 let slice = anchor_slice(m, cam) as i16 as i32 as u32;
-                call_addr(c, REPLAY_FIND_CLOSEST_CAMERA, &[p, slice]);
+                crate::call::call_jal(c, REPLAY_FIND_CLOSEST_CAMERA, &[p, slice]);
             }
         }
         let mode = cam.mode(&mut c.m);
@@ -1766,7 +1766,7 @@ fn leave_mode(c: &mut Cpu, p: u32) {
     let old = cam.mode(&mut c.m) as u16;
     if old.wrapping_sub(11) < 2 {
         c.m.w32(GEOM_SCREEN, FINISH_GEOM_SCREEN);
-        call_addr(c, TRS_PROJ_SET_PROJECTION, &[0, 0, 320, 240]);
+        crate::call::call_jal(c, TRS_PROJ_SET_PROJECTION, &[0, 0, 320, 240]);
     }
     if (cam.mode(&mut c.m) as u16).wrapping_sub(2) >= 6 {
         reset_rel_pos(&mut c.m, p + 1);

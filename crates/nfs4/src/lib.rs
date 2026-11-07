@@ -2146,6 +2146,11 @@ pub(crate) mod test_util {
             return true;
         }
         c.r[2] = match addr {
+            // `LoadImage` (the host's): the rectangle and its pixels hashed into LOADED_IMAGES
+            0x800E_E3EC => {
+                load_image(c);
+                0
+            }
             // `PadGetState`: what PAD_STATE holds, a stable pad (6) when it's 0
             0x800F_07FC => match c.m.r32(PAD_STATE) {
                 0 => 6,
@@ -2195,6 +2200,24 @@ pub(crate) mod test_util {
     pub const DIRECTORY: u32 = 0x8014_8C00;
     pub const DIRECTORY_MARK: u32 = 0x00D1_2E57;
 
+    /// What the test CPUs' `LoadImage` was given (VRAM isn't RAM, so the checks would miss
+    /// it): how many images, then a hash of each one's rectangle and pixels in turn.
+    pub const LOADED_IMAGES: u32 = 0x8014_8AC4;
+
+    fn load_image(c: &mut Cpu) {
+        let (rect, data) = (c.r[4], c.r[5]);
+        let (w, h) = (c.m.r16(rect.wrapping_add(4)) as u32, c.m.r16(rect.wrapping_add(6)) as u32);
+        let mut hash = c.m.r32(LOADED_IMAGES + 4);
+        let words = (0..2).map(|k| c.m.r32(rect.wrapping_add(4 * k))).collect::<Vec<_>>();
+        let pixels = (0..(w * h).min(4096)).map(|k| c.m.r16(data.wrapping_add(2 * k)) as u32).collect::<Vec<_>>();
+        for v in words.into_iter().chain(pixels) {
+            hash = (hash ^ v).wrapping_mul(0x0100_0193);
+        }
+        c.m.w32(LOADED_IMAGES + 4, hash);
+        let n = c.m.r32(LOADED_IMAGES);
+        c.m.w32(LOADED_IMAGES, n.wrapping_add(1));
+    }
+
     /// Where the test CPUs answer `PadInfoMode` from: the count, then seven modes.
     pub const PAD_MODES: u32 = 0x8014_8AD0;
 
@@ -2235,25 +2258,36 @@ pub(crate) mod test_util {
             let (state, scratch) = (c.m.ram.clone(), c.m.scratch);
             c.rand_seed = seed;
             c.decomp = plain;
+            let t0 = c.ticks;
             let want_v = run(&mut c, original, &a);
+            let want_ticks = c.ticks - t0;
             let (want, want_seed) = (c.m.ram.clone(), c.rand_seed);
             c.m.ram.copy_from_slice(&state);
             c.m.scratch = scratch;
             c.rand_seed = seed;
             c.decomp = crate::decomp;
+            let t0 = c.ticks;
             let got_v = port(&mut c, &a);
+            let got_ticks = c.ticks - t0;
             busy += !ram_diff(&state, &want).is_empty() as u32;
             let diff = ram_diff(&want, &c.m.ram);
-            if !diff.is_empty() || got_v.is_some_and(|v| v != want_v) || c.rand_seed != want_seed {
+            let ticks_differ = COMPARE_TICKS.get() && got_ticks != want_ticks;
+            if !diff.is_empty() || got_v.is_some_and(|v| v != want_v) || c.rand_seed != want_seed || ticks_differ {
                 mismatches += 1;
                 if mismatches <= 5 {
-                    eprintln!("{name} case {i}: returned {got_v:x?}, the original {want_v:#x}; rand state {:#x}, the original {want_seed:#x}", c.rand_seed);
+                    eprintln!("{name} case {i}: returned {got_v:x?}, the original {want_v:#x}; rand state {:#x}, the original {want_seed:#x}; {got_ticks} ticks, the original {want_ticks}", c.rand_seed);
                     report(name, i, &want, &c.m.ram, &diff);
                 }
             }
         }
         eprintln!("{name}: {busy} of {cases} cases changed RAM");
         assert_eq!(mismatches, 0, "{name} differs from the original");
+    }
+
+    thread_local! {
+        /// Whether [`against_original`] also compares the ticks each run takes (the loops'
+        /// backward branches, which the host's spin detection counts as time while loading).
+        pub static COMPARE_TICKS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     /// The scratchpad stack's top under a race's frames, for [`same_stack`].

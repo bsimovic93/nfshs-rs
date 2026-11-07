@@ -443,7 +443,7 @@ pub fn abi_main_game_loop(c: &mut Cpu) {
 fn input_tick(c: &mut Cpu, r: &mut Saved) {
     let m = &mut c.m;
     if REPLAY_MODE.get(m) == REPLAY_WATCH && SIM_VAR.pause_sim(m) == 0 {
-        r.call_ptr(c, 0x800b_5d44, &[], 0x800b_7b58); // Replay_GetInterfaceKey
+        r.call(c, |c| crate::call::jal(c, 0x800b_5d44), &[], 0x800b_7b58); // Replay_GetInterfaceKey
         let m = &mut c.m;
         if REPLAY_INTERFACE.depressed(m) == 4 {
             let end = REPLAY_INTERFACE.end(m);

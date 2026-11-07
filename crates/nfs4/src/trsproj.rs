@@ -5,7 +5,7 @@
 //! Written readable from the start (step 3 of DECOMP.md's plan): the game's data and the GTE's
 //! registers as the original leaves them, the stack and CPU registers free.
 
-use crate::call::{call_addr, with_buffer};
+use crate::call::{call_jal, with_buffer};
 use crate::globals::GAME_SETUP;
 use ps1rt::{Cpu, Mem};
 
@@ -88,7 +88,7 @@ fn set_offset(c: &mut Cpu, x: i32, y: i32, w: i32, h: i32) {
 /// screen's centre that of the rectangle (x, y, w, h).
 pub fn set_projection(c: &mut Cpu, x: i32, y: i32, w: i32, h: i32) {
     let h_screen = c.m.r32(GEOM_SCREEN);
-    call_addr(c, SET_GEOM_SCREEN, &[h_screen]);
+    call_jal(c, SET_GEOM_SCREEN, &[h_screen]);
     set_offset(c, x, y, w, h);
 }
 
@@ -199,7 +199,7 @@ pub fn abi_trans_pt_n16(c: &mut Cpu) {
 pub fn transform_project_vertex(c: &mut Cpu, matrix: u32, pos: u32, n: i32, points: u32, out: u32) {
     with_buffer(c, 12, |c, moved| {
         for k in 0..n.max(0) as u32 {
-            call_addr(c, TRANSFORM, &[points.wrapping_add(12 * k), matrix, moved]);
+            call_jal(c, TRANSFORM, &[points.wrapping_add(12 * k), matrix, moved]);
             let m = &mut c.m;
             let v = out.wrapping_add(8 * k);
             for j in 0..3 {
@@ -310,6 +310,8 @@ mod tests {
             }
             ADDR.set(addr);
             let args_rng = std::cell::RefCell::new(Rng(0xC10 ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
+            // (not the ticks: this runs in race frames, which stay far from the host's spin count)
+            crate::test_util::COMPARE_TICKS.set(false);
             against_original(name, 400, 0xC11 + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), gte_port);
         }
     }

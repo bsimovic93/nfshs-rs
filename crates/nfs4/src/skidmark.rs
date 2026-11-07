@@ -9,7 +9,7 @@
 //! Written readable from the start (step 3 of DECOMP.md's plan): the game's data as the
 //! original leaves it, the stack and registers free.
 
-use crate::call::{call_addr, with_buffer};
+use crate::call::{call_jal, with_buffer};
 use crate::fixed::{fastintcos, fastintsin, fixedmult, intatan};
 use crate::globals::GAME_SETUP;
 use crate::types::Coord;
@@ -318,7 +318,7 @@ pub fn onyx_build_facets(c: &mut Cpu, view: u32) {
             // (the y's: the matrix's second column)
             m.w32(ctrl + 4 * k, if k % 3 == 1 { v.wrapping_neg() } else { v });
         }
-        call_addr(c, DRAW_CTRL_SKIDMARK, &[ctrl]);
+        call_jal(c, DRAW_CTRL_SKIDMARK, &[ctrl]);
     });
 }
 
@@ -334,7 +334,7 @@ pub fn init_skidmark(c: &mut Cpu) {
         c.m.w32(MAX_CHUNKS, CHUNKS_SPLIT);
     }
     let max = c.m.r32(MAX_CHUNKS);
-    let chunks = call_addr(c, RESERVE, &[NAME, max.wrapping_mul(CHUNK_SIZE), 0]);
+    let chunks = call_jal(c, RESERVE, &[NAME, max.wrapping_mul(CHUNK_SIZE), 0]);
     let m = &mut c.m;
     m.w16(chunks + CHUNK_N, 0);
     m.w32(CHUNKS, chunks);
@@ -362,7 +362,7 @@ pub fn abi_restart_skidmark(c: &mut Cpu) {
 pub fn kill_skidmark(c: &mut Cpu) {
     let chunks = c.m.r32(CHUNKS);
     if chunks != 0 {
-        call_addr(c, PURGE, &[chunks]);
+        call_jal(c, PURGE, &[chunks]);
     }
     c.m.w32(CHUNKS, 0);
 }
@@ -557,6 +557,8 @@ mod tests {
             }
             ADDR.set(addr);
             let args_rng = std::cell::RefCell::new(Rng(0xB10 ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
+            // (not the ticks: this runs in race frames, which stay far from the host's spin count)
+            crate::test_util::COMPARE_TICKS.set(false);
             against_original(name, 600, 0xB11 + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), via_abi);
         }
     }

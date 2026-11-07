@@ -18,7 +18,7 @@
 //! the part: what the earlier parts left there, and before them the stack's leftovers. The port
 //! keeps the buffer across the parts as the original does and starts it zeroed.
 
-use crate::call::{call_addr, with_buffer};
+use crate::call::{call_jal, ticks, with_buffer};
 use crate::globals::{GAME_SETUP, HUMAN_RACE_CARS, INPUT_SIM, NUM_HUMAN_RACE_CARS, NUM_SLICES, REPLAY_INTERFACE, REPLAY_MODE, SIM_GLOBAL, SIM_VAR};
 use crate::types::{Car, CameraCamSlot, NewtonObj, ReplayBuffer, ReplayCameraModes};
 use ps1rt::{Cpu, Mem};
@@ -254,12 +254,14 @@ pub fn abi_decompress(c: &mut Cpu) {
     c.r[2] = decompress(&mut c.m, c.r[4]);
 }
 
-/// `n` bytes copied from `from` to `to`, a word at a time (the setup's copies).
-fn copy(m: &mut Mem, to: u32, from: u32, n: u32) {
+/// `n` bytes copied from `from` to `to`, a word at a time (the setup's copies; the original's
+/// loop copies 16 bytes a pass, ticking at each but the last).
+fn copy(c: &mut Cpu, to: u32, from: u32, n: u32) {
     for k in (0..n).step_by(4) {
-        let w = m.r32(from + k);
-        m.w32(to + k, w);
+        let w = c.m.r32(from + k);
+        c.m.w32(to + k, w);
     }
+    ticks(c, (n / 16).saturating_sub(1));
 }
 
 /// `Replay_InitReplay` (REPLAY.CPP, 0x800b4a74): the race's replay mode from its setup, the
@@ -273,17 +275,20 @@ pub fn init_replay(c: &mut Cpu) {
     if REPLAY_MODE.get(m) == MODE_WATCHING {
         let settings = GAME_SETUP.0 + USER_SETTING;
         let kept: Vec<u32> = (0..USER_SETTING_SIZE).step_by(4).map(|k| m.r32(settings + k)).collect();
+        ticks(c, USER_SETTING_SIZE / 16 - 1);
         load_replay(c);
+        copy(c, GAME_SETUP.0, BUFFER.game_setup().0, SETUP_SIZE);
         let m = &mut c.m;
-        copy(m, GAME_SETUP.0, BUFFER.game_setup().0, SETUP_SIZE);
         for (k, &w) in kept.iter().enumerate() {
             m.w32(settings + 4 * k as u32, w);
         }
+        ticks(c, USER_SETTING_SIZE / 16 - 1);
+        let m = &mut c.m;
         let size = BUFFER.size(m);
         m.w32(GET_PTR, 0);
         m.w32(SIZE, size as u32);
     } else {
-        copy(m, BUFFER.game_setup().0, GAME_SETUP.0, SETUP_SIZE);
+        copy(c, BUFFER.game_setup().0, GAME_SETUP.0, SETUP_SIZE);
     }
 }
 
@@ -299,12 +304,12 @@ pub fn abi_init_replay(c: &mut Cpu) {
 pub fn reset_replay(c: &mut Cpu) {
     let mode = REPLAY_MODE.get(&mut c.m);
     if (mode as u32) < 2 {
-        // (a tick a byte, the original's loop branching back: the host takes a long enough
-        // run of them without a call to it for time passing, as at the race's load)
+        // (the original's loop branches back at each byte but the last: the host takes a long
+        // enough run of such ticks without a call to it for time passing, as at the race's load)
         for k in (0..DATA_SIZE as u32).rev() {
             c.m.w8(DATA + k, 0);
-            c.tick();
         }
+        ticks(c, DATA_SIZE as u32 - 1);
         let m = &mut c.m;
         m.w32(STORE_PTR, 0);
         m.w32(GET_PTR, 0);
@@ -333,7 +338,10 @@ pub fn reset_replay(c: &mut Cpu) {
             cam.set_camera_mode(&mut c.m, mode);
             cam.set_cut_to_next_camera(&mut c.m, 0);
         }
+        c.tick();
     }
+    // (the players' ticks cleared: a loop of two)
+    c.tick();
     let m = &mut c.m;
     m.w32(counter(1), 0);
     m.w32(counter(0), 0);
@@ -348,7 +356,7 @@ pub fn abi_reset_replay(c: &mut Cpu) {
 /// `Replay_StoringReplay` (REPLAY.CPP, 0x800b4d70): the race's end: the replay kept (its setup
 /// and length), the TV cameras forgotten.
 pub fn storing_replay(c: &mut Cpu) {
-    save_replay(&mut c.m);
+    save_replay(c);
     c.m.w32(NUM_VALID_CAMS, 0);
 }
 
@@ -427,7 +435,7 @@ pub fn abi_retreiving_controller_data(c: &mut Cpu) {
 /// steering to 1/4 around 64, the gas and brake to 1/8, the flags, the car's ramping of the
 /// first three in their bit 7); a full record into the buffer.
 pub fn save_input(c: &mut Cpu, p: u32) {
-    call_addr(c, INPUT_FETCH, &[p]);
+    call_jal(c, INPUT_FETCH, &[p]);
     let m = &mut c.m;
     let tick = m.r32(counter(p));
     let at = record(p).wrapping_add(tick);
@@ -464,7 +472,7 @@ pub fn abi_save_input(c: &mut Cpu) {
 /// the car's ramping and the pad from the tick's bytes (the ramping bits cleared from them),
 /// once it has run out no input; then a TV camera chosen by the car's slice.
 pub fn get_input(c: &mut Cpu, p: u32) {
-    call_addr(c, INPUT_FETCH, &[p]);
+    call_jal(c, INPUT_FETCH, &[p]);
     let m = &mut c.m;
     if m.r32(counter(p)) == 0 {
         let at = m.r32(GET_PTR);
@@ -525,19 +533,21 @@ pub fn abi_get_input(c: &mut Cpu) {
 
 /// `Replay_SaveReplay` (REPLAY.CPP, 0x800b5c6c): the replay kept with the race's setup (to be
 /// watched: mode 2) and its length (the ticks so far, unless the buffer filled first).
-pub fn save_replay(m: &mut Mem) {
+pub fn save_replay(c: &mut Cpu) {
+    let m = &mut c.m;
     if REPLAY_MODE.get(m) == MODE_RECORDING {
         let ticks = SIM_GLOBAL.game_ticks(m);
         m.w32(SIZE, ticks as u32);
     }
-    copy(m, BUFFER.game_setup().0, GAME_SETUP.0, SETUP_SIZE);
+    copy(c, BUFFER.game_setup().0, GAME_SETUP.0, SETUP_SIZE);
+    let m = &mut c.m;
     BUFFER.game_setup().set_replay_mode(m, MODE_WATCHING);
     let size = m.r32(SIZE);
     BUFFER.set_size(m, size as i32);
 }
 
 pub fn abi_save_replay(c: &mut Cpu) {
-    save_replay(&mut c.m);
+    save_replay(c);
 }
 
 /// `Replay_LoadReplay` (REPLAY.CPP, 0x800b5cf8): nothing (the replay stays in RAM).
@@ -563,11 +573,11 @@ pub fn abi_do_replay(c: &mut Cpu) {
 }
 
 fn pressed(c: &mut Cpu, key: u32) -> bool {
-    call_addr(c, INPUT_INTERFACE, &[key, 1]) != 0
+    call_jal(c, INPUT_INTERFACE, &[key, 1]) != 0
 }
 
 fn play(c: &mut Cpu, sound: u32) {
-    call_addr(c, PLAY_PAUSE_SOUND, &[sound]);
+    call_jal(c, PLAY_PAUSE_SOUND, &[sound]);
 }
 
 /// `Replay_GetInterfaceKey` (REPLAY.CPP, 0x800b5d44): a tick of the replay's controls. A press
@@ -637,7 +647,7 @@ pub fn get_interface_key(c: &mut Cpu) {
         play(c, SOUND_ACCEPT);
     }
     if SIM_VAR.quick_pause_sim(&mut c.m) != 0 {
-        call_addr(c, CAMERA_UPDATE, &[]);
+        call_jal(c, CAMERA_UPDATE, &[]);
     }
 }
 
@@ -671,7 +681,7 @@ fn next_camera(c: &mut Cpu, players: u32) {
                 find_closest_camera(c, p, slice);
                 CAMERAS.at(p).set_camera_mode(&mut c.m, CAMERA_TV);
             } else {
-                call_addr(c, CAMERA_SET_MODE, &[p, CAMERA_NO_TV_SWITCH]);
+                call_jal(c, CAMERA_SET_MODE, &[p, CAMERA_NO_TV_SWITCH]);
             }
         }
     } else {
@@ -685,7 +695,7 @@ fn next_camera(c: &mut Cpu, players: u32) {
             let car = human(m, p);
             info.set_target(m, NewtonObj(car.0));
             let mode = list_mode(m);
-            call_addr(c, CAMERA_SET_MODE, &[p, mode]);
+            call_jal(c, CAMERA_SET_MODE, &[p, mode]);
             let mode = list_mode(&mut c.m);
             CAMERAS.at(p).set_camera_mode(&mut c.m, mode as i32);
         }
@@ -704,16 +714,16 @@ pub fn load_camera_file(c: &mut Cpu) {
         let handle = name + 112;
         c.m.w32(handle, 0);
         let path = c.m.r32(TRACKS_PATH);
-        call_addr(c, SPRINTF, &[name, CAMERA_VIV, path]);
-        call_addr(c, ADD_BIG_FILE, &[name, BIG_FILE_SLOT, BIG_FILE_PRIORITY, handle]);
+        call_jal(c, SPRINTF, &[name, CAMERA_VIV, path]);
+        call_jal(c, ADD_BIG_FILE, &[name, BIG_FILE_SLOT, BIG_FILE_PRIORITY, handle]);
         let m = &mut c.m;
         let format = if GAME_SETUP.reverse_track(m) != 0 { TRACK_RHO_REVERSED } else { TRACK_RHO };
         let track = GAME_SETUP.track(m);
-        call_addr(c, SPRINTF, &[name, format, track as u32]);
-        let data = call_addr(c, LOAD_FILE, &[name, 0]);
+        call_jal(c, SPRINTF, &[name, format, track as u32]);
+        let data = call_jal(c, LOAD_FILE, &[name, 0]);
         c.m.w32(NUM_VALID_CAMS, 0);
         let handle = c.m.r32(handle);
-        call_addr(c, DEL_BIG_FILE, &[handle, BIG_FILE_PRIORITY]);
+        call_jal(c, DEL_BIG_FILE, &[handle, BIG_FILE_PRIORITY]);
         data
     });
     install_cameras(c, data);
@@ -729,10 +739,13 @@ fn install_cameras(c: &mut Cpu, data: u32) {
         slot.set_slice(m, -1);
         m.w32(slot.0, flags & !SLOT_ZOOM);
     }
+    // (each loop of the original's ticks at each pass but the last)
+    ticks(c, NUM_SLOTS - 1);
     if data == 0 {
         return;
     }
-    copy(m, SLOTS.0, data, NUM_SLOTS * CameraCamSlot::SIZE);
+    copy(c, SLOTS.0, data, NUM_SLOTS * CameraCamSlot::SIZE);
+    let m = &mut c.m;
     for k in 0..NUM_SLOTS {
         let slot = SLOTS.at(k);
         if slot.fov(m) != 0 {
@@ -742,7 +755,8 @@ fn install_cameras(c: &mut Cpu, data: u32) {
             slot.set_slice(m, -1);
         }
     }
-    call_addr(c, PURGE_MEM, &[data]);
+    ticks(c, NUM_SLOTS - 1);
+    call_jal(c, PURGE_MEM, &[data]);
     let m = &mut c.m;
     // (a bubble sort: by slice, the unused, -1, after the rest)
     for _ in 0..NUM_SLOTS - 1 {
@@ -752,15 +766,23 @@ fn install_cameras(c: &mut Cpu, data: u32) {
             if sb >= 0 && (sb < sa || sa < 0) {
                 let size = CameraCamSlot::SIZE;
                 let first: Vec<u32> = (0..size).step_by(4).map(|o| m.r32(a.0 + o)).collect();
-                copy(m, a.0, b.0, size);
+                // (the original's swap is unrolled: no loop)
+                for o in (0..size).step_by(4) {
+                    let w = m.r32(b.0 + o);
+                    m.w32(a.0 + o, w);
+                }
                 for (o, &w) in first.iter().enumerate() {
                     m.w32(b.0 + 4 * o as u32, w);
                 }
             }
         }
     }
+    // (the sort's two loops: the inner's 31 passes and the outer's each tick)
+    ticks(c, (NUM_SLOTS - 1) * NUM_SLOTS);
+    let m = &mut c.m;
     let n = m.r32(NUM_VALID_CAMS) as i32;
-    if GAME_SETUP.reverse_track(m) != 0 {
+    let reversed = GAME_SETUP.reverse_track(m) != 0;
+    if reversed {
         // (each camera takes the slice of the one before it, the first the last's)
         let last = SLOTS.at((n - 1) as u32).slice(m);
         for k in (0..n).rev() {
@@ -768,6 +790,7 @@ fn install_cameras(c: &mut Cpu, data: u32) {
             SLOTS.at(k as u32).set_slice(m, slice);
         }
     }
+    let turned = if reversed && n > 0 { n as u32 - 1 } else { 0 };
     let n = m.r32(NUM_VALID_CAMS) as i32;
     for k in 0..n.max(0) as u32 {
         let pos = SLOTS.at(k).pos();
@@ -777,6 +800,7 @@ fn install_cameras(c: &mut Cpu, data: u32) {
         pos.set_z(m, z << SLOT_POS_SHIFT);
         pos.set_y(m, y << SLOT_POS_SHIFT);
     }
+    ticks(c, turned + (n.max(1) - 1) as u32);
 }
 
 pub fn abi_load_camera_file(c: &mut Cpu) {
@@ -801,11 +825,11 @@ fn cut_to(c: &mut Cpu, p: u32) {
         let slot = SLOTS.at(cam.cut_to_next_camera(m) as u32);
         let spline = (m.r32(slot.0) >> 11) & 7;
         info.set_spline_mode(m, spline as i8);
-        call_addr(c, CAMERA_SET_MODE, &[p, CAMERA_SPLINE]);
+        call_jal(c, CAMERA_SET_MODE, &[p, CAMERA_SPLINE]);
     } else {
         let slot = SLOTS.at(cam.cut_to_next_camera(m) as u32);
         cam.set_default_camera(m, 1);
-        call_addr(c, CAMERA_REPLAY_UPDATE, &[p, slot.0]);
+        call_jal(c, CAMERA_REPLAY_UPDATE, &[p, slot.0]);
     }
 }
 
@@ -843,7 +867,7 @@ pub fn choose_camera(c: &mut Cpu, p: u32, slice: u32) {
     } else {
         let slot = SLOTS.at(cam.cut_to_next_camera(m) as u32);
         cam.set_default_camera(m, 1);
-        call_addr(c, CAMERA_REPLAY_UPDATE, &[p, slot.0]);
+        call_jal(c, CAMERA_REPLAY_UPDATE, &[p, slot.0]);
     }
 }
 
@@ -874,6 +898,8 @@ pub fn find_closest_camera(c: &mut Cpu, p: u32, slice: u32) {
     let half = n / 2;
     let cams = m.r32(NUM_VALID_CAMS) as i32;
     let mut best = 0;
+    // (the search's loop ticks at each camera passed)
+    let mut passed = 0;
     for i in 0..cams.max(0) {
         let next = if i + 1 < cams { i + 1 } else { 0 };
         let here = SLOTS.at(i as u32).slice(m) as i32;
@@ -884,7 +910,10 @@ pub fn find_closest_camera(c: &mut Cpu, p: u32, slice: u32) {
             best = i;
             break;
         }
+        passed += 1;
     }
+    ticks(c, passed);
+    let m = &mut c.m;
     CAMERAS.at(p).set_cut_to_next_camera(m, best);
     cut_to(c, p);
 }
@@ -1098,6 +1127,10 @@ mod tests {
             ("Replay_Decompress", 0x800b_49e4, nfs4rc::f_800b49e4, |c, r| vec![[PART_IN, DATA + c.m.r32(GET_PTR)][pick(r, 2) as usize]]),
             ("Replay_InitReplay", 0x800b_4a74, nfs4rc::f_800b4a74, |_, _| vec![]),
             ("Replay_ResetReplay", 0x800b_4c18, nfs4rc::f_800b4c18, |_, _| vec![]),
+            ("Replay_ResetReplay (recording)", 0x800b_4c18, nfs4rc::f_800b4c18, |c, r| {
+                REPLAY_MODE.set(&mut c.m, [0, 1, -1][pick(r, 3) as usize]);
+                vec![]
+            }),
             ("Replay_StoringReplay", 0x800b_4d70, nfs4rc::f_800b4d70, |_, _| vec![]),
             ("Replay_StoringControllerData", 0x800b_4d90, nfs4rc::f_800b4d90, |c, _| (0..32).map(|k| c.m.r32(RECORD_IN + 4 * k)).collect()),
             ("Replay_RetreivingControllerData", 0x800b_515c, nfs4rc::f_800b515c, |_, _| vec![RECORD_OUT]),
@@ -1143,13 +1176,14 @@ mod tests {
 
     fn loaded_port(c: &mut Cpu, a: &[u32]) -> Option<u32> {
         c.m.w32(NUM_VALID_CAMS, 0);
-        call_addr(c, DEL_BIG_FILE, &[0, BIG_FILE_PRIORITY]);
+        call_jal(c, DEL_BIG_FILE, &[0, BIG_FILE_PRIORITY]);
         install_cameras(c, a[0]);
         None
     }
 
     #[test]
     fn replay_camera_file_fuzz() {
+        crate::test_util::COMPARE_TICKS.set(true);
         against_original("Replay_LoadCameraFile (loaded)", 300, 0xAF1, shuffle, loaded_original, &|_| vec![FILE], loaded_port);
     }
 
@@ -1166,6 +1200,9 @@ mod tests {
                 "Replay_ReplayChooseCamera" => 2000,
                 _ => 300,
             };
+            // (the ticks too where they matter, in what runs at the race's start and end; not
+            // a replay's start, whose cameras are the camera's ports, which don't tick)
+            crate::test_util::COMPARE_TICKS.set(matches!(name, "Replay_InitReplay" | "Replay_ResetReplay (recording)" | "Replay_StoringReplay" | "Replay_SaveReplay" | "Replay_LoadReplay" | "Replay_LoadCameraFile"));
             against_original(name, n, 0xAE1 + k as u64, shuffle, original, &|c| args(c, &mut args_rng.borrow_mut()), via_abi);
         }
     }
