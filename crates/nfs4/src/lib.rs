@@ -115,6 +115,7 @@ pub mod simqueue;
 pub mod statchk;
 pub mod stats;
 pub mod stattool;
+pub mod textureprocess;
 pub mod trsproj;
 pub mod types;
 pub mod udff;
@@ -1816,6 +1817,22 @@ pub static FUNCS: &[Func] = &[
     func(0x800e_0110, "Skidmark_InitSkidmark", skidmark::abi_init_skidmark),
     func(0x800e_0184, "Skidmark_RestartSkidmark", skidmark::abi_restart_skidmark),
     func(0x800e_0198, "Skidmark_KillSkidmark", skidmark::abi_kill_skidmark),
+    func_ret(0x800e_1490, "TextureProcess_TransColorCheck", textureprocess::abi_trans_color_check),
+    func(0x800e_14c4, "TextureProcess_ColorClut", textureprocess::abi_color_clut),
+    func_ret(0x800e_16cc, "TextureProcess_DepthColorCluts", textureprocess::abi_depth_color_cluts),
+    func_ret(0x800e_17a4, "Fog_CheckRange", textureprocess::abi_check_range),
+    func_ret(0x800e_17f8, "Fog_FindKey", textureprocess::abi_find_key),
+    func_ret(0x800e_188c, "Fog_AllocKey", textureprocess::abi_alloc_key),
+    func(0x800e_18d8, "Fog_AddKey", textureprocess::abi_add_key),
+    func(0x800e_198c, "Fog_Update", textureprocess::abi_update),
+    func_ret(0x800e_1ad0, "Fog_MakeTrackPathName", textureprocess::abi_make_track_path_name),
+    func_ret(0x800e_1b20, "Fog_ReadFogKeys", textureprocess::abi_read_fog_keys),
+    func(0x800e_1c38, "Fog_InitFogTriggers", textureprocess::abi_init_fog_triggers),
+    func(0x800e_1d1c, "Fog_DeInitFogTriggers", textureprocess::abi_de_init_fog_triggers),
+    func(0x800e_1d40, "TextureProcess_Init", textureprocess::abi_init),
+    func(0x800e_1d54, "CV_ProcessWorldColors_FINAL", textureprocess::abi_process_world_colors),
+    func(0x800e_1f14, "CV_ColorTracks", textureprocess::abi_color_tracks),
+    func(0x800e_211c, "CV_InitColorVertices", textureprocess::abi_init_color_vertices),
     func(0x800e_2538, "TrsProj_SetTransPrecision", trsproj::abi_set_trans_precision),
     func(0x800e_2544, "TrsProj_ResetTransPrecision", trsproj::abi_reset_trans_precision),
     func(0x800e_2554, "TrsProj_SetProjection", trsproj::abi_set_projection),
