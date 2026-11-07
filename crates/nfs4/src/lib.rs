@@ -88,6 +88,7 @@ pub mod mpause;
 pub mod pausemenu;
 pub mod movie;
 pub mod newton;
+pub mod night;
 pub mod physics;
 pub mod psxfront;
 pub mod replay;
@@ -1803,6 +1804,25 @@ pub static FUNCS: &[Func] = &[
     func(0x800d_a4f8, "Hud_BTC_BonusTime", hud::abi_btc_bonus_time),
     func(0x800d_a510, "Hud_Perp_OverlayOn", hud::abi_perp_overlay_on),
     func(0x800d_a53c, "Hud_Perp_OverlayOff", hud::abi_perp_overlay_off),
+    func_ret(0x800d_bf04, "Night_FindClosestColor", night::abi_find_closest_color),
+    func(0x800d_bfcc, "Night_CreateNightTableElement", night::abi_create_night_table_element),
+    func(0x800d_c190, "Night_CreateNightTable", night::abi_create_night_table),
+    func(0x800d_c1b8, "Night_GenerateNextLightningEvent", night::abi_generate_next_lightning_event),
+    func(0x800d_c22c, "Night_PauseLightningEffect", night::abi_pause_lightning_effect),
+    func(0x800d_c2b0, "Night_DoLightningEffect", night::abi_do_lightning_effect),
+    func(0x800d_c434, "Night_SetCopColor", night::abi_set_cop_color),
+    func(0x800d_c4c8, "Night_InitPlayerHeadLightColor", night::abi_init_player_head_light_color),
+    func(0x800d_c524, "Night_SetPlayerHeadLightColor", night::abi_set_player_head_light_color),
+    func(0x800d_c560, "Night_InitCopLightColors", night::abi_init_cop_light_colors),
+    func(0x800d_c5bc, "Night_SetCopLightColors", night::abi_set_cop_light_colors),
+    func(0x800d_c63c, "Night_InitWeatherTables", night::abi_init_weather_tables),
+    func(0x800d_c6c0, "Night_SetWeatherColors", night::abi_set_weather_colors),
+    func(0x800d_c73c, "Night_GenerateAllLightTables", night::abi_generate_all_light_tables),
+    func(0x800d_c9d0, "Night_InitNightDriving", night::abi_init_night_driving),
+    func(0x800d_cb6c, "Night_KillNightDriving", night::abi_kill_night_driving),
+    func(0x800d_cc0c, "Night_RestartNightDriving", night::abi_restart_night_driving),
+    func(0x800d_cc94, "Night_SetEnviroment", night::abi_set_enviroment),
+    func(0x800d_cda4, "Night_AdditiveNightCalc", night::abi_additive_night_calc),
     func(0x800d_dad0, "RPause_CopyBackToFrontBuffer", rpause::abi_copy_back_to_front_buffer),
     func(0x800d_db90, "RPause_StartPauseMenu", rpause::abi_start_pause_menu),
     func(0x800d_dbb0, "RPause_StopPauseMenu", rpause::abi_stop_pause_menu),
