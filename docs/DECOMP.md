@@ -33,8 +33,9 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
    (HUD.CPP, all 62), the camera (CAMERA.CPP, all 41) and the pause menu (MPAUSE.CPP,
    PAUSEMENU.CPP, RPAUSE.CPP, all 73) done 2026-11-03, the replays (REPLAY.CPP, all 16)
    2026-11-07: see "The readable HUD". The drawing started 2026-11-07 with the files the host
-   doesn't draw for itself: the tyre marks (SKIDMARK.CPP, all 11) and the GTE's set-up
-   (TRSPROJ.CPP, all 11).
+   doesn't draw for itself: the tyre marks (SKIDMARK.CPP, all 11), the GTE's set-up
+   (TRSPROJ.CPP, all 11), the fog and depth cue (TEXTUREPROCESS.CPP, all 16) and night driving
+   (NIGHT.CPP, all 19).
 4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
    the AI (what the planned changes touch first).
 5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
@@ -309,12 +310,9 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   find no files, and the recompiled `LoadCameraFile` calls `loadfileadrz` directly, so
   `replay_camera_file_fuzz` enters the original after that call (`f_800b61d4_at`, its frame and
   v0 set up) with a camera file in RAM, against the port's `install_cameras`.
-  A trap found here: the recompiled code ticks the CPU at each backward branch, and the host
-  takes 20,000 ticks without a call to it for the game spinning, moving its clock on. Clearing
-  the buffer at the race's load is a 24,576-iteration loop in the original, so a port clearing
-  it without ticking left the race's clock a tick behind (found by the lockstep tours, not the
-  pictures); the port ticks once a byte. A long loop of the original's ported must tick as it
-  does (`c.tick()`, as the front end's waits do).
+  A trap found here (see "The spin-tick trap" below): clearing the buffer at the race's load is
+  a 24,576-pass loop in the original, and a port clearing it without ticking left the race's
+  clock a tick behind (found by the lockstep tours, not the pictures).
 
 - **The drawing: the tyre marks (SKIDMARK.CPP, `skidmark.rs`) and the GTE's set-up (TRSPROJ.CPP,
   `trsproj.rs`).** The host draws the marks itself from their chunks in RAM (`read_skids`), so
@@ -329,6 +327,38 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   RAM after, as code reads them. The original packs the matrix's last element and the vector's
   z from 32-bit stack words whose top halves are leftovers; the GTE uses only the low halves, so
   the ports write the shorts alone.
+
+- **The fog and depth cue (TEXTUREPROCESS.CPP, `textureprocess.rs`) and night driving (NIGHT.CPP,
+  `night.rs`).** The depth cue's palettes go to VRAM through the host's `LoadImage`, which the
+  RAM comparisons can't see: the test CPUs' stand-in hashes each upload's rectangle and pixels
+  into `test_util::LOADED_IMAGES`. The fog files and `night.psh` aren't on the test CPUs, so
+  `fog_file_fuzz` enters `Fog_ReadFogKeys` after its load (as the camera file's test does) and
+  the night's set-up is fuzzed on its other paths; the night races below run the rest. The
+  fog's keys are a ring the search walks for ever if it has one key, so the fuzz builds rings of
+  two or more (the game never searches a ring of one). Night's light tables are built on the
+  scratchpad (`gTableCache`) and copied back to the world's 256 colour places, past the world's
+  own. `Night_CreateNightTableElement` reads the nearest colour's index from its frame, which
+  the search leaves unset only when no colour is nearer than 3 x 255 squared; the port starts it
+  at 0. `Night_SetCopColor` indexes a two-word table in its frame by a byte the game's table
+  keeps to 0 or 1 (the port masks it).
+
+- **The spin-tick trap.** The recompiled code ticks the CPU at each backward branch it takes,
+  and `Cpu::call` (a call by address: a `jalr`, a hooked or host-replaced function) ticks once
+  and goes through the host, which restarts its count; after 20,000 ticks without a call to it
+  the host takes the game for spinning on a busy-wait and moves its clock on a tick. Race frames
+  stay far from that (measured with `PS1_SPINSTAT=1`: about 5,100 at most), but loading doesn't
+  (67,230 at a race's start), so a port that runs while the game loads must tick exactly as its
+  original does, and call as it does: `call::call_jal` is the original's `jal` (the port if
+  there is one, else the recompiled code directly, the host only for the functions it hooks or
+  replaces), `call::call_addr` a `jalr` (always through the host), `call::ticks` the loops'
+  passes. Found twice: the replay buffer's clear, then night driving with police (millions of
+  colour searches at the load; the race's clocks two ticks behind from the first frame).
+  `test_util::COMPARE_TICKS` makes the fuzz compare the ticks each run takes, which caught every
+  missing tick (a library call like `memset` replaced by plain Rust is one). The older readable
+  ports (the front end, the HUD, the camera, the pause menu) call by `call_addr` and don't tick
+  their loops; the bit-exact ports don't tick either (`BWorldSm_FindClosestQuadRez`'s road
+  search is why `Fog_Update`'s ticks aren't compared). None of them has diverged a tour or race
+  yet; moving them over is a separate step.
 
 - **Calling a port.** Routing happens at the recompiled call sites: a port calling another
   function's recompiled original (`nfs4rc::f_*`) runs the original even once that function is
@@ -418,6 +448,12 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   port sets in a register by hand before a call is kept, so those places are checked as each
   module is rewritten. A port passes its arguments as arguments (the scrambler takes registers
   set by hand around an empty argument list as leftovers).
+- **Races by time and weather**: the tours' race is a day's; the drawing's night, rain and police
+  code needs others, run in lockstep as a long race (the car held flat out into the walls, which
+  also leaves tyre marks): `GS_SET="54=1,48=1,14=1" BOOT_SCRIPT="8:-,150:x" nfshs decomp-check
+  --laps 1` (GameSetup +0x54 night, +0x48 rain, +0x14 police; 9480 frames). Before calling the
+  drawing's milestones done: day, rain, police, night, rainy night and all three, and two of them
+  with `NFSHS_DECOMP_SCRAMBLE=1`.
 - **Switches**: `NFSHS_DECOMP=off` runs everything recompiled; `NFSHS_DECOMP_OFF=Name,...`
   turns single functions off, for bisecting a difference.
 
@@ -459,6 +495,8 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
 | RPAUSE.CPP (readable) | all 3: a paused frame begun, and shown (the race's picture copied under the menu, its view's ordering table drawn, the buffers flipped) |
 | SKIDMARK.CPP (readable) | all 11: the tyre marks' chunks (`InitSkidmark`: 16, 8 with two players; `RestartSkidmark`, `KillSkidmark`), the chunk marks go into (`CheckChunk`: the next once one is full or too far from its origin, round the oldest), a wheel's mark going on (`Add`: a new mark's first two segments, one more in the same chunk, two again in another; `AddStretch`, `Stretch`, `EndStretch` for marks drawn as one stretching quad), the segments' edges across the way (`CalcStartSegment`, `CalcOneSegment`), the marks drawn for a view (`OnyxBuildFacets`) |
 | TRSPROJ.CPP (readable) | all 11: the GTE's set-up: the translations' precision, the projection (the race's distance or the menus', the screen's centre; a view's: the whole screen or half with two players), the camera's turn (`SetPsxMatrix`: 16.16 to 4.12, transposed) and translation, points through them (`TransPt`, `TransPtN16` for ground points, `TransformProjectVertex` through a matrix into vertices) |
+| TEXTUREPROCESS.CPP (readable) | all 16: the depth cue's palettes (`ColorClut`: 16 colours pulled toward the fog's by the step, into VRAM; `DepthColorCluts`: 16 steps where `Texture_GetClutId` finds room; `TransColorCheck`), the fog's distance along the track (its keys: a ring by slice from the track's `.fog` file for the time and weather, `ReadFogKeys`, `AddKey`, `AllocKey`, `FindKey`, `CheckRange`; `Update` for a camera: between the key's and the next's; `InitFogTriggers`, `DeInitFogTriggers`, `MakeTrackPathName`), the world's colours tinted for some tracks' nights in two-player races (`CV_ColorTracks`, `CV_ProcessWorldColors_FINAL`, `CV_InitColorVertices`), `Init` |
+| NIGHT.CPP (readable) | all 19: the light tables (each world colour's index under the headlights at 16 levels, the police's red and blue, the rain's two tints; `CreateNightTableElement`, `FindClosestColor`: the nearest colour or a new one, `CreateNightTable`, `GenerateAllLightTables`; their colours and blocks: `InitPlayerHeadLightColor`, `SetPlayerHeadLightColor`, `InitCopLightColors`, `SetCopLightColors`, `InitWeatherTables`, `SetWeatherColors`, `SetCopColor`), the headlights' pool (`night.psh`'s levels added to vertices ahead: `SetEnviroment`, `AdditiveNightCalc`), the storm (`GenerateNextLightningEvent`, `DoLightningEffect`: flickers, thunder, the sky; `PauseLightningEffect` in sheltered stretches and tunnels), `InitNightDriving`, `KillNightDriving`, `RestartNightDriving` |
 | REPLAY.CPP (readable) | all 16: the replay set up with the race (`InitReplay`: the mode from the setup, the TV cameras loaded; watching, the recorded setup put back but for the user's settings), reset (the buffer emptied, or the controls and each player's first TV camera) and kept at the race's end (`StoringReplay`, `SaveReplay`, `LoadReplay` empty); each tick a human's pad recorded (`SaveInput`: steering, gas, brake, flags, the car's ramping in bit 7) or played back (`GetInput`, through `DoReplay`, a car's replay function), a record's run-length coding (`Compress`, `Decompress`, `StoringControllerData`, `RetreivingControllerData`; the buffer full stops the recording, a 0 length ends the replay); the replay's controls (`GetInterfaceKey`: instant replay, end, pause, speed, camera, the stats screen); the track's TV cameras (`LoadCameraFile`: 32 slots, sorted by slice, a reversed track's turned along, places scaled) and the cuts between them by the car's slice (`ReplayChooseCamera`, `ReplayFindClosestCamera`; the spline camera's slots set it up) |
 | CAMERA.CPP (readable) | all 41: the cameras per player (`Camera_gInfo`): chase (tail, helicopter: one routine), bumper, simple, crash, circle, TV, blimp, spline, animated, finish, pull-over, police; `Camera_Update`, `Init`, the modes, the view's and the sound's maths, pitch and roll, the ground, tunnel and wall checks |
 | HUD.CPP (readable) | all 62: the views and the primitives the HUD builds from its shapes and the font (`gpu.rs` the set-up), the dashboard (`Init`: gauges, time sprites, the map frame; the numbers, the tachometer, the speed in big digits), the map (track map and markers, or the radar near and far), the wingman's orders, the CD player (title scrolling, track and time), the replay's controls, the next racer's name, the 3-2-1 countdown, the pursuit's big time, the perp overlay, the busted overlay and the perps' records, the pause box, `Hud_Render` |
