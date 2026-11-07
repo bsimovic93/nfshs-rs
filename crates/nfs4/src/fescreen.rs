@@ -83,7 +83,7 @@ const RESERVE: fn(&mut Cpu) = nfs4rc::f_800e5f28;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 const DELETE: fn(&mut Cpu) = nfs4rc::f_800a4910;
 const SYSTEM_TASK: fn(&mut Cpu) = crate::feaudio::systemtask_entry;
-const RELEASE_CLUT: fn(&mut Cpu) = nfs4rc::f_800e05b0;
+const RELEASE_CLUT: u32 = 0x800e_05b0;
 const LOAD_PMX: fn(&mut Cpu) = crate::fetexture::load_pmx_at_offset_entry;
 
 fn sx(v: u32) -> u32 {
@@ -110,7 +110,7 @@ fn release_clut(c: &mut Cpu, shape: TextureShapeInfo) -> bool {
     if id == 0 {
         return false;
     }
-    call(c, RELEASE_CLUT, &[id as i16 as i32 as u32]);
+    crate::call::call_jal(c, RELEASE_CLUT, &[id as i16 as i32 as u32]);
     true
 }
 

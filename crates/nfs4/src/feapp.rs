@@ -103,7 +103,7 @@ const NEGCON: u32 = 0x23;
 const HELP_SHAPES: u32 = 59;
 const SHAPE_SIZE: u32 = 32;
 const SHAPE_CLUT: u32 = 4;
-const RELEASE_CLUT: fn(&mut Cpu) = nfs4rc::f_800e05b0;
+const RELEASE_CLUT: u32 = 0x800e_05b0;
 
 /// A frame's drawing: `FeAudio_systemtask`, `Draw_StartFrameRender`, `Draw_StartRenderingView`,
 /// `Draw_StopRenderingView`, the frame shown.
@@ -573,7 +573,7 @@ pub fn free_help_shape_cluts(c: &mut Cpu) {
         let shape = c.m.r32(SHAPES).wrapping_add(k * SHAPE_SIZE);
         if c.m.r32(shape + SHAPE_CLUT) != 0 {
             let clut = c.m.r16(shape + SHAPE_CLUT) as i16 as i32 as u32;
-            call(c, RELEASE_CLUT, &[clut]);
+            crate::call::call_jal(c, RELEASE_CLUT, &[clut]);
             let shape = c.m.r32(SHAPES).wrapping_add(k * SHAPE_SIZE);
             c.m.w32(shape + SHAPE_CLUT, 0);
         }

@@ -391,9 +391,9 @@ const BLOCKCLEAR: fn(&mut Cpu) = nfs4rc::f_800f24d4;
 const STRCPY: fn(&mut Cpu) = nfs4rc::f_800e6714;
 const SPRINTF: fn(&mut Cpu) = nfs4rc::f_800e50a8;
 const RESET_DCT_BUFFER: fn(&mut Cpu) = nfs4rc::f_800dd0ac;
-const TEXTURE_MENU_START: fn(&mut Cpu) = nfs4rc::f_800e121c;
-const TEXTURE_MENU_END: fn(&mut Cpu) = nfs4rc::f_800e1244;
-const TEXTURE_CLEAN_UP: fn(&mut Cpu) = nfs4rc::f_800e1460;
+const TEXTURE_MENU_START: u32 = 0x800e_121c;
+const TEXTURE_MENU_END: u32 = 0x800e_1244;
+const TEXTURE_CLEAN_UP: u32 = 0x800e_1460;
 const CARIO_START_UP: fn(&mut Cpu) = nfs4rc::f_800bccf8;
 const CARIO_CLEAN_UP: fn(&mut Cpu) = nfs4rc::f_800bcd64;
 const CARIO_RESTART: fn(&mut Cpu) = nfs4rc::f_800bcd8c;
@@ -413,7 +413,7 @@ const AUDIO_DEINIT_DRIVER: fn(&mut Cpu) = nfs4rc::f_800bca4c;
 const AUDIO_INIT_DRIVER: fn(&mut Cpu) = nfs4rc::f_800bc958;
 const SET_DEF_DISP_ENV: fn(&mut Cpu) = nfs4rc::f_800f2c3c;
 const INIT_GEOM: fn(&mut Cpu) = nfs4rc::f_800f2b00;
-const INIT_MENU_CLUT: fn(&mut Cpu) = nfs4rc::f_800e111c;
+const INIT_MENU_CLUT: u32 = 0x800e_111c;
 const INIT_LINK_MODE: fn(&mut Cpu) = nfs4rc::f_800f1328;
 const LOAD_WORDS: fn(&mut Cpu) = nfs4rc::f_800b9ef0;
 const SECONDARY_MEM_CARD_CHECK: fn(&mut Cpu) = crate::front::secondary_mem_card_check_entry;
@@ -470,7 +470,7 @@ pub fn initialize_spinning_cars(c: &mut Cpu) {
     }
     c.m.w32(IN_MENU, 1);
     call(c, RESET_DCT_BUFFER, &[]);
-    call(c, TEXTURE_MENU_START, &[]);
+    crate::call::call_jal(c, TEXTURE_MENU_START, &[]);
     c.m.w32(IN_FRONT_END, 1);
     call(c, CARIO_START_UP, &[]);
     call(c, R3DCAR_START_UP, &[]);
@@ -527,7 +527,7 @@ pub fn cleanup_spinning_cars(c: &mut Cpu) {
     call(c, R3DCAR_CLEAN_UP, &[]);
     call(c, CARIO_CLEAN_UP, &[]);
     c.m.w32(IN_FRONT_END, 0);
-    call(c, TEXTURE_CLEAN_UP, &[]);
+    crate::call::call_jal(c, TEXTURE_CLEAN_UP, &[]);
     free_draw_memory(c);
     let m = &mut c.m;
     m.w32(IN_MENU, 0);
@@ -559,7 +559,7 @@ pub fn cleanup_spinning_cars_menu(c: &mut Cpu) {
         let car = c.m.r32(CAR_OBJECTS + 4 * k);
         call(c, R3DCAR_DEINSTANTIATE_MENU, &[car]);
     }
-    call(c, TEXTURE_MENU_END, &[]);
+    crate::call::call_jal(c, TEXTURE_MENU_END, &[]);
     call(c, CARIO_RESTART, &[]);
 }
 
@@ -644,7 +644,7 @@ pub fn init_psx_front_end(c: &mut Cpu) {
     call(c, ADD_TIMER, &[TIMER]);
     call(c, INIT_GEOM, &[]);
     psx_alloc_shapes(c);
-    call(c, INIT_MENU_CLUT, &[]);
+    crate::call::call_jal(c, INIT_MENU_CLUT, &[]);
     c.m.w32(SCREEN_WIDTH, 512);
     c.m.w32(SCREEN_BPP, 16);
     if c.m.r32(FIRST_TIME) != 0 {

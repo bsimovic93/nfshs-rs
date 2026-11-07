@@ -118,8 +118,8 @@ const RECORDS_NAME: u32 = 0x8001_21D0;
 const VTABLE: u32 = 0x8001_21D8;
 
 const SHAPE_TO_CLUT: fn(&mut Cpu) = nfs4rc::f_800f75f0;
-const RELEASE_CLUT: fn(&mut Cpu) = nfs4rc::f_800e05b0;
-const GET_CLUT_ID: fn(&mut Cpu) = nfs4rc::f_800e0544;
+const RELEASE_CLUT: u32 = 0x800e_05b0;
+const GET_CLUT_ID: u32 = 0x800e_0544;
 const UPLOAD_SHAPE: fn(&mut Cpu) = nfs4rc::f_800f7304;
 const BLOCKCLEAR: fn(&mut Cpu) = nfs4rc::f_800f24d4;
 const SPRINTF: fn(&mut Cpu) = nfs4rc::f_800e50a8;
@@ -275,11 +275,11 @@ pub fn load_icon(c: &mut Cpu, this: u32, k: u32) {
                 }
                 let old = m.r16(fp + CLUTS);
                 if old != 0 {
-                    call(c, RELEASE_CLUT, &[old as i16 as i32 as u32]);
+                    crate::call::call_jal(c, RELEASE_CLUT, &[old as i16 as i32 as u32]);
                 }
                 // a CLUT of its own, each frame put in VRAM (17 apart, by the save)
                 with_buffer(c, 8, |c, clut| {
-                    call(c, GET_CLUT_ID, &[0, clut, clut + 4]);
+                    crate::call::call_jal(c, GET_CLUT_ID, &[0, clut, clut + 4]);
                     let m = &mut c.m;
                     let v = (h(m, clut + 4) << 6) | ((m.r32(clut) as i32 >> 4) as u32 & 0x3F);
                     m.w16(fp + CLUTS, v as u16);
@@ -460,7 +460,7 @@ fn fade_out_icon(c: &mut Cpu, this: u32, k: u32, gone_first: bool) -> bool {
     }
     let clut = c.m.r16(at + CLUTS);
     if clut != 0 {
-        call(c, RELEASE_CLUT, &[clut as i16 as i32 as u32]);
+        crate::call::call_jal(c, RELEASE_CLUT, &[clut as i16 as i32 as u32]);
         c.m.w16(at + CLUTS, 0);
     }
     if !gone_first {
@@ -853,7 +853,7 @@ pub fn release_icons(c: &mut Cpu, this: u32) {
         icon_gone(&mut c.m, this, k);
         let clut = c.m.r16(this + 2 * k + CLUTS);
         if clut != 0 {
-            call(c, RELEASE_CLUT, &[clut as i16 as i32 as u32]);
+            crate::call::call_jal(c, RELEASE_CLUT, &[clut as i16 as i32 as u32]);
             c.m.w16(this + 2 * k + CLUTS, 0);
         }
     }

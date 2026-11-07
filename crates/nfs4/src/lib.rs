@@ -116,6 +116,7 @@ pub mod simqueue;
 pub mod statchk;
 pub mod stats;
 pub mod stattool;
+pub mod texture;
 pub mod textureprocess;
 pub mod trsproj;
 pub mod types;
@@ -1838,6 +1839,30 @@ pub static FUNCS: &[Func] = &[
     func(0x800e_0110, "Skidmark_InitSkidmark", skidmark::abi_init_skidmark),
     func(0x800e_0184, "Skidmark_RestartSkidmark", skidmark::abi_restart_skidmark),
     func(0x800e_0198, "Skidmark_KillSkidmark", skidmark::abi_kill_skidmark),
+    func(0x800e_01c0, "Texture_InitPaletteSharing", texture::abi_init_palette_sharing),
+    func(0x800e_023c, "Texture_DeInitPaletteSharing", texture::abi_de_init_palette_sharing),
+    func(0x800e_0284, "Texture_ResetPaletteSharing", texture::abi_reset_palette_sharing),
+    func_ret(0x800e_0294, "Texture_CheckForSharedPalette", texture::abi_check_for_shared_palette),
+    func(0x800e_03c8, "Texture_AddSharedPalette", texture::abi_add_shared_palette),
+    func(0x800e_0440, "Texture_InitClut", texture::abi_init_clut),
+    func(0x800e_0544, "Texture_GetClutId", texture::abi_get_clut_id),
+    func(0x800e_05b0, "Texture_MenuReleaseClutId", texture::abi_menu_release_clut_id),
+    func(0x800e_0610, "Texture_ColorCarPalette", texture::abi_color_car_palette),
+    func(0x800e_0648, "Texture_CopyPalette", texture::abi_copy_palette),
+    func(0x800e_06a8, "Texture_ProcessPaletteCopy", texture::abi_process_palette_copy),
+    func(0x800e_0754, "Texture_LoadImage", texture::abi_load_image),
+    func(0x800e_0798, "Texture_Vramf", texture::abi_vramf),
+    func(0x800e_0944, "Texture_Vramcf", texture::abi_vramcf),
+    func_ret(0x800e_0aac, "Texture_GetTranslucencyMode", texture::abi_get_translucency_mode),
+    func(0x800e_0b24, "Texture_LoadPmx", texture::abi_load_pmx),
+    func(0x800e_0f64, "Texture_CloneUVPmx", texture::abi_clone_uv_pmx),
+    func(0x800e_10c4, "Texture_InitTrackTexture", texture::abi_init_track_texture),
+    func(0x800e_111c, "Texture_InitMenuClut", texture::abi_init_menu_clut),
+    func(0x800e_121c, "Texture_InitMenuTexture", texture::abi_init_menu_texture),
+    func(0x800e_1244, "Texture_CleanupMenuTexture", texture::abi_cleanup_menu_texture),
+    func(0x800e_12a4, "Texture_LoadMenuTexture", texture::abi_load_menu_texture),
+    func(0x800e_1458, "Texture_KillTrackTexture", texture::abi_kill_track_texture),
+    func(0x800e_1460, "Texture_KillMenuTexture", texture::abi_kill_menu_texture),
     func_ret(0x800e_1490, "TextureProcess_TransColorCheck", textureprocess::abi_trans_color_check),
     func(0x800e_14c4, "TextureProcess_ColorClut", textureprocess::abi_color_clut),
     func_ret(0x800e_16cc, "TextureProcess_DepthColorCluts", textureprocess::abi_depth_color_cluts),

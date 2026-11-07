@@ -21,7 +21,7 @@ const UNPACK: fn(&mut Cpu) = nfs4rc::f_800e4b28;
 const RESERVE: fn(&mut Cpu) = nfs4rc::f_800e5f28;
 const PURGE: fn(&mut Cpu) = nfs4rc::f_800e612c;
 const BLOCKMOVE: fn(&mut Cpu) = nfs4rc::f_800e6ec8;
-const GET_CLUT_ID: fn(&mut Cpu) = nfs4rc::f_800e0544;
+const GET_CLUT_ID: u32 = 0x800e_0544;
 const UPLOAD_SHAPE: fn(&mut Cpu) = nfs4rc::f_800f7304;
 const SHAPE_DEPTH: fn(&mut Cpu) = nfs4rc::f_800f4d40;
 const GET_CLUT: fn(&mut Cpu) = nfs4rc::f_800f4dac;
@@ -81,7 +81,7 @@ pub fn load_pmx_at_offset(c: &mut Cpu, file: u32, k: u32, info: TextureShapeInfo
         c.m.w32(clut_at + 4, 0);
         let kind = c.m.r8(s) as u32 & 3;
         if kind != KIND_16BIT {
-            call(c, GET_CLUT_ID, &[kind, clut_at, clut_at + 4]);
+            crate::call::call_jal(c, GET_CLUT_ID, &[kind, clut_at, clut_at + 4]);
             let m = &mut c.m;
             let v = (m.r32(clut_at + 4) << 6) | ((m.r32(clut_at) as i32 >> 4) as u32 & 0x3F);
             info.set_clut_id(m, v as i32);
