@@ -93,6 +93,7 @@ pub mod psxfront;
 pub mod replay;
 pub mod rpause;
 pub mod schedule;
+pub mod skidmark;
 pub mod screenaudio;
 pub mod screencarselect;
 pub mod screencongrats;
@@ -114,6 +115,7 @@ pub mod simqueue;
 pub mod statchk;
 pub mod stats;
 pub mod stattool;
+pub mod trsproj;
 pub mod types;
 pub mod udff;
 pub mod vec;
@@ -1803,6 +1805,28 @@ pub static FUNCS: &[Func] = &[
     func(0x800d_dad0, "RPause_CopyBackToFrontBuffer", rpause::abi_copy_back_to_front_buffer),
     func(0x800d_db90, "RPause_StartPauseMenu", rpause::abi_start_pause_menu),
     func(0x800d_dbb0, "RPause_StopPauseMenu", rpause::abi_stop_pause_menu),
+    func(0x800d_f300, "CalcStartSegment", skidmark::abi_calc_start_segment),
+    func(0x800d_f4d0, "CalcOneSegment", skidmark::abi_calc_one_segment),
+    func_ret(0x800d_f5f8, "Skidmark_CheckChunk", skidmark::abi_check_chunk),
+    func(0x800d_f7a4, "Skidmark_Add", skidmark::abi_add),
+    func(0x800d_fb78, "Skidmark_AddStretch", skidmark::abi_add_stretch),
+    func(0x800d_ff14, "Skidmark_Stretch", skidmark::abi_stretch),
+    func(0x800d_ff94, "Skidmark_EndStretch", skidmark::abi_end_stretch),
+    func(0x800e_0070, "Skidmark_OnyxBuildFacets", skidmark::abi_onyx_build_facets),
+    func(0x800e_0110, "Skidmark_InitSkidmark", skidmark::abi_init_skidmark),
+    func(0x800e_0184, "Skidmark_RestartSkidmark", skidmark::abi_restart_skidmark),
+    func(0x800e_0198, "Skidmark_KillSkidmark", skidmark::abi_kill_skidmark),
+    func(0x800e_2538, "TrsProj_SetTransPrecision", trsproj::abi_set_trans_precision),
+    func(0x800e_2544, "TrsProj_ResetTransPrecision", trsproj::abi_reset_trans_precision),
+    func(0x800e_2554, "TrsProj_SetProjection", trsproj::abi_set_projection),
+    func(0x800e_25d4, "TrsProj_SetMenuProjection", trsproj::abi_set_menu_projection),
+    func(0x800e_2614, "TrsProj_SetViewTrsProjEnviro", trsproj::abi_set_view_trs_proj_enviro),
+    func(0x800e_2668, "TrsProj_SetPsxMatrix", trsproj::abi_set_psx_matrix),
+    func(0x800e_2758, "TrsProj_SetPsxTrans", trsproj::abi_set_psx_trans),
+    func(0x800e_27a8, "TrsProj_SetPsxTransZero", trsproj::abi_set_psx_trans_zero),
+    func(0x800e_27d8, "TrsProj_TransPt", trsproj::abi_trans_pt),
+    func(0x800e_2864, "TrsProj_TransPtN16", trsproj::abi_trans_pt_n16),
+    func(0x800e_28ec, "TrsProj_TransformProjectVertex", trsproj::abi_transform_project_vertex),
 ];
 
 /// The index of the function at `addr` in [`FUNCS`].

@@ -66,14 +66,14 @@ pub fn abi_euler_to_mat(c: &mut Cpu) {
 
 /// A view (`DRender_tView`: +0 its kind, +4 its player, +8 its view's maths).
 const CAMERA_GET_VIEW_INFO: u32 = 0x8008_5a2c;
-const TRS_PROJ_SET_VIEW_ENVIRO: fn(&mut Cpu) = nfs4rc::f_800e2614;
+const TRS_PROJ_SET_VIEW_ENVIRO: u32 = 0x800e_2614;
 
 /// `Camera_SetCamera` (CAMERA.CPP, 0x80081128): view `view`'s maths from its camera, then the
 /// projection's set-up for it.
 pub fn set_camera(c: &mut Cpu, view: u32) {
     let (player, kind) = (c.m.r32(view + 4), c.m.r32(view));
     call_addr(c, CAMERA_GET_VIEW_INFO, &[player, view + 8, kind]);
-    call(c, TRS_PROJ_SET_VIEW_ENVIRO, &[view]);
+    call_addr(c, TRS_PROJ_SET_VIEW_ENVIRO, &[view]);
 }
 
 pub fn abi_set_camera(c: &mut Cpu) {
@@ -1757,7 +1757,7 @@ pub fn abi_get_audio_view_info(c: &mut Cpu) {
 
 /// The split screen's cameras (`gSplitCameras`: three, a word each).
 const SPLIT_CAMERAS: u32 = 0x8011_07C4;
-const TRS_PROJ_SET_PROJECTION: fn(&mut Cpu) = nfs4rc::f_800e2554;
+const TRS_PROJ_SET_PROJECTION: u32 = 0x800e_2554;
 
 /// Leaving player `p`'s current mode: the projection reset after the spline and TV cameras,
 /// the camera put behind the car after any but the chase cameras, its animation freed.
@@ -1766,7 +1766,7 @@ fn leave_mode(c: &mut Cpu, p: u32) {
     let old = cam.mode(&mut c.m) as u16;
     if old.wrapping_sub(11) < 2 {
         c.m.w32(GEOM_SCREEN, FINISH_GEOM_SCREEN);
-        call(c, TRS_PROJ_SET_PROJECTION, &[0, 0, 320, 240]);
+        call_addr(c, TRS_PROJ_SET_PROJECTION, &[0, 0, 320, 240]);
     }
     if (cam.mode(&mut c.m) as u16).wrapping_sub(2) >= 6 {
         reset_rel_pos(&mut c.m, p + 1);
