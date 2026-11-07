@@ -670,6 +670,30 @@
 # UDFF.CPP
 800bc8f8 Udff_GetInt
 
+# HRZSKU.CPP (readable from the start)
+800d02d4 Horizon_InterpolateLineSCoords
+800d0414 Sky_InitStars
+800d05fc Sky_KillStars
+800d0640 Hrz_InitSkyColor
+800d079c Hrz_InitSky
+800d0ae0 Hrz_Init2DRing
+800d0dc4 Hrz_GetHorizonPixMap
+800d0e78 Hrz_InitHorizon
+800d0ee4 Hrz_KillHorizon
+800d0f10 Hrz_LightningAddFork
+800d1128 Hrz_CalculateLightning
+800d1164 Hrz_TextureQuad
+800d1294 Hrz_SetLightingPosInSky
+800d13a4 Hrz_BuildForkLightning
+800d14c0 Hrz_LightningFlicker
+800d159c HrzSetPsxMatrix
+800d167c HrzSetPsxTranslation
+800d16cc Hrz_RotProj16
+800d1710 Hrz_SetDitheringPrim
+800d1798 Hrz_BuildSky
+800d1ec0 Sky_RenderStars
+800d207c Hrz_BuildHorizon
+
 # HUD.CPP (readable from the start)
 800d27e0 Hud_CreateHudViews
 800d2acc Hud_GoTpage

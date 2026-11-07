@@ -80,6 +80,7 @@ pub mod fixed;
 pub mod front;
 pub mod globals;
 pub mod gpu;
+pub mod hrzsku;
 pub mod hud;
 pub mod mathnfs;
 pub mod memcard;
@@ -1744,6 +1745,28 @@ pub static FUNCS: &[Func] = &[
     func(0x800b_8ed0, "Stats_TrackStats", stats::abi_track_stats),
     func(0x800b_92d8, "Stats_ExtrapolateOpponentTimes", stats::abi_extrapolate_opponent_times),
     func(0x800b_9a80, "Stats_TrackEndGame", stats::abi_track_end_game),
+    func(0x800d_02d4, "Horizon_InterpolateLineSCoords", hrzsku::abi_interpolate_line_s_coords),
+    func(0x800d_0414, "Sky_InitStars", hrzsku::abi_init_stars),
+    func(0x800d_05fc, "Sky_KillStars", hrzsku::abi_kill_stars),
+    func(0x800d_0640, "Hrz_InitSkyColor", hrzsku::abi_init_sky_color),
+    func(0x800d_079c, "Hrz_InitSky", hrzsku::abi_init_sky),
+    func(0x800d_0ae0, "Hrz_Init2DRing", hrzsku::abi_init_2d_ring),
+    func(0x800d_0dc4, "Hrz_GetHorizonPixMap", hrzsku::abi_get_horizon_pix_map),
+    func(0x800d_0e78, "Hrz_InitHorizon", hrzsku::abi_init_horizon),
+    func(0x800d_0ee4, "Hrz_KillHorizon", hrzsku::abi_kill_horizon),
+    func(0x800d_0f10, "Hrz_LightningAddFork", hrzsku::abi_lightning_add_fork),
+    func(0x800d_1128, "Hrz_CalculateLightning", hrzsku::abi_calculate_lightning),
+    func(0x800d_1164, "Hrz_TextureQuad", hrzsku::abi_texture_quad),
+    func(0x800d_1294, "Hrz_SetLightingPosInSky", hrzsku::abi_set_lighting_pos_in_sky),
+    func(0x800d_13a4, "Hrz_BuildForkLightning", hrzsku::abi_build_fork_lightning),
+    func(0x800d_14c0, "Hrz_LightningFlicker", hrzsku::abi_lightning_flicker),
+    func(0x800d_159c, "HrzSetPsxMatrix", hrzsku::abi_set_psx_matrix),
+    func(0x800d_167c, "HrzSetPsxTranslation", hrzsku::abi_set_psx_translation),
+    func(0x800d_16cc, "Hrz_RotProj16", hrzsku::abi_rot_proj16),
+    func(0x800d_1710, "Hrz_SetDitheringPrim", hrzsku::abi_set_dithering_prim),
+    func(0x800d_1798, "Hrz_BuildSky", hrzsku::abi_build_sky),
+    func(0x800d_1ec0, "Sky_RenderStars", hrzsku::abi_render_stars),
+    func(0x800d_207c, "Hrz_BuildHorizon", hrzsku::abi_build_horizon),
     func(0x800d_27e0, "Hud_CreateHudViews", hud::abi_create_hud_views),
     func(0x800d_2acc, "Hud_GoTpage", hud::abi_go_tpage),
     func(0x800d_2b5c, "Hud_DebugInfo", hud::abi_nothing),

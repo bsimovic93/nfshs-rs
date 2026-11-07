@@ -3,7 +3,7 @@
 //! results, rounding and overflow included.
 
 use crate::globals;
-use ps1rt::Mem;
+use ps1rt::{Cpu, Mem};
 
 /// `a / b` as the R3000's `div` leaves it (the compiler's checks only trap): truncated
 /// toward zero; by 0, -1 or 1 by the sign of `a`; `i32::MIN / -1` stays `i32::MIN`.
@@ -96,6 +96,20 @@ pub fn fixedsin(m: &mut Mem, a: i32) -> i32 {
 /// `fixedcos` (0x800ede00).
 pub fn fixedcos(m: &mut Mem, a: i32) -> i32 {
     interpolate(m, a, fastintcos, |m, a| fastintsin(m, a).wrapping_neg())
+}
+
+/// [`fixedsin`] ticking as its recompiled original does: its `fastintcos` runs on into
+/// `fastintsin`, which the recompiled code reaches by a continuation (a tick; ports of what runs
+/// while loading tick as their originals, see `call::ticks`).
+pub fn fixedsin_ticked(c: &mut Cpu, a: i32) -> i32 {
+    c.tick();
+    fixedsin(&mut c.m, a)
+}
+
+/// [`fixedcos`] ticking as its recompiled original does (as [`fixedsin_ticked`]).
+pub fn fixedcos_ticked(c: &mut Cpu, a: i32) -> i32 {
+    c.tick();
+    fixedcos(&mut c.m, a)
 }
 
 /// `make64` (0x800fee34): `v` shifted left by `shift` as a 64-bit number (lo, hi). Shifts of

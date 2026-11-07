@@ -11,8 +11,13 @@ pub const NEXT_PRIM: u32 = 0x1F80_0004;
 /// A primitive of `size` bytes taken from the scratchpad's buffer and linked into the ordering
 /// table (the original's reads and writes in its order).
 pub fn add_prim(m: &mut Mem, size: u32) -> u32 {
-    let prim = m.r32(NEXT_PRIM);
     let ot = m.r32(OT);
+    add_prim_to(m, ot, size)
+}
+
+/// [`add_prim`] into the ordering table entry at `ot`.
+pub fn add_prim_to(m: &mut Mem, ot: u32, size: u32) -> u32 {
+    let prim = m.r32(NEXT_PRIM);
     let v = (m.r32(prim) & 0xFF00_0000) | (m.r32(ot) & 0x00FF_FFFF);
     m.w32(prim, v);
     let entry = m.r32(ot);
@@ -40,6 +45,11 @@ pub fn set_poly_f4(m: &mut Mem, prim: u32) {
 /// `SetPolyG4`: a gouraud-shaded quad.
 pub fn set_poly_g4(m: &mut Mem, prim: u32) {
     set_len_code(m, prim, 8, 0x38);
+}
+
+/// `SetPolyGT4`: a gouraud-shaded textured quad.
+pub fn set_poly_gt4(m: &mut Mem, prim: u32) {
+    set_len_code(m, prim, 12, 0x3C);
 }
 
 /// `SetPolyFT4`: a flat textured quad.
