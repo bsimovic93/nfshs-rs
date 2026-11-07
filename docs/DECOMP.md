@@ -32,7 +32,9 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
    COPSPEAK, TRGSFX). The drawing is checked by pictures and the primitives it emits. The HUD
    (HUD.CPP, all 62), the camera (CAMERA.CPP, all 41) and the pause menu (MPAUSE.CPP,
    PAUSEMENU.CPP, RPAUSE.CPP, all 73) done 2026-11-03, the replays (REPLAY.CPP, all 16)
-   2026-11-07: see "The readable HUD".
+   2026-11-07: see "The readable HUD". The drawing started 2026-11-07 with the files the host
+   doesn't draw for itself: the tyre marks (SKIDMARK.CPP, all 11) and the GTE's set-up
+   (TRSPROJ.CPP, all 11).
 4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
    the AI (what the planned changes touch first).
 5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
@@ -314,6 +316,20 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   pictures); the port ticks once a byte. A long loop of the original's ported must tick as it
   does (`c.tick()`, as the front end's waits do).
 
+- **The drawing: the tyre marks (SKIDMARK.CPP, `skidmark.rs`) and the GTE's set-up (TRSPROJ.CPP,
+  `trsproj.rs`).** The host draws the marks itself from their chunks in RAM (`read_skids`), so
+  the ports keep the chunks exact; `Skidmark_OnyxBuildFacets` hands the race's own drawing
+  (`Draw_kCtrlSkidmark`, still recompiled) the view's turn and the chunks. Its fuzz draws for
+  real: the scratchpad's ordering table and primitive pointers at free RAM (as the HUD's), the
+  race's camera view (`gCView`) and the chunks moved in front of it (the race RAM's marks are
+  behind the camera), keeping to the chunks and segments the race filled (others hold junk
+  links the original follows off the scratchpad). TRSPROJ is the first port to drive the GTE
+  itself (`Cpu::gte_write`, `gte_command`, `gte_read`): its results are GTE registers, which the
+  fuzz compares by loading the GTE from RAM before each run and writing its registers back to
+  RAM after, as code reads them. The original packs the matrix's last element and the vector's
+  z from 32-bit stack words whose top halves are leftovers; the GTE uses only the low halves, so
+  the ports write the shorts alone.
+
 - **Calling a port.** Routing happens at the recompiled call sites: a port calling another
   function's recompiled original (`nfs4rc::f_*`) runs the original even once that function is
   decompiled. Until 2026-11-03, 112 calls did (the race loop's camera and AI start-up and
@@ -441,6 +457,8 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
 | MPAUSE.CPP (readable) | all 10: the pause menus made (`tPauseMenuDefs`: pause, options, audio, controller, are you sure) and freed, a paused frame's input (`MPause_Logic`: the pad's key to the menu once the highlight bar stops, the bar sent moving, going to a menu (confirming first in one player races), back, or the race's command), its drawing (`MPause_Render`: the bar, the box), the audio menu's mode, music level and test sounds (`MusicLogic`), the vibration items for the pad (`ControllerLogic`), the menu up (`StartPauseMenu`: Restart, Quit or Forfeit by the race) and down (the controller set up again) |
 | PAUSEMENU.CPP (readable) | all 60 and PAUSEMENU.H's 2: the pause menu's classes: texts on the current line (centred on the title's), list iterators (plain and indexed by the player), items (text, interactive, left-right choices with arrows, sliders of 15 bars, indexed ones, go-to and command buttons), menus (`tPMenu`: items up and down move between past disabled ones, round; start and back; drawn a line each) |
 | RPAUSE.CPP (readable) | all 3: a paused frame begun, and shown (the race's picture copied under the menu, its view's ordering table drawn, the buffers flipped) |
+| SKIDMARK.CPP (readable) | all 11: the tyre marks' chunks (`InitSkidmark`: 16, 8 with two players; `RestartSkidmark`, `KillSkidmark`), the chunk marks go into (`CheckChunk`: the next once one is full or too far from its origin, round the oldest), a wheel's mark going on (`Add`: a new mark's first two segments, one more in the same chunk, two again in another; `AddStretch`, `Stretch`, `EndStretch` for marks drawn as one stretching quad), the segments' edges across the way (`CalcStartSegment`, `CalcOneSegment`), the marks drawn for a view (`OnyxBuildFacets`) |
+| TRSPROJ.CPP (readable) | all 11: the GTE's set-up: the translations' precision, the projection (the race's distance or the menus', the screen's centre; a view's: the whole screen or half with two players), the camera's turn (`SetPsxMatrix`: 16.16 to 4.12, transposed) and translation, points through them (`TransPt`, `TransPtN16` for ground points, `TransformProjectVertex` through a matrix into vertices) |
 | REPLAY.CPP (readable) | all 16: the replay set up with the race (`InitReplay`: the mode from the setup, the TV cameras loaded; watching, the recorded setup put back but for the user's settings), reset (the buffer emptied, or the controls and each player's first TV camera) and kept at the race's end (`StoringReplay`, `SaveReplay`, `LoadReplay` empty); each tick a human's pad recorded (`SaveInput`: steering, gas, brake, flags, the car's ramping in bit 7) or played back (`GetInput`, through `DoReplay`, a car's replay function), a record's run-length coding (`Compress`, `Decompress`, `StoringControllerData`, `RetreivingControllerData`; the buffer full stops the recording, a 0 length ends the replay); the replay's controls (`GetInterfaceKey`: instant replay, end, pause, speed, camera, the stats screen); the track's TV cameras (`LoadCameraFile`: 32 slots, sorted by slice, a reversed track's turned along, places scaled) and the cuts between them by the car's slice (`ReplayChooseCamera`, `ReplayFindClosestCamera`; the spline camera's slots set it up) |
 | CAMERA.CPP (readable) | all 41: the cameras per player (`Camera_gInfo`): chase (tail, helicopter: one routine), bumper, simple, crash, circle, TV, blimp, spline, animated, finish, pull-over, police; `Camera_Update`, `Init`, the modes, the view's and the sound's maths, pitch and roll, the ground, tunnel and wall checks |
 | HUD.CPP (readable) | all 62: the views and the primitives the HUD builds from its shapes and the font (`gpu.rs` the set-up), the dashboard (`Init`: gauges, time sprites, the map frame; the numbers, the tachometer, the speed in big digits), the map (track map and markers, or the radar near and far), the wingman's orders, the CD player (title scrolling, track and time), the replay's controls, the next racer's name, the 3-2-1 countdown, the pursuit's big time, the perp overlay, the busted overlay and the perps' records, the pause box, `Hud_Render` |
