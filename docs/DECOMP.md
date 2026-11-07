@@ -34,8 +34,8 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
    PAUSEMENU.CPP, RPAUSE.CPP, all 73) done 2026-11-03, the replays (REPLAY.CPP, all 16)
    2026-11-07: see "The readable HUD". The drawing started 2026-11-07 with the files the host
    doesn't draw for itself: the tyre marks (SKIDMARK.CPP, all 11), the GTE's set-up
-   (TRSPROJ.CPP, all 11), the fog and depth cue (TEXTUREPROCESS.CPP, all 16) and night driving
-   (NIGHT.CPP, all 19).
+   (TRSPROJ.CPP, all 11), the fog and depth cue (TEXTUREPROCESS.CPP, all 16), night driving
+   (NIGHT.CPP, all 19) and the rain and snow (WEATHER.CPP, all 25).
 4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
    the AI (what the planned changes touch first).
 5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
@@ -342,6 +342,16 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   at 0. `Night_SetCopColor` indexes a two-word table in its frame by a byte the game's table
   keeps to 0 or 1 (the port masks it).
 
+- **The rain and snow (WEATHER.CPP, `weather.rs`).** The host calls `Weather_BuildWeather` itself
+  for each view it draws and records the primitives it adds (the host's `views.rs`), so the
+  port's primitives are what the screen shows; they are in RAM, so the rain races check them in
+  lockstep. The fuzz builds a weather state on the race RAM (a dry day's): the particles' blocks,
+  rain's or snow's box, particles in it and just past each side, the lens's drops, the levels,
+  the race's camera view turned and moved a little since the last frame, the GTE loaded and
+  dumped as for TRSPROJ. The original packs its vectors' z with stack leftovers in the top half,
+  which the GTE never reads. `Weather_TransformVertex` loops on and on given no particles (the
+  game never does).
+
 - **The spin-tick trap.** The recompiled code ticks the CPU at each backward branch it takes,
   and `Cpu::call` (a call by address: a `jalr`, a hooked or host-replaced function) ticks once
   and goes through the host, which restarts its count; after 20,000 ticks without a call to it
@@ -497,6 +507,7 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
 | TRSPROJ.CPP (readable) | all 11: the GTE's set-up: the translations' precision, the projection (the race's distance or the menus', the screen's centre; a view's: the whole screen or half with two players), the camera's turn (`SetPsxMatrix`: 16.16 to 4.12, transposed) and translation, points through them (`TransPt`, `TransPtN16` for ground points, `TransformProjectVertex` through a matrix into vertices) |
 | TEXTUREPROCESS.CPP (readable) | all 16: the depth cue's palettes (`ColorClut`: 16 colours pulled toward the fog's by the step, into VRAM; `DepthColorCluts`: 16 steps where `Texture_GetClutId` finds room; `TransColorCheck`), the fog's distance along the track (its keys: a ring by slice from the track's `.fog` file for the time and weather, `ReadFogKeys`, `AddKey`, `AllocKey`, `FindKey`, `CheckRange`; `Update` for a camera: between the key's and the next's; `InitFogTriggers`, `DeInitFogTriggers`, `MakeTrackPathName`), the world's colours tinted for some tracks' nights in two-player races (`CV_ColorTracks`, `CV_ProcessWorldColors_FINAL`, `CV_InitColorVertices`), `Init` |
 | NIGHT.CPP (readable) | all 19: the light tables (each world colour's index under the headlights at 16 levels, the police's red and blue, the rain's two tints; `CreateNightTableElement`, `FindClosestColor`: the nearest colour or a new one, `CreateNightTable`, `GenerateAllLightTables`; their colours and blocks: `InitPlayerHeadLightColor`, `SetPlayerHeadLightColor`, `InitCopLightColors`, `SetCopLightColors`, `InitWeatherTables`, `SetWeatherColors`, `SetCopColor`), the headlights' pool (`night.psh`'s levels added to vertices ahead: `SetEnviroment`, `AdditiveNightCalc`), the storm (`GenerateNextLightningEvent`, `DoLightningEffect`: flickers, thunder, the sky; `PauseLightningEffect` in sheltered stretches and tunnels), `InitNightDriving`, `KillNightDriving`, `RestartNightDriving` |
+| WEATHER.CPP (readable) | all 25: the rain and snow: the box ahead of the camera and the wind (`InitRain`, `InitSnow`), the particles moved by the camera's turn and motion since the last frame and the wind, jittered, brought back into the box (`ProcessParticles`, `TransformVertex`, `QuickReOrthogonalize`, `CheckAndResetParticles`), drawn as streaks or flakes (`CreateRain`, `CreateSnow`), the lens's drops in the bumper camera (`InitSplats`, `DoSplats`, `CreateSplat`), the density and intensity wandering between four levels (`GetNewState`, `ChangeDensityState`, `ChangeIntensityState`, `...BasedOnTime`, `InitStateControls`), a view's frame (`DoWeather`, `BuildWeather`: not in tunnels), the GTE's matrices (`SetMatrix`, `SetIdentMatrix`), `Init`, `DeInit`, `Restart`, `GetNumParticles` |
 | REPLAY.CPP (readable) | all 16: the replay set up with the race (`InitReplay`: the mode from the setup, the TV cameras loaded; watching, the recorded setup put back but for the user's settings), reset (the buffer emptied, or the controls and each player's first TV camera) and kept at the race's end (`StoringReplay`, `SaveReplay`, `LoadReplay` empty); each tick a human's pad recorded (`SaveInput`: steering, gas, brake, flags, the car's ramping in bit 7) or played back (`GetInput`, through `DoReplay`, a car's replay function), a record's run-length coding (`Compress`, `Decompress`, `StoringControllerData`, `RetreivingControllerData`; the buffer full stops the recording, a 0 length ends the replay); the replay's controls (`GetInterfaceKey`: instant replay, end, pause, speed, camera, the stats screen); the track's TV cameras (`LoadCameraFile`: 32 slots, sorted by slice, a reversed track's turned along, places scaled) and the cuts between them by the car's slice (`ReplayChooseCamera`, `ReplayFindClosestCamera`; the spline camera's slots set it up) |
 | CAMERA.CPP (readable) | all 41: the cameras per player (`Camera_gInfo`): chase (tail, helicopter: one routine), bumper, simple, crash, circle, TV, blimp, spline, animated, finish, pull-over, police; `Camera_Update`, `Init`, the modes, the view's and the sound's maths, pitch and roll, the ground, tunnel and wall checks |
 | HUD.CPP (readable) | all 62: the views and the primitives the HUD builds from its shapes and the font (`gpu.rs` the set-up), the dashboard (`Init`: gauges, time sprites, the map frame; the numbers, the tachometer, the speed in big digits), the map (track map and markers, or the radar near and far), the wingman's orders, the CD player (title scrolling, track and time), the replay's controls, the next racer's name, the 3-2-1 countdown, the pursuit's big time, the perp overlay, the busted overlay and the perps' records, the pause box, `Hud_Render` |
