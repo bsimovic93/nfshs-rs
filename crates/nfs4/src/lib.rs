@@ -121,6 +121,7 @@ pub mod trsproj;
 pub mod types;
 pub mod udff;
 pub mod vec;
+pub mod weather;
 
 use ps1rt::Cpu;
 use std::cell::{Cell, RefCell};
@@ -1864,6 +1865,31 @@ pub static FUNCS: &[Func] = &[
     func(0x800e_27d8, "TrsProj_TransPt", trsproj::abi_trans_pt),
     func(0x800e_2864, "TrsProj_TransPtN16", trsproj::abi_trans_pt_n16),
     func(0x800e_28ec, "TrsProj_TransformProjectVertex", trsproj::abi_transform_project_vertex),
+    func_ret(0x800e_29cc, "Weather_GetNumParticles", weather::abi_get_num_particles),
+    func(0x800e_29dc, "Weather_SetMatrix", weather::abi_set_matrix),
+    func(0x800e_2aa0, "Weather_SetIdentMatrix", weather::abi_set_ident_matrix),
+    func(0x800e_2b24, "Weather_InitSnow", weather::abi_init_snow),
+    func(0x800e_2b84, "Weather_InitRain", weather::abi_init_rain),
+    func(0x800e_2be4, "Weather_InitSplats", weather::abi_init_splats),
+    func_ret(0x800e_2cf8, "Weather_GetNewState", weather::abi_get_new_state),
+    func(0x800e_2d38, "Weather_ChangeDensityState", weather::abi_change_density_state),
+    func(0x800e_2dac, "Weather_ChangeIntensityState", weather::abi_change_intensity_state),
+    func(0x800e_2e24, "Weather_ChangeDensityBasedOnTime", weather::abi_change_density_based_on_time),
+    func(0x800e_2efc, "Weather_ChangeIntensityBasedOnTime", weather::abi_change_intensity_based_on_time),
+    func(0x800e_2ff4, "Weather_InitStateControls", weather::abi_init_state_controls),
+    func(0x800e_30c0, "Weather_Restart", weather::abi_restart),
+    func(0x800e_313c, "Weather_Init", weather::abi_init),
+    func(0x800e_3488, "Weather_DeInit", weather::abi_de_init),
+    func(0x800e_351c, "Weather_TransformVertex", weather::abi_transform_vertex),
+    func_ret(0x800e_35e0, "Weather_CheckAndResetParticles", weather::abi_check_and_reset_particles),
+    func(0x800e_395c, "Weather_QuickReOrthogonalize", weather::abi_quick_re_orthogonalize),
+    func(0x800e_3bdc, "Weather_ProcessParticles", weather::abi_process_particles),
+    func(0x800e_3fc8, "Weather_CreateSnow", weather::abi_create_snow),
+    func(0x800e_4178, "Weather_CreateRain", weather::abi_create_rain),
+    func(0x800e_433c, "Weather_CreateSplat", weather::abi_create_splat),
+    func(0x800e_4464, "Weather_DoSplats", weather::abi_do_splats),
+    func(0x800e_4628, "Weather_DoWeather", weather::abi_do_weather),
+    func(0x800e_493c, "Weather_BuildWeather", weather::abi_build_weather),
 ];
 
 /// The index of the function at `addr` in [`FUNCS`].
