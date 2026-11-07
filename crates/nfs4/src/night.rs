@@ -670,6 +670,9 @@ mod tests {
     use crate::femenu::tests::{ADDR, Case, pick, via_abi};
     use crate::test_util::{Rng, against_original};
 
+    /// `random`'s state (six words).
+    const RANDOM_STATE: u32 = 0x8012_478C;
+
     /// Free RAM (the race leaves it zero) for what a night race sets up (the race RAM is a day
     /// race's): the tables, the world's colours (256 places), the headlights' pool's levels
     /// (64 by 64), a view, a car's setup, a colour, a vertex.
@@ -765,6 +768,10 @@ mod tests {
         let car = m.r32(CAMERA_INFO + CAMERA_TARGET);
         let lights = m.r8(car + CAR_LIGHTS) & !HIGH_BEAMS | if pick(rng, 2) == 0 { HIGH_BEAMS } else { 0 };
         m.w8(car + CAR_LIGHTS, lights);
+        // (the library's `random` state: else every case draws the same numbers)
+        for k in 0..6 {
+            m.w32(RANDOM_STATE + 4 * k, rng.next() as u32);
+        }
     }
 
     fn light(c: &mut Cpu, r: &mut Rng) -> u32 {
