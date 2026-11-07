@@ -667,6 +667,38 @@
 8006988c AIPerson_Startup
 80069a30 AIPerson_Cleanup
 
+# TRACK.CPP (readable from the start; Track_FlagListedQuads is retail only, unnamed)
+800b9fc0 Track_SetTrackNumber
+800b9fd0 Track_MakeTrackPathName
+800ba018 Track_MakeTrackDataPathName
+800ba060 AllocArtResource
+800ba0a0 InitArtResources
+800ba0d0 DeInitArtResources
+800ba0f4 LoadShapesAndMakePmx
+800ba440 LoadShapesAndMakePmx_EnvMap
+800ba4f8 TexturesLoadInitial
+800ba6a4 Track_AnimateTextures
+800ba83c Track_GetProperMultiPalShapeIndex
+800ba88c Track_ProcessFlipAndUVFlags
+800ba9f4 Track_AssociateSingleMaterial
+800bab60 Track_LinkMaterials
+800baf24 ReduceObjectPrecision
+800bafc4 InvalidatePersistentCollideBoomObjects
+800bb030 CalcObjectBoundingSphere
+800bb290 CalcObjDefPtrs
+800bb2f4 Track_FlagListedQuads
+800bb3d8 Track_InitPersistentData
+800bb5b4 Track_Init
+800bba40 Track_DeInit
+800bbb1c Track_AnimateTrackLighting
+800bbb24 KillFile_OpenRead
+800bbb68 KillFile_ReadEntry
+800bbb88 Track_LoadObjectKillData
+800bbce0 SaveSurface::Save
+800bbd44 SaveSurface::SaveSurface
+800bbd88 SaveSurface::~SaveSurface
+800bbdd0 SaveSurface::RestoreAll
+
 # UDFF.CPP
 800bc8f8 Udff_GetInt
 

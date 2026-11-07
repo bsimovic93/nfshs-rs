@@ -118,6 +118,7 @@ pub mod statchk;
 pub mod stats;
 pub mod stattool;
 pub mod texture;
+pub mod track;
 pub mod textureprocess;
 pub mod trsproj;
 pub mod types;
@@ -1745,6 +1746,36 @@ pub static FUNCS: &[Func] = &[
     func(0x800b_8ed0, "Stats_TrackStats", stats::abi_track_stats),
     func(0x800b_92d8, "Stats_ExtrapolateOpponentTimes", stats::abi_extrapolate_opponent_times),
     func(0x800b_9a80, "Stats_TrackEndGame", stats::abi_track_end_game),
+    func(0x800b_9fc0, "Track_SetTrackNumber", track::abi_set_track_number),
+    func_ret(0x800b_9fd0, "Track_MakeTrackPathName", track::abi_make_track_path_name),
+    func_ret(0x800b_a018, "Track_MakeTrackDataPathName", track::abi_make_track_data_path_name),
+    func(0x800b_a060, "AllocArtResource", track::abi_alloc_art_resource),
+    func(0x800b_a0a0, "InitArtResources", track::abi_init_art_resources),
+    func(0x800b_a0d0, "DeInitArtResources", track::abi_de_init_art_resources),
+    func(0x800b_a0f4, "LoadShapesAndMakePmx", track::abi_load_shapes_and_make_pmx),
+    func(0x800b_a440, "LoadShapesAndMakePmx_EnvMap", track::abi_load_shapes_and_make_pmx_env_map),
+    func(0x800b_a4f8, "TexturesLoadInitial", track::abi_textures_load_initial),
+    func(0x800b_a6a4, "Track_AnimateTextures", track::abi_animate_textures),
+    func_ret(0x800b_a83c, "Track_GetProperMultiPalShapeIndex", track::abi_get_proper_multi_pal_shape_index),
+    func(0x800b_a88c, "Track_ProcessFlipAndUVFlags", track::abi_process_flip_and_uv_flags),
+    func(0x800b_a9f4, "Track_AssociateSingleMaterial", track::abi_associate_single_material),
+    func(0x800b_ab60, "Track_LinkMaterials", track::abi_link_materials),
+    func(0x800b_af24, "ReduceObjectPrecision", track::abi_reduce_object_precision),
+    func(0x800b_afc4, "InvalidatePersistentCollideBoomObjects", track::abi_invalidate_persistent_collide_boom_objects),
+    func(0x800b_b030, "CalcObjectBoundingSphere", track::abi_calc_object_bounding_sphere),
+    func(0x800b_b290, "CalcObjDefPtrs", track::abi_calc_obj_def_ptrs),
+    func(0x800b_b2f4, "Track_FlagListedQuads", track::abi_flag_listed_quads),
+    func(0x800b_b3d8, "Track_InitPersistentData", track::abi_init_persistent_data),
+    func(0x800b_b5b4, "Track_Init", track::abi_init),
+    func(0x800b_ba40, "Track_DeInit", track::abi_de_init),
+    func(0x800b_bb1c, "Track_AnimateTrackLighting", track::abi_animate_track_lighting),
+    func_ret(0x800b_bb24, "KillFile_OpenRead", track::abi_kill_file_open_read),
+    func(0x800b_bb68, "KillFile_ReadEntry", track::abi_kill_file_read_entry),
+    func(0x800b_bb88, "Track_LoadObjectKillData", track::abi_load_object_kill_data),
+    func(0x800b_bce0, "SaveSurface::Save", track::abi_save_surface_save),
+    func_ret(0x800b_bd44, "SaveSurface::SaveSurface", track::abi_save_surface_new),
+    func(0x800b_bd88, "SaveSurface::~SaveSurface", track::abi_save_surface_delete),
+    func(0x800b_bdd0, "SaveSurface::RestoreAll", track::abi_save_surface_restore_all),
     func(0x800d_02d4, "Horizon_InterpolateLineSCoords", hrzsku::abi_interpolate_line_s_coords),
     func(0x800d_0414, "Sky_InitStars", hrzsku::abi_init_stars),
     func(0x800d_05fc, "Sky_KillStars", hrzsku::abi_kill_stars),
