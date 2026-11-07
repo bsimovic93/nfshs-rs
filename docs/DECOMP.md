@@ -31,7 +31,8 @@ the checks compare that instead (`tools/tourshots.py`, the primitives drawn).
    TEXTURE*, HRZSKU, SKIDMARK, TRSPROJ) and the sound and speech (SPEECH, SPCHEVNT, AUDIO*,
    COPSPEAK, TRGSFX). The drawing is checked by pictures and the primitives it emits. The HUD
    (HUD.CPP, all 62), the camera (CAMERA.CPP, all 41) and the pause menu (MPAUSE.CPP,
-   PAUSEMENU.CPP, RPAUSE.CPP, all 73) done 2026-11-03: see "The readable HUD".
+   PAUSEMENU.CPP, RPAUSE.CPP, all 73) done 2026-11-03, the replays (REPLAY.CPP, all 16)
+   2026-11-07: see "The readable HUD".
 4. **The bit-exact ports rewritten readable:** physics, Newton, collisions, the race logic and
    the AI (what the planned changes touch first).
 5. **Off `ps1rt`, a subsystem at a time**, once nothing recompiled reads its data: typed RAM
@@ -290,6 +291,29 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
   sound options buffer is the library's to fill (the test CPUs don't), which changes no RAM.
   The test CPUs answer `PadGetState` from `test_util::PAD_STATE`, for the vibration items.
 
+- **The replays (REPLAY.CPP, `replay.rs`).** A replay is the humans' pads, recorded a tick at a
+  time into 32-tick records (`controlData`: 32 steering bytes, then the gases, brakes and
+  flags, each a part) and each full record run-length coded into the replay buffer, four parts
+  of at most 33 bytes; watching, the records are read back and drive the cars, under the
+  track's TV cameras (`camera.viv`, chosen by the slice the car is on). The coding doesn't escape
+  a lone 0xFF byte, which the reading then takes for a run (the original's bug, kept; only the
+  flags byte can be 0xFF). The reading copies each part into a buffer in its frame and decodes
+  it there, so such a part, ending in a mistaken run, reads the buffer past its end: the port
+  keeps the buffer across a record's parts as the original does, and starts it zeroed where
+  the original has the stack's leftovers. Every race tour records (each tick's `SaveInput`, a
+  record coded every 32); none watches a replay (the game shows one only after a finished race),
+  so playing back, the replay's controls and the TV cameras' cuts are checked by the fuzz alone
+  (`replay_fuzz`: coded records to read, the track's cameras and other modes). The test CPUs
+  find no files, and the recompiled `LoadCameraFile` calls `loadfileadrz` directly, so
+  `replay_camera_file_fuzz` enters the original after that call (`f_800b61d4_at`, its frame and
+  v0 set up) with a camera file in RAM, against the port's `install_cameras`.
+  A trap found here: the recompiled code ticks the CPU at each backward branch, and the host
+  takes 20,000 ticks without a call to it for the game spinning, moving its clock on. Clearing
+  the buffer at the race's load is a 24,576-iteration loop in the original, so a port clearing
+  it without ticking left the race's clock a tick behind (found by the lockstep tours, not the
+  pictures); the port ticks once a byte. A long loop of the original's ported must tick as it
+  does (`c.tick()`, as the front end's waits do).
+
 - **Calling a port.** Routing happens at the recompiled call sites: a port calling another
   function's recompiled original (`nfs4rc::f_*`) runs the original even once that function is
   decompiled. Until 2026-11-03, 112 calls did (the race loop's camera and AI start-up and
@@ -417,6 +441,7 @@ RAM (`hud_fuzz`) with planted mutants, and checked by the tours in lockstep and 
 | MPAUSE.CPP (readable) | all 10: the pause menus made (`tPauseMenuDefs`: pause, options, audio, controller, are you sure) and freed, a paused frame's input (`MPause_Logic`: the pad's key to the menu once the highlight bar stops, the bar sent moving, going to a menu (confirming first in one player races), back, or the race's command), its drawing (`MPause_Render`: the bar, the box), the audio menu's mode, music level and test sounds (`MusicLogic`), the vibration items for the pad (`ControllerLogic`), the menu up (`StartPauseMenu`: Restart, Quit or Forfeit by the race) and down (the controller set up again) |
 | PAUSEMENU.CPP (readable) | all 60 and PAUSEMENU.H's 2: the pause menu's classes: texts on the current line (centred on the title's), list iterators (plain and indexed by the player), items (text, interactive, left-right choices with arrows, sliders of 15 bars, indexed ones, go-to and command buttons), menus (`tPMenu`: items up and down move between past disabled ones, round; start and back; drawn a line each) |
 | RPAUSE.CPP (readable) | all 3: a paused frame begun, and shown (the race's picture copied under the menu, its view's ordering table drawn, the buffers flipped) |
+| REPLAY.CPP (readable) | all 16: the replay set up with the race (`InitReplay`: the mode from the setup, the TV cameras loaded; watching, the recorded setup put back but for the user's settings), reset (the buffer emptied, or the controls and each player's first TV camera) and kept at the race's end (`StoringReplay`, `SaveReplay`, `LoadReplay` empty); each tick a human's pad recorded (`SaveInput`: steering, gas, brake, flags, the car's ramping in bit 7) or played back (`GetInput`, through `DoReplay`, a car's replay function), a record's run-length coding (`Compress`, `Decompress`, `StoringControllerData`, `RetreivingControllerData`; the buffer full stops the recording, a 0 length ends the replay); the replay's controls (`GetInterfaceKey`: instant replay, end, pause, speed, camera, the stats screen); the track's TV cameras (`LoadCameraFile`: 32 slots, sorted by slice, a reversed track's turned along, places scaled) and the cuts between them by the car's slice (`ReplayChooseCamera`, `ReplayFindClosestCamera`; the spline camera's slots set it up) |
 | CAMERA.CPP (readable) | all 41: the cameras per player (`Camera_gInfo`): chase (tail, helicopter: one routine), bumper, simple, crash, circle, TV, blimp, spline, animated, finish, pull-over, police; `Camera_Update`, `Init`, the modes, the view's and the sound's maths, pitch and roll, the ground, tunnel and wall checks |
 | HUD.CPP (readable) | all 62: the views and the primitives the HUD builds from its shapes and the font (`gpu.rs` the set-up), the dashboard (`Init`: gauges, time sprites, the map frame; the numbers, the tachometer, the speed in big digits), the map (track map and markers, or the radar near and far), the wingman's orders, the CD player (title scrolling, track and time), the replay's controls, the next racer's name, the 3-2-1 countdown, the pursuit's big time, the perp overlay, the busted overlay and the perps' records, the pause box, `Hud_Render` |
 | FEMENU.CPP (front end) | all but `DrawSlider` (a host hook; 72): the list iterators a menu item steps through (`tListIterator`: a byte into a list of text ids; indexed by one byte or two, per player, a range, a range indexed; `Value`, `TextValue`, `Increment`, `Decrement` going round), the menu items (`tMenuItem`: flags, text, the selection's fade; interactive; left-right choices and sliders, which step their iterator with a sound and draw the text and the value or slider; buttons going to a menu and calling a function) and the menus (`tMenu`: built from a list of items, the current item moved up and down past disabled ones, accept, back, options, help and start, drawn with the title, transitions) |
