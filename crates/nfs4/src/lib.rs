@@ -78,6 +78,7 @@ pub mod fetracks;
 pub mod fetv;
 pub mod fevideowall;
 pub mod fixed;
+pub mod flare;
 pub mod front;
 pub mod globals;
 pub mod gpu;
@@ -1795,6 +1796,24 @@ pub static FUNCS: &[Func] = &[
     func_ret(0x800b_bd44, "SaveSurface::SaveSurface", track::abi_save_surface_new),
     func(0x800b_bd88, "SaveSurface::~SaveSurface", track::abi_save_surface_delete),
     func(0x800b_bdd0, "SaveSurface::RestoreAll", track::abi_save_surface_restore_all),
+    func(0x800c_ca10, "Flare_Tri", flare::abi_tri),
+    func(0x800c_caac, "Flare_SetMatrix", flare::abi_set_matrix),
+    func(0x800c_cb58, "Flare_IdentMatrix", flare::abi_ident_matrix),
+    func(0x800c_cb74, "Flare_OctFlare", flare::abi_oct_flare),
+    func(0x800c_cd94, "Flare_OctFlareSpikes", flare::abi_oct_flare_spikes),
+    func(0x800c_d3f4, "Flare_HexFlare", flare::abi_hex_flare),
+    func(0x800c_d5c8, "Flare_ReflectHexFlare", flare::abi_reflect_hex_flare),
+    func(0x800c_d79c, "Flare_QuadFlare", flare::abi_quad_flare),
+    func(0x800c_d8b8, "Flare_CarShapedHalo", flare::abi_car_shaped_halo),
+    func(0x800c_ec24, "Flare_2DSpike", flare::abi_spike_2d),
+    func(0x800c_f0ac, "Flare_PreCalcHexLightBeam", flare::abi_pre_calc_hex_light_beam),
+    func(0x800c_f180, "Flare_Quad", flare::abi_quad),
+    func(0x800c_f224, "Flare_QuadNotTransparent", flare::abi_quad_not_transparent),
+    func(0x800c_f2c8, "Flare_QuadRing", flare::abi_quad_ring),
+    func(0x800c_f37c, "Flare_TextureQuad", flare::abi_texture_quad),
+    func(0x800c_f8a4, "Flare_InitLensFlare", flare::abi_init_lens_flare),
+    func(0x800c_ff30, "Flare_Sun", flare::abi_sun),
+    func(0x800d_021c, "Flare_Moon", flare::abi_moon),
     func(0x800d_02d4, "Horizon_InterpolateLineSCoords", hrzsku::abi_interpolate_line_s_coords),
     func(0x800d_0414, "Sky_InitStars", hrzsku::abi_init_stars),
     func(0x800d_05fc, "Sky_KillStars", hrzsku::abi_kill_stars),

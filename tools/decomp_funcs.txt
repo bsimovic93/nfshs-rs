@@ -2005,3 +2005,23 @@
 80074ed8 AnimScript::GetTimedAnimPosRot(coorddef *, matrixtdef *)
 80074f04 AnimScript::GetTimedAnimPosRot(int, coorddef *, matrixtdef *)
 80074ffc AnimScript::GetStatus
+
+# FLARE.CPP (readable from the start; its nine host hooks stay the original's)
+800cca10 Flare_Tri
+800ccaac Flare_SetMatrix
+800ccb58 Flare_IdentMatrix
+800ccb74 Flare_OctFlare
+800ccd94 Flare_OctFlareSpikes
+800cd3f4 Flare_HexFlare
+800cd5c8 Flare_ReflectHexFlare
+800cd79c Flare_QuadFlare
+800cd8b8 Flare_CarShapedHalo
+800cec24 Flare_2DSpike
+800cf0ac Flare_PreCalcHexLightBeam
+800cf180 Flare_Quad
+800cf224 Flare_QuadNotTransparent
+800cf2c8 Flare_QuadRing
+800cf37c Flare_TextureQuad
+800cf8a4 Flare_InitLensFlare
+800cff30 Flare_Sun
+800d021c Flare_Moon
