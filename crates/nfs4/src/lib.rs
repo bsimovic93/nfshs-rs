@@ -19,6 +19,7 @@
 
 pub mod abi;
 pub mod ai;
+pub mod anim;
 pub mod aicop;
 pub mod aidatarecord;
 pub mod aidelaycar;
@@ -1451,6 +1452,24 @@ pub static FUNCS: &[Func] = &[
     func(0x8007_41b4, "AIWorld_CalcSpeed", aiworld::abi_calc_speed),
     func_ret(0x8007_41fc, "AIWorld_CalcLateralVelocity", aiworld::abi_calc_lateral_velocity),
     func(0x8007_4258, "AIWorld_FindBarrierLessLaneAndPosition", aiworld::abi_find_barrier_less_lane_and_position),
+    func(0x8007_4374, "Anim_Restart", anim::abi_restart),
+    func_ret(0x8007_43fc, "Anim_InitSystem", anim::abi_init_system),
+    func(0x8007_4590, "Anim_DeInitSystem", anim::abi_de_init_system),
+    func_ret(0x8007_45c8, "Anim_Handle", anim::abi_handle),
+    func_ret(0x8007_464c, "Anim_FreeHandle", anim::abi_free_handle),
+    func_ret(0x8007_46cc, "Anim_GetAnim", anim::abi_get_anim),
+    func(0x8007_46e8, "Anim_GetLastRotPos", anim::abi_get_last_rot_pos),
+    func_ret(0x8007_4760, "Anim_GetLastAnimPosRot", anim::abi_get_last_anim_pos_rot),
+    func_ret(0x8007_47f8, "Anim_GetRotPos", anim::abi_get_rot_pos),
+    func_ret(0x8007_4a0c, "Anim_GetPos", anim::abi_get_pos),
+    func_ret(0x8007_4c40, "AnimScript::AnimScript(int)", anim::abi_script_new),
+    func_ret(0x8007_4cac, "AnimScript::AnimScript(int, int)", anim::abi_script_new_run),
+    func_ret(0x8007_4d48, "AnimScript::AnimScript(Group *, int, int, int)", anim::abi_script_new_group),
+    func(0x8007_4e14, "AnimScript::SetAnimAttrib", anim::abi_set_anim_attrib),
+    func(0x8007_4e1c, "AnimScript::GetAnimFrameInfo", anim::abi_get_anim_frame_info),
+    func_ret(0x8007_4ed8, "AnimScript::GetTimedAnimPosRot(coorddef *, matrixtdef *)", anim::abi_get_timed_anim_pos_rot_first),
+    func_ret(0x8007_4f04, "AnimScript::GetTimedAnimPosRot(int, coorddef *, matrixtdef *)", anim::abi_get_timed_anim_pos_rot),
+    func_ret(0x8007_4ffc, "AnimScript::GetStatus", anim::abi_get_status),
     func_ret(0x8007_df6c, "xzsquaredist32", bworld::abi_xzsquaredist32),
     func_ret(0x8007_f334, "BWorldSm_Init", bworldsm::abi_init),
     func(0x8007_f36c, "BWorldSm_Restart", bworldsm::abi_restart),

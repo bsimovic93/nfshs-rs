@@ -1985,3 +1985,23 @@
 800dcc0c Night_RestartNightDriving
 800dcc94 Night_SetEnviroment
 800dcda4 Night_AdditiveNightCalc
+
+# ANIM.CPP (readable from the start; the AnimScript constructors are unnamed in retail_syms.tsv)
+80074374 Anim_Restart
+800743fc Anim_InitSystem
+80074590 Anim_DeInitSystem
+800745c8 Anim_Handle
+8007464c Anim_FreeHandle
+800746cc Anim_GetAnim
+800746e8 Anim_GetLastRotPos
+80074760 Anim_GetLastAnimPosRot
+800747f8 Anim_GetRotPos
+80074a0c Anim_GetPos
+80074c40 AnimScript::AnimScript(int)
+80074cac AnimScript::AnimScript(int, int)
+80074d48 AnimScript::AnimScript(Group *, int, int, int)
+80074e14 AnimScript::SetAnimAttrib
+80074e1c AnimScript::GetAnimFrameInfo
+80074ed8 AnimScript::GetTimedAnimPosRot(coorddef *, matrixtdef *)
+80074f04 AnimScript::GetTimedAnimPosRot(int, coorddef *, matrixtdef *)
+80074ffc AnimScript::GetStatus

@@ -166,7 +166,7 @@ pub fn abi_island_profile(c: &mut Cpu) {
 }
 
 /// The cameras' animations' handles (none: -1) and `0x8007464c` freeing one.
-const ANIM_FREE: fn(&mut Cpu) = nfs4rc::f_8007464c;
+const ANIM_FREE: u32 = 0x8007_464C;
 
 /// `Camera_Kill` (CAMERA.CPP, 0x80084610): each player's camera's animation freed (both with
 /// split screen linked: the setup's `commMode` 1).
@@ -176,7 +176,7 @@ pub fn kill(c: &mut Cpu) {
         let cam = info(p);
         let handle = cam.anim_handle(&mut c.m);
         if handle != -1 {
-            call(c, ANIM_FREE, &[handle as i32 as u32]);
+            crate::call::call_jal(c, ANIM_FREE, &[handle as i32 as u32]);
         }
         cam.set_anim_handle(&mut c.m, -1);
     }
@@ -724,10 +724,10 @@ pub fn abi_update_tv_cam(c: &mut Cpu) {
 /// The cameras' animations (ANIM): one opened by number (its handle), its data by handle, the
 /// place and turn at the time (`GetTimedAnimPosRot`: > 0 while it runs), the finish's restarted,
 /// one freed.
-const ANIM_OPEN: fn(&mut Cpu) = nfs4rc::f_800745c8;
-const ANIM_DATA: fn(&mut Cpu) = nfs4rc::f_800746cc;
-const ANIM_POS_ROT: fn(&mut Cpu) = nfs4rc::f_80074ed8;
-const ANIM_RESTART: fn(&mut Cpu) = nfs4rc::f_80074760;
+const ANIM_OPEN: u32 = 0x8007_45C8;
+const ANIM_DATA: u32 = 0x8007_46CC;
+const ANIM_POS_ROT: u32 = 0x8007_4ED8;
+const ANIM_RESTART: u32 = 0x8007_4760;
 /// The tracks' animated cameras (four a track, by number) and which of them are in the world's
 /// frame (a byte a track, a bit a number); the finish's animation.
 const ANIM_CAMS: u32 = 0x8011_07E0;
@@ -746,8 +746,8 @@ const ANIM_BUFFERS: u32 = 12 + 36 + 12;
 
 /// The anim's place (at `buf`) and turn at the time from handle `handle`; whether it runs on.
 fn anim_pos_rot(c: &mut Cpu, handle: i8, buf: u32) -> bool {
-    let data = call(c, ANIM_DATA, &[handle as i32 as u32]);
-    call(c, ANIM_POS_ROT, &[data, buf + ANIM_POS, buf + ANIM_ROT]) as i32 > 0
+    let data = crate::call::call_jal(c, ANIM_DATA, &[handle as i32 as u32]);
+    crate::call::call_jal(c, ANIM_POS_ROT, &[data, buf + ANIM_POS, buf + ANIM_ROT]) as i32 > 0
 }
 
 /// Player `p`'s camera on the animation's place and turn: in the world's frame, or the car's
@@ -782,7 +782,7 @@ fn open_next_anim(c: &mut Cpu, p: u32) {
     cam.set_anim_num(m, num.wrapping_sub(1));
     let track = GAME_SETUP.track(m) as u32;
     let anim = m.r8(ANIM_CAMS.wrapping_add((num as i32 as u32).wrapping_add(track << 2))) as u32;
-    let handle = call(c, ANIM_OPEN, &[anim]);
+    let handle = crate::call::call_jal(c, ANIM_OPEN, &[anim]);
     cam.set_anim_handle(&mut c.m, handle as i8);
 }
 
@@ -802,7 +802,7 @@ pub fn update_anim_cam(c: &mut Cpu, p: u32) {
             let m = &mut c.m;
             if cam.anim_num(m) > 0 {
                 let handle = cam.anim_handle(m);
-                call(c, ANIM_FREE, &[handle as i32 as u32]);
+                crate::call::call_jal(c, ANIM_FREE, &[handle as i32 as u32]);
                 open_next_anim(c, p);
                 let handle = cam.anim_handle(&mut c.m);
                 anim_pos_rot(c, handle, buf);
@@ -839,13 +839,13 @@ pub fn abi_update_anim_cam(c: &mut Cpu) {
 pub fn update_finish_cam(c: &mut Cpu, p: u32) {
     let cam = info(p);
     if cam.anim_handle(&mut c.m) == -1 {
-        let handle = call(c, ANIM_OPEN, &[FINISH_ANIM]);
+        let handle = crate::call::call_jal(c, ANIM_OPEN, &[FINISH_ANIM]);
         cam.set_anim_handle(&mut c.m, handle as i8);
     }
     with_buffer(c, ANIM_BUFFERS, |c, buf| {
         let handle = cam.anim_handle(&mut c.m);
         if !anim_pos_rot(c, handle, buf) {
-            call(c, ANIM_RESTART, &[FINISH_ANIM, 6, buf + ANIM_POS, buf + ANIM_ROT]);
+            crate::call::call_jal(c, ANIM_RESTART, &[FINISH_ANIM, 6, buf + ANIM_POS, buf + ANIM_ROT]);
         }
         anim_place(c, p, buf, false);
     });
@@ -1773,7 +1773,7 @@ fn leave_mode(c: &mut Cpu, p: u32) {
     }
     let handle = cam.anim_handle(&mut c.m);
     if handle >= 0 {
-        call(c, ANIM_FREE, &[handle as i32 as u32]);
+        crate::call::call_jal(c, ANIM_FREE, &[handle as i32 as u32]);
         cam.set_anim_handle(&mut c.m, -1);
     }
 }
